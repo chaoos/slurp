@@ -87,17 +87,17 @@ def slurm_finished(args):
     else:
       file_list.extend([f.name for f in Path(infile).glob('**/slurm-*') if f.is_file()])
 
-  info = []
+  jobs = []
   jids = []
   for file in tqdm(file_list):
-    if (m := re.match(r'.*slurm-([0-9]+).*', file)):
-      jid = int(m.group(1))
+    if (m := re.match(r'.*slurm-([0-9,\_]+).*', file)):
+      jid = m.group(1)
       if not (jid in jids):
         jids.append(jid)
-        info.append(get_job_info(jid))
+        jobs.append(get_job_info(jid))
 
-  if info:
-    DL, headers = LDtoDL(info, type=set.intersection, sort_by_key="!Array Job ID")
+  if jobs:
+    DL, headers = LDtoDL(jobs, type=set.intersection, sort_by_key="!Array Job ID")
     print(tabulate(colorize_dict_vals(DL), headers=headers))
 
 def tsplit(str, types, delimiter="|"):
@@ -127,7 +127,7 @@ def suffix_to_int(str):
 
 def get_mem_usages(jobs):
   env = { "shell": True, "capture_output": True, "text": True }
-  keys = list(set(map(lambda x: x.split("_")[0], jobs.keys())))
+  keys = list(set(map(lambda x: x.split("_")[0], jobs.keys()))) # TODO remove
   for jid in tqdm(keys):
     res = subprocess.run([f'sstat -n --format="JobID,MaxRSS" -j {jid} --parsable2 -n'], **env)
     for item in res.stdout.split():
@@ -142,8 +142,9 @@ def get_mem_usages(jobs):
 def slurm_running(args):
   jobs = get_queue()
   jobs = get_mem_usages(jobs).values() if args.mem else jobs.values()
-  DL, headers = LDtoDL(jobs, sort_by_key="!Job ID")
-  print(tabulate(colorize_dict_vals(DL), headers=headers))
+  if jobs:
+    DL, headers = LDtoDL(jobs, sort_by_key="!Job ID")
+    print(tabulate(colorize_dict_vals(DL), headers=headers, showindex="always"))
 
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
