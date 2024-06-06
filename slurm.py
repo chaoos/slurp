@@ -18,14 +18,13 @@ from tqdm import tqdm
 import humanize
 from termcolor import colored
 
-
 def sort_LD(LD, key):
   actual_key = key.replace("!", "")
-  LD = sorted(LD, key=lambda d: d[actual_key], reverse=key.startswith("!"))
+  LD = sorted(LD, key=lambda d: d.get(actual_key, "N/A"), reverse=key.startswith("!"))
   for d in LD:
     order = "↓" if key.startswith("!") else "↑"
-    d[f"{actual_key} {order}"] = d[actual_key]
-    del d[f"{actual_key}"]
+    d[f"{actual_key} {order}"] = d.get(actual_key, "N/A")
+    d.pop(actual_key, None)
   return LD
 
 colors = {
@@ -62,15 +61,22 @@ def LDtoDL(LD, type=set.union, sort_by_key=None):
 
 
 def get_job_info(jid, seff="seff", sacct="sacct"):
-  env = { "stdout": subprocess.PIPE, "text": True }
-  res = subprocess.run([seff, str(jid)], **env)
   dct = {}
-  for line in res.stdout.split("\n"):
-    if (m := re.match(r'^(.+): (.+)', line)):
-      dct[m.group(1)] = m.group(2)
+  try:
+    env = { "stdout": subprocess.PIPE, "text": True }
+    res = subprocess.run([seff, str(jid)], **env)
+    for line in res.stdout.split("\n"):
+      if (m := re.match(r'^(.+): (.+)', line)):
+        dct[m.group(1)] = m.group(2)
+    jname = subprocess.check_output([sacct, "-j", str(jid), r'--format=JobName%100', "-P", "-n"]).decode('utf8')
+    dct["Job name"] = jname.partition('\n')[0]
 
-  jname = subprocess.check_output([sacct, "-j", str(jid), r'--format=JobName%100', "-P", "-n"]).decode('utf8')
-  dct["Job name"] = jname.partition('\n')[0]
+  except:
+    dct["Array Job ID"] = str(jid)
+    res = subprocess.check_output([sacct, "-j", str(jid), r'--format=JobName%100,State', "-P", "-n"]).decode('utf8')
+    dct = dct | dict(zip(["Job name", "State"], res.partition('\n')[0].split("|")))
+    pass
+
 
   return dct
 
@@ -104,9 +110,9 @@ def tsplit(str, types, delimiter="|"):
   return [types[i](v) for i, v in enumerate(str.split(delimiter))]
 
 squeue = {
-  "keys":    ["Job ID", "Job name", "Tasks per node", "# Nodes", "State", "Elasped / Total (Start)"],
-  "fmt_str": ["%i",     "%j",       "%c",             "%D",      "%T",    "%M / %l (%S)"],
-  "types":   [str,      str,        int,              int,       str,     str],
+  "keys":    ["Job ID", "Job name", "Tasks per node", "# Nodes", "State",   "Elasped / Total (Start)", "Comment"],
+  "fmt_str": ["%i",     "%j",       "%c",             "%D",      "%T (%r)", "%M / %l (%S)",            "%k"],
+  "types":   [str,      str,        int,              int,       str,       str,                       str],
 }
 def get_queue():
   env = { "shell": True, "capture_output": True, "text": True }
