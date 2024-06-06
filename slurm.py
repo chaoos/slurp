@@ -35,6 +35,7 @@ colors = {
   "PENDING":       lambda x: colored(x, 'light_blue'),
   "FAILED":        lambda x: colored(x, 'light_red'),
   "OUT_OF_MEMORY": lambda x: colored(x, 'light_red'),
+  "CANCELLED":     lambda x: colored(x, 'light_red'),
 }
 
 def choose(val, colors=colors):
@@ -60,6 +61,11 @@ def LDtoDL(LD, type=set.union, sort_by_key=None):
   return DL, common_keys
 
 
+seff_keys = ["Array Job ID", "State", "Job Wall-clock time", "Memory Efficiency"]
+sacct_fields = {
+  "keys":    ["Job name",    "State"],
+  "fmt_str": ["JobName%100", "State"],
+}
 def get_job_info(jid, seff="seff", sacct="sacct"):
   dct = {}
   try:
@@ -67,16 +73,16 @@ def get_job_info(jid, seff="seff", sacct="sacct"):
     res = subprocess.run([seff, str(jid)], **env)
     for line in res.stdout.split("\n"):
       if (m := re.match(r'^(.+): (.+)', line)):
-        dct[m.group(1)] = m.group(2)
+        if m.group(1) in seff_keys:
+          dct[m.group(1)] = m.group(2)
     jname = subprocess.check_output([sacct, "-j", str(jid), r'--format=JobName%100', "-P", "-n"]).decode('utf8')
     dct["Job name"] = jname.partition('\n')[0]
 
   except:
     dct["Array Job ID"] = str(jid)
-    res = subprocess.check_output([sacct, "-j", str(jid), r'--format=JobName%100,State', "-P", "-n"]).decode('utf8')
-    dct = dct | dict(zip(["Job name", "State"], res.partition('\n')[0].split("|")))
+    res = subprocess.check_output([sacct, "-j", str(jid), rf'--format={",".join(sacct_fields["fmt_str"])}', "-P", "-n"]).decode('utf8')
+    dct = dct | dict(zip(sacct_fields["keys"], res.partition('\n')[0].split("|")))
     pass
-
 
   return dct
 
@@ -103,23 +109,23 @@ def slurm_finished(args):
         jobs.append(get_job_info(jid))
 
   if jobs:
-    DL, headers = LDtoDL(jobs, type=set.intersection, sort_by_key="!Array Job ID")
+    DL, headers = LDtoDL(jobs, type=set.union, sort_by_key="!Array Job ID")
     print(tabulate(colorize_dict_vals(DL), headers=headers))
 
 def tsplit(str, types, delimiter="|"):
   return [types[i](v) for i, v in enumerate(str.split(delimiter))]
 
-squeue = {
+squeue_fields = {
   "keys":    ["Job ID", "Job name", "Tasks per node", "# Nodes", "State",   "Elasped / Total (Start)", "Comment"],
   "fmt_str": ["%i",     "%j",       "%c",             "%D",      "%T (%r)", "%M / %l (%S)",            "%k"],
   "types":   [str,      str,        int,              int,       str,       str,                       str],
 }
 def get_queue():
   env = { "shell": True, "capture_output": True, "text": True }
-  res = subprocess.run([fr'squeue --me -r -h --format="{"|".join(squeue["fmt_str"])}"'], **env)
+  res = subprocess.run([fr'squeue --me -r -h --format="{"|".join(squeue_fields["fmt_str"])}"'], **env)
   items = res.stdout.split("\n")
-  vals = lambda x: tsplit(x, squeue["types"])
-  return {item.split("|")[0]: dict(zip(squeue["keys"], vals(item))) for item in items}
+  vals = lambda x: tsplit(x, squeue_fields["types"])
+  return {item.split("|")[0]: dict(zip(squeue_fields["keys"], vals(item))) for item in items}
 
 def suffix_to_int(str):
   if str.endswith("K"):
