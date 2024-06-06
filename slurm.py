@@ -61,26 +61,26 @@ def LDtoDL(LD, type=set.union, sort_by_key=None):
   return DL, common_keys
 
 
-seff_keys = ["Array Job ID", "State", "Job Wall-clock time", "Memory Efficiency"]
+seff_keys = ["Array Job ID", "State", "Job Wall-clock time", "Memory Efficiency", "Nodes"]
 sacct_fields = {
-  "keys":    ["Job name",    "State"],
-  "fmt_str": ["JobName%100", "State"],
+  "keys":    ["Job name",    "State", "Elapsed", "Exit Code", "MaxVMSize"],
+  "fmt_str": ["JobName%100", "State", "Elapsed", "ExitCode",  "MaxVMSize"],
 }
-def get_job_info(jid, seff="seff", sacct="sacct"):
+def get_job_info(jid):
   dct = {}
   try:
     env = { "stdout": subprocess.PIPE, "text": True }
-    res = subprocess.run([seff, str(jid)], **env)
+    res = subprocess.run(["seff", str(jid)], **env)
     for line in res.stdout.split("\n"):
       if (m := re.match(r'^(.+): (.+)', line)):
         if m.group(1) in seff_keys:
           dct[m.group(1)] = m.group(2)
-    jname = subprocess.check_output([sacct, "-j", str(jid), r'--format=JobName%100', "-P", "-n"]).decode('utf8')
+    jname = subprocess.check_output(["sacct", "-j", str(jid), r'--format=JobName%100', "-P", "-n"]).decode('utf8')
     dct["Job name"] = jname.partition('\n')[0]
 
   except:
     dct["Array Job ID"] = str(jid)
-    res = subprocess.check_output([sacct, "-j", str(jid), rf'--format={",".join(sacct_fields["fmt_str"])}', "-P", "-n"]).decode('utf8')
+    res = subprocess.check_output(["sacct", "-j", str(jid), rf'--format={",".join(sacct_fields["fmt_str"])}', "-P", "-n"]).decode('utf8')
     dct = dct | dict(zip(sacct_fields["keys"], res.partition('\n')[0].split("|")))
     pass
 
@@ -141,7 +141,7 @@ def get_mem_usages(jobs):
   env = { "shell": True, "capture_output": True, "text": True }
   keys = list(set(map(lambda x: x.split("_")[0], jobs.keys()))) # TODO remove
   for jid in tqdm(keys):
-    res = subprocess.run([f'sstat -n --format="JobID,MaxRSS" -j {jid} --parsable2 -n'], **env)
+    res = subprocess.run([rf'sstat -n --format="JobID,MaxRSS" -j {jid} --parsable2 -n'], **env)
     for item in res.stdout.split():
       jid, mem = tsplit(item, [lambda x: x[:-2], suffix_to_int])
       for j_id in jobs.keys():
