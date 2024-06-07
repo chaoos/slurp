@@ -17,6 +17,7 @@ from pathlib import Path
 from tqdm import tqdm
 import humanize
 from termcolor import colored
+from datetime import datetime
 
 def sort_LD(LD, key):
   actual_key = key.replace("!", "")
@@ -36,6 +37,7 @@ colors = {
   "FAILED":        lambda x: colored(x, 'light_red'),
   "OUT_OF_MEMORY": lambda x: colored(x, 'light_red'),
   "CANCELLED":     lambda x: colored(x, 'light_red'),
+  "TIMEOUT":       lambda x: colored(x, 'light_red'),
 }
 
 def choose(val, colors=colors):
@@ -63,8 +65,8 @@ def LDtoDL(LD, type=set.union, sort_by_key=None):
 
 seff_keys = ["Array Job ID", "State", "Job Wall-clock time", "Memory Efficiency", "Nodes"]
 sacct_fields = {
-  "keys":    ["Job name",    "State", "Elapsed", "Exit Code", "MaxVMSize"],
-  "fmt_str": ["JobName%100", "State", "Elapsed", "ExitCode",  "MaxVMSize"],
+  "keys":    ["Job name",    "State", "Job Wall-clock time", "Exit Code", "MaxVMSize", "Nodes"],
+  "fmt_str": ["JobName%100", "State", "Elapsed",             "ExitCode",  "MaxVMSize", "NNodes"],
 }
 def get_job_info(jid):
   dct = {}
@@ -85,6 +87,10 @@ def get_job_info(jid):
     pass
 
   return dct
+
+def to_nodehours(job):
+  t = datetime.strptime(job.get("Job Wall-clock time", 0), "%H:%M:%S")
+  return int(job.get("Nodes", 1))*(t.hour + t.minute/60 + t.second/3600)
 
 def slurm_finished(args):
   file_list = []
@@ -111,12 +117,13 @@ def slurm_finished(args):
   if jobs:
     DL, headers = LDtoDL(jobs, type=set.union, sort_by_key="!Array Job ID")
     print(tabulate(colorize_dict_vals(DL), headers=headers))
+    print(f"Total resources in the list: {sum(map(to_nodehours, jobs)):.1f} nodehours")
 
 def tsplit(str, types, delimiter="|"):
   return [types[i](v) for i, v in enumerate(str.split(delimiter))]
 
 squeue_fields = {
-  "keys":    ["Job ID", "Job name", "Tasks per node", "# Nodes", "State",   "Elasped / Total (Start)", "Comment"],
+  "keys":    ["Job ID", "Job name", "Tasks per node", "# Nodes", "State",   "Elapsed / Total (Start)", "Comment"],
   "fmt_str": ["%i",     "%j",       "%c",             "%D",      "%T (%r)", "%M / %l (%S)",            "%k"],
   "types":   [str,      str,        int,              int,       str,       str,                       str],
 }
@@ -146,9 +153,10 @@ def get_mem_usages(jobs):
       jid, mem = tsplit(item, [lambda x: x[:-2], suffix_to_int])
       for j_id in jobs.keys():
         if (j_id.startswith(f"{jid}_") or j_id == jid):
-          jobs[j_id]["Memory usage per task"] = humanize.naturalsize(mem)
-          jobs[j_id]["Memory usage per node"] = humanize.naturalsize(mem*jobs[j_id]["Tasks per node"])
-          jobs[j_id]["Total memory usage"] = humanize.naturalsize(mem*jobs[j_id]["Tasks per node"]*jobs[j_id]["# Nodes"])
+          task = humanize.naturalsize(mem)
+          node = humanize.naturalsize(mem*jobs[j_id]["Tasks per node"])
+          total  = humanize.naturalsize(mem*jobs[j_id]["Tasks per node"]*jobs[j_id]["# Nodes"])
+          jobs[j_id]["Memory usage (task, node, total)"] = f"{task}, {node}, {total}"
   return jobs
 
 def slurm_running(args):
