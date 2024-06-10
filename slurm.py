@@ -89,8 +89,14 @@ def get_job_info(jid):
   return dct
 
 def to_nodehours(job):
-  t = datetime.strptime(job.get("Job Wall-clock time", 0), "%H:%M:%S")
-  return int(job.get("Nodes", 1))*(t.hour + t.minute/60 + t.second/3600)
+  walltime = job.get("Job Wall-clock time", "00:00:00")
+  try:
+    t = datetime.strptime(walltime, "%H:%M:%S")
+    day = 0
+  except:
+    t = datetime.strptime(walltime, "%d-%H:%M:%S")
+    day = t.day
+  return int(job.get("Nodes", 1))*(24*day + t.hour + t.minute/60 + t.second/3600)
 
 def slurm_finished(args):
   file_list = []
