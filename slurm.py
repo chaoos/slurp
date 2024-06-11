@@ -126,14 +126,14 @@ def slurm_finished(args):
       spec.loader.exec_module(mod)
       setup = schema.validate(mod.setup)
       dirs = [os.path.abspath(f"{setup.work_dir}/{run.run_name}") for run in setup.runs]
-      file_list.extend([f for f in itertools.chain.from_iterable([gl.glob(f'{dir}/*/slurm-*') for dir in dirs])])
+      file_list.extend([f for f in itertools.chain.from_iterable([gl.glob(f'{dir}/*/slurm-*.out') for dir in dirs])])
     else:
-      file_list.extend([f.name for f in Path(infile).glob('**/slurm-*') if f.is_file()])
+      file_list.extend([f.name for f in Path(infile).glob('**/slurm-*.out') if f.is_file()])
 
   jobs = []
   jids = []
   for file in tqdm(file_list):
-    if (m := re.match(r'.*slurm-([0-9,\_]+).*', file)):
+    if (m := re.match(r'.*slurm-([0-9,\_]+)\.*', file)):
       jid = m.group(1)
       if not (jid in jids):
         jids.append(jid)
