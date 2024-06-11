@@ -62,11 +62,26 @@ def LDtoDL(LD, type=set.union, sort_by_key=None):
   DL = {k: [dct.get(k, None) for dct in LD] for k in common_keys}
   return DL, common_keys
 
+def suffix_to_int(str):
+  if str.endswith("K"):
+    return int(str[:-1])*1000
+  elif str.endswith("M"):
+    return int(str[:-1])*1000*1000
+  elif str.endswith("G"):
+    return int(str[:-1])*1000*1000*1000
+  else:
+    return int(str[:-1])
 
 seff_keys = ["Array Job ID", "State", "Job Wall-clock time", "Memory Efficiency", "Nodes"]
-sacct_fields = {
-  "keys":    ["Job name",    "State", "Job Wall-clock time", "Exit Code", "MaxVMSize", "Nodes"],
-  "fmt_str": ["JobName%100", "State", "Elapsed",             "ExitCode",  "MaxVMSize", "NNodes"],
+last = lambda x: x[-1]
+frst = lambda x: x[0]
+s2int = lambda x: humanize.naturalsize(suffix_to_int(x))
+noop = lambda x: x
+sacct = {
+  "display": ["Job name",    "State", "Job Wall-clock time", "Memory/task", "Nodes"],
+  "format":  ["JobName%100", "State", "Elapsed",             "MaxRSS",      "NNodes"],
+  "aggr":    [frst,          last,    frst,                  last,          last],
+  "post":    [noop,          noop,    noop,                  s2int,         noop],
 }
 def get_job_info(jid):
   dct = {}
@@ -81,9 +96,13 @@ def get_job_info(jid):
     dct["Job name"] = jname.partition('\n')[0]
 
   except:
+    evaluate = lambda x: x[0](x[1])
     dct["Array Job ID"] = str(jid)
-    res = subprocess.check_output(["sacct", "-j", str(jid), rf'--format={",".join(sacct_fields["fmt_str"])}', "-P", "-n"]).decode('utf8')
-    dct = dct | dict(zip(sacct_fields["keys"], res.partition('\n')[0].split("|")))
+    res = subprocess.check_output(["sacct", "-j", str(jid), rf'--format={",".join(sacct["format"])}', "-P", "-n"]).decode('utf8')
+    list_of_lines = list(map(list, itertools.zip_longest(*[l.split("|") for l in res.rstrip().split('\n')], fillvalue=None)))
+    values = map(evaluate, zip(sacct["post"], map(evaluate, zip(sacct["aggr"], list_of_lines))))
+    #dct = dct | dict(zip(sacct["display"], res.partition('\n')[0].split("|")))
+    dct = dct | dict(zip(sacct["display"], values))
     pass
 
   return dct
@@ -139,16 +158,6 @@ def get_queue():
   items = res.stdout.split("\n")
   vals = lambda x: tsplit(x, squeue_fields["types"])
   return {item.split("|")[0]: dict(zip(squeue_fields["keys"], vals(item))) for item in items}
-
-def suffix_to_int(str):
-  if str.endswith("K"):
-    return int(str[:-1])*1000
-  elif str.endswith("M"):
-    return int(str[:-1])*1000*1000
-  elif str.endswith("G"):
-    return int(str[:-1])*1000*1000*1000
-  else:
-    return int(str[:-1])
 
 def get_mem_usages(jobs):
   env = { "shell": True, "capture_output": True, "text": True }
