@@ -70,12 +70,12 @@ def suffix_to_int(str):
   elif str.endswith("G"):
     return int(str[:-1])*1000*1000*1000
   else:
-    return int(str[:-1])
+    return str
 
 seff_keys = ["Array Job ID", "State", "Job Wall-clock time", "Memory Efficiency", "Nodes"]
 last = lambda x: x[-1]
 frst = lambda x: x[0]
-s2int = lambda x: humanize.naturalsize(suffix_to_int(x))
+s2int = lambda x: humanize.naturalsize(suffix_to_int(x)) if isinstance(suffix_to_int(x), int) else x
 noop = lambda x: x
 sacct = {
   "display": ["Job name",    "State", "Job Wall-clock time", "Memory/task", "Nodes"],
