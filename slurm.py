@@ -70,12 +70,12 @@ def suffix_to_int(str):
   elif str.endswith("G"):
     return int(str[:-1])*1000*1000*1000
   else:
-    return int(str[:-1])
+    return str
 
 seff_keys = ["Array Job ID", "State", "Job Wall-clock time", "Memory Efficiency", "Nodes"]
 last = lambda x: x[-1]
 frst = lambda x: x[0]
-s2int = lambda x: humanize.naturalsize(suffix_to_int(x))
+s2int = lambda x: humanize.naturalsize(suffix_to_int(x)) if isinstance(suffix_to_int(x), int) else x
 noop = lambda x: x
 sacct = {
   "display": ["Job name",    "State", "Job Wall-clock time", "Memory/task", "Nodes"],
@@ -141,7 +141,7 @@ def slurm_finished(args):
 
   if jobs:
     DL, headers = LDtoDL(jobs, type=set.union, sort_by_key="!Array Job ID")
-    print(tabulate(colorize_dict_vals(DL), headers=headers))
+    print(tabulate(colorize_dict_vals(DL), headers=headers, showindex="always"))
     print(f"Total resources in the list: {sum(map(to_nodehours, jobs)):.1f} nodehours")
 
 def tsplit(str, types, delimiter="|"):
