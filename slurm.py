@@ -64,11 +64,11 @@ def LDtoDL(LD, type=set.union, sort_by_key=None):
 
 def suffix_to_int(str):
   if str.endswith("K"):
-    return int(str[:-1])*1000
+    return int(float(str[:-1]))*1000
   elif str.endswith("M"):
-    return int(str[:-1])*1000*1000
+    return int(float(str[:-1]))*1000*1000
   elif str.endswith("G"):
-    return int(str[:-1])*1000*1000*1000
+    return int(float(str[:-1]))*1000*1000*1000
   else:
     return str
 
@@ -101,7 +101,6 @@ def get_job_info(jid):
     res = subprocess.check_output(["sacct", "-j", str(jid), rf'--format={",".join(sacct["format"])}', "-P", "-n"]).decode('utf8')
     list_of_lines = list(map(list, itertools.zip_longest(*[l.split("|") for l in res.rstrip().split('\n')], fillvalue=None)))
     values = map(evaluate, zip(sacct["post"], map(evaluate, zip(sacct["aggr"], list_of_lines))))
-    #dct = dct | dict(zip(sacct["display"], res.partition('\n')[0].split("|")))
     dct = dct | dict(zip(sacct["display"], values))
     pass
 
