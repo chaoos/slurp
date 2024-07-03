@@ -18,6 +18,9 @@ from tqdm import tqdm
 import humanize
 from termcolor import colored
 from datetime import datetime
+import helpers as hp
+
+logger = hp.get_logger()
 
 def sort_LD(LD, key):
   actual_key = key.replace("!", "")
@@ -87,18 +90,24 @@ def get_job_info(jid):
   dct = {}
   try:
     env = { "stdout": subprocess.PIPE, "text": True }
-    res = subprocess.run(["seff", str(jid)], **env)
+    cmd = ["seff", str(jid)]
+    logger.debug(rf'running command: {" ".join(cmd)}')
+    res = subprocess.run(cmd, **env)
     for line in res.stdout.split("\n"):
       if (m := re.match(r'^(.+): (.+)', line)):
         if m.group(1) in seff_keys:
           dct[m.group(1)] = m.group(2)
-    jname = subprocess.check_output(["sacct", "-j", str(jid), r'--format=JobName%100', "-P", "-n"]).decode('utf8')
+    cmd = ["sacct", "-j", str(jid), r'--format=JobName%100', "-P", "-n"]
+    logger.debug(rf'running command: {" ".join(cmd)}')
+    jname = subprocess.check_output(cmd).decode('utf8')
     dct["Job name"] = jname.partition('\n')[0]
 
   except:
     evaluate = lambda x: x[0](x[1])
     dct["Array Job ID"] = str(jid)
-    res = subprocess.check_output(["sacct", "-j", str(jid), rf'--format={",".join(sacct["format"])}', "-P", "-n"]).decode('utf8')
+    cmd = ["sacct", "-j", str(jid), rf'--format={",".join(sacct["format"])}', "-P", "-n"]
+    logger.debug(rf'running command: {" ".join(cmd)}')
+    res = subprocess.check_output(cmd).decode('utf8')
     list_of_lines = list(map(list, itertools.zip_longest(*[l.split("|") for l in res.rstrip().split('\n')], fillvalue=None)))
     values = map(evaluate, zip(sacct["post"], map(evaluate, zip(sacct["aggr"], list_of_lines))))
     dct = dct | dict(zip(sacct["display"], values))
@@ -141,7 +150,7 @@ def slurm_finished(args):
   if jobs:
     DL, headers = LDtoDL(jobs, type=set.union, sort_by_key="!Array Job ID")
     print(tabulate(colorize_dict_vals(DL), headers=headers, showindex="always"))
-    print(f"Total resources in the list: {sum(map(to_nodehours, jobs)):.1f} nodehours")
+    logger.info(f"Total resources in the list: {sum(map(to_nodehours, jobs)):.1f} nodehours")
 
 def tsplit(str, types, delimiter="|"):
   return [types[i](v) for i, v in enumerate(str.split(delimiter))]
@@ -153,16 +162,21 @@ squeue_fields = {
 }
 def get_queue():
   env = { "shell": True, "capture_output": True, "text": True }
-  res = subprocess.run([fr'squeue --me -r -h --format="{"|".join(squeue_fields["fmt_str"])}"'], **env)
+  cmd = [fr'squeue --me -r -h --format="{"|".join(squeue_fields["fmt_str"])}"']
+  logger.debug(rf'running command: {" ".join(cmd)}')
+  res = subprocess.run(cmd, **env)
   items = res.stdout.split("\n")
   vals = lambda x: tsplit(x, squeue_fields["types"])
-  return {item.split("|")[0]: dict(zip(squeue_fields["keys"], vals(item))) for item in items}
+  non_empty = lambda x: True
+  return {item.split("|")[0]: dict(zip(squeue_fields["keys"], vals(item))) for item in filter(non_empty, items)}
 
 def get_mem_usages(jobs):
   env = { "shell": True, "capture_output": True, "text": True }
   keys = list(set(map(lambda x: x.split("_")[0], jobs.keys()))) # TODO remove
   for jid in tqdm(keys):
-    res = subprocess.run([rf'sstat -n --format="JobID,MaxRSS" -j {jid} --parsable2 -n'], **env)
+    cmd = [rf'sstat -n --format="JobID,MaxRSS" -j {jid} --parsable2 -n']
+    logger.debug(rf'running command: {" ".join(cmd)}')
+    res = subprocess.run(cmd, **env)
     for item in res.stdout.split():
       jid, mem = tsplit(item, [lambda x: x[:-2], suffix_to_int])
       for j_id in jobs.keys():
@@ -185,7 +199,9 @@ def main():
   parser.add_argument('-i', '--infile', required=False, nargs = '+',
     help='Path to setup file(s) or directories to scan for slurm output files.')
   parser.add_argument('--mem', help="Obtain peak memory for running jobs", default=False, action="store_true")
+  parser.add_argument("-v", "--verbosity", action="count", help="increase output verbosity", default=0)
   args = parser.parse_args()
+  logger = hp.setup_logger(args.verbosity)
 
   if args.infile:
     slurm_finished(args)
