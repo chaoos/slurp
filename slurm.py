@@ -19,6 +19,7 @@ import humanize
 from termcolor import colored
 from datetime import datetime
 import helpers as hp
+import getpass
 
 logger = hp.get_logger()
 
@@ -187,12 +188,25 @@ def get_mem_usages(jobs):
           jobs[j_id]["Memory usage (task, node, total)"] = f"{task}, {node}, {total}"
   return jobs
 
+def get_full_queue():
+  env = { "shell": True, "capture_output": True, "text": True }
+  cmd = [fr'squeue -r -h --format="%u|%T" --sort=-p,i']
+  logger.debug(rf'running command: {" ".join(cmd)}')
+  res = subprocess.run(cmd, **env)
+  items = res.stdout.split("\n")
+  running = list(filter(lambda x: x.split("|")[-1] == "RUNNING", items))
+  pending = list(filter(lambda x: x.split("|")[-1] == "PENDING", items))
+  before_me = list(filter(lambda x: x[1].split("|")[0]==getpass.getuser(), enumerate(pending)))
+  return len(pending), len(running), before_me[0][0] if before_me else 0
+
 def slurm_running(args):
   jobs = get_queue()
   jobs = get_mem_usages(jobs).values() if args.mem else jobs.values()
   if jobs:
     DL, headers = LDtoDL(jobs, sort_by_key="!Job ID")
     print(tabulate(colorize_dict_vals(DL), headers=headers, showindex="always"))
+  p, r, b = get_full_queue()
+  logger.info(f"Total jobs in queue: {p} pending, {r} running, {b} before mine")
 
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
