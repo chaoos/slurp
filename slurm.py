@@ -202,7 +202,7 @@ def get_full_queue():
   y = min(before_me, key=lambda x: x.get('jid'), default={"jid":0}).get("jid")
   before_me = list(filter(lambda x: x.get("jid") < y, pending))
   nodes = list(map(lambda x: x.get("nodes"), before_me))
-  nodes = dict(zip(["min","max","sum"], [min(nodes), max(nodes), sum(nodes)]))
+  nodes = dict(zip(["min","max","sum"], [min(nodes, default=0), max(nodes, default=0), sum(nodes)]))
   reasons = dict(Counter(map(lambda x: x.get('reason'), before_me)))
   return len(pending), len(running), len(before_me), reasons, nodes
 
