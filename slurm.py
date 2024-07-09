@@ -20,6 +20,8 @@ from termcolor import colored
 from datetime import datetime
 import helpers as hp
 import getpass
+from collections import Counter
+from functools import reduce
 
 logger = hp.get_logger()
 
@@ -190,14 +192,19 @@ def get_mem_usages(jobs):
 
 def get_full_queue():
   env = { "shell": True, "capture_output": True, "text": True }
-  cmd = [fr'squeue -r -h --format="%u|%T" --sort=-p,i']
+  cmd = [fr'squeue -r -h --format="%u|%i|%T|%r|%D" --sort=-p,i']
   logger.debug(rf'running command: {" ".join(cmd)}')
   res = subprocess.run(cmd, **env)
-  items = res.stdout.split("\n")
-  running = list(filter(lambda x: x.split("|")[-1] == "RUNNING", items))
-  pending = list(filter(lambda x: x.split("|")[-1] == "PENDING", items))
-  before_me = list(filter(lambda x: x[1].split("|")[0]==getpass.getuser(), enumerate(pending)))
-  return len(pending), len(running), before_me[0][0] if before_me else 0
+  items = list(map(lambda x: dict(zip(["user", "jid", "state", "reason", "nodes"], tsplit(x, [str,int,str,str,int]))), res.stdout.split("\n")))
+  running = list(filter(lambda x: x.get("state")=="RUNNING", items))
+  pending = list(filter(lambda x: x.get("state")=="PENDING", items))
+  before_me = list(filter(lambda x: x.get("user")==getpass.getuser(), pending))
+  y = min(before_me, key=lambda x: x.get('jid'), default={"jid":0}).get("jid")
+  before_me = list(filter(lambda x: x.get("jid") < y, pending))
+  nodes = list(map(lambda x: x.get("nodes"), before_me))
+  nodes = dict(zip(["min","max","sum"], [min(nodes), max(nodes), sum(nodes)]))
+  reasons = dict(Counter(map(lambda x: x.get('reason'), before_me)))
+  return len(pending), len(running), len(before_me), reasons, nodes
 
 def slurm_running(args):
   jobs = get_queue()
@@ -205,8 +212,8 @@ def slurm_running(args):
   if jobs:
     DL, headers = LDtoDL(jobs, sort_by_key="!Job ID")
     print(tabulate(colorize_dict_vals(DL), headers=headers, showindex="always"))
-  p, r, b = get_full_queue()
-  logger.info(f"Total jobs in queue: {p} pending, {r} running, {b} before mine")
+  p, r, b, reasons, nodes = get_full_queue()
+  logger.info(f"Total jobs in queue: {p} pending, {r} running, {b} before mine ({reasons = }, {nodes = })")
 
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
