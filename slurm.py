@@ -68,7 +68,7 @@ def LDtoDL(LD, type=set.union, sort_by_key=None):
   DL = {k: [dct.get(k, None) for dct in LD] for k in common_keys}
   return DL, common_keys
 
-def suffix_to_int(str):
+def suffix_to_int(str, default=0):
   if str.endswith("K"):
     return int(float(str[:-1]))*1000
   elif str.endswith("M"):
@@ -76,7 +76,7 @@ def suffix_to_int(str):
   elif str.endswith("G"):
     return int(float(str[:-1]))*1000*1000*1000
   else:
-    return str
+    return default
 
 seff_keys = ["Array Job ID", "State", "Job Wall-clock time", "Memory Efficiency", "Nodes"]
 last = lambda x: x[-1]
@@ -177,7 +177,7 @@ def get_mem_usages(jobs):
   env = { "shell": True, "capture_output": True, "text": True }
   keys = list(set(map(lambda x: x.split("_")[0], jobs.keys()))) # TODO remove
   for jid in tqdm(keys):
-    cmd = [rf'sstat -n --format="JobID,MaxRSS" -j {jid} --parsable2 -n']
+    cmd = [rf'sstat --format="JobID,MaxRSS" -j {jid} --parsable2 -n']
     logger.debug(rf'running command: {" ".join(cmd)}')
     res = subprocess.run(cmd, **env)
     for item in res.stdout.split():
@@ -195,7 +195,8 @@ def get_full_queue():
   cmd = [fr'squeue -r -h --format="%u|%i|%T|%r|%D" --sort=-p,i']
   logger.debug(rf'running command: {" ".join(cmd)}')
   res = subprocess.run(cmd, **env)
-  items = list(map(lambda x: dict(zip(["user", "jid", "state", "reason", "nodes"], tsplit(x, [str,int,str,str,int]))), res.stdout.split("\n")))
+  jid = lambda i: int(re.findall(r'\d+', i)[0])
+  items = list(map(lambda x: dict(zip(["user", "jid", "state", "reason", "nodes"], tsplit(x, [str,jid,str,str,int]))), res.stdout.split("\n")))
   running = list(filter(lambda x: x.get("state")=="RUNNING", items))
   pending = list(filter(lambda x: x.get("state")=="PENDING", items))
   before_me = list(filter(lambda x: x.get("user")==getpass.getuser(), pending))
