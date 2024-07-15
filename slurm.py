@@ -166,7 +166,7 @@ squeue_fields = {
   "types":   [str,      str,        int,              int,       str,       str,                       str],
 }
 def get_queue(us=False):
-  who = f"-A {','.join([g.gr_name for g in grp.getgrall() if getpass.getuser() in g.gr_mem])}" if us else "--me"
+  who = f"-A {','.join(map(lambda g: grp.getgrgid(g).gr_name, os.getgroups()))}" if us else "--me"
   env = { "shell": True, "capture_output": True, "text": True }
   cmd = [fr'squeue {who} -r -h --format="{"|".join(squeue_fields["fmt_str"])}"']
   logger.debug(rf'running command: {" ".join(cmd)}')
