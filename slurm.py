@@ -20,8 +20,10 @@ from termcolor import colored
 from datetime import datetime
 import helpers as hp
 import getpass
-from collections import Counter
+from collections import Counter, OrderedDict
 from functools import reduce
+from textwrap import shorten
+import grp
 
 logger = hp.get_logger()
 
@@ -64,7 +66,7 @@ def colorize_dict_vals(dct):
 def LDtoDL(LD, type=set.union, sort_by_key=None):
   if sort_by_key is not None:
     LD = sort_LD(LD, sort_by_key)
-  common_keys = type(*map(set, LD))
+  common_keys = sorted(type(*map(set, LD)))
   DL = {k: [dct.get(k, None) for dct in LD] for k in common_keys}
   return DL, common_keys
 
@@ -81,7 +83,7 @@ def suffix_to_int(str, default=0):
 seff_keys = ["Array Job ID", "State", "Job Wall-clock time", "Memory Efficiency", "Nodes"]
 last = lambda x: x[-1]
 frst = lambda x: x[0]
-s2int = lambda x: humanize.naturalsize(suffix_to_int(x)) if isinstance(suffix_to_int(x), int) else x
+s2int = lambda x: humanize.naturalsize(suffix_to_int(x))
 noop = lambda x: x
 sacct = {
   "display": ["Job name",    "State", "Job Wall-clock time", "Memory/task", "Nodes"],
@@ -163,9 +165,10 @@ squeue_fields = {
   "fmt_str": ["%i",     "%j",       "%c",             "%D",      "%T (%r)", "%M / %l (%S)",            "%k"],
   "types":   [str,      str,        int,              int,       str,       str,                       str],
 }
-def get_queue():
+def get_queue(us=False):
+  who = f"-A {','.join([g.gr_name for g in grp.getgrall() if getpass.getuser() in g.gr_mem])}" if us else "--me"
   env = { "shell": True, "capture_output": True, "text": True }
-  cmd = [fr'squeue --me -r -h --format="{"|".join(squeue_fields["fmt_str"])}"']
+  cmd = [fr'squeue {who} -r -h --format="{"|".join(squeue_fields["fmt_str"])}"']
   logger.debug(rf'running command: {" ".join(cmd)}')
   res = subprocess.run(cmd, **env)
   items = res.stdout.split("\n")
@@ -204,11 +207,11 @@ def get_full_queue():
   before_me = list(filter(lambda x: x.get("jid") < y, pending))
   nodes = list(map(lambda x: x.get("nodes"), before_me))
   nodes = dict(zip(["min","max","sum"], [min(nodes, default=0), max(nodes, default=0), sum(nodes)]))
-  reasons = dict(Counter(map(lambda x: x.get('reason'), before_me)))
+  reasons = dict(Counter(map(lambda x: shorten(x.get('reason'), width=100), before_me)))
   return len(pending), len(running), len(before_me), reasons, nodes
 
 def slurm_running(args):
-  jobs = get_queue()
+  jobs = get_queue(args.us)
   jobs = get_mem_usages(jobs).values() if args.mem else jobs.values()
   if jobs:
     DL, headers = LDtoDL(jobs, sort_by_key="!Job ID")
@@ -222,6 +225,7 @@ def main():
     help='Path to setup file(s) or directories to scan for slurm output files.')
   parser.add_argument('--mem', help="Obtain peak memory for running jobs", default=False, action="store_true")
   parser.add_argument("-v", "--verbosity", action="count", help="increase output verbosity", default=0)
+  parser.add_argument('--us', help="Show jobs of all user accounts of current user", default=False, action="store_true")
   args = parser.parse_args()
   logger = hp.setup_logger(args.verbosity)
 
