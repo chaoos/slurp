@@ -120,15 +120,15 @@ def get_job_info(jid):
 
   return dct
 
+def hours(walltime):
+  seconds = 0
+  for part in walltime.split(':'):
+    days, part = part.split('-') if '-' in part else ("0", part)
+    seconds = seconds*60 + int(part, 10) + int(days, 10)*24
+  return seconds/3600
+
 def to_nodehours(job):
-  walltime = job.get("Job Wall-clock time", "00:00:00")
-  try:
-    t = datetime.strptime(walltime, "%H:%M:%S")
-    day = 0
-  except:
-    t = datetime.strptime(walltime, "%d-%H:%M:%S")
-    day = t.day
-  return int(job.get("Nodes", 1))*(24*day + t.hour + t.minute/60 + t.second/3600)
+  return int(job.get("Nodes", 1))*hours(job.get("Job Wall-clock time", "00:00:00"))
 
 def slurm_finished(args):
   file_list = []
@@ -195,11 +195,11 @@ def get_mem_usages(jobs):
 
 def get_full_queue():
   env = { "shell": True, "capture_output": True, "text": True }
-  cmd = [fr'squeue -r -h --format="%u|%i|%T|%r|%D" --sort=-p,i']
+  cmd = [fr'squeue -r -h --format="%u|%i|%T|%r|%D|%l" --sort=-p,i']
   logger.debug(rf'running command: {" ".join(cmd)}')
   res = subprocess.run(cmd, **env)
   jid = lambda i: int(re.findall(r'\d+', i)[0])
-  items = list(map(lambda x: dict(zip(["user", "jid", "state", "reason", "nodes"], tsplit(x, [str,jid,str,str,int]))), res.stdout.split("\n")))
+  items = list(map(lambda x: dict(zip(["user", "jid", "state", "reason", "nodes", "nh"], tsplit(x, [str,jid,str,str,int,hours]))), res.stdout.split("\n")))
   running = list(filter(lambda x: x.get("state")=="RUNNING", items))
   pending = list(filter(lambda x: x.get("state")=="PENDING", items))
   before_me = list(filter(lambda x: x.get("user")==getpass.getuser(), pending))
@@ -207,8 +207,9 @@ def get_full_queue():
   before_me = list(filter(lambda x: x.get("jid") < y, pending))
   nodes = list(map(lambda x: x.get("nodes"), before_me))
   nodes = dict(zip(["min","max","sum"], [min(nodes, default=0), max(nodes, default=0), sum(nodes)]))
+  nh = int(sum(map(lambda x: x.get("nodes")*x.get("nh"), before_me)))
   reasons = dict(Counter(map(lambda x: shorten(x.get('reason'), width=100), before_me)))
-  return len(pending), len(running), len(before_me), reasons, nodes
+  return len(pending), len(running), len(before_me), reasons, nodes, nh
 
 def slurm_running(args):
   jobs = get_queue(args.us)
@@ -216,8 +217,8 @@ def slurm_running(args):
   if jobs:
     DL, headers = LDtoDL(jobs, sort_by_key="!Job ID")
     print(tabulate(colorize_dict_vals(DL), headers=headers, showindex="always"))
-  p, r, b, reasons, nodes = get_full_queue()
-  logger.info(f"Total jobs in queue: {p} pending, {r} running, {b} before mine ({reasons = }, {nodes = })")
+  p, r, b, reasons, nodes, node_hours = get_full_queue()
+  logger.info(f"Total jobs in queue: {p} pending, {r} running, {b} before mine ({reasons = }, {nodes = }, {node_hours = })")
 
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
