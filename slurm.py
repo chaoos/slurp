@@ -190,7 +190,7 @@ def get_mem_usages(jobs):
           task = humanize.naturalsize(mem)
           node = humanize.naturalsize(mem*jobs[j_id]["Tasks per node"])
           total  = humanize.naturalsize(mem*jobs[j_id]["Tasks per node"]*jobs[j_id]["# Nodes"])
-          jobs[j_id]["Memory usage (task, node, total)"] = f"{task}, {node}, {total}"
+          jobs[j_id]["CPU Memory usage (task, node, total)"] = f"{task}, {node}, {total}"
   return jobs
 
 def get_full_queue():
@@ -211,14 +211,18 @@ def get_full_queue():
   reasons = dict(Counter(map(lambda x: shorten(x.get('reason'), width=100), before_me)))
   return len(pending), len(running), len(before_me), reasons, nodes, nh
 
+def slurm_summary():
+  p, r, b, reasons, nodes, node_hours = get_full_queue()
+  logger.info(f"Total jobs in queue: {p} pending, {r} running, {b} before mine ({reasons = }, {nodes = }, {node_hours = })")
+
 def slurm_running(args):
   jobs = get_queue(args.us)
   jobs = get_mem_usages(jobs).values() if args.mem else jobs.values()
   if jobs:
     DL, headers = LDtoDL(jobs, sort_by_key="!Job ID")
     print(tabulate(colorize_dict_vals(DL), headers=headers, showindex="always"))
-  p, r, b, reasons, nodes, node_hours = get_full_queue()
-  logger.info(f"Total jobs in queue: {p} pending, {r} running, {b} before mine ({reasons = }, {nodes = }, {node_hours = })")
+  slurm_summary()
+  
 
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
