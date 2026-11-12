@@ -7,16 +7,26 @@ running job.
 """
 
 import argparse
+import asyncio
 import codecs
+import fcntl
+import functools
 import logging
 import os
 import re
 import shlex
+import struct
 import subprocess
+import sys
+import termios
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
 import humanize
+from rich.color import Color
+from rich.segment import Segment
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 from textual import events, on, work
@@ -26,6 +36,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.coordinate import Coordinate
 from textual.message import Message
 from textual.screen import Screen
+from textual.strip import Strip
+from textual.widget import Widget
 from textual.widgets import Button, Checkbox, DataTable, Footer, Header, Input, Label, OptionList, Select, Static, TextArea
 from textual.widgets.option_list import Option
 from textual.widgets.text_area import Selection
@@ -958,6 +970,7 @@ class JobScreen(Screen):
     Binding("r", "reload", "Reload"),
     Binding("e", "open('stderr')", "Error file"),
     Binding("o", "open('stdout')", "Output file"),
+    Binding("s", "shell", "Shell on node"),
   ]
 
   def __init__(self, job):
@@ -979,6 +992,7 @@ class JobScreen(Screen):
           yield Input(id="cmd", placeholder="command, e.g. nvidia-smi")
           yield Select([], id="node", prompt="all nodes", allow_blank=True)
           yield Button("Run", id="run", variant="primary")
+          yield Button("Shell", id="shell", tooltip="interactive shell on the node (Ctrl-D closes it)")
         with Horizontal(id="presets"):
           for i, name in enumerate(PRESETS):
             yield Button(name, id=f"preset{i}", classes="preset")
@@ -1076,6 +1090,26 @@ class JobScreen(Screen):
   def action_back(self):
     self.app.pop_screen()
 
+  def check_action(self, action, parameters):
+    if action == "shell":
+      return self.job.running
+    return True
+
+  @on(Button.Pressed, "#shell")
+  def action_shell(self):
+    if not self.job.running:
+      self.notify("the job is not running", severity="error")
+      return
+    node = self.query_one("#node", Select).value
+    node = (self.details["nodes"] or [None])[0] if node is Select.NULL else node
+    if not node:
+      self.notify("the nodes of the job are not known yet, try again in a moment", severity="warning")
+      return
+    args = ["srun", f"--jobid={self.job.rec['JobIDRaw']}", "--overlap", "--pty", "--nodes=1", "--ntasks=1", "-w", node,
+            f"--job-name={STEP_NAME}", "bash", "-l"]
+    self.app.push_screen(TerminalScreen(["Jobs", self.job.jid, f"shell on {node}"], args,
+                                        f"shell on {node} in job {self.job.jid} · Ctrl-D closes it"))
+
   def action_reload(self):
     self.load(refresh_job=True)
 
@@ -1146,6 +1180,272 @@ class JobScreen(Screen):
     self.app.call_from_thread(self.app.push_screen, FileScreen(crumbs, text=text, refresher=lambda: run_on_nodes(job, cmd, node),
                                                                bases=bases, env=env))
 
+# ---------------------------------------------------------------------------
+# terminal window: a command (srun --pty bash) in a pseudo terminal, emulated with pyte
+
+# make the pseudo terminal the controlling terminal of the command (for Ctrl-C, job control), then run it
+CTTY = "import fcntl, os, sys, termios; fcntl.ioctl(0, termios.TIOCSCTTY, 0); os.execvp(sys.argv[1], sys.argv[1:])"
+ALT_SCREEN_MODES = (47, 1047, 1049)
+DECCKM = 1 << 5 # private mode 1 (application cursor keys), pyte stores private modes shifted by 5 bits
+
+TERM_KEYS = {
+  "enter": "\r", "tab": "\t", "shift+tab": "\x1b[Z", "backspace": "\x7f", "ctrl+h": "\x08", "escape": "\x1b",
+  "insert": "\x1b[2~", "delete": "\x1b[3~", "pageup": "\x1b[5~", "pagedown": "\x1b[6~", "home": "\x1b[H", "end": "\x1b[F",
+  "f1": "\x1bOP", "f2": "\x1bOQ", "f3": "\x1bOR", "f4": "\x1bOS", "f5": "\x1b[15~", "f6": "\x1b[17~", "f7": "\x1b[18~",
+  "f8": "\x1b[19~", "f9": "\x1b[20~", "f10": "\x1b[21~", "f11": "\x1b[23~", "f12": "\x1b[24~",
+}
+TERM_ARROWS = {"up": "A", "down": "B", "right": "C", "left": "D"}
+
+def vt_color(name):
+  """pyte color (name or rrggbb) -> rich color"""
+  if not name or name == "default":
+    return None
+  if re.fullmatch(r'[0-9a-fA-F]{6}', name):
+    return Color.parse("#" + name)
+  bright = name.startswith("bright")
+  base = {"brown": "yellow"}.get(name[6:] if bright else name, name[6:] if bright else name)
+  try:
+    return Color.parse(("bright_" if bright else "") + base)
+  except Exception:
+    return None
+
+@functools.lru_cache(maxsize=4096)
+def vt_style(fg, bg, bold, italics, underscore, strikethrough, reverse):
+  return Style(color=vt_color(fg), bgcolor=vt_color(bg), bold=bold, italic=italics, underline=underscore,
+               strike=strikethrough, reverse=reverse)
+
+def make_vt_screen(cols, rows, reply):
+  """pyte screen that answers terminal queries through reply and supports the alternate screen of vim, less, htop"""
+  import pyte
+
+  class VTScreen(pyte.Screen):
+    saved = None
+
+    def write_process_input(self, data):
+      reply(data.encode())
+
+    def set_mode(self, *modes, **kwargs):
+      if kwargs.get("private") and any(m in ALT_SCREEN_MODES for m in modes):
+        self.saved = ({y: dict(line) for y, line in self.buffer.items()}, (self.cursor.x, self.cursor.y))
+        self.erase_in_display(2)
+        modes = tuple(m for m in modes if m not in ALT_SCREEN_MODES)
+        if not modes:
+          return
+      super().set_mode(*modes, **kwargs)
+
+    def reset_mode(self, *modes, **kwargs):
+      if kwargs.get("private") and any(m in ALT_SCREEN_MODES for m in modes):
+        if self.saved:
+          buffer, (x, y) = self.saved
+          self.saved = None
+          self.buffer.clear()
+          for row, line in buffer.items():
+            if row < self.lines:
+              self.buffer[row].update(line)
+          self.cursor.x, self.cursor.y = min(x, self.columns - 1), min(y, self.lines - 1)
+          self.dirty.update(range(self.lines))
+        modes = tuple(m for m in modes if m not in ALT_SCREEN_MODES)
+        if not modes:
+          return
+      super().reset_mode(*modes, **kwargs)
+
+  return VTScreen(cols, rows), pyte
+
+class TerminalView(Widget, can_focus=True):
+  """Runs a command in a pseudo terminal and shows it; all keys go to the command"""
+  DEFAULT_CSS = "TerminalView { height: 1fr; }"
+
+  class Exited(Message):
+    def __init__(self, code, elapsed):
+      super().__init__()
+      self.code, self.elapsed = code, elapsed
+
+  def __init__(self, args, **kwargs):
+    super().__init__(**kwargs)
+    self.args = args
+    self.vt = self.stream = self.proc = self.fd = None
+    self.started = None
+    self.done = False
+
+  def on_mount(self):
+    self.call_after_refresh(self.start)
+
+  def start(self):
+    cols, rows = max(self.size.width, 20), max(self.size.height, 5)
+    try:
+      self.vt, pyte = make_vt_screen(cols, rows, self.write)
+    except ImportError:
+      self.post_message(self.Exited(-1, 0))
+      self.app.notify("the shell window needs the python package pyte: pip install pyte", severity="error", timeout=10)
+      return
+    self.stream = pyte.ByteStream(self.vt)
+    master, slave = os.openpty()
+    self.fd = master
+    self.set_winsize(cols, rows)
+    log.debug(f"running command: {shlex.join(self.args)}")
+    try:
+      self.proc = subprocess.Popen([sys.executable, "-c", CTTY, *self.args], stdin=slave, stdout=slave, stderr=slave,
+                                   start_new_session=True, env=os.environ | {"TERM": "xterm-256color"}, close_fds=True)
+    except OSError as e:
+      self.stream.feed(f"cannot start {self.args[0]}: {e}\r\n".encode())
+      os.close(slave)
+      self.finish()
+      return
+    finally:
+      if self.proc:
+        os.close(slave)
+    self.started = time.time()
+    os.set_blocking(master, False)
+    asyncio.get_running_loop().add_reader(master, self.read_output)
+
+  def set_winsize(self, cols, rows):
+    if self.fd is not None:
+      try:
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+      except OSError:
+        pass
+
+  def read_output(self):
+    try:
+      data = os.read(self.fd, 65536)
+    except BlockingIOError:
+      return
+    except OSError: # EIO: the command closed the terminal
+      data = b""
+    if not data:
+      self.finish()
+      return
+    self.stream.feed(data)
+    self.refresh()
+
+  def finish(self):
+    if self.done:
+      return
+    self.done = True
+    if self.fd is not None:
+      try:
+        asyncio.get_running_loop().remove_reader(self.fd)
+      except Exception:
+        pass
+      os.close(self.fd)
+      self.fd = None
+    code = -1
+    if self.proc:
+      try:
+        code = self.proc.wait(timeout=3)
+      except subprocess.TimeoutExpired:
+        self.proc.kill()
+        code = self.proc.wait()
+    self.refresh()
+    self.post_message(self.Exited(code, time.time() - (self.started or time.time())))
+
+  def write(self, data):
+    if self.fd is not None and not self.done:
+      try:
+        os.write(self.fd, data)
+      except OSError:
+        pass
+
+  def on_unmount(self):
+    if not self.done and self.proc and self.proc.poll() is None:
+      self.proc.terminate() # window closed while the command runs (e.g. the app quits)
+    if self.fd is not None:
+      try:
+        asyncio.get_running_loop().remove_reader(self.fd)
+      except Exception:
+        pass
+
+  def on_resize(self, event):
+    if self.vt is not None:
+      cols, rows = max(event.size.width, 2), max(event.size.height, 2)
+      self.vt.resize(rows, cols)
+      self.set_winsize(cols, rows)
+      self.refresh()
+
+  async def on_key(self, event):
+    if self.done or self.vt is None:
+      return # let the window handle Esc to close it
+    event.stop()
+    event.prevent_default()
+    key = event.key
+    if key in TERM_ARROWS:
+      data = ("\x1bO" if DECCKM in self.vt.mode else "\x1b[") + TERM_ARROWS[key]
+    elif key.startswith(("ctrl+", "shift+", "alt+")) and key.split("+")[-1] in TERM_ARROWS:
+      mod = {"shift": 2, "alt": 3, "ctrl": 5}[key.split("+")[0]]
+      data = f"\x1b[1;{mod}{TERM_ARROWS[key.split('+')[-1]]}"
+    elif key in TERM_KEYS:
+      data = TERM_KEYS[key]
+    elif event.character:
+      data = event.character
+    elif key.startswith("ctrl+") and len(key) == 6 and key[5].isalpha():
+      data = chr(ord(key[5]) & 0x1f)
+    elif key.startswith("alt+") and len(key) == 5:
+      data = "\x1b" + key[4]
+    else:
+      return
+    self.write(data.encode())
+
+  def on_paste(self, event):
+    text = event.text.replace("\r\n", "\r").replace("\n", "\r")
+    if self.vt is not None and (2004 << 5) in self.vt.mode: # bracketed paste
+      text = f"\x1b[200~{text}\x1b[201~"
+    self.write(text.encode())
+
+  def render_line(self, y):
+    width = self.size.width
+    vt = self.vt
+    if vt is None or y >= vt.lines:
+      return Strip.blank(width, self.rich_style)
+    line = vt.buffer[y]
+    cursor_x = vt.cursor.x if (y == vt.cursor.y and self.has_focus and not vt.cursor.hidden and not self.done) else -1
+    base = self.rich_style
+    segments, text, style = [], "", None
+    for x in range(min(vt.columns, width)):
+      ch = line[x]
+      if ch.data == "": # second cell of a wide character
+        continue
+      st = base + vt_style(ch.fg, ch.bg, ch.bold, ch.italics, ch.underscore, ch.strikethrough, ch.reverse != (x == cursor_x))
+      if st != style:
+        if text:
+          segments.append(Segment(text, style))
+        text, style = "", st
+      text += ch.data
+    if text:
+      segments.append(Segment(text, style))
+    return Strip(segments).adjust_cell_length(width, base)
+
+class TerminalScreen(Screen):
+  """Window with an interactive command (a shell on a node); it closes when the command ends"""
+  BINDINGS = [Binding("escape", "close", "Close", show=False)] # only reaches the window once the command ended
+
+  def __init__(self, crumbs, args, title):
+    super().__init__()
+    self.crumbs, self.args, self.title_text = crumbs, args, title
+
+  def compose(self) -> ComposeResult:
+    yield Header()
+    yield Static(self.title_text, id="tstatus")
+    yield TerminalView(self.args, id="term")
+
+  def on_mount(self):
+    self.sub_title = crumb_title(self.crumbs)
+    self.query_one("#term").focus()
+
+  @property
+  def running(self):
+    term = self.query_one("#term", TerminalView)
+    return not term.done
+
+  @on(TerminalView.Exited)
+  def exited(self, event):
+    if event.code == 0 or event.elapsed > 10: # Ctrl-D / exit (bash passes on the status of its last command)
+      self.app.pop_screen()
+    else: # probably failed to start: keep the window to show why
+      self.query_one("#tstatus", Static).update(f"{self.title_text} · ended with exit code {event.code} · Esc closes the window")
+
+  def action_close(self):
+    self.app.pop_screen()
+
 COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("state", "State"), ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
            ("start", "Start"), ("end", "End"), ("err", "Err"), ("cmd", "Command")]
 
@@ -1179,7 +1479,7 @@ class SlurmTUI(App):
   #cmd { width: 1fr; }
   #node { width: 28; }
   #presets Button { margin-right: 1; min-width: 8; }
-  #fstatus { height: 1; padding: 0 1; background: $panel; }
+  #fstatus, #tstatus { height: 1; padding: 0 1; background: $panel; }
   #text { height: 1fr; }
   #search, #dfilter { dock: bottom; display: none; }
   #search.visible, #dfilter.visible { display: block; }
@@ -1227,6 +1527,8 @@ class SlurmTUI(App):
   def check_action(self, action, parameters):
     if action in ("open", "reload"): # keys of the job table, not of the other windows
       return self.screen is self.screen_stack[0]
+    if action in ("quit", "command_palette", "help_quit") and isinstance(self.screen, TerminalScreen) and self.screen.running:
+      return False # Ctrl-Q, Ctrl-P, Ctrl-C go to the shell
     return True
 
   def show_warnings(self):
