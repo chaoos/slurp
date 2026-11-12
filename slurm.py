@@ -213,7 +213,12 @@ def parse_duration(string):
 # states of jobs that are still in the queue (and therefore listed by squeue)
 active_states = {"RUNNING", "PENDING", "REQUEUED", "REQUEUE_HOLD", "REQUEUE_FED", "SUSPENDED", "RESIZING",
                  "CONFIGURING", "COMPLETING", "SIGNALING", "STAGE_OUT", "STOPPED", "RESV_DEL_HOLD"}
-sacct_fields = ["JobID", "JobName%100", "ReqCPUS", "NNodes", "State", "ExitCode", "Elapsed", "Timelimit", "Start", "End", "Comment", "MaxRSS"]
+sacct_fields = ["JobID", "JobName%100", "NTasks", "NNodes", "State", "ExitCode", "Elapsed", "Timelimit", "Start", "End", "Comment", "MaxRSS", "AveRSS"]
+def sacct_bytes(string):
+  """sacct sizes like '22163328K', '21511.50M' or plain bytes '1726579370'"""
+  m = re.fullmatch(r'([\d.]+)([KMGTP]?)', string)
+  return int(float(m.group(1)) * 1024**" KMGTP".index(m.group(2) or " ")) if m else 0
+
 def get_completed(since, us=False, mem=False):
   who = ["-a", "-A", ",".join(accounts())] if us else ["-u", getpass.getuser()]
   cmd = ["sacct", *who, "-S", since.isoformat(), "-E", "now", "-P", "-n", f"--format={','.join(sacct_fields)}"]
@@ -225,23 +230,29 @@ def get_completed(since, us=False, mem=False):
     logger.warning(f"sacct failed: {res.stderr.strip()}")
     return {}
 
-  jobs, maxrss = {}, {}
+  jobs, steps = {}, {}
   for line in res.stdout.splitlines():
     fields = line.split("|")
     if len(fields) != len(sacct_fields):
       continue
-    jid, name, cpus, nodes, state, exitcode, elapsed, limit, start, end, comment, rss = fields
-    base = jid.split(".")[0] # job steps (123.batch, 123.0, ...) belong to job 123
-    maxrss[base] = max(maxrss.get(base, 0), suffix_to_int(rss))
-    if "." in jid or state.split(" ")[0] in active_states or end in ("Unknown", "None", ""):
+    jid, name, ntasks, nodes, state, exitcode, elapsed, limit, start, end, comment, maxrss, avgrss = fields
+    nodes = int(nodes or 0)
+    if "." in jid: # job steps (123.batch, 123.0, ...) belong to job 123
+      ntasks = int(ntasks or 1)
+      tpn = -(-ntasks // max(nodes, 1))
+      # MaxRSS is the peak of the most hungry task, AveRSS the mean over the tasks of the step
+      total = sacct_bytes(avgrss)*ntasks
+      st = steps.setdefault(jid.split(".")[0], {"tpn": 0, "task": 0, "node": 0, "total": 0})
+      for key, val in zip(st, [tpn, sacct_bytes(maxrss), total // max(nodes, 1), total]):
+        st[key] = max(st[key], val)
+      continue
+    if state.split(" ")[0] in active_states or end in ("Unknown", "None", ""):
       continue
     if datetime.fromisoformat(end) < since:
       continue
-    nodes, cpus = int(nodes or 0), int(cpus or 0)
     jobs[jid] = {
       "Job ID":                  jid,
       "Job name":                name,
-      "Tasks per node":          cpus // nodes if nodes else cpus,
       "# Nodes":                 nodes,
       "State":                   f"{state} ({exitcode})",
       "Elapsed / Total (Start)": f"{elapsed} / {limit} ({start})",
@@ -249,10 +260,11 @@ def get_completed(since, us=False, mem=False):
       "Comment":                 comment,
     }
 
-  if mem:
-    for jid, job in jobs.items():
-      if maxrss.get(jid):
-        job["CPU Memory usage (task, node, total)"] = mem_usage(maxrss[jid], job)
+  for jid, job in jobs.items():
+    if (st := steps.get(jid)):
+      job["Tasks per node"] = st["tpn"]
+      if mem and st["task"]:
+        job["CPU Memory usage (task, node, total)"] = ", ".join(humanize.naturalsize(st[k]) for k in ["task", "node", "total"])
   return jobs
 
 def completed_summary(jobs, since):
