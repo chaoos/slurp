@@ -2088,23 +2088,25 @@ class SlurmTUI(App):
     for view in self.screen.query(TerminalView):
       view.refresh()
 
-  def open_shell(self, args, title):
+  def open_shell(self, args, title, focus=False):
     if self.shell and not self.shell.done:
       self.notify("a shell is already open on the right, close it first (✕)", severity="warning")
       self.focus_terminal()
       return
     if self.shell:
       self.shell.terminate()
+    if not focus and not isinstance(self.focused, TerminalView):
+      self.screen.left_focus = self.focused
     self.shell = TerminalSession(self, args, title)
     self.shell_changed()
-    self.call_after_refresh(self.focus_terminal)
+    self.call_after_refresh(self.focus_terminal if focus else self.focus_left)
 
   def restart_shell(self):
     if self.shell:
       args, title = self.shell.args, self.shell.title
       self.shell.terminate()
       self.shell = None
-      self.open_shell(args, title)
+      self.open_shell(args, title, focus=True)
 
   def action_close_shell(self):
     self.close_shell()
