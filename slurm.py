@@ -218,7 +218,9 @@ def get_completed(since, us=False, mem=False):
   who = ["-a", "-A", ",".join(accounts())] if us else ["-u", getpass.getuser()]
   cmd = ["sacct", *who, "-S", since.isoformat(), "-E", "now", "-P", "-n", f"--format={','.join(sacct_fields)}"]
   logger.debug(rf'running command: {" ".join(cmd)}')
-  res = subprocess.run(cmd, capture_output=True, text=True)
+  # force ISO timestamps, a user-set SLURM_TIME_FORMAT (e.g. "relative") would print 'Ystday 18:55'
+  env = os.environ | {"SLURM_TIME_FORMAT": "standard"}
+  res = subprocess.run(cmd, capture_output=True, text=True, env=env)
   if res.returncode != 0:
     logger.warning(f"sacct failed: {res.stderr.strip()}")
     return {}
