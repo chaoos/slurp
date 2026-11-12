@@ -1864,6 +1864,9 @@ class TerminalView(Widget, can_focus=True):
     event.stop()
     event.prevent_default()
     key = event.key
+    if key == "ctrl+x":
+      self.app.close_shell()
+      return
     if key == SWITCH_KEY:
       self.app.action_switch_side()
       return
