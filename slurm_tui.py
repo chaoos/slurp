@@ -1815,7 +1815,10 @@ class TerminalSession:
       except subprocess.TimeoutExpired:
         self.proc.kill()
         self.code = self.proc.wait()
-    self.app.shell_changed()
+    if self.proc and self.app.shell is self:
+      self.app.close_shell()
+    else:
+      self.app.shell_changed()
 
   def terminate(self):
     """End the command (the pane is closed or the app quits)"""
