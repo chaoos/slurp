@@ -267,6 +267,56 @@ def get_completed(since, us=False, mem=False):
         job["CPU Memory usage (task, node, total)"] = ", ".join(humanize.naturalsize(st[k]) for k in ["task", "node", "total"])
   return jobs
 
+def get_submit_lines(jids):
+  """SubmitLine of the jobs (sbatch/salloc/srun ...) and of their srun steps, ordered by step number"""
+  info = {}
+  if not jids:
+    return info
+  cmd = ["sacct", "-j", ",".join(jids), "-P", "-n", "--format=JobID,SubmitLine"]
+  logger.debug(rf'running command: {" ".join(cmd)}')
+  res = subprocess.run(cmd, capture_output=True, text=True)
+  if res.returncode != 0:
+    logger.warning(f"sacct failed: {res.stderr.strip()}")
+  for line in res.stdout.splitlines():
+    jid, _, submit = line.partition("|")
+    base, dot, step = jid.partition(".")
+    entry = info.setdefault(base, {"submit": "", "steps": []})
+    if not dot:
+      entry["submit"] = submit
+    elif step.isdigit() and submit: # skip batch, extern and interactive steps
+      entry["steps"].append((int(step), submit))
+  return info
+
+def batch_script_sruns(jid, cache):
+  """srun lines in the batch script of a job that is still known to the controller (variables not expanded)"""
+  base = jid.split("_")[0] # all tasks of an array job share the script
+  if base not in cache:
+    cmd = ["scontrol", "write", "batch_script", jid, "-"]
+    logger.debug(rf'running command: {" ".join(cmd)}')
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    lines = res.stdout.splitlines() if res.returncode == 0 else []
+    cache[base] = [l.strip() for l in lines if not l.lstrip().startswith("#") and re.search(r'(?:^|[\s;&|(`])srun(?:\s|$)', l)]
+  return cache[base]
+
+def add_commands(jobs, queued):
+  """Add the srun command of each job: of its latest step, the job itself if submitted by srun,
+  the srun lines of the batch script of queued jobs or the sbatch/salloc line as last resort"""
+  info = get_submit_lines([jid for jid in jobs if jid])
+  cache = {}
+  for jid, job in jobs.items():
+    entry = info.get(jid, {"submit": "", "steps": []})
+    cmds = [submit for _, submit in sorted(entry["steps"])]
+    if not cmds and entry["submit"].startswith("srun"):
+      cmds = [entry["submit"]]
+    if not cmds and jid and jid in queued:
+      cmds = batch_script_sruns(jid, cache)
+    cmds = list(dict.fromkeys(cmds)) # unique, keep order
+    if cmds:
+      job["Command"] = cmds[-1] + (f"  [+{len(cmds)-1} more]" if len(cmds) > 1 else "")
+    else:
+      job["Command"] = entry["submit"]
+  return jobs
+
 def completed_summary(jobs, since):
   states = Counter(job["State"].split(" ")[0] for job in jobs.values())
   states = ", ".join(f"{n} {state}" for state, n in states.most_common())
@@ -300,7 +350,11 @@ def slurm_running(args):
   if args.mem:
     jobs = get_mem_usages(jobs)
   completed = get_completed(args.completed, args.us, args.mem) if args.completed else {}
-  jobs = list((completed | jobs).values()) # jobs still in the queue take precedence
+  queued = set(jobs)
+  jobs = completed | jobs # jobs still in the queue take precedence
+  if args.exec:
+    jobs = add_commands(jobs, queued)
+  jobs = list(jobs.values())
   if jobs:
     DL, headers = LDtoDL(jobs, sort_by_key="!Job ID")
     print(tabulate(colorize_dict_vals(DL), headers=headers, showindex="always"))
@@ -318,12 +372,14 @@ def main():
   parser.add_argument('--us', help="Show jobs of all user accounts of current user", default=False, action="store_true")
   parser.add_argument('-c', '--completed', type=parse_duration, metavar="DURATION",
     help="Also list jobs that finished within the last DURATION, e.g. 30s, 30m, 2h, 1d, 3w, 2mo, 1y or combined like 1d12h")
+  parser.add_argument('-e', '--exec', default=False, action="store_true",
+    help="Show the command the job executes: the srun command(s) of its steps or in its batch script")
   args = parser.parse_args()
   logger = hp.setup_logger(args.verbosity)
 
   if args.infile:
-    if args.completed:
-      logger.warning("-c/--completed is ignored together with -i/--infile")
+    if args.completed or args.exec:
+      logger.warning("-c/--completed and -e/--exec are ignored together with -i/--infile")
     slurm_finished(args)
   else:
     slurm_running(args)
