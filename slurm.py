@@ -298,9 +298,12 @@ def batch_script_sruns(jid, cache):
     cmd = ["scontrol", "write", "batch_script", jid, "-"]
     logger.debug(rf'running command: {" ".join(cmd)}')
     res = subprocess.run(cmd, capture_output=True, text=True)
-    lines = res.stdout.splitlines() if res.returncode == 0 else []
-    cache[base] = [l.strip() for l in lines if not l.lstrip().startswith("#") and re.search(r'(?:^|[\s;&|(`])srun(?:\s|$)', l)]
+    cache[base] = srun_lines(res.stdout) if res.returncode == 0 else []
   return cache[base]
+
+def srun_lines(script):
+  """Lines of a (batch) script that call srun, without comments"""
+  return [l.strip() for l in script.splitlines() if not l.lstrip().startswith("#") and re.search(r'(?:^|[\s;&|(`])srun(?:\s|$)', l)]
 
 def add_commands(jobs, queued):
   """Add the srun command of each job: of its latest step, the job itself if submitted by srun,
