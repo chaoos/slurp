@@ -19,7 +19,7 @@ from datetime import datetime
 import humanize
 from rich.table import Table
 from rich.text import Text
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -1217,6 +1217,13 @@ class SlurmTUI(App):
     table.focus()
     self.action_reload()
 
+  async def on_event(self, event):
+    if isinstance(event, events.Key) and event is not getattr(self, "_logged_key", None):
+      self._logged_key = event # the app sees a key twice: on its way to the focused widget and bubbling back
+      # with --log: when do keys arrive (e.g. a lone Esc held back by the terminal until the next key)
+      log.debug(f"key {event.key!r} in {type(self.screen).__name__} ({len(self.screen_stack)} windows open)")
+    await super().on_event(event)
+
   def check_action(self, action, parameters):
     if action in ("open", "reload"): # keys of the job table, not of the other windows
       return self.screen is self.screen_stack[0]
@@ -1268,6 +1275,8 @@ class SlurmTUI(App):
     if current in self.jobs:
       table.move_cursor(row=table.get_row_index(current))
     table.loading = False
+    if not isinstance(self.focused, Input): # loading took the focus away from the table (to the Reload button)
+      table.focus()
     queued = [j for j in jobs if j.queued]
     running = sum(j.running for j in queued)
     finished = [j for j in jobs if not j.queued]
