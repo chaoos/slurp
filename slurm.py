@@ -267,18 +267,22 @@ def get_completed(since, us=False, mem=False):
         job["CPU Memory usage (task, node, total)"] = ", ".join(humanize.naturalsize(st[k]) for k in ["task", "node", "total"])
   return jobs
 
+def sacct_rows(jids, fields):
+  """sacct records (jobs and steps) of the given jobs as dicts; the last field may contain '|'"""
+  if not jids:
+    return []
+  cmd = ["sacct", "-j", ",".join(jids), "-P", "-n", f"--format={','.join(fields)}"]
+  logger.debug(rf'running command: {" ".join(cmd)}')
+  res = subprocess.run(cmd, capture_output=True, text=True, env=os.environ | {"SLURM_TIME_FORMAT": "standard"})
+  if res.returncode != 0:
+    logger.warning(f"sacct failed: {res.stderr.strip()}")
+  return [dict(zip(fields, line.split("|", len(fields)-1))) for line in res.stdout.splitlines()]
+
 def get_submit_lines(jids):
   """SubmitLine of the jobs (sbatch/salloc/srun ...) and of their srun steps, ordered by step number"""
   info = {}
-  if not jids:
-    return info
-  cmd = ["sacct", "-j", ",".join(jids), "-P", "-n", "--format=JobID,SubmitLine"]
-  logger.debug(rf'running command: {" ".join(cmd)}')
-  res = subprocess.run(cmd, capture_output=True, text=True)
-  if res.returncode != 0:
-    logger.warning(f"sacct failed: {res.stderr.strip()}")
-  for line in res.stdout.splitlines():
-    jid, _, submit = line.partition("|")
+  for row in sacct_rows(jids, ["JobID", "SubmitLine"]):
+    jid, submit = row["JobID"], row.get("SubmitLine", "")
     base, dot, step = jid.partition(".")
     entry = info.setdefault(base, {"submit": "", "steps": []})
     if not dot:
@@ -315,6 +319,53 @@ def add_commands(jobs, queued):
       job["Command"] = cmds[-1] + (f"  [+{len(cmds)-1} more]" if len(cmds) > 1 else "")
     else:
       job["Command"] = entry["submit"]
+  return jobs
+
+def first_node(nodelist):
+  """nid[001234-001240,001300] -> nid001234"""
+  m = re.match(r'([^\[,\s]+)(?:\[(\d+))?', nodelist)
+  return (m.group(1) + (m.group(2) or "")) if m and nodelist not in ("None assigned", "") else ""
+
+def expand_filename(pattern, job):
+  """Expand the filename pattern of sbatch --output/--error (see man sbatch) for a job record of sacct"""
+  array_id, _, task = job["JobID"].partition("_")
+  raw = job["JobIDRaw"]
+  vals = {
+    "%": "%", "A": array_id if task else raw, "a": task or "4294967294", "b": str(int(task) % 10) if task.isdigit() else "0",
+    "j": raw, "J": raw, "u": job["User"], "x": job["JobName"], "N": first_node(job["NodeList"]), "n": "0", "t": "0", "s": "batch",
+  }
+  def sub(m):
+    val = vals[m.group(2)]
+    return val.zfill(int(m.group(1))) if m.group(1) and val.isdigit() else val
+  path = re.sub(r'%(\d*)([%AabjJuxNnts])', sub, pattern)
+  return os.path.join(job["WorkDir"], path)
+
+err_fields = ["JobID", "JobIDRaw", "User", "NodeList", "Start", "WorkDir", "StdOut", "StdErr", "JobName"]
+def add_error_flags(jobs):
+  """Flag jobs whose slurm error file (sbatch --error) is not empty"""
+  rows = {row["JobID"]: row for row in sacct_rows([jid for jid in jobs if jid], err_fields) if "." not in row["JobID"]}
+  n = 0
+  for jid, job in jobs.items():
+    row = rows.get(jid)
+    if not row or not (row["StdErr"] or row["StdOut"]): # e.g. salloc: no files
+      continue
+    if row["Start"] in ("None", "Unknown", ""): # never started, no files written
+      job["Err"] = ""
+      continue
+    err = expand_filename(row["StdErr"], row) if row["StdErr"] else None
+    if err is None or err == expand_filename(row["StdOut"], row):
+      job["Err"] = "(stdout)" # stderr goes to the output file as well
+      continue
+    try:
+      size = os.path.getsize(err)
+    except OSError:
+      job["Err"] = "?"
+      continue
+    if size:
+      n += 1
+    job["Err"] = colored(f"! {humanize.naturalsize(size)}", "light_red", attrs=["bold"]) if size else ""
+  if n:
+    logger.info(f"{n} job(s) wrote to their error file")
   return jobs
 
 def completed_summary(jobs, since):
@@ -354,6 +405,8 @@ def slurm_running(args):
   jobs = completed | jobs # jobs still in the queue take precedence
   if args.exec:
     jobs = add_commands(jobs, queued)
+  if args.error:
+    jobs = add_error_flags(jobs)
   jobs = list(jobs.values())
   if jobs:
     DL, headers = LDtoDL(jobs, sort_by_key="!Job ID")
@@ -374,12 +427,14 @@ def main():
     help="Also list jobs that finished within the last DURATION, e.g. 30s, 30m, 2h, 1d, 3w, 2mo, 1y or combined like 1d12h")
   parser.add_argument('-e', '--exec', default=False, action="store_true",
     help="Show the command the job executes: the srun command(s) of its steps or in its batch script")
+  parser.add_argument('--error', default=False, action="store_true",
+    help="Flag jobs whose slurm error file (sbatch --error) is not empty with a red '!' and its size")
   args = parser.parse_args()
   logger = hp.setup_logger(args.verbosity)
 
   if args.infile:
-    if args.completed or args.exec:
-      logger.warning("-c/--completed and -e/--exec are ignored together with -i/--infile")
+    if args.completed or args.exec or args.error:
+      logger.warning("-c/--completed, -e/--exec and --error are ignored together with -i/--infile")
     slurm_finished(args)
   else:
     slurm_running(args)
