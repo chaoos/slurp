@@ -1517,6 +1517,15 @@ class SlurmTUI(App):
     table.focus()
     self.action_reload()
 
+  async def action_quit(self):
+    # Stop mouse and focus reports right away, and clear the screen while still on the alternate screen:
+    # terminals that switch back to the previous content are not affected, in terminals (or GNU screen / tmux
+    # setups) without an alternate screen the last frame of the app would otherwise stay on the screen.
+    if self._driver is not None:
+      self._driver.write(REPORTS_OFF + "\x1b[0m\x1b[2J\x1b[H")
+      self._driver.flush()
+    self.exit()
+
   async def on_event(self, event):
     if isinstance(event, events.Key) and event is not getattr(self, "_logged_key", None):
       self._logged_key = event # the app sees a key twice: on its way to the focused widget and bubbling back
@@ -1635,6 +1644,8 @@ class SlurmTUI(App):
                   severity="warning")
       return
     self.open_file(job, path)
+
+REPORTS_OFF = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1015l\x1b[?1006l\x1b[?1004l" # mouse and focus reporting off
 
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
