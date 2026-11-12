@@ -24,6 +24,7 @@ from textual.app import App, ComposeResult, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.coordinate import Coordinate
+from textual.message import Message
 from textual.screen import Screen
 from textual.widgets import Button, Checkbox, DataTable, Footer, Header, Input, Label, OptionList, Select, Static, TextArea
 from textual.widgets.option_list import Option
@@ -272,7 +273,7 @@ def job_vars(job):
   raw = job.rec["JobIDRaw"]
   return os.environ | {
     "SLURM_JOB_ID": raw, "SLURM_JOBID": raw, "SLURM_ARRAY_JOB_ID": array_id, "SLURM_ARRAY_TASK_ID": task,
-    "SLURM_SUBMIT_DIR": job.rec["WorkDir"], "SLURM_JOB_NAME": job.rec["JobName"],
+    "SLURM_SUBMIT_DIR": job.rec["WorkDir"], "SLURM_JOB_NAME": job.rec["JobName"], "PWD": job.rec["WorkDir"],
     "SLURM_JOB_NUM_NODES": job.rec["NNodes"], "SLURM_NNODES": job.rec["NNodes"], "SLURM_NTASKS": job.rec["NTasks"],
   }
 
@@ -291,7 +292,8 @@ def path_candidates(line):
       if part and not part.startswith("-"):
         yield part
 
-def existing_files(lines, workdir, env=None):
+def existing_files(lines, workdir, env=None, dirs=False):
+  """Existing files (and directories if dirs) named in command lines, relative paths are relative to workdir"""
   found = []
   for line in lines:
     if env is not None:
@@ -299,9 +301,44 @@ def existing_files(lines, workdir, env=None):
     for cand in path_candidates(line):
       path = os.path.expanduser(cand)
       path = path if os.path.isabs(path) else os.path.join(workdir or ".", path)
-      if os.path.isfile(path):
+      if os.path.isfile(path) or (dirs and os.path.isdir(path) and os.path.normpath(path) != "/"):
         found.append(os.path.normpath(path))
   return found
+
+PATH_DELIMS = set(" \t\"'`=,;()[]{}<>|")
+
+def word_at(line, col):
+  """The word around column col of line, delimited by white space, quotes, '=' and brackets"""
+  if not (0 <= col < len(line)) or line[col] in PATH_DELIMS:
+    return ""
+  start, end = col, col
+  while start > 0 and line[start-1] not in PATH_DELIMS:
+    start -= 1
+  while end < len(line) and line[end] not in PATH_DELIMS:
+    end += 1
+  return line[start:end]
+
+def resolve_path(word, bases=(), env=None):
+  """The existing file or directory a word of a text refers to (None if there is none).
+  Relative paths are tried against the base directories in order, 'path:123' as path."""
+  word = re.sub(r'^\d*[<>]+&?', '', word.strip()).rstrip(".,;:&|")
+  if env:
+    word = expand_vars(word, env)
+  for cand in dict.fromkeys([word, word.split(":")[0]]):
+    if not re.search(r'[\w~]', cand) or cand.startswith("-"):
+      continue
+    cand = os.path.expanduser(cand)
+    for path in [cand] if os.path.isabs(cand) else [os.path.join(b, cand) for b in bases if b]:
+      if os.path.exists(path):
+        return os.path.normpath(path)
+  return None
+
+def is_binary(path):
+  try:
+    with open(path, "rb") as f:
+      return b"\0" in f.read(8192)
+  except OSError:
+    return False
 
 def script_lines(text):
   """Lines of a batch script that may name files: commands and #SBATCH options, no other comments"""
@@ -352,6 +389,11 @@ def load_details(job):
       add(Entry(kind, path, path=path))
   if job.merged():
     files.append(Entry("stderr", "goes to the stdout file"))
+  if workdir:
+    add(Entry("workdir", workdir, path=workdir))
+  for path in [job.stdout_path(), job.stderr_path()]:
+    if path and os.path.isdir(os.path.dirname(path)):
+      add(Entry("output dir", os.path.dirname(path), path=os.path.dirname(path)))
 
   submitted = batch_script(job.jid) if job.queued else ""
   if submitted:
@@ -368,21 +410,23 @@ def load_details(job):
       break
 
   cmds = [submit_line] + [s["SubmitLine"] for s in job.steps if s["SubmitLine"] and s["JobName"] != STEP_NAME]
-  for path in existing_files(cmds, workdir):
+  for path in existing_files(cmds, workdir, dirs=True):
     add(Entry("command", path, path=path))
   env = job_vars(job)
-  for path in existing_files(script_lines(submitted or on_disk), workdir, env):
+  for path in existing_files(script_lines(submitted or on_disk), workdir, env, dirs=True):
     add(Entry("in script", path, path=path))
 
   for e in files:
-    if e.path and not os.path.isfile(e.path):
+    if e.path and os.path.isdir(e.path):
+      e.label = e.path.rstrip("/") + "/"
+      e.note = e.note or "directory"
+    elif e.path and not os.path.isfile(e.path):
       e.note = "does not exist (yet)"
     elif e.path:
       try:
         e.note = e.note or humanize.naturalsize(os.path.getsize(e.path))
-        with open(e.path, "rb") as f:
-          if b"\0" in f.read(8192):
-            e.note += " binary"
+        if is_binary(e.path):
+          e.note += " binary"
       except OSError:
         e.note = "not readable"
   add(Entry("sacct", "all accounting fields of the job and its steps", text=None, note="sacct -o ALL"))
@@ -465,10 +509,220 @@ def clean(text):
   text = re.sub(r'\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07', '', text)
   return re.sub(r'[^\n]*\r(?!\n)', '', text.replace("\r\n", "\n"))
 
+def crumb_title(crumbs):
+  """Breadcrumbs for the header, shortened in the middle when they get long"""
+  crumbs = list(crumbs)
+  if len(crumbs) > 5:
+    crumbs = crumbs[:2] + ["…"] + crumbs[-2:]
+  return " › ".join(crumbs)
+
+class PathArea(TextArea):
+  """Read-only text where a click on the name of an existing file or directory opens it"""
+  class PathClicked(Message):
+    def __init__(self, path):
+      super().__init__()
+      self.path = path
+
+  resolver = None # word -> existing path or None
+
+  def path_at_cursor(self):
+    if self.selected_text.strip():
+      return self.resolver(self.selected_text.strip()) if self.resolver else None
+    row, col = self.cursor_location
+    return self.path_at(row, col)
+
+  def path_at(self, row, col):
+    if not self.resolver or row >= self.document.line_count:
+      return None
+    line = self.document.get_line(row)
+    word = word_at(line, col) or word_at(line, col - 1) # also just behind the end of a word
+    return self.resolver(word) if word else None
+
+  def on_click(self, event):
+    if event.chain > 1 or self.selected_text: # double clicks and dragging select text
+      return
+    row, col = self.get_target_document_location(event)
+    path = self.path_at(row, col)
+    if path:
+      self.post_message(self.PathClicked(path))
+
+def open_path(app, crumbs, path, bases=(), env=None, follow=False):
+  """Open a directory in the browser or a file in the viewer"""
+  if os.path.isdir(path):
+    app.push_screen(DirScreen(crumbs, path, bases=bases, env=env))
+  elif is_binary(path):
+    app.notify(f"{path} is a binary file", severity="warning")
+  elif os.path.isfile(path):
+    bases = list(dict.fromkeys([*bases, os.path.dirname(path)]))
+    app.push_screen(FileScreen([*crumbs, os.path.basename(path)], path=path, follow=follow, bases=bases, env=env))
+  else:
+    app.notify(f"{path} does not exist (yet)", severity="warning")
+
+DIR_COLUMNS = [("name", "Name"), ("size", "Size"), ("mtime", "Modified")]
+DIR_LIMIT = 20000 # entries listed at most
+
+class DirScreen(Screen):
+  """Directory browser: click (or Enter) a subdirectory to enter it, a file to open it"""
+  BINDINGS = [
+    Binding("escape", "back", "Back"),
+    Binding("backspace,u", "parent", "Parent"),
+    Binding("slash", "filter", "Filter"),
+    Binding("f", "follow", "Follow"),
+    Binding("r", "reload", "Reload"),
+    Binding("full_stop", "hidden", "Hidden files"),
+  ]
+
+  def __init__(self, crumbs, path, bases=(), env=None):
+    super().__init__()
+    self.path = os.path.normpath(path)
+    self.crumbs = [*crumbs, self.path.rstrip("/") + "/"]
+    self.bases, self.env = list(bases), env # passed on to the files opened from here (e.g. the job's WorkDir)
+    self.entries = []
+    self.pattern = ""
+    self.show_hidden = True
+    self.following = False
+    self.sort_column, self.sort_reverse = "name", False
+
+  def compose(self) -> ComposeResult:
+    yield Header()
+    yield Static(id="dstatus")
+    yield ClickTable(id="dir", cursor_type="row", zebra_stripes=True)
+    yield Input(id="dfilter", placeholder="filter names (Enter: apply, Esc: clear)")
+    yield Footer()
+
+  def on_mount(self):
+    self.sub_title = crumb_title(self.crumbs)
+    table = self.query_one("#dir", ClickTable)
+    for key, label in DIR_COLUMNS:
+      table.add_column(label, key=key)
+    self.timer = self.set_interval(2.0, self.action_reload, pause=True)
+    self.action_reload()
+    table.focus()
+
+  def scan(self):
+    entries = []
+    try:
+      with os.scandir(self.path) as it:
+        for i, de in enumerate(it):
+          if i >= DIR_LIMIT:
+            break
+          try:
+            st = de.stat()
+            isdir = de.is_dir()
+          except OSError:
+            st, isdir = None, False
+          entries.append({"name": de.name, "dir": isdir, "size": st.st_size if st and not isdir else None,
+                          "mtime": st.st_mtime if st else 0, "link": de.is_symlink()})
+    except OSError as e:
+      self.notify(f"cannot list {self.path}: {e}", severity="error")
+    return entries
+
+  def action_reload(self):
+    self.entries = self.scan()
+    self.populate()
+
+  def populate(self):
+    table = self.query_one("#dir", ClickTable)
+    current = None
+    if table.row_count:
+      try:
+        current = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0)).row_key.value
+      except Exception:
+        pass
+    table.clear()
+    if self.path != "/":
+      table.add_row(Text("../", style="bold"), "", "", key="..")
+    keys = {"name": lambda e: e["name"].lower(), "size": lambda e: e["size"] or 0, "mtime": lambda e: e["mtime"]}
+    shown = [e for e in self.entries if (self.show_hidden or not e["name"].startswith("."))
+             and self.pattern.lower() in e["name"].lower()]
+    shown.sort(key=keys[self.sort_column], reverse=self.sort_reverse)
+    shown.sort(key=lambda e: not e["dir"]) # directories first
+    for e in shown:
+      style = "bold blue" if e["dir"] else ""
+      if e["name"].startswith("."):
+        style += " dim"
+      name = Text(e["name"] + ("/" if e["dir"] else "") + (" @" if e["link"] else ""), style=style.strip())
+      size = humanize.naturalsize(e["size"]) if e["size"] is not None else ""
+      mtime = datetime.fromtimestamp(e["mtime"]).strftime("%Y-%m-%d %H:%M:%S") if e["mtime"] else ""
+      table.add_row(name, size, mtime, key=e["name"])
+    if current is not None:
+      try:
+        table.move_cursor(row=table.get_row_index(current))
+      except Exception:
+        pass
+    status = f"{self.path} · {len(shown)} of {len(self.entries)} entries"
+    if len(self.entries) >= DIR_LIMIT:
+      status += f" (only the first {DIR_LIMIT} are listed)"
+    if self.pattern:
+      status += f" · filter '{self.pattern}'"
+    status += " · following (f)" if self.following else ""
+    self.query_one("#dstatus", Static).update(status)
+
+  def open(self, name):
+    path = os.path.dirname(self.path) if name == ".." else os.path.join(self.path, name)
+    open_path(self.app, self.crumbs, path, bases=self.bases, env=self.env)
+
+  @on(DataTable.RowSelected, "#dir")
+  def selected(self, event):
+    event.stop()
+    self.query_one("#dir", ClickTable).take_clicked_column()
+    if event.row_key.value is not None:
+      self.open(event.row_key.value)
+
+  @on(DataTable.HeaderSelected, "#dir")
+  def sort_by(self, event):
+    event.stop()
+    col = event.column_key.value
+    if col == self.sort_column:
+      self.sort_reverse = not self.sort_reverse
+    else:
+      self.sort_column, self.sort_reverse = col, col != "name"
+    self.populate()
+
+  def action_back(self):
+    search = self.query_one("#dfilter", Input)
+    if search.has_class("visible"):
+      search.remove_class("visible")
+      self.pattern = ""
+      self.populate()
+      self.query_one("#dir").focus()
+    else:
+      self.app.pop_screen()
+
+  def action_parent(self):
+    if self.path != "/":
+      self.open("..")
+
+  def action_filter(self):
+    search = self.query_one("#dfilter", Input)
+    search.add_class("visible")
+    search.value = self.pattern
+    search.focus()
+
+  @on(Input.Changed, "#dfilter")
+  def filter_changed(self, event):
+    self.pattern = event.value
+    self.populate()
+
+  @on(Input.Submitted, "#dfilter")
+  def filter_submitted(self, event):
+    event.input.remove_class("visible")
+    self.query_one("#dir").focus()
+
+  def action_follow(self):
+    self.following = not self.following
+    (self.timer.resume if self.following else self.timer.pause)()
+    self.populate()
+
+  def action_hidden(self):
+    self.show_hidden = not self.show_hidden
+    self.populate()
+
 class FileScreen(Screen):
   """Read-only viewer for a file (with tail -f style following) or for text (optionally re-run by a refresher)"""
   BINDINGS = [
     Binding("escape", "back", "Back"),
+    Binding("enter", "open_path", "Open path"),
     Binding("f", "follow", "Follow"),
     Binding("slash", "search", "Search"),
     Binding("n", "find(True)", "Next", show=False),
@@ -481,9 +735,10 @@ class FileScreen(Screen):
     Binding("l", "less", "less"),
   ]
 
-  def __init__(self, crumbs, path=None, text=None, refresher=None, follow=False):
+  def __init__(self, crumbs, path=None, text=None, refresher=None, follow=False, bases=(), env=None):
     super().__init__()
     self.crumbs, self.path, self.text, self.refresher = crumbs, path, text, refresher
+    self.bases, self.env = list(bases), env # to resolve relative paths in the text
     self.following = follow and path is not None
     self.watching = False
     self.full = False
@@ -496,12 +751,14 @@ class FileScreen(Screen):
   def compose(self) -> ComposeResult:
     yield Header()
     yield Static(id="fstatus")
-    yield TextArea(id="text", read_only=True, show_line_numbers=True, soft_wrap=False, highlight_cursor_line=False)
+    area = PathArea(id="text", read_only=True, show_line_numbers=True, soft_wrap=False, highlight_cursor_line=False)
+    area.resolver = lambda word: resolve_path(word, self.bases, self.env)
+    yield area
     yield Input(id="search", placeholder="search (Enter: find, Esc: cancel)")
     yield Footer()
 
   def on_mount(self):
-    self.sub_title = " › ".join(self.crumbs)
+    self.sub_title = crumb_title(self.crumbs)
     self.load()
     self.timer = self.set_interval(1.0, self.poll, pause=not self.following)
     self.rerun_timer = self.set_interval(5.0, self.rerun, pause=True)
@@ -585,6 +842,17 @@ class FileScreen(Screen):
       self.area.focus()
     else:
       self.app.pop_screen()
+
+  @on(PathArea.PathClicked)
+  def path_clicked(self, event):
+    open_path(self.app, self.crumbs, event.path, self.bases, self.env)
+
+  def action_open_path(self):
+    path = self.area.path_at_cursor()
+    if path:
+      open_path(self.app, self.crumbs, path, self.bases, self.env)
+    else:
+      self.notify("no existing file or directory at the cursor", severity="warning")
 
   def action_follow(self):
     self.following = not self.following
@@ -779,7 +1047,7 @@ class JobScreen(Screen):
     for i, e in enumerate(self.details["files"]):
       prompt = Text()
       prompt.append(f"{e.kind:<10} ", style="bold")
-      openable = (e.path and os.path.isfile(e.path)) or e.text is not None or e.kind == "sacct"
+      openable = (e.path and os.path.exists(e.path)) or e.text is not None or e.kind == "sacct"
       prompt.append(e.label, style="" if openable else "dim")
       if e.note:
         prompt.append(f"  {e.note}", style="dim")
@@ -818,18 +1086,20 @@ class JobScreen(Screen):
         return
     self.notify(f"no {kind} file", severity="warning")
 
+  def context(self):
+    """Base directories and variables to resolve paths in texts of this job"""
+    return [self.job.rec["WorkDir"]], job_vars(self.job)
+
   def open_entry(self, e):
-    crumbs = ["Jobs", self.job.jid, os.path.basename(e.path) if e.path else e.label]
+    bases, env = self.context()
+    crumbs = ["Jobs", self.job.jid]
     if e.kind == "sacct":
       text = sacct_all(self.job)
-      self.app.push_screen(FileScreen(crumbs, text=text, refresher=lambda: sacct_all(self.job)))
+      self.app.push_screen(FileScreen([*crumbs, e.label], text=text, refresher=lambda: sacct_all(self.job), bases=bases, env=env))
     elif e.path:
-      if "binary" in e.note:
-        self.notify(f"{e.path} is a binary file", severity="warning")
-        return
-      self.app.push_screen(FileScreen(crumbs, path=e.path, follow=self.job.running and e.kind in ("stdout", "stderr")))
+      open_path(self.app, crumbs, e.path, bases, env, follow=self.job.running and e.kind in ("stdout", "stderr"))
     elif e.text is not None:
-      self.app.push_screen(FileScreen(crumbs, text=e.text))
+      self.app.push_screen(FileScreen([*crumbs, e.label], text=e.text, bases=bases, env=env))
 
   @on(OptionList.OptionSelected, "#files")
   def file_selected(self, event):
@@ -843,7 +1113,8 @@ class JobScreen(Screen):
     if step:
       width = max(map(len, step))
       text = "\n".join(f"{k:<{width}}  {v}" for k, v in step.items() if v) + "\n"
-      self.app.push_screen(FileScreen(["Jobs", self.job.jid, f"step {step['JobID']}"], text=text))
+      bases, env = self.context()
+      self.app.push_screen(FileScreen(["Jobs", self.job.jid, f"step {step['JobID']}"], text=text, bases=bases, env=env))
 
   @on(Button.Pressed, "#run")
   @on(Input.Submitted, "#cmd")
@@ -871,7 +1142,9 @@ class JobScreen(Screen):
   def command_done(self, cmd, node, text):
     job = self.job
     crumbs = ["Jobs", job.jid, f"{cmd} @ {node or 'all nodes'}"]
-    self.app.call_from_thread(self.app.push_screen, FileScreen(crumbs, text=text, refresher=lambda: run_on_nodes(job, cmd, node)))
+    bases, env = self.context()
+    self.app.call_from_thread(self.app.push_screen, FileScreen(crumbs, text=text, refresher=lambda: run_on_nodes(job, cmd, node),
+                                                               bases=bases, env=env))
 
 COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("state", "State"), ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
            ("start", "Start"), ("end", "End"), ("err", "Err"), ("cmd", "Command")]
@@ -908,8 +1181,10 @@ class SlurmTUI(App):
   #presets Button { margin-right: 1; min-width: 8; }
   #fstatus { height: 1; padding: 0 1; background: $panel; }
   #text { height: 1fr; }
-  #search { dock: bottom; display: none; }
-  #search.visible { display: block; }
+  #search, #dfilter { dock: bottom; display: none; }
+  #search.visible, #dfilter.visible { display: block; }
+  #dstatus { height: 1; padding: 0 1; background: $panel; }
+  #dir { height: 1fr; }
   """
   BINDINGS = [
     Binding("q", "quit", "Quit"),
@@ -941,6 +1216,11 @@ class SlurmTUI(App):
       table.add_column(label, key=key)
     table.focus()
     self.action_reload()
+
+  def check_action(self, action, parameters):
+    if action in ("open", "reload"): # keys of the job table, not of the other windows
+      return self.screen is self.screen_stack[0]
+    return True
 
   def show_warnings(self):
     for msg in dict.fromkeys(collector.drain()):
@@ -1034,7 +1314,7 @@ class SlurmTUI(App):
       self.push_screen(JobScreen(job))
 
   def open_file(self, job, path):
-    self.push_screen(FileScreen(["Jobs", job.jid, os.path.basename(path)], path=path, follow=job.running))
+    open_path(self, ["Jobs", job.jid], path, [job.rec["WorkDir"]], job_vars(job), follow=job.running)
 
   def action_open(self, kind):
     job = self.current_job()
