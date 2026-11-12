@@ -35,6 +35,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.coordinate import Coordinate
 from textual.message import Message
+from textual.reactive import reactive
 from textual.screen import Screen
 from textual.strip import Strip
 from textual.widget import Widget
@@ -570,10 +571,24 @@ def open_path(app, crumbs, path, bases=(), env=None, follow=False):
   else:
     app.notify(f"{path} does not exist (yet)", severity="warning")
 
+class SplitScreen(Screen):
+  """Window with its content on the left and, while a shell is open, the terminal pane on the right"""
+  def compose(self) -> ComposeResult:
+    yield Header()
+    with Horizontal(classes="split"):
+      with Vertical(classes="left"):
+        yield from self.compose_left()
+      yield Splitter()
+      yield TerminalPane()
+    yield Footer()
+
+  def compose_left(self):
+    return []
+
 DIR_COLUMNS = [("name", "Name"), ("size", "Size"), ("mtime", "Modified")]
 DIR_LIMIT = 20000 # entries listed at most
 
-class DirScreen(Screen):
+class DirScreen(SplitScreen):
   """Directory browser: click (or Enter) a subdirectory to enter it, a file to open it"""
   BINDINGS = [
     Binding("escape", "back", "Back"),
@@ -595,12 +610,10 @@ class DirScreen(Screen):
     self.following = False
     self.sort_column, self.sort_reverse = "name", False
 
-  def compose(self) -> ComposeResult:
-    yield Header()
+  def compose_left(self):
     yield Static(id="dstatus")
     yield ClickTable(id="dir", cursor_type="row", zebra_stripes=True)
     yield Input(id="dfilter", placeholder="filter names (Enter: apply, Esc: clear)")
-    yield Footer()
 
   def on_mount(self):
     self.sub_title = crumb_title(self.crumbs)
@@ -730,7 +743,7 @@ class DirScreen(Screen):
     self.show_hidden = not self.show_hidden
     self.populate()
 
-class FileScreen(Screen):
+class FileScreen(SplitScreen):
   """Read-only viewer for a file (with tail -f style following) or for text (optionally re-run by a refresher)"""
   BINDINGS = [
     Binding("escape", "back", "Back"),
@@ -760,14 +773,12 @@ class FileScreen(Screen):
     self.decoder = None
     self.timer = None
 
-  def compose(self) -> ComposeResult:
-    yield Header()
+  def compose_left(self):
     yield Static(id="fstatus")
     area = PathArea(id="text", read_only=True, show_line_numbers=True, soft_wrap=False, highlight_cursor_line=False)
     area.resolver = lambda word: resolve_path(word, self.bases, self.env)
     yield area
     yield Input(id="search", placeholder="search (Enter: find, Esc: cancel)")
-    yield Footer()
 
   def on_mount(self):
     self.sub_title = crumb_title(self.crumbs)
@@ -963,7 +974,7 @@ class FileScreen(Screen):
     if self.path:
       self.poll()
 
-class JobScreen(Screen):
+class JobScreen(SplitScreen):
   """Details, files and steps of one job, commands on its nodes"""
   BINDINGS = [
     Binding("escape,backspace", "back", "Back"),
@@ -978,8 +989,7 @@ class JobScreen(Screen):
     self.job = job
     self.details = {"files": [], "sstat": {}, "nodes": []}
 
-  def compose(self) -> ComposeResult:
-    yield Header()
+  def compose_left(self):
     with VerticalScroll(id="details"):
       yield Static(id="info")
       yield Label("Files", classes="section")
@@ -992,11 +1002,10 @@ class JobScreen(Screen):
           yield Input(id="cmd", placeholder="command, e.g. nvidia-smi")
           yield Select([], id="node", prompt="all nodes", allow_blank=True)
           yield Button("Run", id="run", variant="primary")
-          yield Button("Shell", id="shell", tooltip="interactive shell on the node (Ctrl-D closes it)")
+          yield Button("Shell", id="shell", tooltip="interactive shell on the node, opens on the right")
         with Horizontal(id="presets"):
           for i, name in enumerate(PRESETS):
             yield Button(name, id=f"preset{i}", classes="preset")
-    yield Footer()
 
   def on_mount(self):
     self.sub_title = f"Jobs › {self.job.jid}"
@@ -1107,8 +1116,7 @@ class JobScreen(Screen):
       return
     args = ["srun", f"--jobid={self.job.rec['JobIDRaw']}", "--overlap", "--pty", "--nodes=1", "--ntasks=1", "-w", node,
             f"--job-name={STEP_NAME}", "bash", "-l"]
-    self.app.push_screen(TerminalScreen(["Jobs", self.job.jid, f"shell on {node}"], args,
-                                        f"shell on {node} in job {self.job.jid} · Ctrl-D closes it"))
+    self.app.open_shell(args, f"shell on {node} · job {self.job.jid}")
 
   def action_reload(self):
     self.load(refresh_job=True)
@@ -1251,32 +1259,34 @@ def make_vt_screen(cols, rows, reply):
 
   return VTScreen(cols, rows), pyte
 
-class TerminalView(Widget, can_focus=True):
-  """Runs a command in a pseudo terminal and shows it; all keys go to the command"""
-  DEFAULT_CSS = "TerminalView { height: 1fr; }"
+SWITCH_KEY = "ctrl+right_square_bracket" # Ctrl-]: the one key that does not go to the shell
 
-  class Exited(Message):
-    def __init__(self, code, elapsed):
-      super().__init__()
-      self.code, self.elapsed = code, elapsed
-
-  def __init__(self, args, **kwargs):
-    super().__init__(**kwargs)
-    self.args = args
+class TerminalSession:
+  """A command (srun --pty bash) in a pseudo terminal, emulated with pyte. It belongs to the app and is shown in
+  the terminal pane of every window, so it keeps running while you navigate on the left."""
+  def __init__(self, app, args, title):
+    self.app, self.args, self.title = app, args, title
     self.vt = self.stream = self.proc = self.fd = None
-    self.started = None
-    self.done = False
+    self.size = None
+    self.done, self.code, self.error = False, None, ""
 
-  def on_mount(self):
-    self.call_after_refresh(self.start)
+  def ensure(self, cols, rows):
+    """Start with, or resize to, the size of the pane"""
+    cols, rows = max(cols, 2), max(rows, 2)
+    if self.vt is None and not self.done:
+      self.start(cols, rows)
+    elif self.vt is not None and (cols, rows) != self.size:
+      self.size = (cols, rows)
+      self.vt.resize(rows, cols)
+      self.set_winsize(cols, rows)
 
-  def start(self):
-    cols, rows = max(self.size.width, 20), max(self.size.height, 5)
+  def start(self, cols, rows):
+    self.size = (cols, rows)
     try:
       self.vt, pyte = make_vt_screen(cols, rows, self.write)
     except ImportError:
-      self.post_message(self.Exited(-1, 0))
-      self.app.notify("the shell window needs the python package pyte: pip install pyte", severity="error", timeout=10)
+      self.done, self.code, self.error = True, -1, "the shell needs the python package pyte: pip install pyte"
+      self.app.shell_changed()
       return
     self.stream = pyte.ByteStream(self.vt)
     master, slave = os.openpty()
@@ -1287,16 +1297,14 @@ class TerminalView(Widget, can_focus=True):
       self.proc = subprocess.Popen([sys.executable, "-c", CTTY, *self.args], stdin=slave, stdout=slave, stderr=slave,
                                    start_new_session=True, env=os.environ | {"TERM": "xterm-256color"}, close_fds=True)
     except OSError as e:
-      self.stream.feed(f"cannot start {self.args[0]}: {e}\r\n".encode())
       os.close(slave)
+      self.stream.feed(f"cannot start {self.args[0]}: {e}\r\n".encode())
       self.finish()
       return
-    finally:
-      if self.proc:
-        os.close(slave)
-    self.started = time.time()
+    os.close(slave)
     os.set_blocking(master, False)
     asyncio.get_running_loop().add_reader(master, self.read_output)
+    self.app.shell_changed()
 
   def set_winsize(self, cols, rows):
     if self.fd is not None:
@@ -1316,12 +1324,9 @@ class TerminalView(Widget, can_focus=True):
       self.finish()
       return
     self.stream.feed(data)
-    self.refresh()
+    self.app.refresh_terminal()
 
-  def finish(self):
-    if self.done:
-      return
-    self.done = True
+  def close_fd(self):
     if self.fd is not None:
       try:
         asyncio.get_running_loop().remove_reader(self.fd)
@@ -1329,15 +1334,31 @@ class TerminalView(Widget, can_focus=True):
         pass
       os.close(self.fd)
       self.fd = None
-    code = -1
+
+  def finish(self):
+    if self.done:
+      return
+    self.done = True
+    self.close_fd()
+    self.code = -1
     if self.proc:
       try:
-        code = self.proc.wait(timeout=3)
+        self.code = self.proc.wait(timeout=3)
       except subprocess.TimeoutExpired:
         self.proc.kill()
-        code = self.proc.wait()
-    self.refresh()
-    self.post_message(self.Exited(code, time.time() - (self.started or time.time())))
+        self.code = self.proc.wait()
+    self.app.shell_changed()
+
+  def terminate(self):
+    """End the command (the pane is closed or the app quits)"""
+    self.close_fd()
+    if self.proc and self.proc.poll() is None:
+      self.proc.terminate()
+      try:
+        self.proc.wait(timeout=3)
+      except subprocess.TimeoutExpired:
+        self.proc.kill()
+    self.done = True
 
   def write(self, data):
     if self.fd is not None and not self.done:
@@ -1346,30 +1367,47 @@ class TerminalView(Widget, can_focus=True):
       except OSError:
         pass
 
-  def on_unmount(self):
-    if not self.done and self.proc and self.proc.poll() is None:
-      self.proc.terminate() # window closed while the command runs (e.g. the app quits)
-    if self.fd is not None:
-      try:
-        asyncio.get_running_loop().remove_reader(self.fd)
-      except Exception:
-        pass
+class TerminalView(Widget, can_focus=True):
+  """Shows the shell of the app; while it has the focus all keys except Ctrl-] go to the shell"""
+  DEFAULT_CSS = "TerminalView { height: 1fr; }"
+
+  @property
+  def session(self):
+    return self.app.shell
+
+  def attach(self):
+    """The pane was shown or got a new session: start/resize the session with the size of this view"""
+    if self.session and self.size.width > 0 and self.size.height > 0:
+      self.session.ensure(self.size.width, self.size.height)
+    self.refresh()
 
   def on_resize(self, event):
-    if self.vt is not None:
-      cols, rows = max(event.size.width, 2), max(event.size.height, 2)
-      self.vt.resize(rows, cols)
-      self.set_winsize(cols, rows)
-      self.refresh()
+    if self.session and self.display:
+      self.session.ensure(event.size.width, event.size.height)
+    self.refresh()
+
+  def on_focus(self):
+    self.refresh()
+
+  def on_blur(self):
+    self.refresh()
 
   async def on_key(self, event):
-    if self.done or self.vt is None:
-      return # let the window handle Esc to close it
     event.stop()
     event.prevent_default()
     key = event.key
+    if key == SWITCH_KEY:
+      self.app.action_switch_side()
+      return
+    s = self.session
+    if s is None or s.vt is None and not s.done:
+      return
+    if s.done:
+      if key == "enter":
+        self.app.restart_shell()
+      return
     if key in TERM_ARROWS:
-      data = ("\x1bO" if DECCKM in self.vt.mode else "\x1b[") + TERM_ARROWS[key]
+      data = ("\x1bO" if DECCKM in s.vt.mode else "\x1b[") + TERM_ARROWS[key]
     elif key.startswith(("ctrl+", "shift+", "alt+")) and key.split("+")[-1] in TERM_ARROWS:
       mod = {"shift": 2, "alt": 3, "ctrl": 5}[key.split("+")[0]]
       data = f"\x1b[1;{mod}{TERM_ARROWS[key.split('+')[-1]]}"
@@ -1383,22 +1421,28 @@ class TerminalView(Widget, can_focus=True):
       data = "\x1b" + key[4]
     else:
       return
-    self.write(data.encode())
+    s.write(data.encode())
 
   def on_paste(self, event):
+    s = self.session
+    if s is None or s.vt is None:
+      return
     text = event.text.replace("\r\n", "\r").replace("\n", "\r")
-    if self.vt is not None and (2004 << 5) in self.vt.mode: # bracketed paste
+    if (2004 << 5) in s.vt.mode: # bracketed paste
       text = f"\x1b[200~{text}\x1b[201~"
-    self.write(text.encode())
+    s.write(text.encode())
 
   def render_line(self, y):
     width = self.size.width
-    vt = self.vt
-    if vt is None or y >= vt.lines:
-      return Strip.blank(width, self.rich_style)
-    line = vt.buffer[y]
-    cursor_x = vt.cursor.x if (y == vt.cursor.y and self.has_focus and not vt.cursor.hidden and not self.done) else -1
+    s = self.session
+    vt = s.vt if s else None
     base = self.rich_style
+    if vt is None or y >= vt.lines:
+      if s and s.error and y == 0:
+        return Strip([Segment(s.error, base + Style(color="red"))]).adjust_cell_length(width, base)
+      return Strip.blank(width, base)
+    line = vt.buffer[y]
+    cursor_x = vt.cursor.x if (y == vt.cursor.y and self.has_focus and not vt.cursor.hidden and not s.done) else -1
     segments, text, style = [], "", None
     for x in range(min(vt.columns, width)):
       ch = line[x]
@@ -1414,37 +1458,65 @@ class TerminalView(Widget, can_focus=True):
       segments.append(Segment(text, style))
     return Strip(segments).adjust_cell_length(width, base)
 
-class TerminalScreen(Screen):
-  """Window with an interactive command (a shell on a node); it closes when the command ends"""
-  BINDINGS = [Binding("escape", "close", "Close", show=False)] # only reaches the window once the command ended
-
-  def __init__(self, crumbs, args, title):
-    super().__init__()
-    self.crumbs, self.args, self.title_text = crumbs, args, title
-
+class TerminalPane(Vertical):
+  """Right side of every window: title bar with a close button and the shell"""
   def compose(self) -> ComposeResult:
-    yield Header()
-    yield Static(self.title_text, id="tstatus")
-    yield TerminalView(self.args, id="term")
+    with Horizontal(classes="tbar"):
+      yield Static(classes="ttitle")
+      yield Button("✕", classes="tclose", compact=True, tooltip="close the shell (Ctrl-X)")
+    yield TerminalView()
 
   def on_mount(self):
-    self.sub_title = crumb_title(self.crumbs)
-    self.query_one("#term").focus()
+    self.watch(self.app, "shell_version", self.sync)
+    self.watch(self.app, "pane_width", self.set_width)
 
-  @property
-  def running(self):
-    term = self.query_one("#term", TerminalView)
-    return not term.done
+  def sync(self, _=None):
+    s = self.app.shell
+    self.display = s is not None
+    for splitter in self.parent.query(Splitter):
+      splitter.display = s is not None
+    if s is None:
+      return
+    if s.done:
+      status = f"ended (exit code {s.code}) · Enter: new shell · ✕ or Ctrl-X: close"
+    else:
+      status = "Ctrl-] switches between the sides"
+    self.query_one(".ttitle", Static).update(f"{s.title} · {status}")
+    self.call_after_refresh(self.query_one(TerminalView).attach)
 
-  @on(TerminalView.Exited)
-  def exited(self, event):
-    if event.code == 0 or event.elapsed > 10: # Ctrl-D / exit (bash passes on the status of its last command)
-      self.app.pop_screen()
-    else: # probably failed to start: keep the window to show why
-      self.query_one("#tstatus", Static).update(f"{self.title_text} · ended with exit code {event.code} · Esc closes the window")
+  def set_width(self, width):
+    self.styles.width = width if width else "50%"
 
-  def action_close(self):
-    self.app.pop_screen()
+  @on(Button.Pressed, ".tclose")
+  def close_pressed(self, event):
+    event.stop()
+    self.app.close_shell()
+
+class Splitter(Widget):
+  """Vertical bar between the window and the terminal pane, drag it with the mouse to resize"""
+  def __init__(self):
+    super().__init__()
+    self.dragging = False
+
+  def render(self):
+    return ""
+
+  def on_mouse_down(self, event):
+    self.dragging = True
+    self.capture_mouse()
+    self.add_class("-dragging")
+    event.stop()
+
+  def on_mouse_move(self, event):
+    if self.dragging:
+      total = self.screen.size.width
+      self.app.pane_width = max(20, min(total - event.screen_x - 1, total - 20))
+
+  def on_mouse_up(self, event):
+    if self.dragging:
+      self.dragging = False
+      self.release_mouse()
+      self.remove_class("-dragging")
 
 COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("state", "State"), ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
            ("start", "Start"), ("end", "End"), ("err", "Err"), ("cmd", "Command")]
@@ -1460,6 +1532,24 @@ SORT_KEYS = {
   "err":   lambda j: (j.err[0] == "file", j.err[1]),
   "cmd":   lambda j: j.command,
 }
+
+class MainScreen(SplitScreen):
+  """The job table"""
+  def compose_left(self):
+    with Horizontal(id="toolbar"):
+      yield Button("Reload", id="reload", variant="primary")
+      yield Label("finished since")
+      yield Input("1d", id="since", placeholder="off")
+      yield Checkbox("all my accounts", id="us")
+    yield Static(id="status")
+    yield ClickTable(id="jobs", cursor_type="row", zebra_stripes=True)
+
+  def on_mount(self):
+    table = self.query_one("#jobs", ClickTable)
+    for key, label in COLUMNS:
+      table.add_column(label, key=key)
+    table.focus()
+    self.app.action_reload()
 
 class SlurmTUI(App):
   TITLE = "slurm_tui"
@@ -1479,43 +1569,99 @@ class SlurmTUI(App):
   #cmd { width: 1fr; }
   #node { width: 28; }
   #presets Button { margin-right: 1; min-width: 8; }
-  #fstatus, #tstatus { height: 1; padding: 0 1; background: $panel; }
+  #fstatus { height: 1; padding: 0 1; background: $panel; }
   #text { height: 1fr; }
   #search, #dfilter { dock: bottom; display: none; }
   #search.visible, #dfilter.visible { display: block; }
   #dstatus { height: 1; padding: 0 1; background: $panel; }
   #dir { height: 1fr; }
+  .split { height: 1fr; }
+  .left { width: 1fr; height: 1fr; }
+  TerminalPane { width: 50%; height: 1fr; display: none; }
+  Splitter { width: 1; height: 1fr; display: none; background: $panel-lighten-2; }
+  Splitter:hover, Splitter.-dragging { background: $accent; }
+  .tbar { height: 1; background: $panel; }
+  TerminalPane:focus-within .tbar { background: $accent; color: $text; }
+  .ttitle { width: 1fr; height: 1; padding: 0 1; }
+  .tclose { width: 3; min-width: 3; height: 1; }
   """
   BINDINGS = [
     Binding("q", "quit", "Quit"),
     Binding("r", "reload", "Reload"),
     Binding("e", "open('stderr')", "Error file"),
     Binding("o", "open('stdout')", "Output file"),
+    Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
+    Binding("ctrl+x", "close_shell", "Close shell"),
   ]
+  shell_version = reactive(0) # bumped when the shell is opened, closed or ends: the panes update
+  pane_width = reactive(0)    # width of the terminal pane in columns, 0: half of the window
 
   def __init__(self):
     super().__init__()
+    self.shell = None # TerminalSession shown on the right of every window
     self.jobs = {}
     self.sort_column, self.sort_reverse = "jobid", True
     self.since = None
 
-  def compose(self) -> ComposeResult:
-    yield Header()
-    with Horizontal(id="toolbar"):
-      yield Button("Reload", id="reload", variant="primary")
-      yield Label("finished since")
-      yield Input("1d", id="since", placeholder="off")
-      yield Checkbox("all my accounts", id="us")
-    yield Static(id="status")
-    yield ClickTable(id="jobs", cursor_type="row", zebra_stripes=True)
-    yield Footer()
+  def get_default_screen(self):
+    return MainScreen()
 
-  def on_mount(self):
-    table = self.query_one("#jobs", ClickTable)
-    for key, label in COLUMNS:
-      table.add_column(label, key=key)
-    table.focus()
-    self.action_reload()
+  # ---- the shell on the right
+  def shell_changed(self):
+    self.shell_version += 1
+
+  def refresh_terminal(self):
+    for view in self.screen.query(TerminalView):
+      view.refresh()
+
+  def open_shell(self, args, title):
+    if self.shell and not self.shell.done:
+      self.notify("a shell is already open on the right, close it first (✕)", severity="warning")
+      self.focus_terminal()
+      return
+    if self.shell:
+      self.shell.terminate()
+    self.shell = TerminalSession(self, args, title)
+    self.shell_changed()
+    self.call_after_refresh(self.focus_terminal)
+
+  def restart_shell(self):
+    if self.shell:
+      args, title = self.shell.args, self.shell.title
+      self.shell.terminate()
+      self.shell = None
+      self.open_shell(args, title)
+
+  def action_close_shell(self):
+    self.close_shell()
+
+  def close_shell(self):
+    if self.shell:
+      self.shell.terminate()
+      self.shell = None
+      self.shell_changed()
+      self.call_after_refresh(self.focus_left)
+
+  def focus_terminal(self):
+    views = self.screen.query(TerminalView)
+    if views and self.shell:
+      if not isinstance(self.focused, TerminalView):
+        self.screen.left_focus = self.focused
+      views.first().focus()
+
+  def focus_left(self):
+    widget = getattr(self.screen, "left_focus", None)
+    if widget is None or not widget.is_attached or widget.screen is not self.screen or not widget.focusable:
+      chain = [w for w in self.screen.focus_chain if not w.has_class("tclose") and not isinstance(w, TerminalView)]
+      widget = chain[0] if chain else None
+    if widget is not None:
+      widget.focus()
+
+  def action_switch_side(self):
+    if isinstance(self.focused, TerminalView):
+      self.focus_left()
+    else:
+      self.focus_terminal()
 
   async def action_quit(self):
     # Stop mouse and focus reports right away, and clear the screen while still on the alternate screen:
@@ -1536,7 +1682,9 @@ class SlurmTUI(App):
   def check_action(self, action, parameters):
     if action in ("open", "reload"): # keys of the job table, not of the other windows
       return self.screen is self.screen_stack[0]
-    if action in ("quit", "command_palette", "help_quit") and isinstance(self.screen, TerminalScreen) and self.screen.running:
+    if action in ("switch_side", "close_shell"):
+      return self.shell is not None
+    if action in ("quit", "command_palette", "help_quit") and isinstance(self.focused, TerminalView):
       return False # Ctrl-Q, Ctrl-P, Ctrl-C go to the shell
     return True
 
@@ -1652,7 +1800,12 @@ def main():
   parser.add_argument("--log", metavar="FILE", help="write a debug log (all slurm commands that are run) to FILE")
   args = parser.parse_args()
   setup_logging(args.log)
-  SlurmTUI().run()
+  app = SlurmTUI()
+  try:
+    app.run()
+  finally:
+    if app.shell:
+      app.shell.terminate()
 
 if __name__ == "__main__":
   main()
