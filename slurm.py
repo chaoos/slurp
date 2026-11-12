@@ -18,6 +18,7 @@ from tqdm import tqdm
 import humanize
 from termcolor import colored
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 import helpers as hp
 import getpass
 from collections import Counter, OrderedDict
@@ -165,8 +166,11 @@ squeue_fields = {
   "fmt_str": ["%i",     "%j",       "%c",             "%D",      "%T (%r)", "%M / %l (%S)",            "%k"],
   "types":   [str,      str,        int,              int,       str,       str,                       str],
 }
+def accounts():
+  return [grp.getgrgid(g).gr_name for g in os.getgroups()]
+
 def get_queue(us=False):
-  who = f"-A {','.join(map(lambda g: grp.getgrgid(g).gr_name, os.getgroups()))}" if us else "--me"
+  who = f"-A {','.join(accounts())}" if us else "--me"
   env = { "shell": True, "capture_output": True, "text": True }
   cmd = [fr'squeue {who} -r -h --format="{"|".join(squeue_fields["fmt_str"])}"']
   logger.debug(rf'running command: {" ".join(cmd)}')
@@ -187,11 +191,73 @@ def get_mem_usages(jobs):
       jid, mem = tsplit(item, [lambda x: x[:-2], suffix_to_int])
       for j_id in jobs.keys():
         if (j_id.startswith(f"{jid}_") or j_id == jid):
-          task = humanize.naturalsize(mem)
-          node = humanize.naturalsize(mem*jobs[j_id]["Tasks per node"])
-          total  = humanize.naturalsize(mem*jobs[j_id]["Tasks per node"]*jobs[j_id]["# Nodes"])
-          jobs[j_id]["CPU Memory usage (task, node, total)"] = f"{task}, {node}, {total}"
+          jobs[j_id]["CPU Memory usage (task, node, total)"] = mem_usage(mem, jobs[j_id])
   return jobs
+
+def mem_usage(mem, job):
+  task = humanize.naturalsize(mem)
+  node = humanize.naturalsize(mem*job["Tasks per node"])
+  total  = humanize.naturalsize(mem*job["Tasks per node"]*job["# Nodes"])
+  return f"{task}, {node}, {total}"
+
+duration_units = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days", "w": "weeks", "mo": "months", "y": "years"}
+duration_re = r'(\d+)(mo|[smhdwy])'
+def parse_duration(string):
+  """Parse a duration like 30m, 2h, 1d, 3w, 2mo, 1y or 1d12h and return the point in time that far back"""
+  string = string.replace(" ", "")
+  if not re.fullmatch(rf'(?:{duration_re})+', string):
+    raise argparse.ArgumentTypeError(f"invalid duration '{string}' (expected e.g. 30s, 30m, 2h, 1d, 3w, 2mo, 1y or 1d12h)")
+  delta = sum((relativedelta(**{duration_units[u]: int(n)}) for n, u in re.findall(duration_re, string)), relativedelta())
+  return datetime.now().replace(microsecond=0) - delta
+
+# states of jobs that are still in the queue (and therefore listed by squeue)
+active_states = {"RUNNING", "PENDING", "REQUEUED", "REQUEUE_HOLD", "REQUEUE_FED", "SUSPENDED", "RESIZING",
+                 "CONFIGURING", "COMPLETING", "SIGNALING", "STAGE_OUT", "STOPPED", "RESV_DEL_HOLD"}
+sacct_fields = ["JobID", "JobName%100", "ReqCPUS", "NNodes", "State", "ExitCode", "Elapsed", "Timelimit", "Start", "End", "Comment", "MaxRSS"]
+def get_completed(since, us=False, mem=False):
+  who = ["-a", "-A", ",".join(accounts())] if us else ["-u", getpass.getuser()]
+  cmd = ["sacct", *who, "-S", since.isoformat(), "-E", "now", "-P", "-n", f"--format={','.join(sacct_fields)}"]
+  logger.debug(rf'running command: {" ".join(cmd)}')
+  res = subprocess.run(cmd, capture_output=True, text=True)
+  if res.returncode != 0:
+    logger.warning(f"sacct failed: {res.stderr.strip()}")
+    return {}
+
+  jobs, maxrss = {}, {}
+  for line in res.stdout.splitlines():
+    fields = line.split("|")
+    if len(fields) != len(sacct_fields):
+      continue
+    jid, name, cpus, nodes, state, exitcode, elapsed, limit, start, end, comment, rss = fields
+    base = jid.split(".")[0] # job steps (123.batch, 123.0, ...) belong to job 123
+    maxrss[base] = max(maxrss.get(base, 0), suffix_to_int(rss))
+    if "." in jid or state.split(" ")[0] in active_states or end in ("Unknown", "None", ""):
+      continue
+    if datetime.fromisoformat(end) < since:
+      continue
+    nodes, cpus = int(nodes or 0), int(cpus or 0)
+    jobs[jid] = {
+      "Job ID":                  jid,
+      "Job name":                name,
+      "Tasks per node":          cpus // nodes if nodes else cpus,
+      "# Nodes":                 nodes,
+      "State":                   f"{state} ({exitcode})",
+      "Elapsed / Total (Start)": f"{elapsed} / {limit} ({start})",
+      "End":                     end,
+      "Comment":                 comment,
+    }
+
+  if mem:
+    for jid, job in jobs.items():
+      if maxrss.get(jid):
+        job["CPU Memory usage (task, node, total)"] = mem_usage(maxrss[jid], job)
+  return jobs
+
+def completed_summary(jobs, since):
+  states = Counter(job["State"].split(" ")[0] for job in jobs.values())
+  states = ", ".join(f"{n} {state}" for state, n in states.most_common())
+  nh = sum(job["# Nodes"]*hours(job["Elapsed / Total (Start)"].split(" / ")[0]) for job in jobs.values())
+  logger.info(f"Finished since {since:%Y-%m-%d %H:%M}: {len(jobs)} jobs ({states or 'none'}), {nh:.1f} nodehours")
 
 def get_full_queue():
   env = { "shell": True, "capture_output": True, "text": True }
@@ -217,11 +283,16 @@ def slurm_summary():
 
 def slurm_running(args):
   jobs = get_queue(args.us)
-  jobs = get_mem_usages(jobs).values() if args.mem else jobs.values()
+  if args.mem:
+    jobs = get_mem_usages(jobs)
+  completed = get_completed(args.completed, args.us, args.mem) if args.completed else {}
+  jobs = list((completed | jobs).values()) # jobs still in the queue take precedence
   if jobs:
     DL, headers = LDtoDL(jobs, sort_by_key="!Job ID")
     print(tabulate(colorize_dict_vals(DL), headers=headers, showindex="always"))
   slurm_summary()
+  if args.completed:
+    completed_summary(completed, args.completed)
   
 
 def main():
@@ -231,10 +302,14 @@ def main():
   parser.add_argument('--mem', help="Obtain peak memory for running jobs", default=False, action="store_true")
   parser.add_argument("-v", "--verbosity", action="count", help="increase output verbosity", default=0)
   parser.add_argument('--us', help="Show jobs of all user accounts of current user", default=False, action="store_true")
+  parser.add_argument('-c', '--completed', type=parse_duration, metavar="DURATION",
+    help="Also list jobs that finished within the last DURATION, e.g. 30s, 30m, 2h, 1d, 3w, 2mo, 1y or combined like 1d12h")
   args = parser.parse_args()
   logger = hp.setup_logger(args.verbosity)
 
   if args.infile:
+    if args.completed:
+      logger.warning("-c/--completed is ignored together with -i/--infile")
     slurm_finished(args)
   else:
     slurm_running(args)
