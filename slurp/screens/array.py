@@ -16,6 +16,19 @@ from ..widgets import *
 from .base import *
 from .dialogs import ConfirmScreen, copy_text
 
+def epoch(value):
+  try:
+    return datetime.fromisoformat(value).timestamp() if is_time(value) else None
+  except ValueError:
+    return None
+
+def stats_text(values):
+  """min · avg · max (and median) of durations in seconds"""
+  values = sorted(values)
+  avg = sum(values) / len(values)
+  return (f"min {duration_text(values[0])} · avg {duration_text(avg)} · median {duration_text(values[len(values) // 2])} · "
+          f"max {duration_text(values[-1])}  ({len(values)} task{'s' if len(values) != 1 else ''})")
+
 def seconds(elapsed):
   """Slurm elapsed time ([d-]hh:mm:ss) in seconds, None if it is not one"""
   try:
@@ -106,10 +119,23 @@ class ArrayScreen(SplitScreen):
       ends = [t["end"] for t in tasks.values() if is_time(t["end"])]
       if starts:
         grid.add_row("First start / last end", f"{fmt_time(min(starts))} / {fmt_time(max(ends)) if ends else '-'}")
+      now = datetime.now().timestamp()
+      waits = [s - q for t in tasks.values() if t["state"] != "PENDING" and (s := epoch(t.get("start")))
+               and (q := epoch(t.get("submit"))) and s <= now] # (the start of a pending task is only an estimate)
+      if waits:
+        grid.add_row("Queue wait (started)", stats_text(waits))
+      pending = [now - q for t in tasks.values() if t["state"] == "PENDING" and (q := epoch(t.get("submit")))]
+      if pending:
+        grid.add_row("Waiting so far (pending)", stats_text(pending))
+      ended = [s for t in tasks.values() if is_time(t.get("end")) and (s := seconds(t.get("elapsed"))) is not None]
+      if ended:
+        grid.add_row("Run time (ended)", stats_text(ended))
       done = sorted(s for t in tasks.values() if t["state"] == "COMPLETED" and (s := seconds(t.get("elapsed"))) is not None)
       if done:
-        grid.add_row("Run time (completed)", f"median {duration_text(done[len(done) // 2])}, longest {duration_text(done[-1])}"
-                     f" ({len(done)} tasks)")
+        grid.add_row("Run time (completed)", stats_text(done))
+      running_for = [now - s for t in tasks.values() if t["state"] == "RUNNING" and (s := epoch(t.get("start")))]
+      if running_for:
+        grid.add_row("Running for (running)", stats_text(running_for))
         left = count(("PENDING",)) + count(("RUNNING", "COMPLETING", "CONFIGURING"))
         running = count(("RUNNING", "COMPLETING", "CONFIGURING"))
         if left and running:
