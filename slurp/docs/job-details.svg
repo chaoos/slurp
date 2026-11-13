@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="700" viewBox="0 0 1100 700" role="img" aria-labelledby="title desc">
+  <title id="title">Illustrative Slurm TUI job details</title>
+  <desc id="desc">Job detail screen showing cancel and restart controls, progress, on-demand CPU and GPU memory, files, and node commands.</desc>
+  <defs><linearGradient id="top" x2="0" y2="1"><stop stop-color="#1c2635"/><stop offset="1" stop-color="#151c28"/></linearGradient></defs>
+  <rect width="1100" height="700" rx="22" fill="#0b1018"/>
+  <rect x="30" y="28" width="1040" height="644" rx="16" fill="#111923" stroke="#344256"/>
+  <path d="M46 28h1008a16 16 0 0 1 16 16v45H30V44a16 16 0 0 1 16-16z" fill="url(#top)"/>
+  <circle cx="58" cy="55" r="6" fill="#ff6b6b"/><circle cx="80" cy="55" r="6" fill="#f3bd4f"/><circle cx="102" cy="55" r="6" fill="#52c878"/>
+  <text x="550" y="62" text-anchor="middle" fill="#dce7f5" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="18" font-weight="700">Jobs › 482731 · prod_ensemble</text>
+  <rect x="54" y="100" width="112" height="34" rx="7" fill="#713e48" stroke="#aa5b64"/><text x="110" y="122" text-anchor="middle" fill="#ffe8e9" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700">Cancel job</text>
+  <rect x="177" y="100" width="118" height="34" rx="7" fill="#28558c" stroke="#4286d1"/><text x="236" y="122" text-anchor="middle" fill="#eaf4ff" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700">Restart job</text>
+  <g font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="14">
+    <text x="60" y="166" fill="#90a5bf">State</text><text x="260" y="166" fill="#60d6a1">RUNNING</text>
+    <text x="60" y="193" fill="#90a5bf">User / account</text><text x="260" y="193" fill="#d4dfec">roman / lattice · partition gpu</text>
+    <text x="60" y="220" fill="#90a5bf">Nodes</text><text x="260" y="220" fill="#d4dfec">2 · nid005939,nid005940</text>
+    <text x="60" y="247" fill="#90a5bf">WorkDir</text><text x="260" y="247" fill="#d4dfec">/scratch/roman/run/ens_042</text>
+    <text x="60" y="274" fill="#90a5bf">Command</text><text x="260" y="274" fill="#d4dfec">./measure --config input.yaml</text>
+  </g>
+  <rect x="57" y="295" width="982" height="1" fill="#293647"/>
+  <rect x="58" y="311" width="177" height="34" rx="7" fill="#28558c" stroke="#4286d1"/><text x="146" y="333" text-anchor="middle" fill="#eaf4ff" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">Query current memory</text>
+  <text x="257" y="333" fill="#a9bbd0" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="14" font-weight="700">CPU:</text><text x="303" y="333" fill="#dce7f5" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="14">5.8 GiB RSS</text>
+  <text x="480" y="333" fill="#a9bbd0" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="14" font-weight="700">GPU:</text><text x="526" y="333" fill="#dce7f5" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="14">11.2 GiB</text>
+  <text x="60" y="380" fill="#76a9fa" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700">Progress</text>
+  <rect x="60" y="396" width="420" height="13" rx="6" fill="#293647"/><rect x="60" y="396" width="273" height="13" rx="6" fill="#57c99b"/>
+  <text x="60" y="432" fill="#b8c7d9" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="13">Iteration 65/100 · residual = 3.2e-8</text>
+  <text x="570" y="380" fill="#76a9fa" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700">Files</text>
+  <g font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="13"><text x="570" y="408" fill="#91a3ba">stdout</text><text x="700" y="408" fill="#dce7f5">slurm-482731.out</text><text x="570" y="432" fill="#91a3ba">script</text><text x="700" y="432" fill="#dce7f5">run_measure.sbatch</text><text x="570" y="456" fill="#91a3ba">input</text><text x="700" y="456" fill="#dce7f5">input.yaml</text></g>
+  <rect x="58" y="468" width="982" height="1" fill="#293647"/>
+  <text x="60" y="497" fill="#76a9fa" font-family="ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700">Run on the nodes of the job</text>
+  <rect x="60" y="511" width="620" height="34" rx="6" fill="#0d141d" stroke="#344256"/><text x="74" y="533" fill="#8397ae" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="13">command, e.g. nvidia-smi</text>
+  <rect x="692" y="511" width="95" height="34" rx="6" fill="#28558c"/><text x="739" y="533" text-anchor="middle" fill="#eaf4ff" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">Run</text>
+  <rect x="799" y="511" width="104" height="34" rx="6" fill="#1c2939" stroke="#44566f"/><text x="851" y="533" text-anchor="middle" fill="#dce7f5" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">Shell</text>
+  <text x="60" y="582" fill="#91a3ba" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="13">Live memory is queried only after pressing the button. Ended jobs show Slurm-accounted peak memory.</text>
+  <text x="550" y="638" text-anchor="middle" fill="#70839a" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13">Illustrative interface preview · sample job data</text>
+</svg>

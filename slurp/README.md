@@ -1,0 +1,274 @@
+# slurp
+
+`slurp` is a Textual interface for checking Slurm jobs and inspecting
+the files and resources associated with them. It is designed to run on a host
+with access to your Slurm commands, configuration, and job files. You can use
+it in a terminal or open it in a browser.
+
+The images below are illustrative previews built from the app's current
+features and sample data; they are not screenshots from a live cluster.
+
+## Job list
+
+Browse queued and running jobs alongside recently completed jobs, sort by
+columns (the header marks the sort column with ▲ or ▼), and filter by job
+name, command, ID, state, user, account, or path. The completed-job time window
+uses the same duration syntax as `slurm.py`. The dropdown next to it selects
+whose jobs are listed: yours, those of one of your Slurm accounts, or those of
+all of them (the accounts come from `sacctmgr`). Progress appears when the
+output contains a line such as `65/100`; the **Done in** column estimates when
+a running job gets to the end.
+
+![Illustrative slurp job list with status and progress columns](docs/jobs.svg)
+
+## Job details and controls
+
+Open a row to inspect accounting fields, steps, output and error files, the
+batch script, and files referenced by the job. **Cancel job** and **Restart
+job** ask for confirmation; restart lets you use the original submission,
+retry eligible array IDs, or edit a custom command (in a bash editor). For an
+array task, **Run array** submits the array again with another range (start,
+stop, step) and warns when the range covers tasks that are running, queued or
+completed.
+
+The progress shows the latest `n/N` line, and estimates when the job reaches
+`N`: from the average rate since the job started and from the rate of the
+last few `n/N` lines, each with the remaining time and the time of day. The
+times are the timestamps of the lines if they have one, else the times slurp
+saw a new `n`. **Progress file…** picks another (log) file for this job, in
+the directory browser; **Use stdout** goes back. Only the end of the file is
+read (64 kB).
+
+For a running job, press **Query current memory** to request current CPU RSS
+and GPU process memory. This query is on demand; the fields are empty until
+requested. GPU usage is gathered from the processes of the job reported by
+`nvidia-smi` (or `rocm-smi` on AMD nodes), together with the used and total
+memory of every GPU of the nodes. Completed and failed jobs show CPU peak memory from Slurm
+accounting, and GPU peak memory when the accounting database reports it.
+
+![Illustrative job overview with cancel, restart, progress, and memory controls](docs/job-details.svg)
+
+## Files and node tools
+
+The file browser opens from the job details and lets you move through the
+working directory and related paths. It includes specialized views:
+
+- **Markdown:** `.md`, `.markdown`, `.mdown`, and `.mdx` files render with
+  Textual's `MarkdownViewer`, including a table of contents and link navigation.
+- **HDF5:** browse groups, datasets, attributes, and paged data. HDF5 files
+  are recognized by their file signature, including files without an `.h5`
+  extension.
+- **Core dumps:** inspect ELF core metadata with GDB and edit the suggested GDB
+  command before launching it in the terminal pane. Core-to-job association
+  uses node and timestamp clues and is marked as likely/possible.
+- **Text and output:** follow running stdout/stderr, search text, and open
+  paths or line references found in file contents.
+
+For a running job, run commands such as `nvidia-smi`, `free`, `top`, or `ps`
+on its allocated nodes. Shells on its node and GDB sessions open as subtabs.
+
+## Tabs and subtabs
+
+Every tab is a cluster (or this machine). Under the tabs, each tab has its
+subtabs: **Jobs** (the job list, always there), and one subtab with a `✕` for
+each job window, each file or directory opened from the job list, and each
+shell (on the cluster, on the node of a job, GDB). What you open inside a
+subtab, like the files of a job, opens in that subtab; `←` or `Esc` goes back,
+and back from its first window shows the job list. Opening a job again shows
+its subtab. Switching tabs keeps the subtabs. In a shell all keys go to the
+shell, except `Ctrl-]`, which goes back to the job list; `Ctrl-W` closes the
+subtab shown (outside a shell). Every tab can be closed, also the last one;
+then only the `+` button remains.
+
+![Illustrative Markdown, HDF5, and right-side shell views](docs/files.svg)
+
+## Install and launch
+
+Run the program from this repository on a login or other host with Slurm
+access. The package directory `slurp/` must stay next to `slurm.py` (and the
+modules it uses) in this repository.
+Create and activate a virtual environment, then install the repository's
+Python dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+The requirements file includes the dependencies used by the repository's
+scripts, plus the Textual app's terminal and browser features. System commands
+such as `ssh`, `squeue`, `sacct`, `scontrol`, `srun`, and `sbatch` are installed
+separately and must be available locally or on the selected SSH host.
+
+The standalone `fzip.py` compression utility also uses the legacy `bitstream`
+package, whose source build fails under pip's isolated build environment. It is
+not needed by slurp. If you use `fzip.py`, install it separately with:
+
+```bash
+python -m pip install --no-build-isolation bitstream
+```
+
+`h5py` enables the HDF5 browser. If it is unavailable, the app can show
+`h5dump -H` output when `h5dump` is installed.
+
+Start the terminal UI from the repository:
+
+```bash
+python3 slurp          # or: python3 -m slurp
+```
+
+Use `--log FILE` to log Slurm commands and debug events. The app has no
+required configuration file; job and file selection happens inside the UI.
+
+## Connect to Slurm over SSH
+
+The Textual app stays on your local machine. It starts with a **Local** tab.
+Pass one or more regular OpenSSH destinations (`user@host`) or aliases from
+your `~/.ssh/config` to add tabs:
+
+```bash
+python3 slurp --ssh localhost user@host cluster-login
+```
+
+OpenSSH uses your configured identities, certificates, agent, host aliases,
+and `ProxyJump` chain. `localhost`, `127.0.0.1`, and `::1` refer to the local
+machine tab.
+
+Each remote tab has one SSH session, opened the first time you select the
+tab and held open for the life of the app. The login runs in the terminal
+pane on the right, where password, key passphrase, keyboard-interactive, and
+OTP prompts are answered. Once you are logged in, the pane hides by itself
+and the job list loads; nothing has to be typed after the login. A failed
+login stays in the pane so the error can be read; Enter there logs in again,
+and closing it (`✕`) gives up the connection.
+
+The session runs a shell on the cluster that the app sends its commands to:
+a reload (or opening a file, a directory, the job details) only sends lines
+into the open session and costs a round trip; no ssh process is started for
+it. Several commands can run at the same time, so a slow `sacct` does not hold
+up browsing, and aborting one stops only that command. The login scripts of
+the cluster run once, when the session starts, and what they print is
+ignored. Interactive shells (Shell, node shells, GDB) and HDF5 downloads open
+as extra channels of the same connection, without a new login.
+
+Clicking the connection state in the footer (or `c`) opens the connection
+window of the tab: its state, the course of a (re)connect (connecting,
+waiting for input, connected, failed with the error and what ssh printed), the
+logged-in user and login node, the resolved destination (`ssh -G`), traffic
+and round-trip times of the command channel, the ssh process and its TCP
+connection (bytes, rtt, retransmissions, from `ss`), and a log of the session
+events. **Reconnect** ends the session and logs in again, **Disconnect** ends
+it until the tab is selected again.
+
+The footer shows the state of the session of the active tab (green with the
+round-trip time when it answers) and the tab buttons mark each tab: `●`
+connected, `◌` connecting or not answering, `○` not connected. A heartbeat
+notices a session that stops answering ("no answer for …" in the footer);
+after 60 seconds without an answer, or when the session breaks, the app
+reconnects by itself right away, and if that fails again after 5, 15, 30
+and then every 60 seconds. If
+the login needs a password, the pane appears for it. Commands that were
+waiting, like a reload, go on once the session is back; a cancel or restart
+of a job is never sent twice. The UI does not wait for the cluster at any
+point: all commands and remote file access run in the background.
+
+The remote host needs Slurm commands, a POSIX shell, and standard Linux file
+tools; it does not need Python, a copy of this repository, or Textual
+installed. HDF5 files are copied from the remote host into a temporary local
+copy for the `h5py` viewer, which is removed when the viewer closes.
+
+Each tab keeps its own job list, shell, and session. Switching tabs shows the
+list as it was loaded; `r` (or **Reload**) loads it again. While a list
+loads, the old one stays visible, the footer shows the progress, and `a` (or
+the **Abort** button, which replaces **Reload** meanwhile) stops it.
+**Shell** (or `t`) opens a login shell on the cluster of the tab in a subtab. The **+** tab button adds another local or remote connection.
+`d` opens the login directory in the directory browser. Each tab has a `✕`
+that closes it (after asking). Notifications name the tab they belong to.
+
+**Interactive job** (or `i`) shows an `sbatch` command for a job that only
+holds a node (`sleep infinity`) in a bash editor, with fields for the account
+(one of yours or typed), the partition, the time limit, nodes, GPUs and the job
+name; the fields write the command, which stays editable. Once the job runs, its job
+window opens shells on its node. **Cluster info** (or `C`) shows the health
+of the cluster (nodes down, drained, in maintenance, not responding, with
+the reasons; reservations), its occupancy (busy and idle nodes, running and
+pending jobs and why they wait) and the partitions, with its own Reload;
+without a connection it says so, with Reconnect.
+
+## Browser access
+
+### Local browser or SSH tunnel
+
+Install `textual-serve` in the same Python environment and start the local
+browser server:
+
+```bash
+python -m pip install textual-serve
+python3 slurp --serve
+```
+
+Open <http://localhost:8000>. The server binds to `127.0.0.1` by default;
+`--host` and `--port` change the bind address and port. To access it through
+two SSH proxies, run the server on the Slurm host and forward the port:
+
+```bash
+ssh -J user@jump1,user@jump2 -N \
+  -L 8000:127.0.0.1:8000 user@slurm-login
+```
+
+Then browse to <http://localhost:8000> on your computer. Substitute your SSH
+hostnames and usernames. If local port 8000 is occupied, use a different local
+port, e.g. `-L 18000:127.0.0.1:8000`, and open `http://localhost:18000`.
+
+### Random public link with Textual Web
+
+If the Slurm host can make outbound internet connections, Textual Web can
+relay a Textual app to a random public URL without an inbound port or SSH
+forward. Install `textual-web`, then create a configuration file such as
+`serve.toml`:
+
+```toml
+[app.Slurm]
+command = "cd /path/to/scripts && /path/to/venv/bin/python slurp"
+```
+
+Run it from the project directory:
+
+```bash
+textual-web --config serve.toml
+```
+
+Textual Web prints a random URL that can be opened from a browser on another
+network. Its documentation currently describes the project as beta. Anyone
+with the URL can access the running app, so treat it as a secret bearer link:
+the app can run Slurm actions and launch shells as the account running it.
+Use this only when that access is appropriate. A permanent account URL is
+available in Textual Web, but it is an address and should not be treated as a
+secret. See the [Textual Web project](https://github.com/Textualize/textual-web)
+for its current setup and access behavior.
+
+Install Textual Web separately with `python -m pip install textual-web`.
+Terminal suspension is unavailable in browser mode, so opening a file in
+`less` is a terminal-only action.
+
+## Keyboard and mouse
+
+The app supports clicking and scrolling as well as keyboard navigation. Use
+`Tab` to move between controls, `Enter` to open a selection, and `Esc` or the
+top-left `←` button to go back.
+
+| Screen | Main controls |
+|---|---|
+| Job list | `/` search jobs; `Enter` open; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `c` connection window; `e` open stderr; `o` open stdout; `q` quit |
+| Job details | `Cancel job` / `Restart job` / `Run array`; `r` reload; `e` / `o` open error/output; `s` shell on the node (subtab) |
+| Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` load all; `l` open in `less`; `r` reload |
+| Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
+| HDF5 | `s` enter a dataset selection; `[` / `]` change row page; `{` / `}` change column page; `r` reload |
+| Markdown | `r` reload; use the viewer's table of contents and link navigation |
+| Shell (subtab) | `Ctrl-]` back to the job list; `Ctrl-D` exits the shell, Enter starts it again; `✕` of the subtab closes it |
+| Subtabs | `Ctrl-W` close the subtab shown (outside a shell) |
+| Login pane | `Ctrl-]` switch between the window and the login; `Ctrl-X` gives up the login |
+
+When using tmux, enable mouse support with `set -g mouse on` if you want to
+click and scroll inside the app.
