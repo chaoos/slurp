@@ -92,6 +92,7 @@ class JobScreen(SplitScreen):
                        tooltip="choose the (log) file checked for n/N lines, for this job")
           yield Button("Use stdout", id="progress-stdout", compact=True)
         yield Static(id="progress-line", markup=False)
+        yield Static(id="progress-age")
       yield Label("Files", classes="section")
       yield OptionList(Option("loading ...", disabled=True), id="files")
       yield Label("Steps", classes="section")
@@ -116,6 +117,8 @@ class JobScreen(SplitScreen):
     self.show_job()
     self.query_one("#files").focus()
     self.load()
+    self.set_interval(self.PROGRESS_EVERY, self.refresh_progress)
+    self.set_interval(1, self.show_progress_age)
 
   def show_job(self):
     job, rec = self.job, self.job.rec
@@ -156,6 +159,16 @@ class JobScreen(SplitScreen):
     self.query_one("#info", Static).update(grid)
     self.query_one("#memory-controls", Horizontal).display = job.running
     self.query_one("#memory-query", Button).disabled = not job.running
+    self.show_progress()
+    self.query_one("#nodes").display = job.running
+    self.show_steps()
+
+  PROGRESS_EVERY = 10 # seconds between reads of the progress of a running job
+  progress_at = None  # time.monotonic() of the last read
+  progress_reading = False
+
+  def show_progress(self):
+    job = self.job
     progress = progress_for_job(job)
     progress_view = self.query_one("#job-progress", Vertical)
     chosen = PROGRESS.get((tab_name(), job.jid), {}).get("file")
@@ -172,8 +185,33 @@ class JobScreen(SplitScreen):
         self.query_one("#progress-line", Static).update(self.progress_text(job, progress, chosen))
     else:
       progress_view.display = False
-    self.query_one("#nodes").display = job.running
-    self.show_steps()
+    self.show_progress_age()
+
+  def show_progress_age(self):
+    """When the progress was read (counting up), and how often"""
+    age = self.query_one("#progress-age", Static)
+    age.display = self.job.running
+    if self.job.running:
+      ago = "" if self.progress_at is None else f", last {time.monotonic() - self.progress_at:.0f} s ago"
+      reading = " · reading …" if self.progress_reading else ""
+      age.update(Text(f"updated every {self.PROGRESS_EVERY} s{ago}{reading}", style="dim"))
+
+  def refresh_progress(self):
+    """Read the progress of a running job again (in the background)"""
+    if not self.job.running or self.progress_reading:
+      return
+    self.progress_reading = True
+    job = self.job
+    def read():
+      return record_progress(job, output_progress(progress_path(job)))
+    def got(progress):
+      self.progress_reading = False
+      self.progress_at = time.monotonic()
+      if job is self.job:
+        self.job.progress = progress
+        self.show_progress()
+    in_background(self, read, got, group="progress")
+    self.show_progress_age()
 
   def progress_text(self, job, progress, chosen):
     lines = [f"{progress.current}/{progress.total} ({progress.current / max(progress.total, 1):.0%}): {progress.line}"]
@@ -257,6 +295,7 @@ class JobScreen(SplitScreen):
   def loaded(self, job, details):
     self.job, self.details = job, details
     self.job.progress = details.get("progress")
+    self.progress_at = time.monotonic()
     self.show_job()
     self.show_files()
     self.app.show_warnings()
