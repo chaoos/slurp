@@ -1,4 +1,5 @@
-"""Storage of the user on the cluster: quotas of the filesystems"""
+"""Storage of the user on the cluster: quotas of the filesystems, and the oldest files in the scratch directory (which
+the cluster may delete after some time without asking)"""
 
 import os
 import re
@@ -95,3 +96,54 @@ def quota_info():
   return {"time": datetime.now(), "user": user, "dirs": dirs, "entries": entries,
           "site": site if site and not parse_quota_table(site) else "",
           "errors": [] if entries or site else ["no quota information: neither lfs quota nor quota answered"]}
+
+# ---------------------------------------------------------------------------
+# old files in the scratch directory
+
+OLD_FILES_LIMIT = 2000 # oldest files listed
+
+def scratch_dir():
+  """The scratch directory of the user on the cluster ($SCRATCH, also from a login shell)"""
+  out = run(["sh", "-c", 'printf "%s" "${SCRATCH:-}"'], quiet=True).strip()
+  if not out:
+    out = run(["bash", "-lc", 'printf "%s" "${SCRATCH:-}"'], quiet=True, timeout=60).strip().splitlines()[-1:] or [""]
+    out = out[0].strip()
+  return out
+
+def oldest_files(directory, by="atime", limit=OLD_FILES_LIMIT):
+  """The user's files in directory with the oldest access (or modification) time, and the number and size of all of
+  them: one find over the whole tree on the cluster (it can take minutes; the worker can be aborted)"""
+  key = "%A@" if by == "atime" else "%T@"
+  script = ('find "$1" -xdev -type f -user "$(id -u)" -printf "' + key + ' %A@ %T@ %s %p\\n" 2>/dev/null '
+            '| awk \'{n++; s += $4; print} END {printf "TOTAL %d %d\\n", n, s > "/dev/stderr"}\' '
+            f'| sort -n -k1,1 | head -n {int(limit)}')
+  res = run_cmd(["sh", "-c", script, "sh", directory], timeout=3600)
+  files = []
+  for line in res.stdout.splitlines():
+    parts = line.split(" ", 4)
+    if len(parts) == 5:
+      try:
+        files.append({"atime": float(parts[1]), "mtime": float(parts[2]), "size": int(parts[3]), "path": parts[4]})
+      except ValueError:
+        pass
+  m = re.search(r"TOTAL (\d+) (\d+)", res.stderr or "")
+  total = (int(m.group(1)), int(m.group(2))) if m else (len(files), sum(f["size"] for f in files))
+  return {"files": files, "total": total, "by": by, "directory": directory, "time": datetime.now(),
+          "error": "" if res.returncode == 0 or files else (res.stderr or "").strip()[:300]}
+
+def touch_files(paths, what="atime", directory=None):
+  """Touch files (access time, or access and modification time): the listed ones, or every file of the user in
+  directory. -> (number touched, error)"""
+  flag = ["-a"] if what == "atime" else []
+  if directory is not None:
+    script = f'find "$1" -xdev -type f -user "$(id -u)" -exec touch {" ".join(flag)} -c {{}} + ; echo DONE'
+    res = run_cmd(["sh", "-c", script, "sh", directory], timeout=7200, retry=False)
+    return (None if "DONE" in res.stdout else 0), (res.stderr or "").strip()[:300]
+  done, errors = 0, []
+  for i in range(0, len(paths), 500):
+    chunk = paths[i:i + 500]
+    res = run_cmd(["touch", *flag, "-c", "--", *chunk], timeout=600, retry=False)
+    if res.returncode:
+      errors.append((res.stderr or "").strip()[:200])
+    done += len(chunk)
+  return done, "; ".join(errors)

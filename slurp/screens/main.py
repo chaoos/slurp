@@ -89,6 +89,7 @@ class MainScreen(SplitScreen):
       yield Button("Interactive job", id="interactive-job", tooltip="submit a job that holds nodes for shells (i)")
       yield Button("Cluster info", id="cluster-info", tooltip="health and occupancy of the cluster (C)")
       yield Button("Quota", id="quota", tooltip="your quotas on the filesystems (Q)")
+      yield Button("Scratch", id="scratch", tooltip="your oldest files in $SCRATCH, which a cleanup may delete (X)")
       yield Label("finished since")
       yield Input("1d", id="since", placeholder="off")
       yield Select([("my jobs", "me"), ("all my accounts", "all")], value="me", allow_blank=False, id="scope",

@@ -1,4 +1,5 @@
-"""The quota window"""
+"""The quota window, and the scratch window: the oldest files of the user in $SCRATCH, which the cluster may delete
+after some time without asking, and touching them"""
 
 import os
 import time
@@ -126,3 +127,188 @@ class QuotaScreen(ModalScreen):
   @on(Button.Pressed, "#quota-close")
   def action_close(self):
     self.dismiss()
+
+DAY = 86400
+
+class ScratchScreen(SplitScreen):
+  """The oldest files of the user in the scratch directory (searched in the background), to see what an automatic
+  cleanup of the cluster may delete soon, and to touch them"""
+  SHOW_BACK = True
+  BINDINGS = [Binding("escape", "back", "Back"), Binding("space", "toggle", "Select"),
+              Binding("A", "select_all", "Select all"), Binding("r", "search", "Search again")]
+
+  def __init__(self, cluster):
+    super().__init__()
+    self.cluster = cluster
+    self.result, self.worker, self.selected = None, None, set()
+    self.crumbs = ["old files in scratch"]
+
+  def compose_left(self):
+    with Horizontal(id="scratch-bar"):
+      yield Label("directory")
+      yield Input(id="scratch-dir", placeholder="$SCRATCH")
+      yield Label("by")
+      yield Select([("last access", "atime"), ("last modification", "mtime")], value="atime", allow_blank=False, id="scratch-by")
+      yield Label("older than")
+      yield Input("30", id="scratch-days", type="integer")
+      yield Label("days")
+      yield Button("Search", id="scratch-search", variant="primary")
+    with Horizontal(id="scratch-actions"):
+      yield Button("Touch selected", id="touch-selected")
+      yield Button("Touch all listed", id="touch-listed")
+      yield Button("Touch all my files there", id="touch-all", variant="warning")
+    yield Static(id="scratch-status")
+    yield ClickTable(id="scratch-files", cursor_type="row", zebra_stripes=True)
+
+  def on_mount(self):
+    self.sub_title = f"old files in scratch · {self.cluster.name}"
+    table = self.query_one("#scratch-files", ClickTable)
+    for key, label in (("mark", "✓"), ("atime", "Last access"), ("mtime", "Last modified"), ("age", "Age"),
+                       ("size", "Size"), ("path", "Path")):
+      table.add_column(label, key=key)
+    self.status("looking for the scratch directory …")
+    in_background(self, scratch_dir, self.got_dir, group="scratch-dir", connection=self.connection())
+
+  def connection(self):
+    return self.cluster.connection if self.cluster.destination else None
+
+  def got_dir(self, directory):
+    self.query_one("#scratch-dir", Input).value = directory or ""
+    if directory:
+      self.action_search()
+    else:
+      self.status("$SCRATCH is not set on this cluster: type the directory and press Search")
+
+  def status(self, text, style=""):
+    self.query_one("#scratch-status", Static).update(Text(text, style=style))
+
+  def days(self):
+    try:
+      return max(0, int(self.query_one("#scratch-days", Input).value))
+    except ValueError:
+      return 30
+
+  @on(Button.Pressed, "#scratch-search")
+  def search_pressed(self, event):
+    event.stop()
+    if self.worker is not None:
+      self.worker.abort.set()
+      self.worker = None
+      self.query_one("#scratch-search", Button).label = "Search"
+      self.status("search aborted", "yellow")
+    else:
+      self.action_search()
+
+  def action_search(self):
+    directory = self.query_one("#scratch-dir", Input).value.strip()
+    if not directory or self.worker is not None:
+      return
+    by = self.query_one("#scratch-by", Select).value
+    started = time.monotonic()
+    self.status(f"searching the files of the user in {directory} (in the background, it can take minutes) …", "yellow")
+    self.query_one("#scratch-search", Button).label = "Abort"
+    def found(result):
+      if self.worker is not worker:
+        return
+      self.worker = None
+      self.query_one("#scratch-search", Button).label = "Search"
+      if result is not None:
+        result["seconds"] = time.monotonic() - started
+        self.result = result
+        self.selected.clear()
+        self.show()
+    worker = self.worker = in_background(self, lambda: oldest_files(directory, by), found, group="scratch-search",
+                                         connection=self.connection())
+
+  @on(Input.Submitted, "#scratch-days")
+  @on(Select.Changed, "#scratch-by")
+  def options_changed(self, event):
+    if isinstance(event, Select.Changed):
+      if self.result is not None and self.result["by"] != event.value:
+        self.action_search()
+    else:
+      self.show()
+
+  def show(self):
+    r = self.result
+    table = self.query_one("#scratch-files", ClickTable)
+    table.clear()
+    if r is None:
+      return
+    if r["error"]:
+      self.status(f"search failed: {r['error']}", "red")
+      return
+    now, limit = time.time(), self.days() * DAY
+    old = 0
+    for i, f in enumerate(r["files"]):
+      age = now - f[r["by"]]
+      is_old = age > limit
+      old += is_old
+      style = "red" if is_old else ""
+      table.add_row("✓" if i in self.selected else "", datetime.fromtimestamp(f["atime"]).strftime("%Y-%m-%d %H:%M"),
+                    datetime.fromtimestamp(f["mtime"]).strftime("%Y-%m-%d %H:%M"), Text(f"{age / DAY:.0f} d", style=style),
+                    humanize.naturalsize(f["size"]), Text(f["path"], style=style), key=str(i))
+    n, size = r["total"]
+    what = "access" if r["by"] == "atime" else "modification"
+    listed = f"the {len(r['files'])} with the oldest {what} are listed" if n > len(r["files"]) else "all listed"
+    self.status(f"{n} files ({humanize.naturalsize(size)}) of the user in {r['directory']}, {listed}; "
+                f"{old}{'+' if n > len(r['files']) and old == len(r['files']) else ''} not {'used' if r['by'] == 'atime' else 'changed'} "
+                f"for more than {self.days()} days (red), which an automatic cleanup may delete · "
+                f"searched in {r.get('seconds', 0):.0f} s at {r['time']:%H:%M}", "bold red" if old else "green")
+
+  @on(DataTable.RowSelected, "#scratch-files")
+  def row_selected(self, event):
+    event.stop()
+    self.query_one("#scratch-files", ClickTable).take_clicked_column()
+    self.toggle(int(event.row_key.value))
+
+  def toggle(self, i):
+    self.selected.symmetric_difference_update({i})
+    self.query_one("#scratch-files", ClickTable).update_cell(str(i), "mark", "✓" if i in self.selected else "")
+
+  def action_toggle(self):
+    table = self.query_one("#scratch-files", ClickTable)
+    if table.row_count:
+      self.toggle(int(table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0)).row_key.value))
+
+  def action_select_all(self):
+    if self.result:
+      everything = set(range(len(self.result["files"])))
+      self.selected = set() if self.selected == everything else everything
+      self.show()
+
+  @on(Button.Pressed, "#touch-selected, #touch-listed, #touch-all")
+  def touch_pressed(self, event):
+    event.stop()
+    r = self.result
+    if r is None or r["error"]:
+      self.notify("search first", severity="warning")
+      return
+    which = event.button.id
+    if which == "touch-selected" and not self.selected:
+      self.notify("select files first (click a row or Space; A selects all)", severity="warning")
+      return
+    paths = [] if which == "touch-all" else [r["files"][i]["path"] for i in sorted(self.selected)] if which == "touch-selected" \
+            else [f["path"] for f in r["files"]]
+    what = "atime" if r["by"] == "atime" else "both"
+    count = f"all {r['total'][0]} files of the user in {r['directory']}" if which == "touch-all" else f"{len(paths)} files"
+    message = (f"Touch {count}: set their {'access time' if what == 'atime' else 'access and modification times'} to now, so "
+               "that an automatic cleanup that looks at it does not delete them yet.\n\nNote: many sites do not allow keeping "
+               "files in scratch this way (their usage policy may count it as circumventing the cleanup); scratch is not "
+               "meant for keeping data. Move what you need to keep to a project or home filesystem.")
+    self.app.push_screen(ConfirmScreen("Touch files?", message, "Touch", variant="warning"),
+                         lambda ok: self.touch(paths, what, r["directory"] if which == "touch-all" else None) if ok else None)
+
+  def touch(self, paths, what, directory):
+    self.status("touching …", "yellow")
+    def done(result):
+      if result is None:
+        return
+      count, error = result
+      self.notify(f"touched {'all files' if count is None else f'{count} files'}" + (f" (errors: {error})" if error else ""),
+                  severity="warning" if error else "information")
+      self.action_search()
+    in_background(self, lambda: touch_files(paths, what, directory), done, group="touch", connection=self.connection())
+
+  def action_back(self):
+    self.pop_back()

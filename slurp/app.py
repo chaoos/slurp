@@ -75,6 +75,14 @@ class Slurp(App):
   #toolbar > * { margin-right: 1; }
   #toolbar Label { padding-top: 1; }
   #scope { width: 28; }
+  #scratch-bar, #scratch-actions { height: auto; padding: 0 1; }
+  #scratch-bar Label { padding: 1 1 0 0; width: auto; }
+  #scratch-dir { width: 1fr; }
+  #scratch-by { width: 24; }
+  #scratch-days { width: 8; }
+  #scratch-actions Button { margin-right: 1; }
+  #scratch-status { height: auto; padding: 0 1; }
+  #scratch-files { height: 1fr; }
   #notabs { display: none; padding: 2 4; color: $text-muted; }
   MainScreen.-no-tabs #notabs { display: block; }
   MainScreen.-no-tabs .split, MainScreen.-no-tabs #loadstatus, MainScreen.-no-tabs #connstatus { display: none; }
@@ -163,6 +171,7 @@ class Slurp(App):
     Binding("i", "interactive_job", "Interactive job"),
     Binding("C", "cluster_info", "Cluster info"),
     Binding("Q", "quota", "Quota"),
+    Binding("X", "scratch", "Old scratch files"),
     Binding("a", "abort_load", "Abort loading"),
     Binding("c", "connection", "Connection"),
     Binding("ctrl+w", "close_view", "Close subtab"),
@@ -939,6 +948,17 @@ class Slurp(App):
   def action_quota(self):
     if not isinstance(self.screen, QuotaScreen):
       self.push_screen(QuotaScreen(self.cluster))
+
+  @on(Button.Pressed, "#scratch")
+  def scratch_pressed(self, event):
+    self.action_scratch()
+
+  def action_scratch(self):
+    cluster = self.cluster
+    if cluster.destination and not (cluster.connection and cluster.connection.ready):
+      self.notify("log in first", severity="warning")
+      return
+    self.open_view("old files in scratch", lambda: ScratchScreen(cluster), key="scratch")
 
   @on(Button.Pressed, "#cluster-info")
   def cluster_info_pressed(self, event):
