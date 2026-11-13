@@ -662,7 +662,10 @@ def array_overview(array_id):
     for i in indices(jid):
       task = tasks.setdefault(i, {"exit": "", "start": "", "end": "", "elapsed": "", "node": ""})
       task.update(state=state.strip(), reason=reason.strip() if state.strip() == "PENDING" else "")
-  errors = [f"{shlex.join(c[:3])}: {(r.stderr or '').strip()[:200]}" for c, r in zip(cmds, (acct, queue)) if r.returncode]
+  # squeue answers "Invalid job id specified" when no task of the array is queued any more: no error
+  queue_gone = queue.returncode and "invalid job id" in (queue.stderr or "").lower()
+  errors = [f"{shlex.join(c[:3])}: {(r.stderr or '').strip()[:200]}" for c, r in zip(cmds, (acct, queue))
+            if r.returncode and not (r is queue and queue_gone)]
   return {"tasks": tasks, "errors": errors}
 
 def task_group(task):
