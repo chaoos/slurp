@@ -19,12 +19,16 @@ duration syntax as `slurm.py -c`, e.g. `3d12h`); each tab keeps its own. The dro
 whose jobs are listed: yours, those of one of your Slurm accounts, or those of
 all of them (the accounts come from `sacctmgr`). Progress appears when the
 output contains a line such as `65/100`; the **Done in** column estimates when
-a running job gets to the end. Ten or more tasks of an array in one state are
-shown as one row (`9600_[1-30] ▸ 30 tasks`); clicking ▸ (or Space) lists every
-task under it and closes it again. Enter or a click elsewhere opens the window
-of the array: what it is, all its tasks by state (ended ones also by exit code,
-pending ones by reason) with their number and ids, to copy, run times and the
-nodes in use, and buttons to cancel the whole array or only its pending tasks
+a running job gets to the end. An array with ten or more tasks in the list is
+one row (`9600_[1-150] ▸ 150 tasks`) whose state is the mix of its tasks' states
+in Slurm's short codes, coloured: `30R 10PD 100CD 10F` (running, pending,
+completed, failed; CA cancelled, TO timeout, …); clicking ▸ (or Space) lists
+every task under it and closes it again, and **group arrays** (or `g`) switches
+between grouped arrays and every task. Enter or a click elsewhere opens the window
+of the array: what it is, queue waits and run times (min, avg, median, max),
+all its tasks by state (ended ones also by exit code, pending ones by reason)
+with their number and ids, to copy, a list of every task (a click opens its job
+window), the nodes in use, and buttons to cancel the whole array or only its pending tasks
 (after a confirmation). The job window of an array task has an **Array** button
 for it.
 
@@ -229,6 +233,13 @@ pending jobs and why they wait) and the partitions, with its own Reload; its
 title says healthy (green), degraded (yellow) or unhealthy (red) and why;
 without a connection it says so, with Reconnect.
 
+## Copying
+
+Copy buttons put the text on the clipboard with the tool of the machine slurp
+runs on (`wl-copy`, `xclip`, `xsel`, `pbcopy`) and also send it to the terminal
+(OSC 52, which some terminals ignore). Without such a tool a window shows the
+text selected, to copy with the terminal's own selection.
+
 ## Settings
 
 slurp keeps a few settings in `~/.config/slurp/config.json` (or under
@@ -322,7 +333,7 @@ top-left `←` button to go back.
 
 | Screen | Main controls |
 |---|---|
-| Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
+| Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
 | Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (subtab) |
 | Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
