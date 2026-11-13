@@ -58,6 +58,32 @@ from ..screens.dialogs import *
 from ..screens.base import *
 from ..screens.files import *
 
+def node_hours_text(job):
+  """The node hours a job used (nodes × elapsed time): bold, with how they come about; for a running job so far and
+  at most at the time limit, for a pending one what it may take"""
+  rec = job.rec
+  try:
+    nodes = int(rec["NNodes"] or 0)
+  except ValueError:
+    nodes = 0
+  try:
+    limit = sl.hours(rec["Timelimit"]) if rec["Timelimit"] and rec["Timelimit"][0].isdigit() else None
+  except ValueError:
+    limit = None
+  if job.state == "PENDING":
+    text = Text("none yet", style="bold")
+    if nodes and limit:
+      text.append(f"   at most {nodes * limit:.2f} ({nodes} node{'s' if nodes != 1 else ''} × {limit:.2f} h limit)", style="dim")
+    return text
+  used = job.node_hours()
+  text = Text(f"{used:.2f}", style="bold")
+  text.append(f"   {nodes} node{'s' if nodes != 1 else ''} × {used / nodes if nodes else 0:.2f} h", style="dim")
+  if job.running:
+    text.append("   so far", style="yellow")
+    if nodes and limit:
+      text.append(f", at most {nodes * limit:.2f} at the time limit", style="dim")
+  return text
+
 class JobScreen(SplitScreen):
   """Details, files and steps of one job, commands on its nodes"""
   SHOW_BACK = True
@@ -163,7 +189,7 @@ class JobScreen(SplitScreen):
       ("Start", ("~ " if job.state == "PENDING" else "") + rec["Start"].replace("T", " ") if is_time(rec["Start"]) else "-"),
       ("End", rec["End"].replace("T", " ") if is_time(rec["End"]) else "-"),
       ("Elapsed / limit", f"{rec['Elapsed']} / {rec['Timelimit']}"),
-      ("Node hours", f"{job.node_hours():.2f}"),
+      ("Node hours (total)", node_hours_text(job)),
       ("WorkDir", rec["WorkDir"]),
       ("Submitted with", rec["SubmitLine"]),
       ("Command", job.command),
