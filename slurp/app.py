@@ -192,14 +192,25 @@ class Slurp(App):
 
   def __init__(self):
     super().__init__()
-    self.clusters = [ClusterSession("Local")]
+    # the tabs of the last run (from the config; a local tab the first time), and the destinations given with --ssh
+    saved = load_config()
+    self.clusters = []
+    for tab in saved.get("tabs", [{"destination": None}]):
+      destination = tab.get("destination") or None
+      cluster = ClusterSession(destination or "Local", destination)
+      cluster.since_value = tab.get("since") or "1d"
+      cluster.scope = tab.get("scope") or "me"
+      self.clusters.append(cluster)
+    self.cluster_index = min(max(int(saved.get("active", 0) or 0), 0), max(len(self.clusters) - 1, 0))
     for destination in state.initial_ssh_destinations:
       if is_local_destination(destination):
         continue
-      self.clusters.append(ClusterSession(destination, destination))
-    self.cluster_index = 0
-    if state.initial_ssh_destinations and not is_local_destination(state.initial_ssh_destinations[0]):
-      self.cluster_index = 1
+      found = next((i for i, c in enumerate(self.clusters) if c.destination == destination), None)
+      if found is None:
+        self.clusters.append(ClusterSession(destination, destination))
+        found = len(self.clusters) - 1
+      if destination == next(d for d in state.initial_ssh_destinations if not is_local_destination(d)):
+        self.cluster_index = found # the first one given is shown
     self.shell = None # TerminalSession shown on the right of every window
     self.sort_column, self.sort_reverse = "jobid", True
     self.job_filter = ""
@@ -335,6 +346,7 @@ class Slurp(App):
         self.activate_cluster(index)
       return
     self.activate_cluster(index)
+    self.save_tabs()
 
   # ---- subtabs: the job list (the default mode) and the views of the active tab, each a mode with its own windows
   next_view_id = 0
@@ -475,6 +487,12 @@ class Slurp(App):
       self.cluster_index -= 1
     self.main.set_class(not self.clusters, "-no-tabs")
     self.refresh_status()
+    self.save_tabs()
+
+  def save_tabs(self):
+    """The open tabs (and which one is shown, and their choices) in the config, for the next start"""
+    update_config(tabs=[{"destination": c.destination, "since": c.since_value, "scope": c.scope} for c in self.clusters],
+                  active=self.cluster_index)
 
   def add_cluster(self, destination):
     if destination is None:
@@ -486,6 +504,7 @@ class Slurp(App):
       self.clusters.append(ClusterSession(destination, destination))
     self.refresh_cluster_tabs()
     self.select_cluster(len(self.clusters) - 1)
+    self.save_tabs()
 
   RECONNECT_DELAYS = (0, 5, 15, 30, 60) # seconds before the 1st, 2nd, ... attempt to reconnect a broken session
 
@@ -1086,6 +1105,7 @@ class Slurp(App):
         self.notify(str(e), severity="error")
         return
     self.since_value = value or "off"
+    self.save_tabs()
     self.action_reload()
 
   @on(Select.Changed, "#since-choice")
@@ -1101,6 +1121,7 @@ class Slurp(App):
     if event.value is Select.NULL or event.value == self.since_value:
       return
     self.since_value = event.value
+    self.save_tabs()
     self.action_reload()
 
   @on(Select.Changed, "#scope")
@@ -1108,6 +1129,7 @@ class Slurp(App):
     if self.setting_scope or event.value == self.cluster.scope or event.value is Select.NULL:
       return
     self.cluster.scope = event.value
+    self.save_tabs()
     self.setup_job_columns()
     self.action_reload()
 

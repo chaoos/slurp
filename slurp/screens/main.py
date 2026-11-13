@@ -125,4 +125,7 @@ class MainScreen(SplitScreen):
     self.app.setup_job_columns()
     table = self.query_one("#jobs", ClickTable)
     table.focus()
-    self.app.activate_cluster(self.app.cluster_index)
+    if self.app.clusters:
+      self.app.activate_cluster(self.app.cluster_index)
+    else:
+      self.set_class(True, "-no-tabs")
