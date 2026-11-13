@@ -250,6 +250,14 @@ def batch_script(jid, cache=None):
     cache[key] = out
   return out
 
+def array_task_id(job):
+  """Array task index from a selected Slurm array element ID (for example 12345_7)"""
+  for jid in (job.jid, job.rec.get("JobIDRaw", "")):
+    match = re.fullmatch(r"\d+_(\d+)", str(jid))
+    if match:
+      return match.group(1)
+  return None
+
 def restart_args(job):
   """Original sbatch command as argv, or None when the job cannot be resubmitted this way"""
   submit_line = (job.rec.get("SubmitLine") or "").strip()
@@ -259,6 +267,21 @@ def restart_args(job):
     return None
   if not args or os.path.basename(args[0]) != "sbatch":
     return None
+  task_id = array_task_id(job)
+  if task_id is not None:
+    # Replace command-line array ranges and add a single-task override for any #SBATCH directive.
+    original, rest = args[0], args[1:]
+    filtered, skip = [], False
+    for arg in rest:
+      if skip:
+        skip = False
+      elif arg in ("-a", "--array"):
+        skip = True
+      elif arg.startswith("--array=") or (arg.startswith("-a") and arg != "-a"):
+        continue
+      else:
+        filtered.append(arg)
+    args = [original, f"--array={task_id}", *filtered]
   return args
 
 def err_status(job):
@@ -1643,9 +1666,11 @@ class JobScreen(SplitScreen):
     if args is None:
       self.notify("The original sbatch command is not available for this job", severity="warning")
       return
-    submit_line = self.job.rec["SubmitLine"]
+    task_id = array_task_id(self.job)
+    title = "Restart array task?" if task_id is not None else "Restart job?"
+    scope = f"Only array task {task_id} will be submitted as a new job.\n" if task_id is not None else ""
     self.app.push_screen(
-      ConfirmScreen("Restart job?", f"Submit a new job using the recorded command:\n{submit_line}", "Restart job", variant="primary"),
+      ConfirmScreen(title, f"{scope}Submit a new job using this command:\n{shlex.join(args)}", "Restart job", variant="primary"),
       lambda confirmed: self.run_job_action("restart", args, cwd=self.job.rec.get("WorkDir")) if confirmed else None,
     )
 
