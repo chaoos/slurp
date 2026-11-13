@@ -389,16 +389,41 @@ class JobScreen(SplitScreen):
           retry_label = "Retry IDs not running/completed (none found)"
       except Exception as e:
         retry_label = f"Retry IDs not running/completed (unavailable: {str(e)[:80]})"
-    self.app.call_from_thread(self.show_restart_options, default_args, retry_args, retry_label)
+    original = original_submission(self.job, default_args)
+    self.app.call_from_thread(self.show_restart_options, default_args, retry_args, retry_label, original)
 
-  def show_restart_options(self, default_args, retry_args, retry_label):
+  def show_restart_options(self, default_args, retry_args, retry_label, original=None):
     if not self.is_mounted:
       return
     cwd = self.job.rec.get("WorkDir")
-    self.app.push_screen(
-      RestartScreen(self.job.jid, default_args, retry_args, retry_label),
-      lambda args: self.run_job_action("restart", args, cwd=cwd) if args is not None else None,
-    )
+    self.app.push_screen(RestartScreen(self.job.jid, default_args, retry_args, retry_label, original),
+                         lambda choice: self.restart(choice, original, cwd) if choice else None)
+
+  def restart(self, choice, original, cwd):
+    """Submit again; with the environment (env -i NAME=value ... sbatch) and/or the batch script Slurm kept"""
+    args = list(choice["args"])
+    script = original["script"] if choice["same_script"] and original["script_arg"] is not None else None
+    env = original["env"] if choice["same_env"] else None
+    if script is None and env is None:
+      self.run_job_action("restart", args, cwd=cwd)
+      return
+    self.restart_with_original(args, script, original["script_arg"], env, cwd)
+
+  @cluster_work("job-action")
+  def restart_with_original(self, args, script, script_arg, env, cwd):
+    cwd = cwd if cwd and cwd not in ("(null)", "None") else None
+    if script is not None:
+      path = os.path.join(cwd or ".", f".slurp-restart-{self.job.jid}.sh")
+      res = run_cmd(["sh", "-c", 'printf "%s" "$1" > "$2"', "sh", script, path], cwd=cwd, retry=False)
+      if res.returncode:
+        self.app.call_from_thread(self.job_action_finished, "restart", res.returncode, "", f"cannot save the original script: {res.stderr}")
+        return
+      args[script_arg] = path
+    if env is not None:
+      sbatch = run(["sh", "-c", 'command -v "$1"', "sh", args[0]], quiet=True).strip() # PATH of the job may not have it
+      args = ["env", "-i", *(f"{k}={v}" for k, v in env.items()), sbatch or args[0], *args[1:]]
+    result = run_cmd(args, cwd=cwd, timeout=60, env=SLURM_ENV if env is None else None, retry=False)
+    self.app.call_from_thread(self.job_action_finished, "restart", result.returncode, result.stdout, result.stderr)
 
   @cluster_work("job-action")
   def run_job_action(self, action, args, cwd=None):

@@ -312,7 +312,7 @@ class RunArrayScreen(ModalScreen[list[str] | None]):
   def action_cancel(self):
     self.dismiss(None)
 
-class RestartScreen(ModalScreen[list[str] | None]):
+class RestartScreen(ModalScreen[dict | None]):
   """Choose the command to submit when restarting a job"""
   DEFAULT_CSS = """
   RestartScreen { align: center middle; }
@@ -322,12 +322,14 @@ class RestartScreen(ModalScreen[list[str] | None]):
   #restart-command-label { margin-top: 1; }
   #restart-command { width: 1fr; height: auto; min-height: 3; max-height: 12; }
   #restart-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #restart-same-env, #restart-same-script { margin-top: 1; }
   #restart-buttons Button { margin-left: 1; }
   """
   BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)] # also while the editor has the focus
 
-  def __init__(self, jid, default_args, retry_args=None, retry_label="Retry unfinished array tasks unavailable"):
+  def __init__(self, jid, default_args, retry_args=None, retry_label="Retry unfinished array tasks unavailable", original=None):
     super().__init__()
+    self.original = original or {"env": None, "script": None, "script_arg": None}
     self.jid = jid
     self.default_args = list(default_args)
     self.retry_args = list(retry_args) if retry_args else None
@@ -345,6 +347,15 @@ class RestartScreen(ModalScreen[list[str] | None]):
         yield RadioButton("Custom command")
       yield Label("Command to submit (editable in Custom mode)", id="restart-command-label")
       yield bash_editor(self.default_command, "restart-command", read_only=True)
+      env, script = self.original["env"], self.original["script"]
+      yield Checkbox("Same environment as the original job" + (f" ({env_summary(env)})" if env else
+                     " (not available: this cluster does not store job environments, sacct --env-vars is empty; "
+                     "the environment of the login is used)"), value=bool(env), disabled=not env, id="restart-same-env")
+      usable = bool(script) and self.original["script_arg"] is not None
+      yield Checkbox("Same batch script as submitted" + (" (from Slurm; the file on disk may have changed)" if usable else
+                     " (not available: Slurm has not kept it, or the script is not an argument of the command)"
+                     if not script else " (kept by Slurm, but the script argument of the command is not clear)"),
+                     value=usable, disabled=not usable, id="restart-same-script")
       with Horizontal(id="restart-buttons"):
         yield Button("Cancel", id="restart-cancel")
         yield Button("Submit job", id="restart-submit", variant="primary")
@@ -393,7 +404,8 @@ class RestartScreen(ModalScreen[list[str] | None]):
     else:
       self.notify("Select a restart command", severity="warning")
       return
-    self.dismiss(list(args))
+    self.dismiss({"args": list(args), "same_env": self.query_one("#restart-same-env", Checkbox).value,
+                  "same_script": self.query_one("#restart-same-script", Checkbox).value and index != 2})
 
   def action_cancel(self):
     self.dismiss(None)

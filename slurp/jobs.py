@@ -457,6 +457,69 @@ def restart_args(job):
     args = with_array_spec(args, task_id)
   return args
 
+def sacct_dump(text):
+  """The content of sacct --env-vars / --batch-script output: what follows the line of dashes under its title"""
+  lines = text.splitlines()
+  for i, line in enumerate(lines[:4]):
+    if line.strip() and set(line.strip()) == {"-"}:
+      return "\n".join(lines[i + 1:]).strip("\n")
+  return text.strip("\n")
+
+ENV_NAME = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*(?:%%)?)=")
+
+def parse_env(text):
+  """NAME=value lines (a value may go on over several lines, e.g. exported bash functions) -> dict"""
+  env, name = {}, None
+  for line in text.splitlines():
+    m = ENV_NAME.match(line)
+    if m:
+      name = m.group(1)
+      env[name] = line[m.end():]
+    elif name is not None:
+      env[name] += "\n" + line
+  return env
+
+def restart_env(env):
+  """The environment of a submission without what belongs to the job that ran (SLURM_*)"""
+  return {k: v for k, v in env.items() if not k.startswith("SLURM_") or k == "SLURM_CONF"}
+
+def original_submission(job, args):
+  """What Slurm kept of the submission of a job: its environment (if the cluster stores it: AccountingStoreFlags=
+  job_env) and its batch script (while the job is known to the controller, or if stored: job_script), and which
+  argument of args is the script. -> {"env": dict or None, "script": text or None, "script_arg": index or None}"""
+  jid = job.jid
+  cmds = [["sacct", "-j", jid, "--env-vars"], ["sacct", "-j", jid, "--batch-script"],
+          ["scontrol", "write", "batch_script", jid, "-"]]
+  env_res, script_res, scontrol_res = run_many(cmds)
+  env = parse_env(sacct_dump(env_res.stdout)) if env_res.returncode == 0 else {}
+  script = scontrol_res.stdout if scontrol_res.returncode == 0 and scontrol_res.stdout.startswith("#!") else \
+           sacct_dump(script_res.stdout) if script_res.returncode == 0 else ""
+  script = script if script.lstrip().startswith("#!") else ""
+  script_arg = None
+  if script and "--wrap" not in " ".join(args):
+    from .details import existing_files # (details builds on this module)
+    workdir = job.rec.get("WorkDir") or "."
+    named = {os.path.normpath(p) for p in existing_files([shlex.join(args[1:])], workdir)}
+    for i, arg in enumerate(args[1:], 1):
+      path = os.path.normpath(arg if os.path.isabs(arg) else os.path.join(workdir, arg))
+      if not arg.startswith("-") and path in named:
+        script_arg = i
+        break
+  return {"env": restart_env(env) or None, "script": script or None, "script_arg": script_arg}
+
+def env_summary(env):
+  """What matters most in an environment, in a few words: uenv, modules, Python environment"""
+  parts = []
+  uenv = env.get("UENV_MOUNT_LIST") or env.get("UENV_VIEW")
+  if uenv:
+    parts.append(f"uenv {uenv}" + (f" (view {env['UENV_VIEW']})" if env.get("UENV_VIEW") and env.get("UENV_MOUNT_LIST") else ""))
+  if env.get("LOADEDMODULES"):
+    mods = env["LOADEDMODULES"].split(":")
+    parts.append(f"{len(mods)} modules: " + ", ".join(mods[:6]) + (" …" if len(mods) > 6 else ""))
+  if env.get("VIRTUAL_ENV") or env.get("CONDA_DEFAULT_ENV"):
+    parts.append(f"Python env {env.get('VIRTUAL_ENV') or env.get('CONDA_DEFAULT_ENV')}")
+  return f"{len(env)} variables" + (": " + "; ".join(parts) if parts else "")
+
 def array_task_states(parent_id):
   """Current/accounted states by array task ID; fail if either Slurm query is unavailable"""
   states = {}
