@@ -106,6 +106,34 @@ def cluster_info():
       info["reservations"].append(fields)
   return info
 
+HEALTH_STYLES = {"good": "bold green", "warn": "bold yellow", "bad": "bold red"}
+
+def cluster_health(info):
+  """("good" | "warn" | "bad", why) of the cluster from cluster_info()"""
+  if info is None or info.get("failed"):
+    return "bad", "no answer from Slurm"
+  states, total = info["states"], info["nodes"] or 0
+  broken = sum(n for s, n in states.items() if s in ("down", "fail", "failing"))
+  impaired = broken + sum(n for s, n in states.items() if s in ("drained", "draining", "maint", "unknown", "inval"))
+  impaired += info["flags"].get("not responding", 0)
+  down_parts = [p["name"] for p in info["partitions"] if p["avail"] != "up"]
+  now, soon = datetime.now(), []
+  for r in info["reservations"]:
+    if "MAINT" not in r.get("Flags", ""):
+      continue
+    try:
+      start, end = datetime.fromisoformat(r.get("StartTime", "")), datetime.fromisoformat(r.get("EndTime", ""))
+    except ValueError:
+      continue
+    if start <= now <= end or 0 <= (start - now).total_seconds() <= 86400:
+      soon.append(r["ReservationName"] + (" active" if start <= now else f" at {start:%m-%d %H:%M}"))
+  if not total or broken >= max(1, total // 10) or down_parts:
+    why = [f"{broken} of {total} nodes down"] if total else ["no nodes"]
+    return "bad", ", ".join(why + ([f"partition {', '.join(down_parts)} not up"] if down_parts else []))
+  if impaired or soon:
+    return "warn", ", ".join(([f"{impaired} of {total} nodes not usable"] if impaired else []) + [f"maintenance {s}" for s in soon])
+  return "good", f"all {total} nodes usable"
+
 def nodes_text(n):
   return f"{n} node" if n == 1 else f"{n} nodes"
 
@@ -114,7 +142,10 @@ class ClusterInfoScreen(ModalScreen):
   DEFAULT_CSS = """
   ClusterInfoScreen { align: center middle; }
   #ci-dialog { width: 120; max-width: 98%; height: 90%; border: thick $accent; background: $surface; padding: 0 1; }
-  #ci-title { text-style: bold; height: 1; margin-bottom: 1; }
+  #ci-title { text-style: bold; height: auto; margin-bottom: 1; }
+  #ci-dialog.-good { border: thick $success; }
+  #ci-dialog.-warn { border: thick $warning; }
+  #ci-dialog.-bad { border: thick $error; }
   #ci-body { height: 1fr; }
   #ci-buttons { height: auto; align-horizontal: right; margin-top: 1; }
   #ci-buttons Button { margin-left: 1; }
@@ -143,7 +174,17 @@ class ClusterInfoScreen(ModalScreen):
 
   def title_text(self):
     state = "loading …" if self.loading else f"as of {self.info['time']:%H:%M:%S}" if self.info else ""
-    return Text(f"Cluster {self.cluster.name} · {state}")
+    text = Text(f"Cluster {self.cluster.name} · ")
+    dialog = self.query_one("#ci-dialog")
+    for level in HEALTH_STYLES:
+      dialog.remove_class(f"-{level}")
+    if self.info is not None:
+      level, why = cluster_health(self.info)
+      dialog.add_class(f"-{level}")
+      text.append(f"● {dict(good='healthy', warn='degraded', bad='unhealthy')[level]}: {why}", style=HEALTH_STYLES[level])
+      text.append(" · ")
+    text.append(state)
+    return text
 
   def not_connected(self):
     """Why the tab cannot be asked now (None: it can)"""
