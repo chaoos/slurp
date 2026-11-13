@@ -67,6 +67,7 @@ from .screens.clusterinfo import *
 from .storage import *
 from .screens.storage import *
 from . import remote, state
+from .config import load_config, update_config
 
 class Slurp(App):
   TITLE = "slurp"
@@ -210,6 +211,14 @@ class Slurp(App):
 
   def on_mount(self):
     self.set_interval(0.25, self.tick)
+    theme = load_config().get("theme")
+    if theme and theme in self.available_themes:
+      self.theme = theme
+    self.watch(self, "theme", self.theme_changed, init=False)
+
+  def theme_changed(self, theme):
+    """A theme chosen (e.g. with the command palette) is the default from now on"""
+    update_config(theme=theme)
 
   def on_unmount(self):
     self.shutdown()
