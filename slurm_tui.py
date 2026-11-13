@@ -40,7 +40,7 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen, Screen
 from textual.strip import Strip
 from textual.widget import Widget
-from textual.widgets import Button, Checkbox, DataTable, Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Select, Static, TextArea, Tree
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
 from textual.widgets.option_list import Option
 from textual.widgets.text_area import Selection
 from textual.worker import get_current_worker
@@ -2630,7 +2630,9 @@ class MainScreen(SplitScreen):
       yield Button("Reload", id="reload", variant="primary")
       yield Label("finished since")
       yield Input("1d", id="since", placeholder="off")
-      yield Checkbox("all my accounts", id="us")
+      with Horizontal(id="accounts-toggle"):
+        yield Label("all my accounts")
+        yield Switch(id="us")
     yield Static(id="status")
     yield ClickTable(id="jobs", cursor_type="row", zebra_stripes=True)
     yield Input(id="jfilter", placeholder="filter jobs by name, command, ID, state, user, account, path…")
@@ -2662,6 +2664,9 @@ class SlurmTUI(App):
   #toolbar { height: auto; padding: 0 1; }
   #toolbar > * { margin-right: 1; }
   #toolbar Label { padding-top: 1; }
+  #accounts-toggle { width: auto; height: auto; }
+  #accounts-toggle Label { width: auto; height: auto; content-align: center middle; margin-right: 1; padding: 0; }
+  #us { width: auto; height: auto; padding: 0; border: none; }
   #since { width: 12; }
   #topbar { height: 1; }
   #topbar Header { dock: none; width: 1fr; height: 1; }
@@ -2729,7 +2734,7 @@ class SlurmTUI(App):
   def setup_job_columns(self):
     table = self.query_one("#jobs", ClickTable)
     table.clear(columns=True)
-    all_accounts = self.query_one("#us", Checkbox).value
+    all_accounts = self.query_one("#us", Switch).value
     if not all_accounts and self.sort_column == "user":
       self.sort_column, self.sort_reverse = "jobid", True
     for key, label in COLUMNS:
@@ -2837,7 +2842,7 @@ class SlurmTUI(App):
         return
     self.since = since
     self.query_one("#jobs", ClickTable).loading = True
-    self.load(since, self.query_one("#us", Checkbox).value)
+    self.load(since, self.query_one("#us", Switch).value)
 
   @work(thread=True, exclusive=True, group="jobs")
   def load(self, since, us):
@@ -2869,7 +2874,7 @@ class SlurmTUI(App):
               f"{job.state} ({job.reason})" if job.queued else f"{job.state} ({rec['ExitCode']})"
       start = fmt_time(rec["Start"])
       values = [job.jid, rec["JobName"]]
-      if self.query_one("#us", Checkbox).value:
+      if self.query_one("#us", Switch).value:
         values.append(rec["User"])
       values.extend((state_text(state), rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
                      ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]), err_text(job.err),
@@ -2896,9 +2901,9 @@ class SlurmTUI(App):
 
   @on(Button.Pressed, "#reload")
   @on(Input.Submitted, "#since")
-  @on(Checkbox.Changed, "#us")
+  @on(Switch.Changed, "#us")
   def reload_requested(self, event):
-    if isinstance(event, Checkbox.Changed):
+    if isinstance(event, Switch.Changed):
       self.setup_job_columns()
     self.action_reload()
 
