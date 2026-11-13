@@ -125,6 +125,9 @@ class ConnectionScreen(ModalScreen):
   ConnectionScreen { align: center middle; }
   #conn-dialog { width: 110; max-width: 98%; height: 90%; border: thick $accent; background: $surface; padding: 0 1; }
   #conn-title { text-style: bold; height: 1; margin-bottom: 1; }
+  #conn-dialog.-good { border: thick $success; }
+  #conn-dialog.-warn { border: thick $warning; }
+  #conn-dialog.-bad { border: thick $error; }
   #conn-body { height: 1fr; }
   #conn-buttons { height: auto; align-horizontal: right; margin-top: 1; }
   #conn-buttons Button { margin-left: 1; }
@@ -147,9 +150,17 @@ class ConnectionScreen(ModalScreen):
           yield Button("Disconnect", id="conn-disconnect", variant="error")
         yield Button("Close", id="conn-close")
 
+  def show_title(self):
+    text = Text(f"Connection of the tab {self.cluster.name}" + (f" · ssh {self.cluster.destination}" if self.cluster.destination else ""))
+    level, words = connection_health(self.cluster.connection if self.cluster.destination else None)
+    text.append(f" · ● {words}", style=HEALTH_STYLES[level])
+    self.query_one("#conn-title", Static).update(text)
+    dialog = self.query_one("#conn-dialog")
+    for other in HEALTH_STYLES:
+      dialog.set_class(other == level, f"-{other}")
+
   def on_mount(self):
-    self.query_one("#conn-title", Static).update(
-      Text(f"Connection of the tab {self.cluster.name}" + (f" · ssh {self.cluster.destination}" if self.cluster.destination else "")))
+    self.show_title()
     if self.cluster.destination:
       dest = self.cluster.destination
       in_background(self, lambda: ssh_config(dest), self.got_config, group="ssh-config", connection=None)
@@ -206,6 +217,7 @@ class ConnectionScreen(ModalScreen):
   def show(self):
     if not self.is_mounted:
       return
+    self.show_title()
     cluster, c = self.cluster, self.cluster.connection
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold", no_wrap=True)

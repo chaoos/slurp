@@ -97,6 +97,9 @@ class Slurp(App):
   #bottombar Footer { dock: none; width: 1fr; }
   #loadstatus { width: auto; height: 1; padding: 0 1; background: $footer-background; color: $warning; }
   #connstatus { width: auto; height: 1; padding: 0 1; background: $footer-background; }
+  #connstatus.-good { background: $success 25%; }
+  #connstatus.-warn { background: $warning 30%; }
+  #connstatus.-bad { background: $error 40%; }
   #connstatus:hover { background: $accent; }
   #back { width: 3; min-width: 3; height: 1; padding: 0; }
   #status { height: 1; padding: 0 1; background: $panel; }
@@ -541,7 +544,8 @@ class Slurp(App):
       if waiting is not None and waiting > PING_SLOW:
         return Text(f"{self.spinner()} SSH {c.identity}: no answer for {waiting:.0f} s", style="bold red")
       latency = f" · {c.latency * 1000:.0f} ms" if c.latency is not None else ""
-      return Text(f"● SSH {c.identity}{latency}", style="green")
+      level, words = connection_health(c)
+      return Text(f"● SSH {c.identity}{latency}" + ("" if level == "good" else f" · {words}"), style=HEALTH_STYLES[level])
     if c.state == "connecting":
       what = "log in on the right" if self.shell is cluster.login_terminal else "connecting"
       attempt = f" (attempt {cluster.attempts})" if cluster.attempts > 1 else ""
@@ -608,8 +612,11 @@ class Slurp(App):
         continue
       for widget in screen.query("#loadstatus"):
         widget.update(loading)
+      level = connection_health(cluster.connection)[0] if cluster.destination else "good"
       for widget in screen.query("#connstatus"):
         widget.update(connection)
+        for other in HEALTH_STYLES:
+          widget.set_class(other == level and bool(cluster.destination), f"-{other}")
       if isinstance(screen, MainScreen) and screen.query("#reload"):
         screen.query_one("#status", Static).update(Text(cluster.summary))
         button = screen.query_one("#reload", Button)

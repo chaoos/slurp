@@ -660,6 +660,25 @@ class RemoteSSH:
         proc.terminate()
     shutil.rmtree(self.socket_dir, ignore_errors=True)
 
+HEALTH_STYLES = {"good": "bold green", "warn": "bold yellow", "bad": "bold red"}
+SLOW_ROUND_TRIP = 1.0 # seconds: a heartbeat round trip longer than this is slow
+
+def connection_health(connection):
+  """("good" | "warn" | "bad", in words) of an SSH connection (None: the local machine)"""
+  c = connection
+  if c is None:
+    return "good", "local"
+  if c.ready:
+    waiting = c.responding()
+    if waiting is not None and waiting > PING_SLOW:
+      return "bad", f"no answer for {waiting:.0f} s"
+    if waiting is not None and waiting > SLOW_ROUND_TRIP or c.latency is not None and c.latency > SLOW_ROUND_TRIP:
+      return "warn", "slow"
+    return "good", "healthy"
+  if c.state in ("connecting", "new"):
+    return "warn", "connecting" if c.state == "connecting" else "not connected"
+  return "bad", "disconnected" if c.state == "closed" or not c.wanted else "connection lost"
+
 def fs_exists(path): return conn().exists(path) if conn() else os.path.exists(path)
 def fs_isfile(path): return conn().isfile(path) if conn() else os.path.isfile(path)
 def fs_isdir(path): return conn().isdir(path) if conn() else os.path.isdir(path)
