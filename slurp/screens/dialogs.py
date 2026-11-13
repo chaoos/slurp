@@ -470,9 +470,11 @@ def send_osc52(app, text):
 
 def local_clipboard(text):
   """Put text on the clipboard of this machine with its tool (wl-copy, xclip, xsel, pbcopy, clip.exe): the tool
-  used, or None if there is none (or it failed)"""
+  used, or None if there is none (or it failed). Over SSH only a forwarded display counts: pbcopy or clip.exe
+  would fill the clipboard of this machine, not the one of the person at the keyboard"""
+  over_ssh = bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"))
   for env, cmd in CLIPBOARD_TOOLS:
-    if env and not os.environ.get(env) or not shutil.which(cmd[0]):
+    if env and not os.environ.get(env) or not env and over_ssh or not shutil.which(cmd[0]):
       continue
     try:
       if subprocess.run(cmd, input=text.encode(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3).returncode == 0:
