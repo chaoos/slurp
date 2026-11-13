@@ -4093,6 +4093,7 @@ class SlurmTUI(App):
     Binding("e", "open('stderr')", "Error file"),
     Binding("o", "open('stdout')", "Output file"),
     Binding("t", "cluster_shell", "Shell"),
+    Binding("d", "login_dir", "Home dir"),
     Binding("a", "abort_load", "Abort loading"),
     Binding("c", "connection", "Connection"),
     Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
@@ -4456,6 +4457,18 @@ class SlurmTUI(App):
       self.open_shell([], f"shell on {cluster.connection.identity if cluster.connection else cluster.destination}", focus=True)
     else:
       self.open_shell([os.environ.get("SHELL") or "bash", "-l"], "local shell", focus=True)
+
+  def action_login_dir(self):
+    """Browse the login directory of the active cluster."""
+    cluster = self.cluster
+    if cluster.destination and (cluster.connection is None or not cluster.connection.ready):
+      self.notify(f"{cluster.name}: log in first", severity="warning")
+      return
+    path = cluster.connection.home if cluster.connection else os.path.expanduser("~")
+    if not path:
+      self.notify(f"{cluster.name}: login directory is not available yet", severity="warning")
+      return
+    open_path(self, [cluster.name], path, [path])
 
   def restart_shell(self):
     if not self.shell:
