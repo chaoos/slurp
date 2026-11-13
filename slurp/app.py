@@ -971,7 +971,10 @@ class Slurp(App):
   def group_row(self, key, tasks, cluster):
     """Cells of the row of many tasks of an array in one state"""
     array_id, _, state = key.partition("|")
-    ids = compress_array_ids(int(t) for j in tasks if (t := array_task_id(j)) is not None)
+    indices = sorted(int(t) for j in tasks if (t := array_task_id(j)) is not None)
+    ids = compress_array_ids(indices)
+    if len(ids) > 15: # interleaved states give long lists (1,3,5,...): they would make the column very wide
+      ids = f"{indices[0]}…{indices[-1]}"
     opened = key in cluster.expanded
     first = tasks[0].rec
     values = [Text(f"{array_id}_[{ids}] {'▾' if opened else '▸'} {len(tasks)} tasks", style="bold"), first["JobName"]]
@@ -1012,9 +1015,15 @@ class Slurp(App):
     table.clear()
     self.mark_sort_column(table)
     ordered = sorted(visible_jobs, key=SORT_KEYS[self.sort_column], reverse=self.sort_reverse)
-    for item in self.collapse(ordered, cluster):
+    try:
+      items = list(self.collapse(ordered, cluster))
+      rows = {item[0]: self.group_row(*item, cluster) for item in items if isinstance(item, tuple)}
+    except Exception: # the list must show in any case: then without collapsed arrays
+      log.exception("collapsing arrays in the job list failed")
+      items, rows = ordered, {}
+    for item in items:
       if isinstance(item, tuple): # the row of a collapsed (or opened) array
-        table.add_row(*self.group_row(*item, cluster), key="group|" + item[0])
+        table.add_row(*rows[item[0]], key="group|" + item[0])
         continue
       job = item
       rec = job.rec
