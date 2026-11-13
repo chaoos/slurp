@@ -265,14 +265,15 @@ class ScratchScreen(SplitScreen):
       self.status(f"search failed: {r['error']}", "red")
       return
     now, limit = time.time(), self.days() * DAY
-    old = 0
+    old = near = 0
     shown = self.visible()
     for i in shown:
       f = r["files"][i]
       age = now - f[r["by"]]
-      is_old = age > limit
+      is_old, is_near = age > limit, limit * 0.8 < age <= limit # near: within the last fifth of the limit
       old += is_old
-      style = "red" if is_old else ""
+      near += is_near
+      style = "red" if is_old else "yellow" if is_near else ""
       table.add_row("✓" if i in self.selected else "", datetime.fromtimestamp(f["atime"]).strftime("%Y-%m-%d %H:%M"),
                     datetime.fromtimestamp(f["mtime"]).strftime("%Y-%m-%d %H:%M"), Text(f"{age / DAY:.0f} d", style=style),
                     humanize.naturalsize(f["size"]), Text(f["path"], style=style), key=str(i))
@@ -283,8 +284,8 @@ class ScratchScreen(SplitScreen):
     self.status(f"{n} files ({humanize.naturalsize(size)}) of the user in {r['directory']}, {listed}"
                 + (f", {excluded} of them excluded" if excluded else "") + "; "
                 f"{old}{'+' if n > len(r['files']) and old == len(r['files']) else ''} not {'used' if r['by'] == 'atime' else 'changed'} "
-                f"for more than {self.days()} days (red), which an automatic cleanup may delete · "
-                f"searched in {r.get('seconds', 0):.0f} s at {r['time']:%H:%M}", "bold red" if old else "green")
+                f"for more than {self.days()} days (red), which an automatic cleanup may delete, {near} close to it (yellow) · "
+                f"searched in {r.get('seconds', 0):.0f} s at {r['time']:%H:%M}", "bold red" if old else "yellow" if near else "green")
 
   @on(DataTable.RowSelected, "#scratch-files")
   def row_selected(self, event):
