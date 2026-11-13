@@ -87,7 +87,9 @@ class Slurp(App):
   MainScreen.-no-tabs #notabs { display: block; }
   MainScreen.-no-tabs .split, MainScreen.-no-tabs #loadstatus, MainScreen.-no-tabs #connstatus { display: none; }
   #us { width: auto; height: auto; padding: 0; border: none; }
-  #since { width: 12; }
+  #since-choice { width: 18; }
+  #since { width: 12; display: none; }
+  #since.-custom { display: block; }
   #topbar { height: 1; }
   #cluster-tabs { height: 1; padding: 0 1; background: $panel; }
   #cluster-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 1; }
@@ -815,7 +817,7 @@ class Slurp(App):
 
   def reload_cluster(self, cluster):
     """Load the job list of a tab in the background; the list loaded before stays until the new one is there"""
-    value = self.query_one("#since", Input).value.strip()
+    value = self.since_value
     if value.lower() in ("", "0", "off", "no", "none"):
       since = None
     else:
@@ -1004,8 +1006,31 @@ class Slurp(App):
   def cluster_shell_pressed(self, event):
     self.action_cluster_shell()
 
+  since_value = "1d" # how long ago finished jobs are listed (as in slurm.py -c), "off": none
+
   @on(Input.Submitted, "#since")
-  def reload_requested(self, event):
+  def since_typed(self, event):
+    value = event.value.strip()
+    if value.lower() not in ("", "0", "off", "no", "none"):
+      try:
+        sl.parse_duration(value)
+      except sl.argparse.ArgumentTypeError as e:
+        self.notify(str(e), severity="error")
+        return
+    self.since_value = value or "off"
+    self.action_reload()
+
+  @on(Select.Changed, "#since-choice")
+  def since_chosen(self, event):
+    custom = self.query_one("#since", Input)
+    custom.set_class(event.value == "custom", "-custom")
+    if event.value == "custom":
+      custom.value = self.since_value if self.since_value != "off" else ""
+      custom.focus()
+      return
+    if event.value is Select.NULL or event.value == self.since_value:
+      return
+    self.since_value = event.value
     self.action_reload()
 
   @on(Select.Changed, "#scope")

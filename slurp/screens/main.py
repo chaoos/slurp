@@ -58,6 +58,9 @@ COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("user", "User"), ("state", "S
            ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
            ("start", "Start"), ("end", "End"), ("err", "Err"), ("cmd", "Command")]
 
+SINCE_CHOICES = [("only queued", "off"), ("1 hour", "1h"), ("6 hours", "6h"), ("12 hours", "12h"), ("1 day", "1d"),
+                 ("2 days", "2d"), ("1 week", "1w"), ("2 weeks", "2w"), ("1 month", "1mo"), ("custom …", "custom")]
+
 SORT_KEYS = {
   "arrayid": lambda j: (int(t) if (t := array_task_id(j)) is not None else -1, job_id_key(j.jid)), # array index first
   "jobid": lambda j: job_id_key(j.jid),
@@ -91,7 +94,9 @@ class MainScreen(SplitScreen):
       yield Button("Quota", id="quota", tooltip="your quotas on the filesystems (Q)")
       yield Button("Scratch", id="scratch", tooltip="your oldest files in $SCRATCH, which a cleanup may delete (X)")
       yield Label("finished since")
-      yield Input("1d", id="since", placeholder="off")
+      yield Select(SINCE_CHOICES, value="1d", allow_blank=False, id="since-choice",
+                   tooltip="also list the jobs that finished within this time")
+      yield Input("1d", id="since", placeholder="e.g. 3d12h", tooltip="s, m, h, d, w, mo, y, combined (1d12h); Enter: load")
       yield Select([("my jobs", "me"), ("all my accounts", "all")], value="me", allow_blank=False, id="scope",
                    tooltip="whose jobs are listed: yours, or those of one or all of your Slurm accounts")
     yield Static(id="status")
