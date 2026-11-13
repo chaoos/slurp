@@ -643,10 +643,17 @@ class Slurp(App):
                 style="yellow")
 
   def tab_label(self, cluster):
+    """Name, a dot coloured by the health of its session (● connected, ◌ connecting or not answering, ○ not
+    connected), and ⟳ while its list loads"""
     c = cluster.connection
-    mark = "" if not cluster.destination else " ●" if c and c.ready and (c.responding() or 0) <= PING_SLOW else \
-           " ○" if c is None or c.state in ("new", "closed") else " ◌"
-    return cluster.name + mark + (" ⟳" if cluster.loader is not None else "")
+    label = Text(cluster.name)
+    if cluster.destination:
+      mark = "●" if c and c.ready and (c.responding() or 0) <= PING_SLOW else "○" if c is None or c.state in ("new", "closed") else "◌"
+      level = connection_health(c)[0] if c is not None and c.state != "new" else None
+      label.append(" " + mark, style=HEALTH_STYLES[level] if level else "dim")
+    if cluster.loader is not None:
+      label.append(" ⟳")
+    return label
 
   def refresh_cluster_tabs(self):
     for screen in dict.fromkeys([self.main, *self.screen_stack]):
@@ -665,8 +672,8 @@ class Slurp(App):
           button = existing[button_id]
           if button.variant != variant:
             button.variant = variant
-          if str(button.label) != label:
-            button.label = label
+          if str(button.label) != str(label) or getattr(button, "shown_label", None) != label.markup:
+            button.label, button.shown_label = label, label.markup
         else:
           tabs.mount(Button(label, id=button_id, classes="cluster-tab", variant=variant, compact=True),
                      Button("✕", id=f"cluster-close-{index}", classes="cluster-close", compact=True, tooltip="close the tab"),
