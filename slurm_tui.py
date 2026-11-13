@@ -604,6 +604,10 @@ class SplitScreen(Screen):
   def compose_left(self):
     return []
 
+  async def pop_back(self):
+    await self.app.pop_screen()
+    self.app.screen.refresh(layout=True)
+
 DIR_COLUMNS = [("name", "Name"), ("size", "Size"), ("mtime", "Modified")]
 DIR_LIMIT = 20000 # entries listed at most
 
@@ -723,7 +727,7 @@ class DirScreen(SplitScreen):
       self.sort_column, self.sort_reverse = col, col != "name"
     self.populate()
 
-  def action_back(self):
+  async def action_back(self):
     search = self.query_one("#dfilter", Input)
     if search.has_class("visible"):
       search.remove_class("visible")
@@ -731,7 +735,7 @@ class DirScreen(SplitScreen):
       self.populate()
       self.query_one("#dir").focus()
     else:
-      self.app.pop_screen()
+      await self.pop_back()
 
   def action_parent(self):
     if self.path != "/":
@@ -877,13 +881,13 @@ class FileScreen(SplitScreen):
       area.scroll_end(animate=False)
     self.update_status()
 
-  def action_back(self):
+  async def action_back(self):
     search = self.query_one("#search", Input)
     if search.has_class("visible"):
       search.remove_class("visible")
       self.area.focus()
     else:
-      self.app.pop_screen()
+      await self.pop_back()
 
   @on(PathArea.PathClicked)
   def path_clicked(self, event):
@@ -1435,11 +1439,11 @@ class H5Screen(SplitScreen):
       pass
     self.show_data()
 
-  def action_back(self):
+  async def action_back(self):
     if self.focused is self.query_one("#hslice"):
       self.query_one("#htree").focus()
     else:
-      self.app.pop_screen()
+      await self.pop_back()
 
 
 class JobScreen(SplitScreen):
@@ -1564,8 +1568,8 @@ class JobScreen(SplitScreen):
     self.show_files()
     self.app.show_warnings()
 
-  def action_back(self):
-    self.app.pop_screen()
+  async def action_back(self):
+    await self.pop_back()
 
   def check_action(self, action, parameters):
     if action == "shell":
