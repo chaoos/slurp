@@ -49,6 +49,7 @@ from textual.widget import Widget
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, MarkdownViewer, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
 from textual.widgets.option_list import Option
 from textual.widgets.text_area import Selection
+from textual.suggester import SuggestFromList
 from textual.worker import get_current_worker
 
 import slurm as sl
@@ -2966,12 +2967,6 @@ def command_args(text):
   """argv of a command typed in an editor: lines may end with a backslash, the lines are joined"""
   return shlex.split(text.replace("\\\n", " ").replace("\n", " "))
 
-INTERACTIVE_JOB = """sbatch --job-name=interactive \\
-  --nodes=1 --ntasks=1 \\
-  --time=01:00:00 \\
-  --output=/dev/null \\
-  --wrap='sleep infinity'"""
-
 class CommandScreen(ModalScreen[list[str] | None]):
   """Confirm (and edit) a command before it is run: returns its argv, or None"""
   DEFAULT_CSS = """
@@ -3025,6 +3020,81 @@ class CommandScreen(ModalScreen[list[str] | None]):
 def array_range(start, stop, step):
   """sbatch --array expression of a range"""
   return f"{start}-{stop}" + (f":{step}" if step != 1 else "") if stop != start else str(start)
+
+TIME_LIMITS = ["00:30:00", "01:00:00", "02:00:00", "04:00:00", "08:00:00", "12:00:00", "1-00:00:00"]
+
+def interactive_job_command(name="interactive", nodes="1", time_limit="01:00:00", partition="", account="", gpus=""):
+  """sbatch command of a job that only holds its nodes (sleep infinity), one option per line"""
+  lines = [f"sbatch --job-name={shlex.quote(name or 'interactive')}", f"--nodes={nodes or 1} --ntasks-per-node=1",
+           f"--time={time_limit or '01:00:00'}"]
+  lines += [f"--partition={shlex.quote(partition)}"] if partition else []
+  lines += [f"--account={shlex.quote(account)}"] if account else []
+  lines += [f"--gpus-per-node={gpus}"] if gpus else []
+  lines += ["--output=/dev/null", "--wrap='sleep infinity'"]
+  return " \\\n  ".join(lines)
+
+class InteractiveJobScreen(CommandScreen):
+  """CommandScreen for an interactive job: fields for account (from a list or typed), partition, time, nodes and
+  GPUs write the command; it stays editable"""
+  DEFAULT_CSS = CommandScreen.DEFAULT_CSS + """
+  .ij-row { height: auto; margin-bottom: 1; }
+  .ij-row Label { padding: 1 1 0 0; width: auto; }
+  #ij-account { width: 20; }
+  #ij-account-list { width: 24; margin-right: 2; }
+  #ij-partition { width: 26; margin-right: 2; }
+  #ij-time { width: 16; margin-right: 2; }
+  #ij-nodes, #ij-gpus { width: 8; margin-right: 2; }
+  #ij-name { width: 22; }
+  """
+
+  def __init__(self, title, explanation, accounts, connection):
+    super().__init__(title, explanation, interactive_job_command(), "Submit", "sbatch")
+    self.accounts, self.connection = list(accounts or []), connection
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="command-dialog"):
+      yield Static(self.dialog_title, id="command-title")
+      yield Static(self.explanation, markup=False)
+      with Horizontal(classes="ij-row"):
+        yield Label("account")
+        yield Input(id="ij-account", placeholder="default", suggester=SuggestFromList(self.accounts, case_sensitive=False))
+        yield Select([(a, a) for a in self.accounts], prompt="pick", id="ij-account-list")
+        yield Label("partition")
+        yield Select([], prompt="default", id="ij-partition")
+      with Horizontal(classes="ij-row"):
+        yield Label("time")
+        yield Input("01:00:00", id="ij-time", suggester=SuggestFromList(TIME_LIMITS))
+        yield Label("nodes")
+        yield Input("1", id="ij-nodes", type="integer")
+        yield Label("GPUs/node")
+        yield Input("", id="ij-gpus", type="integer", placeholder="-")
+        yield Label("name")
+        yield Input("interactive", id="ij-name")
+      yield bash_editor(self.command, "command-text")
+      with Horizontal(id="command-buttons"):
+        yield Button("Cancel", id="command-cancel")
+        yield Button(self.submit_label, id="command-submit", variant="primary")
+
+  def on_mount(self):
+    self.query_one("#ij-time").focus()
+    def got(partitions):
+      if partitions:
+        self.query_one("#ij-partition", Select).set_options([(p, p) for p in partitions])
+    in_background(self, lambda: [p.rstrip("*") for p in run(["sinfo", "-h", "-o", "%P"], quiet=True).split()],
+                  got, group="partitions", connection=self.connection)
+
+  @on(Select.Changed, "#ij-account-list")
+  def account_picked(self, event):
+    if event.value is not Select.NULL:
+      self.query_one("#ij-account", Input).value = event.value
+
+  @on(Input.Changed, ".ij-row Input")
+  @on(Select.Changed, "#ij-partition")
+  def fields_changed(self, event):
+    value = lambda key: self.query_one(f"#ij-{key}", Input).value.strip()
+    partition = self.query_one("#ij-partition", Select).value
+    self.query_one("#command-text", TextArea).load_text(interactive_job_command(
+      value("name"), value("nodes"), value("time"), "" if partition is Select.NULL else partition, value("account"), value("gpus")))
 
 class RunArrayScreen(ModalScreen[list[str] | None]):
   """Submit the job of an array again with another --array range (start, stop, step), with a warning when the
@@ -5271,7 +5341,8 @@ class SlurmTUI(App):
     explanation = ("The job runs 'sleep infinity' and so holds its nodes until its time limit or until it is cancelled. "
                    "Once it runs, open it in the job list: Shell gives a shell on its node. Change the options as needed "
                    "(partition, account, nodes, time, GPUs).")
-    self.push_screen(CommandScreen(f"Interactive job on {cluster.name}", explanation, INTERACTIVE_JOB, "Submit", "sbatch"),
+    self.push_screen(InteractiveJobScreen(f"Interactive job on {cluster.name}", explanation, cluster.accounts,
+                                          cluster.connection if cluster.destination else None),
                      lambda args: self.submit_job(cluster, args) if args else None)
 
   def submit_job(self, cluster, args):
