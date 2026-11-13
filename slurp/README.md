@@ -179,7 +179,7 @@ reads only what was appended), and HDF5 files are read in place by h5py
 through a file object that fetches only the byte ranges it asks for (1 MiB
 blocks), so a large file costs only what is browsed.
 
-Clicking the connection state in the footer (or `c`) opens the connection
+Clicking the connection state in the footer opens the connection
 window of the tab: its state, the course of a (re)connect (connecting,
 waiting for input, connected, failed with the error and what ssh printed), the
 logged-in user and login node, the resolved destination (`ssh -G`), traffic
@@ -317,7 +317,7 @@ top-left `←` button to go back.
 
 | Screen | Main controls |
 |---|---|
-| Job list | `/` search jobs; `Enter` open; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `c` connection window; `q` quit |
+| Job list | `/` search jobs; `Enter` open; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
 | Job details | `Cancel job` / `Restart job` / `Run array`; `r` reload; `s` shell on the node (subtab) |
 | Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |

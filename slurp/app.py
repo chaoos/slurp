@@ -184,7 +184,6 @@ class Slurp(App):
     Binding("Q", "quota", "Quota"),
     Binding("X", "scratch", "Old scratch files"),
     Binding("a", "abort_load", "Abort loading"),
-    Binding("c", "connection", "Connection"),
     Binding("ctrl+w", "close_view", "Close subtab"),
     Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
     Binding("ctrl+x", "close_shell", "Close shell"),
