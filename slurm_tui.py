@@ -26,6 +26,7 @@ from datetime import datetime
 
 import humanize
 from rich.color import Color
+from rich.progress_bar import ProgressBar as RichProgressBar
 from rich.segment import Segment
 from rich.style import Style
 from rich.table import Table
@@ -40,7 +41,7 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen, Screen
 from textual.strip import Strip
 from textual.widget import Widget
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
 from textual.widgets.option_list import Option
 from textual.widgets.text_area import Selection
 from textual.worker import get_current_worker
@@ -50,6 +51,9 @@ import slurm as sl
 log = logging.getLogger("slurm_tui")
 
 TAIL_BYTES = 4*1024*1024 # files larger than this are shown from their end
+PROGRESS_TAIL_BYTES = 64*1024
+PROGRESS_TAIL_LINES = 30
+PROGRESS_PATTERN = re.compile(r"(?<!\d)(\d+)\s*/\s*(\d+)(?!\d)")
 STEP_NAME = "slurm_tui"  # job name of the steps that run commands on the nodes
 PRESETS = {
   "nvidia-smi": "nvidia-smi",
@@ -134,6 +138,12 @@ def job_id_key(jid):
   return tuple(int(n) for n in re.findall(r'\d+', jid)) or (0,)
 
 @dataclass
+class JobProgress:
+  current: int
+  total: int
+  line: str
+
+@dataclass
 class Job:
   rec: dict                              # sacct record of the allocation (or built from squeue)
   steps: list = field(default_factory=list)
@@ -141,6 +151,7 @@ class Job:
   reason: str = ""                       # pending reason (squeue)
   command: str = ""                      # what the job executes (filled by annotate)
   err: tuple = (None, 0)                 # ("file"|"merged"|"missing"|None, size)
+  progress: JobProgress | None = None      # latest n/N progress entry from a running job's output
 
   @property
   def jid(self):
@@ -178,6 +189,20 @@ class Job:
       return int(self.rec["NNodes"] or 0) * sl.hours(self.rec["Elapsed"])
     except ValueError:
       return 0
+
+FAILED_JOB_STATES = {
+  "BOOT_FAIL", "CANCELLED", "DEADLINE", "FAILED", "NODE_FAIL",
+  "OUT_OF_MEMORY", "PREEMPTED", "REVOKED", "TIMEOUT",
+}
+
+def progress_for_job(job):
+  """Return parsed live progress or a terminal-state bar for completed/failed jobs."""
+  state = job.state.split()[0].rstrip("+") if job.state else ""
+  if state == "COMPLETED":
+    return JobProgress(1, 1, "Job completed successfully")
+  if state in FAILED_JOB_STATES:
+    return JobProgress(0, 1, f"Job ended with state {state}")
+  return job.progress if job.running else None
 
 def record_from_squeue(row):
   rec = dict.fromkeys(SACCT_FIELDS, "")
@@ -401,11 +426,34 @@ def err_status(job):
   except OSError:
     return ("missing", 0)
 
+def output_progress(path):
+  """Read only the tail of an output file and return its latest valid n/N entry."""
+  if not path:
+    return None
+  try:
+    with open(path, "rb") as f:
+      f.seek(0, os.SEEK_END)
+      size = f.tell()
+      f.seek(max(0, size - PROGRESS_TAIL_BYTES))
+      tail = f.read(PROGRESS_TAIL_BYTES).decode("utf-8", errors="replace")
+  except OSError:
+    return None
+  for line in reversed(tail.splitlines()[-PROGRESS_TAIL_LINES:]):
+    for match in reversed(list(PROGRESS_PATTERN.finditer(line))):
+      try:
+        current, total = map(int, match.groups())
+      except ValueError: # extremely long digit sequences
+        continue
+      if current <= total:
+        return JobProgress(current, total, line.strip())
+  return None
+
 def annotate(jobs):
   cache = {}
   for job in jobs:
     job.command = command_of(job, cache)
     job.err = err_status(job)
+    job.progress = output_progress(job.stdout_path()) if job.running else None
   return jobs
 
 # ---------------------------------------------------------------------------
@@ -526,7 +574,7 @@ def sacct_all(job):
 
 def load_details(job):
   """Everything shown in the job window that needs extra queries or file system access"""
-  d = {"files": [], "sstat": {}, "nodes": []}
+  d = {"files": [], "sstat": {}, "nodes": [], "progress": output_progress(job.stdout_path()) if job.running else None}
   workdir = job.rec["WorkDir"]
   files, seen = d["files"], set()
 
@@ -1996,6 +2044,9 @@ class JobScreen(SplitScreen):
       yield Button("Restart job", id="restart-job", variant="primary")
     with VerticalScroll(id="details"):
       yield Static(id="info")
+      with Vertical(id="job-progress"):
+        yield ProgressBar(total=1, show_eta=False, id="progress-bar")
+        yield Static(id="progress-line", markup=False)
       yield Label("Files", classes="section")
       yield OptionList(Option("loading ...", disabled=True), id="files")
       yield Label("Steps", classes="section")
@@ -2051,6 +2102,14 @@ class JobScreen(SplitScreen):
     for key, val in rows:
       grid.add_row(key, val)
     self.query_one("#info", Static).update(grid)
+    progress = progress_for_job(job)
+    progress_view = self.query_one("#job-progress", Vertical)
+    if progress is not None:
+      progress_view.display = True
+      self.query_one("#progress-bar", ProgressBar).update(total=max(progress.total, 1), progress=progress.current)
+      self.query_one("#progress-line", Static).update(progress.line)
+    else:
+      progress_view.display = False
     self.query_one("#nodes").display = job.running
     self.show_steps()
 
@@ -2098,6 +2157,7 @@ class JobScreen(SplitScreen):
 
   def loaded(self, job, details):
     self.job, self.details = job, details
+    self.job.progress = details.get("progress")
     self.show_job()
     self.show_files()
     self.app.show_warnings()
@@ -2602,7 +2662,8 @@ class Splitter(Widget):
       self.release_mouse()
       self.remove_class("-dragging")
 
-COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("user", "User"), ("state", "State"), ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
+COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("user", "User"), ("state", "State"), ("progress", "Progress"),
+           ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
            ("start", "Start"), ("end", "End"), ("err", "Err"), ("cmd", "Command")]
 
 SORT_KEYS = {
@@ -2610,6 +2671,7 @@ SORT_KEYS = {
   "name":  lambda j: j.rec["JobName"],
   "user":  lambda j: j.rec["User"].casefold(),
   "state": lambda j: j.state,
+  "progress": lambda j: (p.current / p.total if (p := progress_for_job(j)) and p.total else 0),
   "nodes": lambda j: int(j.rec["NNodes"] or 0),
   "time":  lambda j: j.node_hours() / max(int(j.rec["NNodes"] or 1), 1),
   "start": lambda j: j.rec["Start"] if is_time(j.rec["Start"]) else "",
@@ -2674,6 +2736,9 @@ class SlurmTUI(App):
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
   #details { height: 1fr; padding: 0 1; }
+  #job-progress { height: auto; margin-bottom: 1; padding: 0 1; }
+  #progress-bar { width: 40; }
+  #progress-line { height: auto; }
   #core-overview { height: 1fr; padding: 1; }
   #core-info { height: auto; }
   #open-gdb { margin-top: 1; }
@@ -2727,20 +2792,32 @@ class SlurmTUI(App):
     self.sort_column, self.sort_reverse = "jobid", True
     self.since = None
     self.job_filter = ""
+    self.job_column_keys = None
 
   def get_default_screen(self):
     return MainScreen()
 
-  def setup_job_columns(self):
+  def setup_job_columns(self, show_progress=None):
     table = self.query_one("#jobs", ClickTable)
-    table.clear(columns=True)
     all_accounts = self.query_one("#us", Switch).value
+    if show_progress is None:
+      show_progress = any(progress_for_job(job) is not None for job in self.jobs.values())
+    visible_columns = [(key, label) for key, label in COLUMNS
+                       if (key != "user" or all_accounts) and (key != "progress" or show_progress)]
+    column_keys = [key for key, _ in visible_columns]
+    if column_keys == self.job_column_keys:
+      return
     if not all_accounts and self.sort_column == "user":
       self.sort_column, self.sort_reverse = "jobid", True
-    for key, label in COLUMNS:
-      if key == "user" and not all_accounts:
-        continue
-      table.add_column(label, key=key)
+    if not show_progress and self.sort_column == "progress":
+      self.sort_column, self.sort_reverse = "jobid", True
+    table.clear(columns=True)
+    for key, label in visible_columns:
+      if key == "progress":
+        table.add_column(label, key=key, width=10)
+      else:
+        table.add_column(label, key=key)
+    self.job_column_keys = column_keys
 
   # ---- the shell on the right
   def shell_changed(self):
@@ -2861,6 +2938,7 @@ class SlurmTUI(App):
     if jobs is not None:
       self.jobs = {job.jid: job for job in jobs}
     all_jobs = list(self.jobs.values())
+    self.setup_job_columns()
     pattern = self.job_filter.casefold()
     visible_jobs = [job for job in all_jobs if not pattern or pattern in " ".join(str(value or "") for value in (
       job.jid, job.rec.get("JobName"), job.state, job.rec.get("User"), job.rec.get("Account"),
@@ -2876,7 +2954,11 @@ class SlurmTUI(App):
       values = [job.jid, rec["JobName"]]
       if self.query_one("#us", Switch).value:
         values.append(rec["User"])
-      values.extend((state_text(state), rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
+      values.append(state_text(state))
+      if "progress" in self.job_column_keys:
+        progress = progress_for_job(job)
+        values.append(RichProgressBar(total=max(progress.total, 1), completed=progress.current, width=8) if progress else "")
+      values.extend((rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
                      ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]), err_text(job.err),
                      job.command[:150]))
       table.add_row(*values, key=job.jid)
