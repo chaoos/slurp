@@ -482,6 +482,49 @@ def current_memory_usage(job):
           "gpu_partial": gpu_partial, "gpu_errors": [d["gpu_error"] for d in nodes.values() if d["gpu_error"]],
           "gpus": gpus, "sstat": sstat}
 
+# ---- memory watch: queries of a job's memory, kept, at intervals, written to a file
+
+MEMORY = {} # (tab, job id) -> watch: {"samples", "every", "due", "busy", "job", "file", "error", "misses"}
+MEMORY_EVERY = [("no repeat", 0), ("every minute", 60), ("every 5 min", 300), ("every 15 min", 900),
+                ("every 30 min", 1800), ("every hour", 3600)]
+
+def memory_dir():
+  return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "slurp", "memory")
+
+def memory_watch(jid, job=None):
+  """The memory watch of a job of the current tab (created on first use)"""
+  key = (tab_name(), jid)
+  if key not in MEMORY:
+    name = re.sub(r"[^\w.@-]+", "_", f"{key[0]}-{jid}")
+    MEMORY[key] = {"samples": [], "every": 0, "due": 0.0, "busy": False, "job": job, "error": "", "misses": 0,
+                   "file": os.path.join(memory_dir(), f"{name}.csv")}
+  if job is not None:
+    MEMORY[key]["job"] = job
+  return MEMORY[key]
+
+def record_memory(watch, result):
+  """Keep a query of current_memory_usage() and append it to the file of the watch. False: nothing was measured."""
+  if "error" in result or result.get("cpu_bytes") is None and result.get("gpu_bytes") is None:
+    watch["misses"] += 1
+    watch["error"] = result.get("error") or "nothing measured (has the job ended?)"
+    return False
+  gpus = result.get("gpus") or []
+  sample = (time.time(), result.get("cpu_bytes"), result.get("gpu_bytes"),
+            sum(g[3] for g in gpus) if gpus else None, sum(g[4] for g in gpus) if gpus else None)
+  watch["samples"].append(sample)
+  watch["error"], watch["misses"] = "", 0
+  try:
+    os.makedirs(os.path.dirname(watch["file"]), exist_ok=True)
+    new = not os.path.exists(watch["file"])
+    with open(watch["file"], "a") as f:
+      if new:
+        f.write("time,cpu_rss_bytes,gpu_job_bytes,gpu_used_bytes,gpu_total_bytes\n")
+      f.write(",".join([datetime.fromtimestamp(sample[0]).isoformat(timespec="seconds"),
+                        *("" if v is None else str(v) for v in sample[1:])]) + "\n")
+  except OSError as e:
+    watch["error"] = f"cannot write {watch['file']}: {e}"
+  return True
+
 def peak_job_memory(job):
   """Slurm-accounted CPU and (when configured) GPU peak memory for an ended job."""
   records = [job.rec, *job.steps]

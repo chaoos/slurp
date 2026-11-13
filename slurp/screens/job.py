@@ -85,6 +85,19 @@ class JobScreen(SplitScreen):
         yield Static(id="memory-cpu", markup=False)
         yield Label("GPU:")
         yield Static(id="memory-gpu", markup=False)
+      with Vertical(id="memory-watch"):
+        with Horizontal(id="memory-watch-bar"):
+          yield Select(MEMORY_EVERY, value=0, allow_blank=False, id="memory-every",
+                       tooltip="query the memory again and again; every query is kept and written to a file")
+          yield Static(id="memory-watch-status")
+        with Horizontal(classes="memory-plot"):
+          yield Label("CPU", classes="memory-plot-label")
+          yield Sparkline([], id="spark-cpu", summary_function=max)
+          yield Static(id="spark-cpu-text", classes="memory-plot-text")
+        with Horizontal(classes="memory-plot"):
+          yield Label("GPU", classes="memory-plot-label")
+          yield Sparkline([], id="spark-gpu", summary_function=max)
+          yield Static(id="spark-gpu-text", classes="memory-plot-text")
       with Vertical(id="job-progress"):
         with Horizontal(id="progress-top"):
           yield ProgressBar(total=1, show_eta=False, id="progress-bar")
@@ -118,6 +131,10 @@ class JobScreen(SplitScreen):
     self.query_one("#files").focus()
     self.load()
     self.set_interval(self.PROGRESS_EVERY, self.refresh_progress)
+    self.memory = memory_watch(self.job.jid, self.job)
+    self.query_one("#memory-every", Select).value = self.memory["every"]
+    self.set_interval(1, self.show_memory_watch)
+    self.show_memory_watch()
     self.set_interval(1, self.show_progress_age)
 
   def show_job(self):
@@ -319,9 +336,49 @@ class JobScreen(SplitScreen):
     if not get_current_worker().is_cancelled:
       self.app.call_from_thread(self.memory_loaded, result)
 
+  shown_samples = -1
+
+  @on(Select.Changed, "#memory-every")
+  def memory_every_changed(self, event):
+    if event.value is Select.NULL or event.value == self.memory["every"]:
+      return
+    self.memory["every"], self.memory["misses"] = event.value, 0
+    self.memory["due"] = time.monotonic() # the first query now
+    self.show_memory_watch()
+
+  def show_memory_watch(self):
+    """Status of the watch (samples, next query, the file) and the plots of CPU and GPU memory over time"""
+    w = self.memory
+    self.query_one("#memory-watch").display = self.job.running or bool(w["samples"])
+    samples = w["samples"]
+    parts = [f"{len(samples)} measurement{'s' if len(samples) != 1 else ''}"]
+    if samples:
+      parts.append(f"since {datetime.fromtimestamp(samples[0][0]):%H:%M}")
+    if w["busy"]:
+      parts.append("measuring …")
+    elif w["every"]:
+      left = max(0, w["due"] - time.monotonic())
+      parts.append(f"next in {int(left) // 60}:{int(left) % 60:02d}")
+    if samples:
+      parts.append(f"file {w['file']}")
+    text = Text(" · ".join(parts))
+    if w["error"]:
+      text.append(f" · {w['error']}", style="yellow")
+    self.query_one("#memory-watch-status", Static).update(text)
+    if len(samples) == self.shown_samples:
+      return
+    self.shown_samples = len(samples)
+    for key, index in (("cpu", 1), ("gpu", 2)):
+      values = [s[index] for s in samples if s[index] is not None]
+      self.query_one(f"#spark-{key}", Sparkline).data = values or [0]
+      self.query_one(f"#spark-{key}-text", Static).update(
+        f"{humanize.naturalsize(values[-1])} now, max {humanize.naturalsize(max(values))}" if values else "-")
+
   def memory_loaded(self, result):
     if not self.is_mounted:
       return
+    record_memory(self.memory, result) # a query by hand is kept too
+    self.show_memory_watch()
     if "error" in result:
       self.query_one("#memory-cpu", Static).update(f"unavailable ({result['error']})")
       self.query_one("#memory-gpu", Static).update("unavailable")

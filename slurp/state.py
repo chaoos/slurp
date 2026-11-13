@@ -40,7 +40,7 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen, Screen
 from textual.strip import Strip
 from textual.widget import Widget
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, MarkdownViewer, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree, Checkbox
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, MarkdownViewer, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree, Checkbox, Sparkline
 from textual.widgets.option_list import Option
 from textual.widgets.text_area import Selection
 from textual.suggester import SuggestFromList

@@ -127,6 +127,14 @@ class Slurp(App):
   #progress-top { height: auto; }
   #progress-top Button { margin-left: 2; }
   #progress-line { height: auto; }
+  #memory-watch { height: auto; margin-bottom: 1; }
+  #memory-watch-bar { height: auto; }
+  #memory-every { width: 22; margin-right: 1; }
+  #memory-watch-status { width: 1fr; padding-top: 1; }
+  .memory-plot { height: 3; }
+  .memory-plot-label { width: 5; padding-top: 1; }
+  .memory-plot Sparkline { width: 1fr; height: 3; }
+  .memory-plot-text { width: 34; padding: 1 0 0 1; }
   #core-overview { height: 1fr; padding: 1; }
   #core-info { height: auto; }
   #open-gdb { margin-top: 1; }
@@ -539,6 +547,33 @@ class Slurp(App):
           self.login(cluster, show=False)
     self.show_tab_shell()
     self.refresh_status()
+    self.run_memory_watches()
+
+  def run_memory_watches(self):
+    """Query the memory of the watched jobs that are due (in the background, on the cluster of their tab)"""
+    now = time.monotonic()
+    for (tab, jid), w in list(MEMORY.items()):
+      if not w["every"] or w["busy"] or now < w["due"] or w["job"] is None:
+        continue
+      cluster = next((c for c in self.clusters if (c.destination or "Local") == tab), None)
+      if cluster is None or cluster.destination and not (cluster.connection and cluster.connection.ready):
+        continue
+      w["busy"] = True
+      def measure(w=w):
+        try:
+          result = current_memory_usage(w["job"])
+        except Exception as e:
+          result = {"error": str(e)}
+        self.call_from_thread(self.memory_measured, w, result)
+      start_worker(self, measure, f"memory-{tab}-{jid}", exclusive=False,
+                   connection=cluster.connection if cluster.destination else None, name=f"memory of job {jid}")
+
+  def memory_measured(self, w, result):
+    w["busy"] = False
+    w["due"] = time.monotonic() + (w["every"] or 0)
+    if not record_memory(w, result) and w["misses"] >= 2:
+      w["every"] = 0 # the job has probably ended
+      w["error"] = f"stopped: {w['error']}"
 
   def spinner(self):
     return "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[self.spinner_frame % 10]
