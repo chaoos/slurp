@@ -2889,6 +2889,17 @@ class ConfirmScreen(ModalScreen[bool]):
     self.dismiss(False)
 
 
+def bash_editor(text, id, read_only=False):
+  """Multi-line command editor with bash syntax highlighting"""
+  editor = TextArea.code_editor(text, id=id, read_only=read_only, soft_wrap=True, show_line_numbers=False)
+  if "bash" in editor.available_languages:
+    editor.language = "bash"
+  return editor
+
+def command_args(text):
+  """argv of a command typed in an editor: lines may end with a backslash, the lines are joined"""
+  return shlex.split(text.replace("\\\n", " ").replace("\n", " "))
+
 class RestartScreen(ModalScreen[list[str] | None]):
   """Choose the command to submit when restarting a job"""
   DEFAULT_CSS = """
@@ -2897,7 +2908,7 @@ class RestartScreen(ModalScreen[list[str] | None]):
   #restart-title { text-style: bold; margin-bottom: 1; }
   #restart-options { max-height: 10; }
   #restart-command-label { margin-top: 1; }
-  #restart-command { width: 1fr; }
+  #restart-command { width: 1fr; height: auto; min-height: 3; max-height: 12; }
   #restart-buttons { height: auto; align-horizontal: right; margin-top: 1; }
   #restart-buttons Button { margin-left: 1; }
   """
@@ -2921,7 +2932,7 @@ class RestartScreen(ModalScreen[list[str] | None]):
         yield RadioButton(self.retry_label, disabled=self.retry_args is None)
         yield RadioButton("Custom command")
       yield Label("Command to submit (editable in Custom mode)", id="restart-command-label")
-      yield Input(self.default_command, id="restart-command", disabled=True)
+      yield bash_editor(self.default_command, "restart-command", read_only=True)
       with Horizontal(id="restart-buttons"):
         yield Button("Cancel", id="restart-cancel")
         yield Button("Submit job", id="restart-submit", variant="primary")
@@ -2931,19 +2942,19 @@ class RestartScreen(ModalScreen[list[str] | None]):
 
   @on(RadioSet.Changed, "#restart-options")
   def option_changed(self, event):
-    command = self.query_one("#restart-command", Input)
+    command = self.query_one("#restart-command", TextArea)
     if event.index == 2:
-      command.disabled = False
-      command.value = self.custom_command
+      command.read_only = False
+      command.load_text(self.custom_command)
       command.focus()
     else:
-      command.disabled = True
-      command.value = self.default_command if event.index == 0 else self.retry_command
+      command.read_only = True
+      command.load_text(self.default_command if event.index == 0 else self.retry_command)
 
-  @on(Input.Changed, "#restart-command")
+  @on(TextArea.Changed, "#restart-command")
   def custom_command_changed(self, event):
     if self.query_one("#restart-options", RadioSet).pressed_index == 2:
-      self.custom_command = event.value
+      self.custom_command = event.text_area.text
 
   @on(Button.Pressed, "#restart-cancel")
   def cancel(self, event):
@@ -2960,7 +2971,7 @@ class RestartScreen(ModalScreen[list[str] | None]):
       args = self.retry_args
     elif index == 2:
       try:
-        args = shlex.split(self.query_one("#restart-command", Input).value)
+        args = command_args(self.query_one("#restart-command", TextArea).text)
       except ValueError as e:
         self.notify(f"Invalid command: {e}", severity="error")
         return
