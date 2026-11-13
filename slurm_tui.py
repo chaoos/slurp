@@ -730,14 +730,26 @@ def open_hdf5(app, crumbs, path, bases=(), env=None):
 
 class SplitScreen(Screen):
   """Window with its content on the left and, while a shell is open, the terminal pane on the right"""
+  SHOW_BACK = False
+
   def compose(self) -> ComposeResult:
-    yield Header()
+    with Horizontal(id="topbar"):
+      if self.SHOW_BACK:
+        yield Button("←", id="back", compact=True, tooltip="Back")
+      yield Header()
     with Horizontal(classes="split"):
       with Vertical(classes="left"):
         yield from self.compose_left()
       yield Splitter()
       yield TerminalPane()
     yield Footer()
+
+  @on(Button.Pressed)
+  def back_pressed(self, event: Button.Pressed) -> None:
+    if event.button.id != "back":
+      return
+    event.stop()
+    self.action_back()
 
   def compose_left(self):
     return []
@@ -752,6 +764,7 @@ DIR_LIMIT = 20000 # entries listed at most
 
 class DirScreen(SplitScreen):
   """Directory browser: click (or Enter) a subdirectory to enter it, a file to open it"""
+  SHOW_BACK = True
   BINDINGS = [
     Binding("escape", "back", "Back"),
     Binding("backspace,u", "parent", "Parent"),
@@ -907,6 +920,7 @@ class DirScreen(SplitScreen):
 
 class FileScreen(SplitScreen):
   """Read-only viewer for a file (with tail -f style following) or for text (optionally re-run by a refresher)"""
+  SHOW_BACK = True
   BINDINGS = [
     Binding("escape", "back", "Back"),
     Binding("enter", "open_path", "Open path"),
@@ -1235,6 +1249,7 @@ def h5_link_target(path, filename):
 
 class H5Screen(SplitScreen):
   """HDF5 browser: tree of groups and datasets, info and attributes of the selected one, and a table of its data"""
+  SHOW_BACK = True
   BINDINGS = [
     Binding("escape", "back", "Back"),
     Binding("s", "selection", "Selection"),
@@ -1713,6 +1728,7 @@ class RestartScreen(ModalScreen[list[str] | None]):
 
 class JobScreen(SplitScreen):
   """Details, files and steps of one job, commands on its nodes"""
+  SHOW_BACK = True
   BINDINGS = [
     Binding("escape,backspace", "back", "Back"),
     Binding("r", "reload", "Reload"),
@@ -2399,6 +2415,9 @@ class SlurmTUI(App):
   #toolbar > * { margin-right: 1; }
   #toolbar Label { padding-top: 1; }
   #since { width: 12; }
+  #topbar { height: 1; }
+  #topbar Header { width: 1fr; height: 1; }
+  #back { width: 3; min-width: 3; height: 1; padding: 0; }
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
   #details { height: 1fr; padding: 0 1; }
