@@ -951,13 +951,12 @@ class Slurp(App):
   COLLAPSE_MIN = 10 # tasks of one array in one state from which they are shown as one row
 
   def collapse(self, ordered, cluster):
-    """The rows of the job list: jobs, and for each array with many tasks in one state a row (key, tasks) where its
-    first task is (followed by the tasks if the row was opened)"""
+    """The rows of the job list: jobs, and for each array with many tasks a row (array id, tasks) where its first
+    task is (followed by the tasks if the row was opened)"""
     groups = {}
     for job in ordered:
       if array_task_id(job) is not None:
-        key = f"{job.jid.partition('_')[0]}|{job.state.split()[0].rstrip('+') if job.state else '?'}"
-        groups.setdefault(key, []).append(job)
+        groups.setdefault(job.jid.partition("_")[0], []).append(job)
     big = {key: jobs for key, jobs in groups.items() if len(jobs) >= self.COLLAPSE_MIN}
     member = {job.jid: key for key, jobs in big.items() for job in jobs}
     done = set()
@@ -971,9 +970,29 @@ class Slurp(App):
         if key in cluster.expanded:
           yield from big[key]
 
+  STATE_CODES = {"RUNNING": "R", "PENDING": "PD", "COMPLETED": "CD", "COMPLETING": "CG", "CONFIGURING": "CF",
+                 "FAILED": "F", "CANCELLED": "CA", "TIMEOUT": "TO", "OUT_OF_MEMORY": "OOM", "NODE_FAIL": "NF",
+                 "BOOT_FAIL": "BF", "DEADLINE": "DL", "PREEMPTED": "PR", "SUSPENDED": "S", "REQUEUED": "RQ"}
+
+  def mixed_state(self, tasks):
+    """How many tasks are in which state, with the short codes of Slurm in the colours of the states:
+    30R 10PD 100CD 5F (running, pending, completed, failed first, then the others)"""
+    counts = {}
+    for j in tasks:
+      state = j.state.split()[0].rstrip("+") if j.state else "?"
+      counts[state] = counts.get(state, 0) + 1
+    order = ["RUNNING", "PENDING", "COMPLETED"]
+    parts = []
+    for state in sorted(counts, key=lambda s: (order.index(s) if s in order else len(order), s)):
+      if parts:
+        parts.append(" ")
+      style = {"RUNNING": "bold green", "COMPLETED": "green", "PENDING": "blue", "CANCELLED": "yellow"}.get(state)
+      parts.append((f"{counts[state]}{self.STATE_CODES.get(state, state[:3])}", style or STATE_STYLES.get(state, "red")))
+    return Text.assemble(*parts)
+
   def group_row(self, key, tasks, cluster):
-    """Cells of the row of many tasks of an array in one state"""
-    array_id, _, state = key.partition("|")
+    """Cells of the row of the tasks of an array"""
+    array_id = key
     indices = sorted(int(t) for j in tasks if (t := array_task_id(j)) is not None)
     ids = compress_array_ids(indices)
     if len(ids) > 15: # interleaved states give long lists (1,3,5,...): they would make the column very wide
@@ -984,7 +1003,7 @@ class Slurp(App):
     if cluster.scope != "me":
       users = {j.rec["User"] for j in tasks}
       values.append(first["User"] if len(users) == 1 else f"{len(users)} users")
-    values.append(Text.assemble(state_text(state), f" ×{len(tasks)}"))
+    values.append(self.mixed_state(tasks))
     if "progress" in self.job_column_keys:
       progress = [p for j in tasks if (p := progress_for_job(j))]
       total, done = sum(p.total for p in progress), sum(p.current for p in progress)
@@ -1261,7 +1280,7 @@ class Slurp(App):
       if self.query_one("#jobs", ClickTable).take_clicked_column() == "jobid": # on ▸: open or close the row
         self.toggle_group(key)
       else: # Enter or a click elsewhere: the window of the array
-        self.open_array(key.partition("|")[0])
+        self.open_array(key)
       return
     job = self.jobs.get(event.row_key.value)
     col = self.query_one("#jobs", ClickTable).take_clicked_column()
@@ -1285,7 +1304,7 @@ class Slurp(App):
     if key.startswith("group|"):
       self.toggle_group(key.partition("|")[2])
     elif (job := self.jobs.get(key)) and array_task_id(job) is not None:
-      group = f"{job.jid.partition('_')[0]}|{job.state.split()[0].rstrip('+') if job.state else '?'}"
+      group = job.jid.partition("_")[0]
       if group in self.cluster.expanded:
         self.toggle_group(group)
 
