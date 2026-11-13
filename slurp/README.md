@@ -19,7 +19,9 @@ duration syntax as `slurm.py -c`, e.g. `3d12h`); each tab keeps its own. The dro
 whose jobs are listed: yours, those of one of your Slurm accounts, or those of
 all of them (the accounts come from `sacctmgr`). Progress appears when the
 output contains a line such as `65/100`; the **Done in** column estimates when
-a running job gets to the end.
+a running job gets to the end. Ten or more tasks of an array in one state are
+shown as one row (`9600_[1-30] ▸ 30 tasks`); Enter or a click opens it and
+lists every task, and closes it again.
 
 ![Illustrative slurp job list with status and progress columns](docs/jobs.svg)
 
@@ -44,7 +46,11 @@ The progress shows the latest `n/N` line, and estimates when the job reaches
 last few `n/N` lines, each with the remaining time and the time of day. The
 times are the timestamps of the lines if they have one, else the times slurp
 saw a new `n`. **Progress file…** picks another (log) file for this job, in
-the directory browser; **Use stdout** goes back. Only the end of the file is
+the directory browser; **Use stdout** goes back. For a task of an array, the
+progress files of the other tasks are guessed from the name of the chosen one:
+the index of the task (or its job id) in the name marks the task, other digits
+(dates, times) may differ; the newest match is used, and tasks whose file is
+not there yet are looked for again at every reload. Only the end of the file is
 read (64 kB), every 10 seconds while the job runs (the window shows when it was
 last read); a chosen file is also listed among the job's files as `progress`.
 
@@ -54,7 +60,8 @@ run on every node of the job as a step (`srun --overlap --input=all … bash -s`
 with the script on stdin, so nothing is copied to the cluster. Every query is
 kept: the dropdown next to it repeats it every 1, 5, 15, 30 or 60 minutes (also
 while the window is not shown), two sparklines plot CPU and GPU memory over
-time, and the measurements are appended to
+time (bars from zero, with the largest value and the time span), and the
+measurements are appended to
 `~/.local/share/slurp/memory/<tab>-<job>.csv`. This query is on demand; the fields are empty until
 requested. GPU usage is gathered from the processes of the job reported by
 `nvidia-smi` (or `rocm-smi` on AMD nodes), together with the used and total
@@ -70,7 +77,8 @@ working directory and related paths. It includes specialized views:
 
 - **Markdown:** `.md`, `.markdown`, `.mdown`, and `.mdx` files render with
   Textual's `MarkdownViewer`, including a table of contents and link navigation.
-- **HDF5:** browse groups, datasets, attributes, and paged data. HDF5 files
+- **HDF5:** browse groups, datasets, attributes, and paged data; a string
+  dataset named `*.md` is rendered as Markdown. HDF5 files
   are recognized by their file signature, including files without an `.h5`
   extension.
 - **Core dumps:** inspect ELF core metadata with GDB and edit the suggested GDB
@@ -216,9 +224,19 @@ pending jobs and why they wait) and the partitions, with its own Reload; its
 title says healthy (green), degraded (yellow) or unhealthy (red) and why;
 without a connection it says so, with Reconnect.
 
+## Settings
+
+slurp keeps a few settings in `~/.config/slurp/config.json` (or under
+`$XDG_CONFIG_HOME`): the theme (chosen with the command palette, `Ctrl-P`), the
+open tabs with the one shown and their choices (finished since, accounts),
+the progress files chosen for jobs and the patterns for arrays. At the next
+start the tabs are back, and the tab shown connects; the others connect when
+they are selected. The dot of an SSH tab is coloured by the health of its
+session (green, yellow, red; grey when not connected yet).
+
 ## Storage: quota and old files in scratch
 
-**Quota** (or `Q`) lists your quotas, and those of your groups where they
+**Quota** (or `Q`, a subtab that loads in the background) lists your quotas, and those of your groups where they
 use space or have a limit: `lfs quota` on each Lustre filesystem and on
 `$SCRATCH`, `$HOME`, `$PROJECT`, `$STORE`, `$WORK`, `quota` on the others,
 with space and files (inodes), used, limit and soft limit, and a bar coloured
@@ -228,7 +246,9 @@ Scratch filesystems are usually cleaned up automatically: files not used for
 some time are deleted without asking. **Scratch** (or `X`) searches your files
 in `$SCRATCH` in the background (one `find` on the cluster; it can be
 aborted) and lists the 2000 with the oldest access (or modification) time;
-those older than the given number of days (30) are red. **Touch selected**,
+those older than the given number of days (30) are red, those in its last fifth
+yellow. An exclude regex leaves matching paths out of the list and of every
+touch. **Touch selected**,
 **Touch all listed** and **Touch all my files there** set their access time
 to now (after a confirmation). Mind that many sites do not allow keeping files
 in scratch this way; move what you need to keep elsewhere.
