@@ -547,6 +547,9 @@ def load_details(job):
     if path and os.path.isdir(os.path.dirname(path)):
       add(Entry("output dir", os.path.dirname(path), path=os.path.dirname(path)))
 
+  for entry in likely_job_core_dumps(job):
+    add(entry)
+
   submitted = batch_script(job.jid) if job.queued else ""
   if submitted:
     add(Entry("script", "batch script as submitted", text=submitted, note="scontrol write batch_script"))
@@ -592,6 +595,59 @@ def load_details(job):
     if job.rec["NodeList"]:
       d["nodes"] = run(["scontrol", "show", "hostnames", job.rec["NodeList"]]).split()
   return d
+
+CORE_DUMP_NAME = re.compile(r"^core_(.+)_(\d+)$")
+
+def likely_job_core_dumps(job):
+  """Find top-level core files in a job's workdir that match its node and run time."""
+  rec = job.rec
+  workdir = rec.get("WorkDir")
+  if not workdir or workdir in ("(null)", "None") or not os.path.isdir(workdir):
+    return []
+  try:
+    start = datetime.fromisoformat(rec["Start"].replace("Z", "+00:00")).timestamp()
+  except (AttributeError, KeyError, TypeError, ValueError):
+    return []
+  try:
+    end = datetime.fromisoformat(rec["End"].replace("Z", "+00:00")).timestamp()
+  except (AttributeError, KeyError, TypeError, ValueError):
+    if not job.running:
+      return []
+    end = time.time()
+
+  # NodeList may be a Slurm hostlist expression. Expand it so core_<node>_<pid>
+  # names can be checked against the allocation.
+  node_list = rec.get("NodeList", "")
+  if node_list in ("(null)", "None", "None assigned"):
+    node_list = ""
+  nodes = set(run(["scontrol", "show", "hostnames", node_list], timeout=10, quiet=True).split()) if node_list else set()
+  if not nodes and node_list and not re.search(r"[\[\]]", node_list):
+    nodes = set(node_list.split(","))
+
+  found = []
+  try:
+    with os.scandir(workdir) as entries:
+      for de in entries:
+        match = CORE_DUMP_NAME.fullmatch(de.name)
+        if not match:
+          continue
+        node, pid = match.groups()
+        if nodes and node not in nodes:
+          continue
+        try:
+          stat = de.stat(follow_symlinks=True)
+          if not de.is_file(follow_symlinks=True) or not start - 300 <= stat.st_mtime <= end + 300:
+            continue
+          if not is_core_dump(de.path):
+            continue
+        except OSError:
+          continue
+        confidence = "likely" if nodes and node in nodes else "possible"
+        note = f"{confidence} · {node} · PID {pid} · {datetime.fromtimestamp(stat.st_mtime):%Y-%m-%d %H:%M:%S}"
+        found.append(Entry("core", de.name, path=de.path, note=note))
+  except OSError:
+    return []
+  return sorted(found, key=lambda entry: entry.label)
 
 def run_on_nodes(job, cmd, node=None):
   """Run a shell command once per node inside the allocation of a running job"""
@@ -700,15 +756,30 @@ class PathArea(TextArea):
     if path:
       self.post_message(self.PathClicked(path))
 
+@dataclass
+class FileView:
+  """A specialized viewer selected by inspecting a file, before the text fallback."""
+  name: str
+  matches: object
+  open: object
+
+FILE_VIEWS = []
+
+def register_file_view(name, matches, open_view):
+  FILE_VIEWS.append(FileView(name, matches, open_view))
+
 def open_path(app, crumbs, path, bases=(), env=None, follow=False):
-  """Open a directory in the browser or a file in the viewer"""
+  """Open a directory or dispatch a file to its first matching specialized view."""
   if os.path.isdir(path):
     app.push_screen(DirScreen(crumbs, path, bases=bases, env=env))
-  elif os.path.isfile(path) and is_hdf5(path):
-    open_hdf5(app, crumbs, path, bases, env)
-  elif is_binary(path):
-    app.notify(f"{path} is a binary file", severity="warning")
   elif os.path.isfile(path):
+    for view in FILE_VIEWS:
+      if view.matches(path):
+        view.open(app, crumbs, path, bases, env)
+        return
+    if is_binary(path):
+      app.notify(f"{path} is a binary file", severity="warning")
+      return
     bases = list(dict.fromkeys([*bases, os.path.dirname(path)]))
     app.push_screen(FileScreen([*crumbs, os.path.basename(path)], path=path, follow=follow, bases=bases, env=env))
   else:
@@ -1172,6 +1243,18 @@ def is_hdf5(path):
     pass
   return False
 
+def is_core_dump(path):
+  """Whether path is an ELF core file (not merely a file named 'core')."""
+  try:
+    with open(path, "rb") as f:
+      header = f.read(18)
+    if len(header) < 18 or header[:4] != b"\x7fELF":
+      return False
+    byte_order = {1: "little", 2: "big"}.get(header[5])
+    return byte_order is not None and int.from_bytes(header[16:18], byte_order) == 4 # ET_CORE
+  except OSError:
+    return False
+
 def open_h5(path):
   """Open read-only without file locking, so files that a running job writes can be read too"""
   import h5py
@@ -1598,6 +1681,171 @@ class H5Screen(SplitScreen):
       self.query_one("#htree").focus()
     else:
       self.pop_back()
+
+
+class GdbCommandScreen(ModalScreen[list[str] | None]):
+  """Edit the command that will be run interactively in the terminal pane."""
+  DEFAULT_CSS = """
+  GdbCommandScreen { align: center middle; }
+  #gdb-dialog { width: 100; max-width: 95%; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+  #gdb-title { text-style: bold; margin-bottom: 1; }
+  #gdb-command { width: 1fr; }
+  #gdb-help { height: auto; margin-top: 1; color: $text-muted; }
+  #gdb-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #gdb-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+  def __init__(self, default_args):
+    super().__init__()
+    self.default_command = shlex.join(default_args)
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="gdb-dialog"):
+      yield Static("Open core dump with GDB", id="gdb-title")
+      yield Label("Command (editable)", id="gdb-command-label")
+      yield Input(self.default_command, id="gdb-command")
+      yield Static("Arguments are parsed as a command line; shell operators and expansion are not evaluated.", id="gdb-help")
+      with Horizontal(id="gdb-buttons"):
+        yield Button("Cancel", id="gdb-cancel")
+        yield Button("Run in terminal", id="gdb-run", variant="primary")
+
+  def on_mount(self):
+    command = self.query_one("#gdb-command", Input)
+    command.focus()
+    command.cursor_position = len(command.value)
+
+  @on(Button.Pressed, "#gdb-cancel")
+  def cancel_pressed(self, event):
+    event.stop()
+    self.dismiss(None)
+
+  @on(Button.Pressed, "#gdb-run")
+  @on(Input.Submitted, "#gdb-command")
+  def run_pressed(self, event):
+    event.stop()
+    command = self.query_one("#gdb-command", Input).value
+    try:
+      args = shlex.split(command)
+    except ValueError as e:
+      self.notify(f"Invalid command: {e}", severity="error")
+      return
+    if not args:
+      self.notify("Enter a command to run", severity="warning")
+      return
+    self.dismiss(args)
+
+  def action_cancel(self):
+    self.dismiss(None)
+
+
+def inspect_core_file(path):
+  """Read process notes from a core file through GDB without starting an interactive session."""
+  gdb = shutil.which("gdb")
+  if not gdb:
+    return {}, "gdb was not found on PATH"
+  try:
+    result = subprocess.run([gdb, "--batch", "--nx", f"--core={path}", "-ex", "info proc"],
+                            capture_output=True, text=True, timeout=20)
+  except (OSError, subprocess.TimeoutExpired) as e:
+    return {}, f"could not inspect core metadata: {e}"
+  output = (result.stdout or "") + "\n" + (result.stderr or "")
+  info = {}
+  for line in output.splitlines():
+    key, sep, value = line.partition("=")
+    key = key.strip()
+    if sep and key in ("exe", "cwd", "cmdline"):
+      value = value.strip()
+      try:
+        parsed = shlex.split(value)
+        value = parsed[0] if len(parsed) == 1 else value
+      except ValueError:
+        value = value.strip("\"'")
+      info[key] = value
+  error = ""
+  if not info:
+    error = (result.stderr or result.stdout or "GDB could not read process details").strip()[:240]
+  return info, error
+
+
+class CoreScreen(SplitScreen):
+  """Overview for an ELF core dump, with an editable GDB command launcher."""
+  SHOW_BACK = True
+  BINDINGS = [Binding("escape", "back", "Back")]
+
+  def __init__(self, crumbs, path, bases=(), env=None):
+    super().__init__()
+    self.path = path
+    self.crumbs = [*crumbs, os.path.basename(path)]
+    self.bases, self.env = list(bases), env
+    self.process_info = {}
+    self.metadata_error = "Reading process details with GDB …"
+
+  def compose_left(self) -> ComposeResult:
+    with VerticalScroll(id="core-overview"):
+      yield Static(id="core-info")
+      yield Button("Open with GDB", id="open-gdb", variant="primary")
+
+  def on_mount(self):
+    self.sub_title = crumb_title(self.crumbs)
+    self.show_info()
+    self.inspect_metadata()
+
+  def show_info(self):
+    try:
+      stat = os.stat(self.path)
+      size = humanize.naturalsize(stat.st_size)
+      modified = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    except OSError as e:
+      size, modified = "unavailable", str(e)
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="bold")
+    grid.add_column()
+    grid.add_row("Type", "ELF core dump")
+    grid.add_row("File", self.path)
+    grid.add_row("Size", size)
+    grid.add_row("Modified", modified)
+    for key, label in (("exe", "Executable"), ("cmdline", "Command line"), ("cwd", "Working directory")):
+      if self.process_info.get(key):
+        grid.add_row(label, self.process_info[key])
+    if self.metadata_error:
+      grid.add_row("Process details", self.metadata_error)
+    self.query_one("#core-info", Static).update(grid)
+
+  @work(thread=True, exclusive=True, group="core-metadata")
+  def inspect_metadata(self):
+    info, error = inspect_core_file(self.path)
+    self.app.call_from_thread(self.metadata_loaded, info, error)
+
+  def metadata_loaded(self, info, error):
+    if not self.is_mounted:
+      return
+    self.process_info, self.metadata_error = info, error
+    self.show_info()
+
+  def gdb_args(self):
+    executable = self.process_info.get("exe")
+    if executable and os.path.isfile(executable):
+      return ["gdb", executable, self.path]
+    return ["gdb", f"--core={self.path}"]
+
+  @on(Button.Pressed, "#open-gdb")
+  def open_gdb(self, event):
+    event.stop()
+    title = f"GDB · {os.path.basename(self.path)}"
+    self.app.push_screen(GdbCommandScreen(self.gdb_args()),
+                         lambda args: self.app.open_shell(args, title, focus=True) if args is not None else None)
+
+  def action_back(self):
+    self.pop_back()
+
+
+def open_core_view(app, crumbs, path, bases=(), env=None):
+  app.push_screen(CoreScreen(crumbs, path, bases=bases, env=env))
+
+
+register_file_view("HDF5", is_hdf5, open_hdf5)
+register_file_view("ELF core dump", is_core_dump, open_core_view)
 
 
 class ConfirmScreen(ModalScreen[bool]):
@@ -2421,6 +2669,9 @@ class SlurmTUI(App):
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
   #details { height: 1fr; padding: 0 1; }
+  #core-overview { height: 1fr; padding: 1; }
+  #core-info { height: auto; }
+  #open-gdb { margin-top: 1; }
   #job-actions { height: auto; margin: 1 0; }
   #job-actions Button { margin-right: 1; }
   .section { margin-top: 1; text-style: bold; color: $accent; }
