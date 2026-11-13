@@ -37,7 +37,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.coordinate import Coordinate
 from textual.message import Message
 from textual.reactive import reactive
-from textual.screen import Screen
+from textual.screen import ModalScreen, Screen
 from textual.strip import Strip
 from textual.widget import Widget
 from textual.widgets import Button, Checkbox, DataTable, Footer, Header, Input, Label, OptionList, Select, Static, TextArea, Tree
@@ -249,6 +249,17 @@ def batch_script(jid, cache=None):
   if cache is not None:
     cache[key] = out
   return out
+
+def restart_args(job):
+  """Original sbatch command as argv, or None when the job cannot be resubmitted this way"""
+  submit_line = (job.rec.get("SubmitLine") or "").strip()
+  try:
+    args = shlex.split(submit_line)
+  except ValueError:
+    return None
+  if not args or os.path.basename(args[0]) != "sbatch":
+    return None
+  return args
 
 def err_status(job):
   if not (job.rec["StdOut"] or job.rec["StdErr"]) or not job.started:
@@ -604,9 +615,10 @@ class SplitScreen(Screen):
   def compose_left(self):
     return []
 
-  async def pop_back(self):
-    await self.app.pop_screen()
-    self.app.screen.refresh(layout=True)
+  def pop_back(self):
+    self.app.pop_screen()
+    # pop_screen completes after this key action; queue a full redraw behind it.
+    self.app.call_later(self.app.refresh, layout=True)
 
 DIR_COLUMNS = [("name", "Name"), ("size", "Size"), ("mtime", "Modified")]
 DIR_LIMIT = 20000 # entries listed at most
@@ -727,7 +739,7 @@ class DirScreen(SplitScreen):
       self.sort_column, self.sort_reverse = col, col != "name"
     self.populate()
 
-  async def action_back(self):
+  def action_back(self):
     search = self.query_one("#dfilter", Input)
     if search.has_class("visible"):
       search.remove_class("visible")
@@ -735,7 +747,7 @@ class DirScreen(SplitScreen):
       self.populate()
       self.query_one("#dir").focus()
     else:
-      await self.pop_back()
+      self.pop_back()
 
   def action_parent(self):
     if self.path != "/":
@@ -881,13 +893,13 @@ class FileScreen(SplitScreen):
       area.scroll_end(animate=False)
     self.update_status()
 
-  async def action_back(self):
+  def action_back(self):
     search = self.query_one("#search", Input)
     if search.has_class("visible"):
       search.remove_class("visible")
       self.area.focus()
     else:
-      await self.pop_back()
+      self.pop_back()
 
   @on(PathArea.PathClicked)
   def path_clicked(self, event):
@@ -1439,11 +1451,50 @@ class H5Screen(SplitScreen):
       pass
     self.show_data()
 
-  async def action_back(self):
+  def action_back(self):
     if self.focused is self.query_one("#hslice"):
       self.query_one("#htree").focus()
     else:
-      await self.pop_back()
+      self.pop_back()
+
+
+class ConfirmScreen(ModalScreen[bool]):
+  """Confirmation dialog for an action that changes a Slurm job"""
+  DEFAULT_CSS = """
+  ConfirmScreen { align: center middle; }
+  #confirm-dialog { width: 72; max-width: 90%; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+  #confirm-title { text-style: bold; margin-bottom: 1; }
+  #confirm-message { height: auto; margin-bottom: 1; }
+  #confirm-buttons { height: auto; align-horizontal: right; }
+  #confirm-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "No")]
+
+  def __init__(self, title, message, confirm_label, variant="error"):
+    super().__init__()
+    self.dialog_title, self.dialog_message = title, message
+    self.confirm_label, self.variant = confirm_label, variant
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="confirm-dialog"):
+      yield Static(self.dialog_title, id="confirm-title")
+      yield Static(self.dialog_message, id="confirm-message", markup=False)
+      with Horizontal(id="confirm-buttons"):
+        yield Button("No", id="confirm-no")
+        yield Button(self.confirm_label, id="confirm-yes", variant=self.variant)
+
+  @on(Button.Pressed, "#confirm-no")
+  def no(self, event):
+    event.stop()
+    self.dismiss(False)
+
+  @on(Button.Pressed, "#confirm-yes")
+  def yes(self, event):
+    event.stop()
+    self.dismiss(True)
+
+  def action_cancel(self):
+    self.dismiss(False)
 
 
 class JobScreen(SplitScreen):
@@ -1463,6 +1514,9 @@ class JobScreen(SplitScreen):
 
   def compose_left(self):
     with VerticalScroll(id="details"):
+      with Horizontal(id="job-actions"):
+        yield Button("Cancel job", id="cancel-job", variant="error")
+        yield Button("Restart job", id="restart-job", variant="primary")
       yield Static(id="info")
       yield Label("Files", classes="section")
       yield OptionList(Option("loading ...", disabled=True), id="files")
@@ -1491,6 +1545,8 @@ class JobScreen(SplitScreen):
 
   def show_job(self):
     job, rec = self.job, self.job.rec
+    self.query_one("#cancel-job", Button).disabled = not (job.queued or job.running)
+    self.query_one("#restart-job", Button).disabled = restart_args(job) is None
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold")
     grid.add_column()
@@ -1568,8 +1624,52 @@ class JobScreen(SplitScreen):
     self.show_files()
     self.app.show_warnings()
 
-  async def action_back(self):
-    await self.pop_back()
+  def action_back(self):
+    self.pop_back()
+
+  @on(Button.Pressed, "#cancel-job")
+  def confirm_cancel(self, event):
+    event.stop()
+    jid = self.job.rec["JobIDRaw"]
+    self.app.push_screen(
+      ConfirmScreen("Cancel job?", f"Cancel Slurm job {jid}? This cannot be undone.", "Cancel job"),
+      lambda confirmed: self.run_job_action("cancel", ["scancel", str(jid)]) if confirmed else None,
+    )
+
+  @on(Button.Pressed, "#restart-job")
+  def confirm_restart(self, event):
+    event.stop()
+    args = restart_args(self.job)
+    if args is None:
+      self.notify("The original sbatch command is not available for this job", severity="warning")
+      return
+    submit_line = self.job.rec["SubmitLine"]
+    self.app.push_screen(
+      ConfirmScreen("Restart job?", f"Submit a new job using the recorded command:\n{submit_line}", "Restart job", variant="primary"),
+      lambda confirmed: self.run_job_action("restart", args, cwd=self.job.rec.get("WorkDir")) if confirmed else None,
+    )
+
+  @work(thread=True, exclusive=True, group="job-action")
+  def run_job_action(self, action, args, cwd=None):
+    cwd = cwd if cwd and cwd not in ("(null)", "None") else None
+    try:
+      result = subprocess.run(args, cwd=cwd or None, capture_output=True, text=True, timeout=60,
+                              env=os.environ | {"SLURM_TIME_FORMAT": "standard"})
+      self.app.call_from_thread(self.job_action_finished, action, result.returncode, result.stdout, result.stderr)
+    except (OSError, subprocess.TimeoutExpired) as e:
+      self.app.call_from_thread(self.job_action_finished, action, -1, "", str(e))
+
+  def job_action_finished(self, action, returncode, stdout, stderr):
+    output = (stdout or stderr).strip()
+    if returncode == 0:
+      if action == "cancel":
+        self.notify(f"Cancellation requested for job {self.job.jid}")
+        if self.is_mounted:
+          self.load(refresh_job=True)
+      else:
+        self.notify(f"Restarted {self.job.jid}: {output or 'new job submitted'}")
+    else:
+      self.notify(f"Could not {action} job {self.job.jid}: {output or 'Slurm command failed'}", severity="error")
 
   def check_action(self, action, parameters):
     if action == "shell":
@@ -2039,6 +2139,8 @@ class SlurmTUI(App):
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
   #details { padding: 0 1; }
+  #job-actions { height: auto; margin: 1 0; }
+  #job-actions Button { margin-right: 1; }
   .section { margin-top: 1; text-style: bold; color: $accent; }
   #files { height: auto; max-height: 16; }
   #steps { height: auto; max-height: 14; }
