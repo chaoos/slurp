@@ -946,6 +946,53 @@ class Slurp(App):
     self.notify("loading aborted: the list is the one loaded before", timeout=4)
     self.refresh_status()
 
+  COLLAPSE_MIN = 10 # tasks of one array in one state from which they are shown as one row
+
+  def collapse(self, ordered, cluster):
+    """The rows of the job list: jobs, and for each array with many tasks in one state a row (key, tasks) where its
+    first task is (followed by the tasks if the row was opened)"""
+    groups = {}
+    for job in ordered:
+      if array_task_id(job) is not None:
+        key = f"{job.jid.partition('_')[0]}|{job.state.split()[0].rstrip('+') if job.state else '?'}"
+        groups.setdefault(key, []).append(job)
+    big = {key: jobs for key, jobs in groups.items() if len(jobs) >= self.COLLAPSE_MIN}
+    member = {job.jid: key for key, jobs in big.items() for job in jobs}
+    done = set()
+    for job in ordered:
+      key = member.get(job.jid)
+      if key is None:
+        yield job
+      elif key not in done:
+        done.add(key)
+        yield (key, big[key])
+        if key in cluster.expanded:
+          yield from big[key]
+
+  def group_row(self, key, tasks, cluster):
+    """Cells of the row of many tasks of an array in one state"""
+    array_id, _, state = key.partition("|")
+    ids = compress_array_ids(int(t) for j in tasks if (t := array_task_id(j)) is not None)
+    opened = key in cluster.expanded
+    first = tasks[0].rec
+    values = [Text(f"{array_id}_[{ids}] {'▾' if opened else '▸'} {len(tasks)} tasks", style="bold"), first["JobName"]]
+    if cluster.scope != "me":
+      users = {j.rec["User"] for j in tasks}
+      values.append(first["User"] if len(users) == 1 else f"{len(users)} users")
+    values.append(Text.assemble(state_text(state), f" ×{len(tasks)}"))
+    if "progress" in self.job_column_keys:
+      progress = [p for j in tasks if (p := progress_for_job(j))]
+      total, done = sum(p.total for p in progress), sum(p.current for p in progress)
+      values.append(RichProgressBar(total=max(total, 1), completed=done, width=8) if progress else "")
+      values.append("")
+    starts = [j.rec["Start"] for j in tasks if is_time(j.rec["Start"])]
+    ends = [j.rec["End"] for j in tasks if is_time(j.rec["End"])]
+    errors = sum(j.err[0] == "file" and j.err[1] > 0 for j in tasks)
+    values.extend((str(sum(int(j.rec["NNodes"] or 0) for j in tasks)), "",
+                   fmt_time(min(starts)) if starts else "", fmt_time(max(ends)) if ends else "",
+                   Text(f"! {errors}", style="bold red") if errors else "", tasks[0].command[:150]))
+    return values
+
   def populate(self, jobs=None):
     table = self.query_one("#jobs", ClickTable)
     cluster = self.cluster
@@ -965,7 +1012,12 @@ class Slurp(App):
     )).casefold()]
     table.clear()
     self.mark_sort_column(table)
-    for job in sorted(visible_jobs, key=SORT_KEYS[self.sort_column], reverse=self.sort_reverse):
+    ordered = sorted(visible_jobs, key=SORT_KEYS[self.sort_column], reverse=self.sort_reverse)
+    for item in self.collapse(ordered, cluster):
+      if isinstance(item, tuple): # the row of a collapsed (or opened) array
+        table.add_row(*self.group_row(*item, cluster), key="group|" + item[0])
+        continue
+      job = item
       rec = job.rec
       state = job.state if job.queued and job.state != "PENDING" else \
               f"{job.state} ({job.reason})" if job.queued else f"{job.state} ({rec['ExitCode']})"
@@ -984,8 +1036,11 @@ class Slurp(App):
                      ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]), err_text(job.err),
                      job.command[:150]))
       table.add_row(*values, key=job.jid)
-    if current in {job.jid for job in visible_jobs}:
-      table.move_cursor(row=table.get_row_index(current))
+    if current is not None:
+      try:
+        table.move_cursor(row=table.get_row_index(current)) # a job or the row of an array
+      except Exception:
+        pass
     if self.screen is self.main and (self.focused is None or not isinstance(self.focused, (Input, TerminalView, TextArea))):
       table.focus() # an unfocused table is drawn in other colours (e.g. after a tab switch or a reload)
     if not cluster.loaded:
@@ -1190,6 +1245,12 @@ class Slurp(App):
 
   @on(DataTable.RowSelected, "#jobs")
   def job_selected(self, event):
+    if str(event.row_key.value).startswith("group|"): # open or close the row of an array
+      key = event.row_key.value.partition("|")[2]
+      self.query_one("#jobs", ClickTable).take_clicked_column()
+      self.cluster.expanded.symmetric_difference_update({key})
+      self.populate()
+      return
     job = self.jobs.get(event.row_key.value)
     col = self.query_one("#jobs", ClickTable).take_clicked_column()
     if not job:
