@@ -4964,6 +4964,8 @@ class SlurmTUI(App):
       table.add_row(*values, key=job.jid)
     if current in {job.jid for job in visible_jobs}:
       table.move_cursor(row=table.get_row_index(current))
+    if self.screen is self.screen_stack[0] and (self.focused is None or not isinstance(self.focused, (Input, TerminalView, TextArea))):
+      table.focus() # an unfocused table is drawn in other colours (e.g. after a tab switch or a reload)
     if not cluster.loaded:
       cluster.summary = "no jobs loaded yet" if not cluster.destination or (cluster.connection and cluster.connection.ready) \
                         else "log in to load the jobs"
