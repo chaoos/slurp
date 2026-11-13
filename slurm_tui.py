@@ -11,15 +11,19 @@ import asyncio
 import codecs
 import fcntl
 import functools
+import json
 import logging
 import os
 import re
+import select
 import shlex
 import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import termios
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -78,6 +82,27 @@ class Collector(logging.Handler):
     return msgs
 
 collector = Collector()
+ssh_connection = None # RemoteSSH of the active tab, None: the local machine
+initial_ssh_destinations = []
+
+@dataclass
+class ClusterSession:
+  """A tab: the local machine or an SSH destination, with its own connection, shell and job list"""
+  name: str
+  destination: str | None = None
+  connection: object | None = None
+  terminal: object | None = None       # shell in the pane on the right while this tab is active
+  login_terminal: object | None = None # the ssh login (control master) of the connection
+  jobs: dict = field(default_factory=dict)
+  since: object | None = None          # finished-since time of the loaded list
+  summary: str = ""                    # status line of the loaded list
+  loaded: bool = False
+  loader: object | None = None         # worker loading the job list
+  load_started: float = 0.0
+  updated: object | None = None        # when the list was loaded
+
+def is_local_destination(destination):
+  return destination.lower() in {"localhost", "127.0.0.1", "::1"}
 
 def setup_logging(logfile):
   for name in ("slurm_tui", "utils"): # "utils" is the logger of slurm.py / helpers.py
@@ -92,24 +117,485 @@ def setup_logging(logfile):
       lg.addHandler(fh)
 
 # ---------------------------------------------------------------------------
-# slurm queries
+# running commands, locally or on the cluster of a tab
+
+SLURM_ENV = {"SLURM_TIME_FORMAT": "standard"}
+REMOTE_SHELLS = 4         # persistent shells per SSH connection: commands that can run at the same time
+SHELL_START_TIMEOUT = 120 # seconds for a remote shell to start (the login scripts of the cluster run first)
+
+class Cancelled(BaseException):
+  """The user aborted the work of a worker (a BaseException, so that `except Exception` on the way lets it pass)"""
+
+_thread = threading.local() # per worker thread: the connection it works with (conn) and its abort event (cancel)
+
+def conn():
+  """Connection of the cluster the running code works for: the one its worker was started with, else the active tab's"""
+  return _thread.conn if hasattr(_thread, "conn") else ssh_connection
+
+def check_cancelled():
+  event = getattr(_thread, "cancel", None)
+  if event is not None and event.is_set():
+    raise Cancelled()
+
+CURRENT = object() # start_worker(connection=CURRENT): the connection of the active tab
+
+def start_worker(node, fn, group, exclusive=True, connection=CURRENT, name=""):
+  """Run fn() in a thread worker of node. The worker keeps the connection of the tab that was active when it was
+  started (or the given one), so switching tabs does not redirect its commands; worker.abort stops the command it
+  is waiting for; an error is logged and shown instead of ending the app."""
+  bound = ssh_connection if connection is CURRENT else connection
+  abort = threading.Event()
+  app = node.app
+  if exclusive:
+    for w in list(app.workers):
+      if w.node is node and w.group == group and hasattr(w, "abort"):
+        w.abort.set()
+  def body():
+    _thread.conn, _thread.cancel = bound, abort
+    try:
+      return fn()
+    except Cancelled:
+      return None
+    except Exception as e:
+      log.exception(f"{name or group} failed")
+      if not abort.is_set():
+        app.call_from_thread(app.notify, f"{name or group} failed: {e}", severity="error", timeout=10)
+      return None
+    finally:
+      del _thread.conn, _thread.cancel
+  worker = node.run_worker(body, thread=True, group=group, exclusive=exclusive, exit_on_error=False, name=name or group)
+  worker.abort = abort
+  return worker
+
+def cluster_work(group, exclusive=True):
+  """Decorator for methods that run as start_worker() workers, like @work(thread=True)"""
+  def deco(method):
+    @functools.wraps(method)
+    def start(self, *args, **kwargs):
+      return start_worker(self, lambda: method(self, *args, **kwargs), group, exclusive, name=method.__name__)
+    return start
+  return deco
+
+def run_local(cmd, timeout=60, env=None, cwd=None, text=True):
+  """subprocess.run with capture_output that the abort of the worker stops"""
+  proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=text,
+                          env=env, cwd=cwd or None)
+  deadline = time.monotonic() + timeout
+  while True:
+    try:
+      out, err = proc.communicate(timeout=0.2)
+      return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+    except subprocess.TimeoutExpired:
+      expired = time.monotonic() > deadline
+      try:
+        check_cancelled()
+      except Cancelled:
+        proc.kill()
+        proc.communicate()
+        raise
+      if expired:
+        proc.kill()
+        proc.communicate()
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+def run_cmd(cmd, timeout=60, env=None, cwd=None, text=True):
+  """Run a command on the cluster of the current tab (worker) and return the CompletedProcess"""
+  c = conn()
+  if c is not None:
+    return c.run(cmd, timeout=timeout, quiet=True, env=env, cwd=cwd, text=text)
+  try:
+    return run_local(cmd, timeout, os.environ | (env or {}), cwd, text)
+  except (OSError, subprocess.TimeoutExpired) as e:
+    return subprocess.CompletedProcess(cmd, 255, "" if text else b"", str(e) if text else str(e).encode())
 
 def run(cmd, timeout=60, quiet=False):
   """Run a command, return its stdout ('' on failure, with a warning unless quiet)"""
   log.debug(f"running command: {shlex.join(cmd)}")
-  try:
-    res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                         env=os.environ | {"SLURM_TIME_FORMAT": "standard"})
-  except (OSError, subprocess.TimeoutExpired) as e:
-    log.warning(f"{cmd[0]} failed: {e}")
-    return ""
+  res = run_cmd(cmd, timeout, SLURM_ENV)
   if res.returncode != 0 and not quiet:
-    log.warning(f"{shlex.join(cmd[:3])} ... failed: {res.stderr.strip()[:300]}")
-  return res.stdout
+    log.warning(f"{shlex.join(cmd[:3])} ... failed: {(res.stderr or '').strip()[:300]}")
+  return res.stdout or ""
+
+def run_many(cmds, timeout=60):
+  """Run several commands; on a remote cluster all of them in a single round trip. CompletedProcess list."""
+  for cmd in cmds:
+    log.debug(f"running command: {shlex.join(cmd)}")
+  c = conn()
+  if c is not None:
+    return c.run_many([(cmd, SLURM_ENV, None) for cmd in cmds], timeout=timeout, quiet=True)
+  return [run_cmd(cmd, timeout, SLURM_ENV) for cmd in cmds]
+
+class RemoteShell:
+  """/bin/sh on the cluster, started once over the SSH control connection. Commands go to its stdin; their exit
+  code, stdout and stderr come back framed by a random token. A command costs one round trip instead of a new SSH
+  session, and the login scripts of the cluster run only once (what they print is dropped)."""
+  def __init__(self, connection, timeout=SHELL_START_TIMEOUT):
+    self.token = os.urandom(8).hex()
+    self.buf = b""
+    argv = ["ssh", "-S", connection.control_path, "-o", "BatchMode=yes", "-T", "-x", "-a",
+            connection.destination, "exec /bin/sh"]
+    log.debug(f"starting remote shell: {shlex.join(argv)}")
+    self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+    self.fd = self.proc.stdout.fileno()
+    try:
+      self.send('d=$(mktemp -d "${TMPDIR:-/tmp}/slurm_tui.XXXXXX") || exit 1\n'
+                "trap 'rm -rf \"$d\"' EXIT\n"
+                "trap 'exit 1' HUP INT TERM PIPE\n"
+                f"printf '\\n%s ready\\n' {self.token}\n")
+      self.read_until(f"\n{self.token} ready\n".encode(), time.monotonic() + timeout, "start")
+    except BaseException:
+      self.kill()
+      raise
+
+  def send(self, text):
+    self.proc.stdin.write(text.encode())
+    self.proc.stdin.flush()
+
+  def read_more(self, deadline, what):
+    while True:
+      check_cancelled()
+      left = deadline - time.monotonic()
+      if left <= 0:
+        raise TimeoutError(f"the remote shell did not {what} in time")
+      ready, _, _ = select.select([self.fd], [], [], min(left, 0.2))
+      if ready:
+        chunk = os.read(self.fd, 1 << 16)
+        if not chunk:
+          raise EOFError(f"the remote shell ended (exit code {self.proc.poll()})")
+        self.buf += chunk
+        return
+
+  def read_until(self, marker, deadline, what="answer"):
+    while (i := self.buf.find(marker)) < 0:
+      self.buf = self.buf[-len(marker):] if what == "start" and len(self.buf) > 1 << 20 else self.buf
+      self.read_more(deadline, what)
+    data, self.buf = self.buf[:i], self.buf[i + len(marker):]
+    return data
+
+  def read_exact(self, n, deadline):
+    while len(self.buf) < n:
+      self.read_more(deadline, "answer")
+    data, self.buf = self.buf[:n], self.buf[n:]
+    return data
+
+  def wrap(self, argv, env=None, cwd=None):
+    parts = [f"cd {shlex.quote(cwd)} || exit 125"] if cwd else []
+    parts += [f"export {k}={shlex.quote(str(v))}" for k, v in (env or {}).items()]
+    parts.append("exec " + shlex.join(map(str, argv)))
+    return (f"( {'; '.join(parts)} ) >\"$d/o\" 2>\"$d/e\" </dev/null; r=$?; "
+            f"printf '%s %s %s %s\\n' {self.token} \"$r\" $(wc -c <\"$d/o\") $(wc -c <\"$d/e\"); cat \"$d/o\" \"$d/e\"\n")
+
+  def execute(self, requests, timeout):
+    """[(argv, env, cwd)] -> [(exit code, stdout bytes, stderr bytes)]"""
+    log.debug(f"remote round trip with {len(requests)} command(s): {shlex.join(map(str, requests[0][0][:4]))} ...")
+    try:
+      self.send("".join(self.wrap(*r) for r in requests))
+      deadline = time.monotonic() + timeout
+      results = []
+      for _ in requests:
+        head = self.read_until(b"\n", deadline).split()
+        if len(head) != 4 or head[0] != self.token.encode():
+          raise EOFError(f"unexpected output from the remote shell: {b' '.join(head)[:100]!r}")
+        code, nout, nerr = map(int, head[1:])
+        results.append((code, self.read_exact(nout, deadline), self.read_exact(nerr, deadline)))
+      return results
+    except BaseException:
+      self.kill() # a command may still be running or the output is out of step: this shell is not used again
+      raise
+
+  @property
+  def alive(self):
+    return self.proc.poll() is None
+
+  def close(self):
+    """End an idle shell: on the end of its input the remote shell exits and removes its temporary directory"""
+    try:
+      self.proc.stdin.close()
+      self.proc.wait(timeout=1)
+    except (OSError, subprocess.TimeoutExpired):
+      pass
+    self.kill()
+
+  def kill(self):
+    if self.proc.poll() is None:
+      self.proc.kill()
+    for f in (self.proc.stdin, self.proc.stdout):
+      try:
+        f.close()
+      except OSError:
+        pass
+    try:
+      self.proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+      pass
+
+class RemoteDirEntry:
+  """Small os.DirEntry-compatible record returned by remote scandir."""
+  def __init__(self, directory, info):
+    self.name = info["name"]
+    self.path = os.path.join(directory, self.name)
+    self.info = info
+  def is_file(self, follow_symlinks=True):
+    return self.info["isfile"]
+  def is_dir(self, follow_symlinks=True):
+    return self.info["isdir"]
+  def is_symlink(self):
+    return self.info.get("link", False)
+  def stat(self, follow_symlinks=True):
+    return type("Stat", (), {"st_size": self.info["size"], "st_mtime": self.info["mtime"]})()
+
+class RemoteScandir(list):
+  def __enter__(self): return self
+  def __exit__(self, *exc): return False
+
+class RemoteSSH:
+  """SSH connection to a cluster: an OpenSSH control master (ssh -M -N, no remote shell) that the user logs in with
+  in the terminal pane, and remote shells multiplexed over it that run the commands of the app."""
+  def __init__(self, destination):
+    self.destination = destination
+    self.socket_dir = tempfile.mkdtemp(prefix=f"slurm-tui-{os.getuid()}-")
+    os.chmod(self.socket_dir, 0o700)
+    self.control_path = os.path.join(self.socket_dir, "control")
+    self.master_argv = ["ssh", "-M", "-S", self.control_path, "-o", "ControlMaster=yes", "-o", "ControlPersist=no",
+                        "-N", destination]
+    self.master = None      # the ssh process of the login (started by its TerminalSession)
+    self.ready = False      # logged in and the first remote shell answered
+    self.connecting = False # the first remote shell is starting
+    self.error = ""
+    self.user, self.groups, self.home = "", [], ""
+    self.idle, self.busy, self.closed = [], 0, False
+    self.cv = threading.Condition()
+
+  @property
+  def logged_in(self):
+    """The control socket exists once the authentication is complete"""
+    return self.master is not None and self.master.poll() is None and os.path.exists(self.control_path)
+
+  @property
+  def connected(self):
+    return self.ready and self.master is not None and self.master.poll() is None
+
+  @property
+  def identity(self):
+    return f"{self.user}@{self.destination}" if self.user else self.destination
+
+  def connect(self):
+    """Start the first remote shell and learn the user, groups and home directory (in a worker thread)"""
+    shell = self.acquire()
+    ok = False
+    try:
+      results = shell.execute([(["id", "-un"], None, None), (["id", "-Gn"], None, None),
+                               (["sh", "-c", 'printf "%s\\n" "$HOME"'], None, None)], timeout=60)
+      ok = True
+    finally:
+      self.release(shell, ok)
+    (_, user, _), (_, groups, _), (_, home, _) = results
+    self.user = user.decode(errors="replace").strip()
+    self.groups = groups.decode(errors="replace").split()
+    self.home = home.decode(errors="replace").strip()
+    if not self.user:
+      raise RuntimeError("the remote shell does not answer to id -un")
+    self.ready, self.error = True, ""
+
+  def acquire(self):
+    with self.cv:
+      while True:
+        check_cancelled()
+        if self.closed:
+          raise OSError(f"the connection to {self.destination} is closed")
+        if self.idle:
+          shell = self.idle.pop()
+          if shell.alive:
+            self.busy += 1
+            return shell
+          continue
+        if self.busy < REMOTE_SHELLS:
+          self.busy += 1
+          break
+        self.cv.wait(0.2)
+    try:
+      return RemoteShell(self)
+    except BaseException:
+      with self.cv:
+        self.busy -= 1
+        self.cv.notify()
+      raise
+
+  def release(self, shell, ok=True):
+    with self.cv:
+      self.busy -= 1
+      if ok and shell.alive and not self.closed:
+        self.idle.append(shell)
+      else:
+        shell.kill()
+      self.cv.notify()
+
+  def run_many(self, requests, timeout=60, quiet=False, text=True):
+    """[(argv, env, cwd)] in one round trip -> [CompletedProcess]"""
+    def failed(msg):
+      if not quiet:
+        log.warning(f"SSH {self.destination}: {msg}")
+      return [subprocess.CompletedProcess(argv, 255, "" if text else b"", msg if text else msg.encode())
+              for argv, _, _ in requests]
+    if not self.ready:
+      return failed("not logged in")
+    shell = None
+    try:
+      shell = self.acquire()
+      results = shell.execute(requests, timeout)
+    except (OSError, EOFError, TimeoutError, ValueError) as e:
+      if shell is not None:
+        self.release(shell, False)
+      return failed(f"{shlex.join(map(str, requests[0][0][:3]))} ... failed: {e}")
+    except BaseException:
+      if shell is not None:
+        self.release(shell, False)
+      raise
+    self.release(shell)
+    out = []
+    for (argv, _, _), (code, stdout, stderr) in zip(requests, results):
+      if text:
+        stdout, stderr = stdout.decode(errors="replace"), stderr.decode(errors="replace")
+      if code and not quiet:
+        log.warning(f"{shlex.join(map(str, argv[:3]))} ... failed: {(stderr if text else stderr.decode(errors='replace')).strip()[:300]}")
+      out.append(subprocess.CompletedProcess(argv, code, stdout, stderr))
+    return out
+
+  def run(self, command, timeout=60, quiet=False, env=None, cwd=None, text=True):
+    return self.run_many([(list(command), env, cwd)], timeout, quiet, text)[0]
+
+  def command_argv(self, command, interactive=False, cwd=None):
+    """ssh command line that runs command (none: the login shell) over the control connection"""
+    remote = [f"cd {shlex.quote(cwd)} || exit"] if cwd else []
+    if command:
+      remote.append("exec " + shlex.join(list(map(str, command))))
+    return ["ssh", "-S", self.control_path, "-tt" if interactive else "-T", self.destination,
+            *(["; ".join(remote)] if remote else [])]
+
+  def path_info(self, path):
+    source = ("p=$1; [ -e \"$p\" ] || [ -L \"$p\" ] || exit 0; "
+              "f=0; d=0; [ ! -f \"$p\" ] || f=1; [ ! -d \"$p\" ] || d=1; "
+              "stat -L -c \"$f $d %s %Y\" -- \"$p\"; readlink -f -- \"$p\"")
+    result = self.run(["sh", "-c", source, "sh", path], quiet=True)
+    lines = (result.stdout or "").splitlines()
+    if result.returncode or len(lines) < 2:
+      return {}
+    try:
+      isfile, isdir, size, mtime = lines[0].split()
+      return {"exists": True, "isfile": isfile == "1", "isdir": isdir == "1",
+              "size": int(size), "mtime": float(mtime), "realpath": lines[1]}
+    except (ValueError, TypeError):
+      return {}
+
+  def exists(self, path): return bool(self.path_info(path).get("exists"))
+  def isfile(self, path): return bool(self.path_info(path).get("isfile"))
+  def isdir(self, path): return bool(self.path_info(path).get("isdir"))
+  def getsize(self, path):
+    info = self.path_info(path)
+    if not info.get("exists"):
+      raise OSError(f"remote path does not exist: {path}")
+    return info["size"]
+  def stat(self, path):
+    info = self.path_info(path)
+    if not info.get("exists"):
+      raise OSError(f"remote path does not exist: {path}")
+    return type("Stat", (), {"st_size": info["size"], "st_mtime": info["mtime"]})()
+  def realpath(self, path): return self.path_info(path).get("realpath", path)
+
+  def expanduser(self, path):
+    if self.home and (path == "~" or path.startswith("~/")):
+      return self.home + path[1:]
+    return path
+
+  def which(self, name):
+    source = "command -v \"$1\" 2>/dev/null || true"
+    return self.run(["sh", "-c", source, "sh", name], quiet=True).stdout.strip()
+
+  def is_hdf5(self, path):
+    source = ("p=$1; for offset in 0 512 1024 2048 4096 8192 16384 32768 65536 "
+              "131072 262144 524288 1048576; do "
+              "sig=$(od -An -tx1 -j \"$offset\" -N 8 -- \"$p\" 2>/dev/null | tr -d ' \\n'); "
+              "[ \"$sig\" = 894844460d0a1a0a ] && exit 0; done; exit 1")
+    return self.run(["sh", "-c", source, "sh", path], quiet=True).returncode == 0
+
+  def scandir(self, path):
+    result = self.run(["find", "--", path, "-mindepth", "1", "-maxdepth", "1", "-printf", "%f\\t%Y\\t%s\\t%T@\\t%y\\n"], quiet=True)
+    if result.returncode and not result.stdout:
+      raise OSError((result.stderr or "remote directory listing failed").strip())
+    items = []
+    for line in (result.stdout or "").splitlines():
+      fields = line.split("\t")
+      if len(fields) != 5:
+        continue
+      name, kind, size, mtime, own = fields
+      items.append({"name": name, "isfile": kind == "f", "isdir": kind == "d", "link": own == "l",
+                    "size": int(size), "mtime": float(mtime)})
+    return RemoteScandir(RemoteDirEntry(path, item) for item in items)
+
+  def read(self, path, offset=0, size=None):
+    if size is None:
+      args = ["cat", "--", path]
+    else:
+      args = ["dd", f"if={path}", "iflag=skip_bytes,count_bytes", f"skip={int(offset)}", f"count={int(size)}", "status=none"]
+    result = self.run(args, timeout=120, quiet=True, text=False)
+    if result.returncode:
+      error = result.stderr.decode(errors="replace") if result.stderr else "remote file read failed"
+      raise OSError(error.strip())
+    return result.stdout
+
+  def download(self, path, suffix=""):
+    fd, local_path = tempfile.mkstemp(prefix="slurm-tui-remote-", suffix=suffix)
+    try:
+      with os.fdopen(fd, "wb") as output:
+        result = subprocess.run(self.command_argv(["cat", "--", path]), stdout=output, stdin=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE, timeout=600)
+      if result.returncode:
+        raise OSError(result.stderr.decode(errors="replace").strip() or f"cannot download {path}")
+      return local_path
+    except Exception:
+      try: os.unlink(local_path)
+      except OSError: pass
+      raise
+
+  def close(self):
+    with self.cv:
+      self.closed = True
+      idle, self.idle = self.idle, []
+    for shell in idle:
+      shell.close()
+    if self.master is not None and self.master.poll() is None:
+      self.master.terminate()
+    self.ready = False
+    shutil.rmtree(self.socket_dir, ignore_errors=True)
+
+def fs_exists(path): return conn().exists(path) if conn() else os.path.exists(path)
+def fs_isfile(path): return conn().isfile(path) if conn() else os.path.isfile(path)
+def fs_isdir(path): return conn().isdir(path) if conn() else os.path.isdir(path)
+def fs_getsize(path): return conn().getsize(path) if conn() else os.path.getsize(path)
+def fs_stat(path): return conn().stat(path) if conn() else os.stat(path)
+def fs_scandir(path): return conn().scandir(path) if conn() else os.scandir(path)
+def fs_read(path, offset=0, size=None):
+  if conn():
+    return conn().read(path, offset, size)
+  with open(path, "rb") as f:
+    f.seek(offset)
+    return f.read() if size is None else f.read(size)
+
+def fs_realpath(path): return conn().realpath(path) if conn() else os.path.realpath(path)
+
+def fs_expanduser(path):
+  if conn() and str(path).startswith("~"):
+    return conn().expanduser(path)
+  return os.path.expanduser(path)
+
+def command_exists(name):
+  return bool(conn().which(name)) if conn() else shutil.which(name) is not None
 
 def parsable(out, fields):
-  """Rows of '|'-separated output as dicts, the last field may contain '|'"""
-  return [dict(zip(fields, line.split("|", len(fields)-1))) for line in out.splitlines() if line.strip()]
+  """Rows of '|'-separated output as dicts, the last field may contain '|'; other lines (e.g. messages) are skipped"""
+  rows = [line.split("|", len(fields)-1) for line in out.splitlines()]
+  return [dict(zip(fields, row)) for row in rows if len(row) == len(fields)]
 
 SACCT_FIELDS = ["JobID", "JobIDRaw", "JobName", "User", "Account", "Partition", "State", "ExitCode", "NNodes", "NTasks",
                 "NodeList", "Submit", "Start", "End", "Elapsed", "Timelimit", "WorkDir", "StdOut", "StdErr",
@@ -118,11 +604,17 @@ SQUEUE_FIELDS = ["JobID", "JobName", "User", "Account", "Partition", "State", "R
                  "Timelimit", "Start", "Submit", "WorkDir", "NodeList"]
 SQUEUE_FMT = "%i|%j|%u|%a|%P|%T|%r|%D|%M|%l|%S|%V|%Z|%N"
 
+def sacct_cmd(args):
+  return ["sacct", *args, "-P", "-n", f"--format={','.join(SACCT_FIELDS)}"]
+
+def squeue_cmd(args):
+  return ["squeue", *args, "-r", "-h", f"--format={SQUEUE_FMT}"]
+
 def sacct(args):
-  return parsable(run(["sacct", *args, "-P", "-n", f"--format={','.join(SACCT_FIELDS)}"]), SACCT_FIELDS)
+  return parsable(run(sacct_cmd(args)), SACCT_FIELDS)
 
 def squeue(args, quiet=False):
-  return parsable(run(["squeue", *args, "-r", "-h", f"--format={SQUEUE_FMT}"], quiet=quiet), SQUEUE_FIELDS)
+  return parsable(run(squeue_cmd(args), quiet=quiet), SQUEUE_FIELDS)
 
 def is_time(val):
   return bool(val) and val not in ("Unknown", "None", "N/A", "(null)")
@@ -213,20 +705,25 @@ def record_from_squeue(row):
 
 def load_jobs(since, us, jids=None):
   """Queued jobs plus jobs that finished after `since` (datetime or None), or only the given job ids"""
-  accts = ",".join(sl.accounts())
-  if jids:
-    queue = squeue(["-j", ",".join(jids)], quiet=True) # finished jobs are unknown to squeue
-  else:
-    queue = squeue(["-A", accts] if us else ["--me"])
-  queued = {row["JobID"]: row for row in queue}
+  c = conn()
+  accts = ",".join(c.groups if c else sl.accounts())
+  user = c.user if c else sl.getpass.getuser()
+  # squeue and the finished jobs together (one round trip on a remote cluster), then the accounting of the queued jobs
+  cmds = [squeue_cmd(["-j", ",".join(jids)] if jids else ["-A", accts] if us else ["--me"])]
+  if since and not jids:
+    cmds.append(sacct_cmd([*(["-a", "-A", accts] if us else ["-u", user]), "-S", since.isoformat(), "-E", "now"]))
+  results = run_many(cmds)
+  for cmd, res in zip(cmds, results):
+    if res.returncode and not (jids and cmd[0] == "squeue"): # finished jobs are unknown to squeue
+      log.warning(f"{shlex.join(cmd[:3])} ... failed: {(res.stderr or '').strip()[:300]}")
+  queued = {row["JobID"]: row for row in parsable(results[0].stdout, SQUEUE_FIELDS)}
 
   rows = []
   ids = set(queued) | set(jids or [])
   if ids:
     rows += sacct(["-j", ",".join(sorted(ids))])
-  if since and not jids:
-    who = ["-a", "-A", accts] if us else ["-u", sl.getpass.getuser()]
-    rows += sacct([*who, "-S", since.isoformat(), "-E", "now"])
+  if len(results) > 1:
+    rows += parsable(results[1].stdout, SACCT_FIELDS)
 
   jobs, steps = {}, {}
   for row in rows:
@@ -251,13 +748,17 @@ def load_jobs(since, us, jids=None):
     job.steps = sorted(steps.get(jid, {}).values(), key=step_key)
   return list(jobs.values())
 
-def command_of(job, cache):
-  """srun line of the latest step, the job's own srun line, the srun lines of
-  the batch script of a queued job or the sbatch/salloc line"""
+def step_commands(job):
   cmds = [s["SubmitLine"] for s in job.steps
           if s["JobID"].partition(".")[2].isdigit() and s["SubmitLine"] and s["JobName"] != STEP_NAME]
   if not cmds and job.rec["SubmitLine"].startswith("srun"):
     cmds = [job.rec["SubmitLine"]]
+  return cmds
+
+def command_of(job, cache):
+  """srun line of the latest step, the job's own srun line, the srun lines of
+  the batch script of a queued job or the sbatch/salloc line"""
+  cmds = step_commands(job)
   if not cmds and job.queued:
     cmds = [expand_vars(line, job_vars(job)) for line in sl.srun_lines(batch_script(job.jid, cache))]
   cmds = list(dict.fromkeys(cmds))
@@ -393,14 +894,13 @@ def restart_args(job):
 
 def array_task_states(parent_id):
   """Current/accounted states by array task ID; fail if either Slurm query is unavailable"""
-  env = os.environ | {"SLURM_TIME_FORMAT": "standard"}
   states = {}
   commands = [
     ["sacct", "-X", "-j", str(parent_id), "-n", "-P", "--format=JobIDRaw,State"],
     ["squeue", "-r", "-j", str(parent_id), "-h", "--format=%i|%T"],
   ]
   for cmd in commands:
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=45, env=env)
+    result = run_cmd(cmd, timeout=45, env=SLURM_ENV)
     if result.returncode:
       raise RuntimeError(result.stderr.strip() or f"{shlex.join(cmd)} failed")
     for line in result.stdout.splitlines():
@@ -413,7 +913,8 @@ def array_task_states(parent_id):
         states[match.group(1)] = state
   return states
 
-def err_status(job):
+def err_status(job, sizes=None):
+  """("file", size) of the error file, or why there is none; sizes: known sizes by path (None: missing)"""
   if not (job.rec["StdOut"] or job.rec["StdErr"]) or not job.started:
     return (None, 0)
   if job.merged():
@@ -421,23 +922,23 @@ def err_status(job):
   path = job.stderr_path()
   if not path:
     return (None, 0)
+  if sizes is not None:
+    return ("file", sizes[path]) if sizes.get(path) is not None else ("missing", 0)
   try:
-    return ("file", os.path.getsize(path))
+    return ("file", fs_getsize(path))
   except OSError:
     return ("missing", 0)
 
-def output_progress(path):
-  """Read only the tail of an output file and return its latest valid n/N entry."""
+def output_progress(path, tail=None):
+  """Latest valid n/N entry in the tail of an output file (read here unless given)"""
   if not path:
     return None
-  try:
-    with open(path, "rb") as f:
-      f.seek(0, os.SEEK_END)
-      size = f.tell()
-      f.seek(max(0, size - PROGRESS_TAIL_BYTES))
-      tail = f.read(PROGRESS_TAIL_BYTES).decode("utf-8", errors="replace")
-  except OSError:
-    return None
+  if tail is None:
+    try:
+      size = fs_getsize(path)
+      tail = fs_read(path, max(0, size - PROGRESS_TAIL_BYTES), PROGRESS_TAIL_BYTES).decode("utf-8", errors="replace")
+    except OSError:
+      return None
   for line in reversed(tail.splitlines()[-PROGRESS_TAIL_LINES:]):
     for match in reversed(list(PROGRESS_PATTERN.finditer(line))):
       try:
@@ -449,11 +950,33 @@ def output_progress(path):
   return None
 
 def annotate(jobs):
-  cache = {}
+  """Command, error file and progress of the jobs. On a remote cluster the sizes of the error files, the tails of
+  the output files and the batch scripts are fetched together, in one round trip."""
+  if conn() is None:
+    cache = {}
+    for job in jobs:
+      job.command = command_of(job, cache)
+      job.err = err_status(job)
+      job.progress = output_progress(job.stdout_path()) if job.running else None
+    return jobs
+  err_paths = sorted({p for job in jobs if err_status(job, {})[0] == "missing" and (p := job.stderr_path())})
+  out_paths = sorted({p for job in jobs if job.running and (p := job.stdout_path())})
+  scripts = sorted({job.jid.split("_")[0]: job.jid for job in jobs if job.queued and not step_commands(job)}.items())
+  cmds = ([["stat", "-L", "-c", "%s", "--", p] for p in err_paths] +
+          [["tail", "-c", str(PROGRESS_TAIL_BYTES), "--", p] for p in out_paths] +
+          [["scontrol", "write", "batch_script", jid, "-"] for _, jid in scripts])
+  results = run_many(cmds) if cmds else []
+  sizes = {}
+  for p, res in zip(err_paths, results):
+    sizes[p] = int(res.stdout) if res.returncode == 0 and res.stdout.strip().isdigit() else None
+  results = results[len(err_paths):]
+  tails = {p: res.stdout if res.returncode == 0 else None for p, res in zip(out_paths, results)}
+  cache = {key: res.stdout for (key, _), res in zip(scripts, results[len(out_paths):])}
   for job in jobs:
     job.command = command_of(job, cache)
-    job.err = err_status(job)
-    job.progress = output_progress(job.stdout_path()) if job.running else None
+    job.err = err_status(job, sizes)
+    path = job.stdout_path()
+    job.progress = output_progress(path, tails.get(path)) if job.running and tails.get(path) is not None else None
   return jobs
 
 # ---------------------------------------------------------------------------
@@ -499,9 +1022,9 @@ def existing_files(lines, workdir, env=None, dirs=False):
     if env is not None:
       line = expand_vars(line, env)
     for cand in path_candidates(line):
-      path = os.path.expanduser(cand)
+      path = fs_expanduser(cand)
       path = path if os.path.isabs(path) else os.path.join(workdir or ".", path)
-      if os.path.isfile(path) or (dirs and os.path.isdir(path) and os.path.normpath(path) != "/"):
+      if fs_isfile(path) or (dirs and fs_isdir(path) and os.path.normpath(path) != "/"):
         found.append(os.path.normpath(path))
   return found
 
@@ -527,16 +1050,15 @@ def resolve_path(word, bases=(), env=None):
   for cand in dict.fromkeys([word, word.split(":")[0]]):
     if not re.search(r'[\w~]', cand) or cand.startswith("-"):
       continue
-    cand = os.path.expanduser(cand)
+    cand = fs_expanduser(cand)
     for path in [cand] if os.path.isabs(cand) else [os.path.join(b, cand) for b in bases if b]:
-      if os.path.exists(path):
+      if fs_exists(path):
         return os.path.normpath(path)
   return None
 
 def is_binary(path):
   try:
-    with open(path, "rb") as f:
-      return b"\0" in f.read(8192)
+    return b"\0" in fs_read(path, size=8192)
   except OSError:
     return False
 
@@ -553,8 +1075,7 @@ def script_lines(text):
 
 def read_text(path, limit=1024*1024):
   try:
-    with open(path, "rb") as f:
-      return f.read(limit).decode("utf-8", errors="replace")
+    return fs_read(path, size=limit).decode("utf-8", errors="replace")
   except OSError:
     return ""
 
@@ -579,7 +1100,7 @@ def load_details(job):
   files, seen = d["files"], set()
 
   def add(entry):
-    key = os.path.realpath(entry.path) if entry.path else (entry.kind, entry.label)
+    key = fs_realpath(entry.path) if entry.path else (entry.kind, entry.label)
     if key not in seen:
       seen.add(key)
       files.append(entry)
@@ -592,7 +1113,7 @@ def load_details(job):
   if workdir:
     add(Entry("workdir", workdir, path=workdir))
   for path in [job.stdout_path(), job.stderr_path()]:
-    if path and os.path.isdir(os.path.dirname(path)):
+    if path and fs_isdir(os.path.dirname(path)):
       add(Entry("output dir", os.path.dirname(path), path=os.path.dirname(path)))
 
   for entry in likely_job_core_dumps(job):
@@ -620,14 +1141,14 @@ def load_details(job):
     add(Entry("in script", path, path=path))
 
   for e in files:
-    if e.path and os.path.isdir(e.path):
+    if e.path and fs_isdir(e.path):
       e.label = e.path.rstrip("/") + "/"
       e.note = e.note or "directory"
-    elif e.path and not os.path.isfile(e.path):
+    elif e.path and not fs_isfile(e.path):
       e.note = "does not exist (yet)"
     elif e.path:
       try:
-        e.note = e.note or humanize.naturalsize(os.path.getsize(e.path))
+        e.note = e.note or humanize.naturalsize(fs_getsize(e.path))
         if is_hdf5(e.path):
           e.note += " HDF5"
         elif is_binary(e.path):
@@ -647,7 +1168,7 @@ def likely_job_core_dumps(job):
   """Find top-level core files in a job's workdir that match its node and run time."""
   rec = job.rec
   workdir = rec.get("WorkDir")
-  if not workdir or workdir in ("(null)", "None") or not os.path.isdir(workdir):
+  if not workdir or workdir in ("(null)", "None") or not fs_isdir(workdir):
     return []
   try:
     start = datetime.fromisoformat(rec["Start"].replace("Z", "+00:00")).timestamp()
@@ -671,7 +1192,7 @@ def likely_job_core_dumps(job):
 
   found = []
   try:
-    with os.scandir(workdir) as entries:
+    with fs_scandir(workdir) as entries:
       for de in entries:
         match = CORE_DUMP_NAME.fullmatch(de.name)
         if not match:
@@ -702,11 +1223,8 @@ def run_on_nodes(job, cmd, node=None):
   args += ["bash", "-c", f'echo "== $(hostname)"; {cmd}']
   log.debug(f"running command: {shlex.join(args)}")
   try:
-    res = subprocess.run(args, capture_output=True, text=True, timeout=60)
+    res = run_cmd(args, timeout=60)
     out, err = res.stdout, res.stderr
-  except subprocess.TimeoutExpired as e:
-    out = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
-    err = "timeout after 60 s"
   except OSError as e:
     out, err = "", str(e)
   tasks, other = {}, []
@@ -892,9 +1410,9 @@ def register_file_view(name, matches, open_view):
 
 def open_path(app, crumbs, path, bases=(), env=None, follow=False):
   """Open a directory or dispatch a file to its first matching specialized view."""
-  if os.path.isdir(path):
+  if fs_isdir(path):
     app.push_screen(DirScreen(crumbs, path, bases=bases, env=env))
-  elif os.path.isfile(path):
+  elif fs_isfile(path):
     for view in FILE_VIEWS:
       if view.matches(path):
         view.open(app, crumbs, path, bases, env)
@@ -912,7 +1430,7 @@ def open_hdf5(app, crumbs, path, bases=(), env=None):
   try:
     import h5py # noqa: F401
   except ImportError:
-    if shutil.which("h5dump"):
+    if command_exists("h5dump"):
       cmd = ["h5dump", "-H", path]
       app.push_screen(FileScreen([*crumbs, os.path.basename(path)], text=run(cmd), refresher=lambda: run(cmd), bases=bases, env=env))
       app.notify("h5py is not installed: showing the structure printed by h5dump -H", severity="warning")
@@ -926,8 +1444,7 @@ def is_markdown(path):
 
 def open_markdown(app, crumbs, path, bases=(), env=None):
   try:
-    with open(path, encoding="utf-8", errors="replace") as f:
-      markdown = f.read()
+    markdown = fs_read(path).decode("utf-8", errors="replace")
   except OSError as e:
     app.notify(f"cannot read {path}: {e}", severity="error")
     return
@@ -938,6 +1455,12 @@ class SplitScreen(Screen):
   SHOW_BACK = False
 
   def compose(self) -> ComposeResult:
+    with Horizontal(id="cluster-tabs"):
+      for index, cluster in enumerate(self.app.clusters):
+        variant = "primary" if index == self.app.cluster_index else "default"
+        yield Button(cluster.name, id=f"cluster-tab-{index}", classes="cluster-tab", variant=variant, compact=True)
+      yield Button("+", id="cluster-add", tooltip="Add a local or SSH cluster", compact=True)
+      yield Static(id="cluster-connection-status")
     with Horizontal(id="topbar"):
       if self.SHOW_BACK:
         yield Button("←", id="back", compact=True, tooltip="Back")
@@ -947,10 +1470,23 @@ class SplitScreen(Screen):
         yield from self.compose_left()
       yield Splitter()
       yield TerminalPane()
-    yield Footer()
+    with Horizontal(id="bottombar"):
+      yield Footer()
+      yield Static(id="loadstatus")
+
+  def on_mount(self):
+    self.call_after_refresh(self.app.refresh_status)
 
   @on(Button.Pressed)
   def back_pressed(self, event: Button.Pressed) -> None:
+    if event.button.id == "cluster-add":
+      event.stop()
+      self.app.push_screen(AddClusterScreen(), self.app.add_cluster)
+      return
+    if event.button.id and event.button.id.startswith("cluster-tab-"):
+      event.stop()
+      self.app.select_cluster(int(event.button.id.rsplit("-", 1)[1]))
+      return
     if event.button.id != "back":
       return
     event.stop()
@@ -985,8 +1521,7 @@ class MarkdownScreen(SplitScreen):
 
   def action_reload(self):
     try:
-      with open(self.path, encoding="utf-8", errors="replace") as f:
-        self.markdown = f.read()
+      self.markdown = fs_read(self.path).decode("utf-8", errors="replace")
     except OSError as e:
       self.notify(f"cannot read {self.path}: {e}", severity="error")
       return
@@ -1038,7 +1573,7 @@ class DirScreen(SplitScreen):
   def scan(self):
     entries = []
     try:
-      with os.scandir(self.path) as it:
+      with fs_scandir(self.path) as it:
         for i, de in enumerate(it):
           if i >= DIR_LIMIT:
             break
@@ -1214,7 +1749,7 @@ class FileScreen(SplitScreen):
     parts = []
     if self.path:
       try:
-        parts.append(f"{self.path}  {humanize.naturalsize(os.path.getsize(self.path))}")
+        parts.append(f"{self.path}  {humanize.naturalsize(fs_getsize(self.path))}")
       except OSError:
         parts.append(f"{self.path}  (not readable)")
       if self.truncated:
@@ -1232,12 +1767,11 @@ class FileScreen(SplitScreen):
       return
     self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     try:
-      with open(self.path, "rb") as f:
-        size = os.fstat(f.fileno()).st_size
-        self.truncated = not self.full and size > TAIL_BYTES
-        f.seek(size - TAIL_BYTES if self.truncated else 0)
-        data = f.read()
-        self.file_pos = f.tell()
+      size = fs_getsize(self.path)
+      self.truncated = not self.full and size > TAIL_BYTES
+      offset = size - TAIL_BYTES if self.truncated else 0
+      data = fs_read(self.path, offset, size - offset)
+      self.file_pos = offset + len(data)
     except OSError as e:
       data, self.file_pos = f"cannot read {self.path}: {e}\n".encode(), 0
     if self.truncated:
@@ -1247,21 +1781,36 @@ class FileScreen(SplitScreen):
     self.action_bottom()
     self.update_status()
 
+  polling = False
+
   def poll(self):
-    """Append what was written to the file since the last poll"""
-    try:
-      size = os.path.getsize(self.path)
-      if size < self.file_pos: # truncated or replaced
-        self.load()
-        return
-      if size == self.file_pos:
-        return
-      with open(self.path, "rb") as f:
-        f.seek(self.file_pos)
-        data = f.read(TAIL_BYTES)
-        self.file_pos = f.tell()
-    except OSError:
+    """Append what was written to the file since the last poll. Read in a worker: on a remote cluster it takes
+    round trips, which must not block the UI."""
+    if self.polling:
       return
+    self.polling, pos = True, self.file_pos
+    def read():
+      size, data = None, b""
+      try:
+        size = fs_getsize(self.path)
+        if size > pos:
+          data = fs_read(self.path, pos, TAIL_BYTES)
+      except OSError:
+        pass
+      finally:
+        self.app.call_from_thread(self.append, pos, size, data)
+    start_worker(self, read, "poll", exclusive=False)
+
+  def append(self, pos, size, data):
+    self.polling = False
+    if size is None or pos != self.file_pos or not self.is_mounted: # unreadable, or reloaded meanwhile
+      return
+    if size < pos: # truncated or replaced
+      self.load()
+      return
+    if not data:
+      return
+    self.file_pos += len(data)
     area = self.area
     at_end = area.scroll_y >= area.max_scroll_y - 1
     area.insert(clean(self.decoder.decode(data)), area.document.end, maintain_selection_offset=True)
@@ -1323,7 +1872,7 @@ class FileScreen(SplitScreen):
     (self.rerun_timer.resume if self.watching else self.rerun_timer.pause)()
     self.update_status()
 
-  @work(thread=True, exclusive=True, group="rerun")
+  @cluster_work("rerun")
   def rerun(self):
     text = self.refresher()
     self.app.call_from_thread(self.show_text, text)
@@ -1377,7 +1926,8 @@ class FileScreen(SplitScreen):
         path = tmp.name
     try:
       with self.app.suspend():
-        subprocess.run(["less", "-R", "+F" if self.following else "+G", path])
+        args = ["less", "-R", "+F" if self.following else "+G", path]
+        subprocess.run(conn().command_argv(args, interactive=True) if conn() else args)
     except SuspendNotSupported:
       self.notify("cannot suspend the terminal here", severity="error")
     finally:
@@ -1391,28 +1941,28 @@ H5_ROWS = 500       # rows of a dataset shown at a time
 H5_COLS = 50        # columns (or fields of a compound type) shown at a time
 H5_MEMBERS = 5000   # members of a group listed at most
 
-def is_hdf5(path):
+def _is_hdf5_local(path):
   """HDF5 signature at the start of the file or behind a user block (512, 1024, 2048, ... bytes)"""
   try:
-    with open(path, "rb") as f:
-      offset = 0
-      while offset <= 1 << 20:
-        f.seek(offset)
-        sig = f.read(8)
-        if sig == HDF5_SIGNATURE:
-          return True
-        if len(sig) < 8:
-          return False
-        offset = 512 if offset == 0 else 2*offset
+    offset = 0
+    while offset <= 1 << 20:
+      sig = fs_read(path, offset, 8)
+      if sig == HDF5_SIGNATURE:
+        return True
+      if len(sig) < 8:
+        return False
+      offset = 512 if offset == 0 else 2*offset
   except OSError:
     pass
   return False
 
+def is_hdf5(path):
+  return conn().is_hdf5(path) if conn() else _is_hdf5_local(path)
+
 def is_core_dump(path):
   """Whether path is an ELF core file (not merely a file named 'core')."""
   try:
-    with open(path, "rb") as f:
-      header = f.read(18)
+    header = fs_read(path, size=18)
     if len(header) < 18 or header[:4] != b"\x7fELF":
       return False
     byte_order = {1: "little", 2: "big"}.get(header[5])
@@ -1493,7 +2043,7 @@ def h5_value(v, width=300):
 
 def h5_link_target(path, filename):
   """File name of an external link, relative to the file that has the link"""
-  return os.path.normpath(os.path.join(os.path.dirname(path), os.path.expanduser(filename)))
+  return os.path.normpath(os.path.join(os.path.dirname(path), fs_expanduser(filename)))
 
 class H5Screen(SplitScreen):
   """HDF5 browser: tree of groups and datasets, info and attributes of the selected one, and a table of its data"""
@@ -1515,6 +2065,7 @@ class H5Screen(SplitScreen):
     self.start = start
     self.bases, self.env = list(bases), env
     self.file = None
+    self.local_path = None
     self.current = None # data of the selected tree node
     self.dataset_selections = {} # dataset path -> selection text typed for it
     self.row0 = self.col0 = 0
@@ -1546,6 +2097,10 @@ class H5Screen(SplitScreen):
       except Exception:
         pass
       self.file = None
+    if self.local_path:
+      try: os.unlink(self.local_path)
+      except OSError: pass
+      self.local_path = None
 
   # --------------------------------------------------------------- tree
   def action_reload(self, first=False):
@@ -1564,12 +2119,16 @@ class H5Screen(SplitScreen):
     tree.clear()
     tree.root.data = {"path": "/", "kind": "group"}
     try:
-      self.file = open_h5(self.path)
+      path = self.path
+      if conn():
+        self.local_path = conn().download(self.path, suffix=os.path.splitext(self.path)[1])
+        path = self.local_path
+      self.file = open_h5(path)
     except Exception as e:
       self.query_one("#hstatus", Static).update(f"{self.path} · cannot open: {e}")
       self.show_message(f"cannot open {self.path}:\n{e}")
       return
-    size = humanize.naturalsize(os.path.getsize(self.path))
+    size = humanize.naturalsize(fs_getsize(self.path))
     self.query_one("#hstatus", Static).update(f"{self.path}  {size} · r: reload (e.g. while a job writes it)")
     self.load_children(tree.root)
     tree.root.expand()
@@ -1659,7 +2218,7 @@ class H5Screen(SplitScreen):
     data = event.node.data
     if data and data["kind"] == "external":
       target = h5_link_target(self.path, data["file"])
-      if os.path.isfile(target) and is_hdf5(target):
+      if fs_isfile(target) and is_hdf5(target):
         self.app.push_screen(H5Screen(self.crumbs, target, start=data["target"], bases=self.bases, env=self.env))
       else:
         self.notify(f"{target} of the external link does not exist or is no HDF5 file", severity="warning")
@@ -1906,13 +2465,13 @@ class GdbCommandScreen(ModalScreen[list[str] | None]):
 
 def inspect_core_file(path):
   """Read process notes from a core file through GDB without starting an interactive session."""
-  gdb = shutil.which("gdb")
+  gdb = conn().which("gdb") if conn() else shutil.which("gdb")
   if not gdb:
     return {}, "gdb was not found on PATH"
   try:
-    result = subprocess.run([gdb, "--batch", "--nx", f"--core={path}", "-ex", "info proc"],
-                            capture_output=True, text=True, timeout=20)
-  except (OSError, subprocess.TimeoutExpired) as e:
+    args = [gdb, "--batch", "--nx", f"--core={path}", "-ex", "info proc"]
+    result = run_cmd(args, timeout=20)
+  except OSError as e:
     return {}, f"could not inspect core metadata: {e}"
   output = (result.stdout or "") + "\n" + (result.stderr or "")
   info = {}
@@ -1958,7 +2517,7 @@ class CoreScreen(SplitScreen):
 
   def show_info(self):
     try:
-      stat = os.stat(self.path)
+      stat = fs_stat(self.path)
       size = humanize.naturalsize(stat.st_size)
       modified = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
     except OSError as e:
@@ -1977,7 +2536,7 @@ class CoreScreen(SplitScreen):
       grid.add_row("Process details", self.metadata_error)
     self.query_one("#core-info", Static).update(grid)
 
-  @work(thread=True, exclusive=True, group="core-metadata")
+  @cluster_work("core-metadata")
   def inspect_metadata(self):
     info, error = inspect_core_file(self.path)
     self.app.call_from_thread(self.metadata_loaded, info, error)
@@ -1990,7 +2549,7 @@ class CoreScreen(SplitScreen):
 
   def gdb_args(self):
     executable = self.process_info.get("exe")
-    if executable and os.path.isfile(executable):
+    if executable and fs_isfile(executable):
       return ["gdb", executable, self.path]
     return ["gdb", f"--core={self.path}"]
 
@@ -2267,7 +2826,7 @@ class JobScreen(SplitScreen):
     for i, e in enumerate(self.details["files"]):
       prompt = Text()
       prompt.append(f"{e.kind:<10} ", style="bold")
-      openable = (e.path and os.path.exists(e.path)) or e.text is not None or e.kind == "sacct"
+      openable = (e.path and fs_exists(e.path)) or e.text is not None or e.kind == "sacct"
       prompt.append(e.label, style="" if openable else "dim")
       if e.note:
         prompt.append(f"  {e.note}", style="dim")
@@ -2277,7 +2836,7 @@ class JobScreen(SplitScreen):
     if self.details["nodes"]:
       self.query_one("#node", Select).set_options([(n, n) for n in self.details["nodes"]])
 
-  @work(thread=True, exclusive=True, group="details")
+  @cluster_work("details")
   def load(self, refresh_job=False):
     job = self.job
     if refresh_job:
@@ -2304,7 +2863,7 @@ class JobScreen(SplitScreen):
     self.query_one("#memory-gpu", Static).update("querying …")
     self.query_current_memory()
 
-  @work(thread=True, exclusive=True, group="current-memory")
+  @cluster_work("current-memory")
   def query_current_memory(self):
     try:
       result = current_memory_usage(self.job)
@@ -2364,7 +2923,7 @@ class JobScreen(SplitScreen):
       return
     self.prepare_restart_options(args)
 
-  @work(thread=True, exclusive=True, group="restart-options")
+  @cluster_work("restart-options")
   def prepare_restart_options(self, default_args):
     task_id = array_task_id(self.job)
     retry_args, retry_label = None, "Retry array IDs not running/completed (not an array task)"
@@ -2396,12 +2955,11 @@ class JobScreen(SplitScreen):
       lambda args: self.run_job_action("restart", args, cwd=cwd) if args is not None else None,
     )
 
-  @work(thread=True, exclusive=True, group="job-action")
+  @cluster_work("job-action")
   def run_job_action(self, action, args, cwd=None):
     cwd = cwd if cwd and cwd not in ("(null)", "None") else None
     try:
-      result = subprocess.run(args, cwd=cwd or None, capture_output=True, text=True, timeout=60,
-                              env=os.environ | {"SLURM_TIME_FORMAT": "standard"})
+      result = run_cmd(args, cwd=cwd, timeout=60, env=SLURM_ENV)
       self.app.call_from_thread(self.job_action_finished, action, result.returncode, result.stdout, result.stderr)
     except (OSError, subprocess.TimeoutExpired) as e:
       self.app.call_from_thread(self.job_action_finished, action, -1, "", str(e))
@@ -2498,7 +3056,7 @@ class JobScreen(SplitScreen):
     node = self.query_one("#node", Select).value
     node = None if node is Select.NULL else node
     self.notify(f"running '{cmd}' on {node or 'all nodes'} ...")
-    self.run_worker(lambda: self.command_done(cmd, node, run_on_nodes(self.job, cmd, node)), thread=True, group="nodes")
+    start_worker(self, lambda: self.command_done(cmd, node, run_on_nodes(self.job, cmd, node)), "nodes", exclusive=False)
 
   def command_done(self, cmd, node, text):
     job = self.job
@@ -2583,8 +3141,10 @@ SWITCH_KEY = "ctrl+right_square_bracket" # Ctrl-]: the one key that does not go 
 class TerminalSession:
   """A command (srun --pty bash) in a pseudo terminal, emulated with pyte. It belongs to the app and is shown in
   the terminal pane of every window, so it keeps running while you navigate on the left."""
-  def __init__(self, app, args, title):
+  def __init__(self, app, args, title, via=None, login=None):
     self.app, self.args, self.title = app, args, title
+    self.via = via     # RemoteSSH: args run on its cluster (no args: the login shell there)
+    self.login = login # RemoteSSH: args are the ssh login (control master) of this connection
     self.vt = self.stream = self.proc = self.fd = None
     self.size = None
     self.done, self.code, self.error = False, None, ""
@@ -2613,8 +3173,11 @@ class TerminalSession:
     self.set_winsize(cols, rows)
     log.debug(f"running command: {shlex.join(self.args)}")
     try:
-      self.proc = subprocess.Popen([sys.executable, "-c", CTTY, *self.args], stdin=slave, stdout=slave, stderr=slave,
+      command = self.via.command_argv(self.args, interactive=True) if self.via else self.args
+      self.proc = subprocess.Popen([sys.executable, "-c", CTTY, *command], stdin=slave, stdout=slave, stderr=slave,
                                    start_new_session=True, env=os.environ | {"TERM": "xterm-256color"}, close_fds=True)
+      if self.login:
+        self.login.master = self.proc
     except OSError as e:
       os.close(slave)
       self.stream.feed(f"cannot start {self.args[0]}: {e}\r\n".encode())
@@ -2666,7 +3229,7 @@ class TerminalSession:
       except subprocess.TimeoutExpired:
         self.proc.kill()
         self.code = self.proc.wait()
-    if self.proc and self.app.shell is self:
+    if self.proc and self.app.shell is self and not self.login: # a login stays, so that its errors can be read
       self.app.close_shell()
     else:
       self.app.shell_changed()
@@ -2871,6 +3434,7 @@ class MainScreen(SplitScreen):
   def compose_left(self):
     with Horizontal(id="toolbar"):
       yield Button("Reload", id="reload", variant="primary")
+      yield Button("Shell", id="cluster-shell", tooltip="shell on the cluster of this tab, in the pane on the right (t)")
       yield Label("finished since")
       yield Input("1d", id="since", placeholder="off")
       with Horizontal(id="accounts-toggle"):
@@ -2899,7 +3463,40 @@ class MainScreen(SplitScreen):
     self.app.setup_job_columns()
     table = self.query_one("#jobs", ClickTable)
     table.focus()
-    self.app.action_reload()
+    self.app.activate_cluster(self.app.cluster_index)
+
+class AddClusterScreen(ModalScreen[str | None]):
+  DEFAULT_CSS = """
+  AddClusterScreen { align: center middle; }
+  #cluster-dialog { width: 72; max-width: 95%; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+  #cluster-destination { width: 1fr; }
+  #cluster-actions { height: auto; align-horizontal: right; margin-top: 1; }
+  #cluster-actions Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="cluster-dialog"):
+      yield Label("SSH destination (blank for local machine)")
+      yield Input(placeholder="user@host or ~/.ssh/config alias", id="cluster-destination")
+      with Horizontal(id="cluster-actions"):
+        yield Button("Cancel", id="cluster-cancel")
+        yield Button("Add", id="cluster-confirm", variant="primary")
+
+  def on_mount(self):
+    self.query_one("#cluster-destination", Input).focus()
+
+  @on(Button.Pressed, "#cluster-cancel")
+  def cancel_pressed(self):
+    self.dismiss(None)
+
+  @on(Button.Pressed, "#cluster-confirm")
+  @on(Input.Submitted, "#cluster-destination")
+  def add_pressed(self):
+    self.dismiss(self.query_one("#cluster-destination", Input).value.strip())
+
+  def action_cancel(self):
+    self.dismiss(None)
 
 class SlurmTUI(App):
   TITLE = "slurm_tui"
@@ -2912,7 +3509,13 @@ class SlurmTUI(App):
   #us { width: auto; height: auto; padding: 0; border: none; }
   #since { width: 12; }
   #topbar { height: 1; }
+  #cluster-tabs { height: 1; padding: 0 1; background: $panel; }
+  #cluster-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 1; }
+  #cluster-connection-status { width: 1fr; height: 1; content-align: right middle; color: $text-muted; }
   #topbar Header { dock: none; width: 1fr; height: 1; }
+  #bottombar { dock: bottom; height: 1; }
+  #bottombar Footer { dock: none; width: 1fr; }
+  #loadstatus { width: auto; height: 1; padding: 0 1; background: $footer-background; color: $warning; }
   #back { width: 3; min-width: 3; height: 1; padding: 0; }
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
@@ -2964,6 +3567,8 @@ class SlurmTUI(App):
     Binding("r", "reload", "Reload"),
     Binding("e", "open('stderr')", "Error file"),
     Binding("o", "open('stdout')", "Output file"),
+    Binding("t", "cluster_shell", "Shell"),
+    Binding("a", "abort_load", "Abort loading"),
     Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
     Binding("ctrl+x", "close_shell", "Close shell"),
   ]
@@ -2972,15 +3577,215 @@ class SlurmTUI(App):
 
   def __init__(self):
     super().__init__()
+    self.clusters = [ClusterSession("Local")]
+    for destination in initial_ssh_destinations:
+      if is_local_destination(destination):
+        continue
+      self.clusters.append(ClusterSession(destination, destination))
+    self.cluster_index = 0
+    if initial_ssh_destinations and not is_local_destination(initial_ssh_destinations[0]):
+      self.cluster_index = 1
     self.shell = None # TerminalSession shown on the right of every window
-    self.jobs = {}
     self.sort_column, self.sort_reverse = "jobid", True
-    self.since = None
     self.job_filter = ""
     self.job_column_keys = None
+    self.spinner_frame = 0
 
   def get_default_screen(self):
     return MainScreen()
+
+  def on_mount(self):
+    self.set_interval(0.25, self.tick)
+
+  def on_unmount(self):
+    self.shutdown()
+
+  def shutdown(self):
+    """End the shells, logins and remote shells of all tabs"""
+    for cluster in self.clusters:
+      for terminal in (cluster.terminal, cluster.login_terminal):
+        if terminal:
+          terminal.terminate()
+      if self.shell and self.shell in (cluster.terminal, cluster.login_terminal):
+        self.shell = None
+      if cluster.connection:
+        cluster.connection.close()
+    if self.shell:
+      self.shell.terminate()
+
+  # ---- tabs: the local machine and SSH destinations, each with its own connection, shell and job list
+  @property
+  def cluster(self):
+    return self.clusters[self.cluster_index]
+
+  @property
+  def jobs(self):
+    return self.cluster.jobs
+
+  @property
+  def ssh(self):
+    return self.cluster.connection
+
+  def login(self, cluster):
+    """Start the SSH login of a tab: ssh -M -N in the terminal pane, where the user answers its prompts"""
+    if cluster.connection:
+      cluster.connection.close()
+    if cluster.login_terminal:
+      cluster.login_terminal.terminate()
+    cluster.connection = RemoteSSH(cluster.destination)
+    cluster.login_terminal = TerminalSession(self, cluster.connection.master_argv, f"SSH login: {cluster.destination}",
+                                             login=cluster.connection)
+
+  def needs_login(self, cluster):
+    if not cluster.destination:
+      return False
+    c = cluster.connection
+    return c is None or (cluster.login_terminal is None or cluster.login_terminal.done) and not c.logged_in
+
+  def activate_cluster(self, index):
+    """Show the tab: its job list as loaded before (no reload), its shell, or its login while not logged in"""
+    global ssh_connection
+    if not 0 <= index < len(self.clusters):
+      return
+    cluster = self.clusters[index]
+    if self.needs_login(cluster):
+      self.login(cluster)
+    self.cluster_index = index
+    ssh_connection = cluster.connection
+    old_shell = self.shell
+    logging_in = cluster.connection is not None and not cluster.connection.ready
+    self.shell = cluster.login_terminal if logging_in and not cluster.connection.logged_in else cluster.terminal
+    if old_shell is not self.shell:
+      self.shell_changed()
+    self.populate()
+    self.refresh_status()
+    if self.shell is not None and self.shell is cluster.login_terminal:
+      self.call_after_refresh(self.focus_terminal)
+    elif not cluster.loaded and cluster.loader is None and (not cluster.destination or cluster.connection.ready):
+      self.action_reload()
+
+  def select_cluster(self, index):
+    if index == self.cluster_index:
+      cluster = self.cluster
+      if cluster.connection and cluster.connection.error and cluster.connection.logged_in:
+        cluster.connection.error = "" # the tick retries the connection
+      elif self.needs_login(cluster):
+        self.activate_cluster(index)
+      return
+    if self.shell is not None and self.shell is not self.cluster.login_terminal:
+      self.cluster.terminal = self.shell
+    for _ in range(len(self.screen_stack) - 1):
+      self.pop_screen()
+    self.activate_cluster(index)
+
+  def add_cluster(self, destination):
+    if destination is None:
+      return
+    if not destination or is_local_destination(destination):
+      self.clusters.append(ClusterSession("Local" if not destination else destination))
+    else:
+      self.clusters.append(ClusterSession(destination, destination))
+    self.refresh_cluster_tabs()
+    self.select_cluster(len(self.clusters) - 1)
+
+  def tick(self):
+    """Every 0.25 s: notice completed logins, animate the spinners, update the connection and load status"""
+    self.spinner_frame += 1
+    for cluster in self.clusters:
+      c = cluster.connection
+      if c and not c.ready and not c.connecting and not c.error and c.logged_in:
+        c.connecting = True
+        start_worker(self, lambda c=c: self.connect_worker(c), f"connect-{id(c)}", exclusive=False, connection=c,
+                     name=f"connecting to {c.destination}")
+    self.refresh_status()
+
+  def connect_worker(self, connection):
+    try:
+      connection.connect()
+      error = ""
+    except (OSError, EOFError, TimeoutError, RuntimeError) as e:
+      error = str(e)
+    self.call_from_thread(self.connected, connection, error)
+
+  def connected(self, connection, error):
+    connection.connecting = False
+    if error:
+      connection.error = f"{error} (the login scripts of the cluster may hang; select the tab to retry)"
+      self.notify(f"{connection.destination}: {connection.error}", severity="error", timeout=10)
+      self.refresh_status()
+      return
+    cluster = next((c for c in self.clusters if c.connection is connection), None)
+    if cluster is None:
+      return
+    if cluster is self.cluster and self.shell is cluster.login_terminal: # the login is done: hide it
+      self.shell = cluster.terminal
+      self.shell_changed()
+      self.call_after_refresh(self.focus_left)
+    self.notify(f"connected to {connection.identity}", timeout=3)
+    if not cluster.loaded and cluster.loader is None:
+      self.reload_cluster(cluster)
+    self.refresh_status()
+
+  def spinner(self):
+    return "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[self.spinner_frame % 10]
+
+  def connection_text(self, cluster):
+    if not cluster.destination:
+      return "local"
+    c = cluster.connection
+    if c is None:
+      return "not connected"
+    if c.ready:
+      return f"{c.identity}" if c.connected else f"{c.destination} · connection lost, select the tab to log in again"
+    if c.error:
+      return f"{c.destination} · {c.error}"
+    if c.connecting:
+      return f"{self.spinner()} {c.destination} · logged in, starting the remote shell"
+    if cluster.login_terminal is None or cluster.login_terminal.done:
+      return f"{c.destination} · login ended, select the tab to log in again"
+    return f"{self.spinner()} {c.destination} · log in on the right"
+
+  def load_text(self, cluster):
+    if cluster.loader is not None:
+      return f"{self.spinner()} loading jobs {time.monotonic() - cluster.load_started:.0f} s · a: abort"
+    return ""
+
+  def refresh_cluster_tabs(self):
+    for screen in self.screen_stack:
+      if not isinstance(screen, SplitScreen) or not screen.is_mounted:
+        continue
+      tabs = screen.query_one("#cluster-tabs", Horizontal)
+      existing = {button.id: button for button in tabs.query("Button.cluster-tab")}
+      for index, cluster in enumerate(self.clusters):
+        variant = "primary" if index == self.cluster_index else "default"
+        label = cluster.name + (" ⟳" if cluster.loader is not None else "")
+        button_id = f"cluster-tab-{index}"
+        if button_id in existing:
+          button = existing[button_id]
+          if button.variant != variant:
+            button.variant = variant
+          if str(button.label) != label:
+            button.label = label
+        else:
+          tabs.mount(Button(label, id=button_id, classes="cluster-tab", variant=variant, compact=True),
+                     before=tabs.query_one("#cluster-add"))
+
+  def refresh_status(self):
+    """Tabs, the connection state (top right), the status line of the job table and the load state (bottom right)"""
+    self.refresh_cluster_tabs()
+    cluster = self.cluster
+    connection, loading = self.connection_text(cluster), self.load_text(cluster)
+    for screen in self.screen_stack:
+      if not isinstance(screen, SplitScreen) or not screen.is_mounted:
+        continue
+      screen.query_one("#cluster-connection-status", Static).update(Text(connection))
+      screen.query_one("#loadstatus", Static).update(Text(loading))
+      if isinstance(screen, MainScreen):
+        screen.query_one("#status", Static).update(Text(cluster.summary))
+        button = screen.query_one("#reload", Button)
+        label, variant = ("Abort", "error") if cluster.loader is not None else ("Reload", "primary")
+        if str(button.label) != label:
+          button.label, button.variant = label, variant
 
   def setup_job_columns(self, show_progress=None):
     table = self.query_one("#jobs", ClickTable)
@@ -3012,7 +3817,12 @@ class SlurmTUI(App):
     for view in self.screen.query(TerminalView):
       view.refresh()
 
-  def open_shell(self, args, title, focus=False):
+  def open_shell(self, args, title, focus=False, via=CURRENT):
+    """Shell in the pane on the right. It runs on the cluster of the active tab, over its SSH connection."""
+    via = self.ssh if via is CURRENT else via
+    if via is not None and not via.ready:
+      self.notify("log in first", severity="warning")
+      return
     if self.shell and not self.shell.done:
       self.notify("a shell is already open on the right, close it first (✕)", severity="warning")
       self.focus_terminal()
@@ -3021,26 +3831,54 @@ class SlurmTUI(App):
       self.shell.terminate()
     if not focus and not isinstance(self.focused, TerminalView):
       self.screen.left_focus = self.focused
-    self.shell = TerminalSession(self, args, title)
+    self.shell = TerminalSession(self, args, title, via=via)
+    self.cluster.terminal = self.shell
     self.shell_changed()
     self.call_after_refresh(self.focus_terminal if focus else self.focus_left)
 
+  def action_cluster_shell(self):
+    cluster = self.cluster
+    if cluster.destination:
+      self.open_shell([], f"shell on {cluster.connection.identity if cluster.connection else cluster.destination}", focus=True)
+    else:
+      self.open_shell([os.environ.get("SHELL") or "bash", "-l"], "local shell", focus=True)
+
   def restart_shell(self):
-    if self.shell:
-      args, title = self.shell.args, self.shell.title
-      self.shell.terminate()
-      self.shell = None
-      self.open_shell(args, title, focus=True)
+    if not self.shell:
+      return
+    if self.shell.login is not None: # the login ended (e.g. a wrong password): log in again
+      cluster = next((c for c in self.clusters if c.login_terminal is self.shell), None)
+      if cluster is not None:
+        self.login(cluster)
+        if cluster is self.cluster:
+          global ssh_connection
+          ssh_connection = cluster.connection
+          self.shell = cluster.login_terminal
+          self.shell_changed()
+          self.call_after_refresh(self.focus_terminal)
+      return
+    args, title, via = self.shell.args, self.shell.title, self.shell.via
+    self.shell.terminate()
+    self.shell = None
+    self.open_shell(args, title, focus=True, via=via)
 
   def action_close_shell(self):
     self.close_shell()
 
   def close_shell(self):
-    if self.shell:
-      self.shell.terminate()
-      self.shell = None
-      self.shell_changed()
-      self.call_after_refresh(self.focus_left)
+    if not self.shell:
+      return
+    cluster = self.cluster
+    if self.shell is cluster.login_terminal: # closing the login gives up the connection
+      cluster.connection.close()
+      cluster.login_terminal = None
+    if cluster.terminal is self.shell:
+      cluster.terminal = None
+    self.shell.terminate()
+    self.shell = None
+    self.shell_changed()
+    self.call_after_refresh(self.focus_left)
+    self.refresh_status()
 
   def focus_terminal(self):
     views = self.screen.query(TerminalView)
@@ -3084,6 +3922,8 @@ class SlurmTUI(App):
       return self.screen is self.screen_stack[0]
     if action in ("switch_side", "close_shell"):
       return self.shell is not None
+    if action == "abort_load":
+      return self.cluster.loader is not None
     if action in ("quit", "command_palette", "help_quit") and isinstance(self.focused, TerminalView):
       return False # Ctrl-Q, Ctrl-P, Ctrl-C go to the shell
     return True
@@ -3093,6 +3933,10 @@ class SlurmTUI(App):
       self.notify(msg, severity="warning", timeout=8)
 
   def action_reload(self):
+    self.reload_cluster(self.cluster)
+
+  def reload_cluster(self, cluster):
+    """Load the job list of a tab in the background; the list loaded before stays until the new one is there"""
     value = self.query_one("#since", Input).value.strip()
     if value.lower() in ("", "0", "off", "no", "none"):
       since = None
@@ -3102,27 +3946,57 @@ class SlurmTUI(App):
       except sl.argparse.ArgumentTypeError as e:
         self.notify(str(e), severity="error")
         return
-    self.since = since
-    self.query_one("#jobs", ClickTable).loading = True
-    self.load(since, self.query_one("#us", Switch).value)
+    if cluster.destination and not (cluster.connection and cluster.connection.ready):
+      self.notify(f"not connected to {cluster.destination} yet", severity="warning")
+      return
+    us = self.query_one("#us", Switch).value
+    if cluster.loader is not None:
+      cluster.loader.abort.set()
+    cluster.load_started = time.monotonic()
+    cluster.loader = start_worker(self, lambda: self.load_worker(cluster, since, us), f"jobs-{id(cluster)}",
+                                  connection=cluster.connection, name=f"loading the jobs of {cluster.name}")
+    self.refresh_status()
 
-  @work(thread=True, exclusive=True, group="jobs")
-  def load(self, since, us):
-    jobs = annotate(load_jobs(since, us))
-    if not get_current_worker().is_cancelled:
-      self.call_from_thread(self.populate, jobs)
+  def load_worker(self, cluster, since, us):
+    worker = get_current_worker()
+    jobs = None
+    try:
+      jobs = annotate(load_jobs(since, us))
+    finally:
+      self.call_from_thread(self.jobs_loaded, cluster, worker, jobs, since)
+
+  def jobs_loaded(self, cluster, worker, jobs, since):
+    if cluster.loader is not worker: # aborted or replaced by a newer reload
+      return
+    cluster.loader = None
+    if jobs is not None:
+      cluster.jobs = {job.jid: job for job in jobs}
+      cluster.since, cluster.loaded, cluster.updated = since, True, datetime.now()
+      if cluster is self.cluster:
+        self.populate()
+    self.show_warnings()
+    self.refresh_status()
+
+  def action_abort_load(self):
+    cluster = self.cluster
+    if cluster.loader is None:
+      return
+    cluster.loader.abort.set()
+    cluster.loader.cancel()
+    cluster.loader = None
+    self.notify("loading aborted: the list is the one loaded before", timeout=4)
+    self.refresh_status()
 
   def populate(self, jobs=None):
     table = self.query_one("#jobs", ClickTable)
+    cluster = self.cluster
     current = None
     if table.row_count:
       try:
         current = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0)).row_key.value
       except Exception:
         pass
-    if jobs is not None:
-      self.jobs = {job.jid: job for job in jobs}
-    all_jobs = list(self.jobs.values())
+    all_jobs = list(cluster.jobs.values())
     self.setup_job_columns()
     pattern = self.job_filter.casefold()
     visible_jobs = [job for job in all_jobs if not pattern or pattern in " ".join(str(value or "") for value in (
@@ -3149,24 +4023,36 @@ class SlurmTUI(App):
       table.add_row(*values, key=job.jid)
     if current in {job.jid for job in visible_jobs}:
       table.move_cursor(row=table.get_row_index(current))
-    table.loading = False
-    if not isinstance(self.focused, Input): # loading took the focus away from the table (to the Reload button)
-      table.focus()
+    if not cluster.loaded:
+      cluster.summary = "no jobs loaded yet" if not cluster.destination or (cluster.connection and cluster.connection.ready) \
+                        else "log in to load the jobs"
+      self.refresh_status()
+      return
     queued = [j for j in all_jobs if j.queued]
     running = sum(j.running for j in queued)
     finished = [j for j in all_jobs if not j.queued]
     errors = sum(j.err[0] == "file" and j.err[1] > 0 for j in all_jobs)
     status = f"{len(queued)} queued ({running} running, {len(queued)-running} pending)"
-    if self.since:
-      status += f" · {len(finished)} finished since {self.since:%m-%d %H:%M}, {sum(j.node_hours() for j in finished):.1f} node hours"
+    if cluster.since:
+      status += f" · {len(finished)} finished since {cluster.since:%m-%d %H:%M}, {sum(j.node_hours() for j in finished):.1f} node hours"
     if pattern:
       status += f" · {len(visible_jobs)} of {len(all_jobs)} jobs match '{self.job_filter}'"
     if errors:
       status += f" · {errors} with output in their error file"
-    self.query_one("#status", Static).update(status + f" · updated {datetime.now():%H:%M:%S}")
-    self.show_warnings()
+    cluster.summary = status + f" · updated {cluster.updated:%H:%M:%S}"
+    self.refresh_status()
 
   @on(Button.Pressed, "#reload")
+  def reload_pressed(self, event):
+    if self.cluster.loader is not None:
+      self.action_abort_load()
+    else:
+      self.action_reload()
+
+  @on(Button.Pressed, "#cluster-shell")
+  def cluster_shell_pressed(self, event):
+    self.action_cluster_shell()
+
   @on(Input.Submitted, "#since")
   @on(Switch.Changed, "#us")
   def reload_requested(self, event):
@@ -3217,7 +4103,7 @@ class SlurmTUI(App):
   def action_open(self, kind):
     job = self.current_job()
     path = job and (job.stderr_path() if kind == "stderr" else job.stdout_path())
-    if not path or not os.path.isfile(path):
+    if not path or not fs_isfile(path):
       self.notify(f"no {kind} file" + (" (stderr goes to the output file)" if job and kind == "stderr" and job.merged() else ""),
                   severity="warning")
       return
@@ -3228,6 +4114,7 @@ REPORTS_OFF = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1015l\x1b[?1006l\x1b[?1004
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--log", metavar="FILE", help="write a debug log (all slurm commands that are run) to FILE")
+  parser.add_argument("--ssh", metavar="HOST", nargs="*", default=[], help="add SSH cluster destinations (user@host or ~/.ssh/config aliases)")
   parser.add_argument("--serve", action="store_true", help="serve the app in a browser with textual-serve")
   parser.add_argument("--host", default="127.0.0.1", help="web server bind address for --serve (default: 127.0.0.1)")
   parser.add_argument("--port", type=int, default=8000, help="web server port for --serve (default: 8000)")
@@ -3241,16 +4128,19 @@ def main():
     command = [sys.executable, os.path.abspath(__file__)]
     if args.log:
       command += ["--log", args.log]
+    if args.ssh:
+      command += ["--ssh", *args.ssh]
     Server(shlex.join(command), host=args.host, port=args.port, title="Slurm TUI").serve()
     return
 
   setup_logging(args.log)
+  global initial_ssh_destinations
+  initial_ssh_destinations = args.ssh
   app = SlurmTUI()
   try:
     app.run()
   finally:
-    if app.shell:
-      app.shell.terminate()
+    app.shutdown()
 
 if __name__ == "__main__":
   main()
