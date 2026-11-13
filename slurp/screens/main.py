@@ -59,6 +59,7 @@ COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("user", "User"), ("state", "S
            ("start", "Start"), ("end", "End"), ("err", "Err"), ("cmd", "Command")]
 
 SORT_KEYS = {
+  "arrayid": lambda j: (int(t) if (t := array_task_id(j)) is not None else -1, job_id_key(j.jid)), # array index first
   "jobid": lambda j: job_id_key(j.jid),
   "name":  lambda j: j.rec["JobName"],
   "user":  lambda j: j.rec["User"].casefold(),

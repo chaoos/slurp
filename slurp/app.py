@@ -624,6 +624,8 @@ class Slurp(App):
       label = labels.get(key.value, str(column.label))
       if key.value == self.sort_column:
         label += " ▼" if self.sort_reverse else " ▲"
+      elif key.value == "jobid" and self.sort_column == "arrayid": # by array index: hollow marks
+        label += " ▽ array" if self.sort_reverse else " △ array"
       if str(column.label) != label:
         column.label = Text(label)
         column.content_width = max(column.content_width, len(label))
@@ -1007,7 +1009,11 @@ class Slurp(App):
   @on(DataTable.HeaderSelected, "#jobs")
   def sort_by(self, event):
     col = event.column_key.value
-    if col == self.sort_column:
+    if col == "jobid": # four orders: job ID descending, ascending, array index ascending, descending
+      orders = [("jobid", True), ("jobid", False), ("arrayid", False), ("arrayid", True)]
+      current = (self.sort_column, self.sort_reverse)
+      self.sort_column, self.sort_reverse = orders[(orders.index(current) + 1) % 4] if current in orders else orders[0]
+    elif col == self.sort_column:
       self.sort_reverse = not self.sort_reverse
     else:
       self.sort_column, self.sort_reverse = col, col in ("jobid", "start", "end", "err")
