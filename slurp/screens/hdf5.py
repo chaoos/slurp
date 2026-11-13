@@ -69,7 +69,7 @@ def open_hdf5(app, crumbs, path, bases=(), env=None):
       return show
     return lambda: app.notify(f"{path} is an HDF5 file: install h5py to browse it", severity="warning")
   return lambda: app.open_window(H5Screen(crumbs, path, bases=bases, env=env))
-H5_ROWS = 500       # rows of a dataset shown at a time
+H5_ROWS = 200       # rows of a dataset shown at a time
 H5_COLS = 50        # columns (or fields of a compound type) shown at a time
 H5_MEMBERS = 5000   # members of a group listed at most
 
@@ -148,8 +148,157 @@ def h5_link_target(path, filename):
   """File name of an external link, relative to the file that has the link"""
   return os.path.normpath(os.path.join(os.path.dirname(path), fs_expanduser(filename)))
 
+def h5_label(name, kind, extra=""):
+  """The parts (text, style) of the label of a tree item"""
+  if kind == "external":
+    return [(name, "bold magenta"), (extra, "dim")]
+  if kind == "error":
+    return [(name, "red"), (extra or "  (cannot open)", "dim")]
+  if kind == "group":
+    return [(name + "/", "bold blue"), (extra, "dim")]
+  return [(name, ""), (extra, "dim")]
+
+def list_group(file, gpath):
+  """The members of a group as plain data: ([{path, name, kind, label, ...}], members not listed)"""
+  import h5py
+  group = file[gpath]
+  names = list(group)
+  items = []
+  for name in names[:H5_MEMBERS]:
+    path = gpath.rstrip("/") + "/" + name
+    item = {"path": path, "name": name}
+    try:
+      link = group.get(name, getlink=True)
+    except Exception:
+      link = None
+    if isinstance(link, h5py.ExternalLink):
+      item.update(kind="external", file=link.filename, target=link.path,
+                  label=h5_label(name, "external", f"  ⇢ {link.filename}:{link.path}"))
+      items.append(item)
+      continue
+    soft = f"  → {link.path}" if isinstance(link, h5py.SoftLink) else ""
+    try:
+      obj = group[name]
+    except Exception as e:
+      item.update(kind="error", error=f"broken link{soft}: {e}", label=h5_label(name, "error", soft))
+      items.append(item)
+      continue
+    if isinstance(obj, h5py.Group):
+      item.update(kind="group", label=h5_label(name, "group", soft))
+    elif isinstance(obj, h5py.Dataset):
+      shape = "scalar" if obj.shape == () else "empty" if obj.shape is None else "×".join(map(str, obj.shape))
+      item.update(kind="dataset", label=h5_label(name, "dataset", f"{soft}  {shape} {obj.dtype}"))
+    else:
+      item.update(kind="datatype", label=h5_label(name, "datatype", f"{soft}  type"))
+    items.append(item)
+  return items, max(0, len(names) - H5_MEMBERS)
+
+def describe_item(file, path, kind):
+  """Info text of a group, dataset or named type"""
+  obj = file[path]
+  t = Text()
+  t.append(obj.name, style="bold")
+  if kind == "group":
+    t.append(f"\ngroup with {len(obj)} members")
+  elif kind == "dataset":
+    shape = "scalar" if obj.shape == () else "empty (no dataspace)" if obj.shape is None else " × ".join(map(str, obj.shape))
+    t.append(f"\ndataset  {shape}  {obj.dtype}")
+    if obj.dtype.names:
+      t.append("\nfields: " + ", ".join(f"{n} {obj.dtype.fields[n][0]}" for n in obj.dtype.names))
+    layout = f"chunks {obj.chunks}" if obj.chunks else "contiguous"
+    filters = [f for f in (obj.compression and f"{obj.compression}" + (f"({obj.compression_opts})" if obj.compression_opts is not None else ""),
+                           obj.shuffle and "shuffle", obj.fletcher32 and "fletcher32", obj.scaleoffset and "scaleoffset") if f]
+    t.append(f"\n{layout}" + (", " + ", ".join(filters) if filters else ""))
+    try:
+      stored = obj.id.get_storage_size()
+      t.append(f"\n{humanize.naturalsize(obj.nbytes)} of data, {humanize.naturalsize(stored)} on disk")
+      if stored and obj.nbytes:
+        t.append(f" (ratio {obj.nbytes / stored:.2g})")
+    except Exception:
+      pass
+    if obj.fillvalue is not None and obj.shape:
+      t.append(f"\nfill value {h5_value(obj.fillvalue)}")
+    try:
+      dims = [", ".join(d.keys()) or (d.label if d.label else "") for d in obj.dims]
+      if any(dims):
+        t.append("\ndimensions: " + " × ".join(d or "-" for d in dims))
+    except Exception:
+      pass
+    if obj.shape == ():
+      t.append("\nvalue: ", style="bold")
+      t.append(read_scalar(obj))
+  else:
+    t.append(f"\nnamed datatype {obj.dtype}")
+  try:
+    attrs = list(obj.attrs)
+  except Exception as e:
+    t.append(f"\ncannot list the attributes: {e}", style="red")
+    return t
+  t.append(f"\n\n{len(attrs)} attribute{'s' if len(attrs) != 1 else ''}" + (":" if attrs else ""), style="bold" if attrs else "dim")
+  for name in attrs:
+    t.append(f"\n  {name}", style="bold")
+    try:
+      t.append(f" = {h5_value(obj.attrs[name])}")
+    except Exception as e:
+      t.append(f" (cannot read: {e})", style="red")
+  return t
+
+def read_scalar(obj):
+  import h5py
+  try:
+    ds = obj.asstr() if h5py.check_string_dtype(obj.dtype) else obj
+    return h5_value(ds[()], width=2000)
+  except Exception as e:
+    return f"cannot read: {e}"
+
+def dataset_page(file, path, text, row0, col0):
+  """The rows and columns of a page of a dataset, read from the file (only that part):
+  {"shape", "nfields", "rows", "columns", "status"} (rows None: nothing to show in a table)"""
+  import h5py
+  ds = file[path]
+  page = {"shape": ds.shape, "nfields": len(ds.dtype.names or ()), "rows": None, "columns": (), "status": ""}
+  if not ds.shape: # scalar or empty: shown in the info
+    return page
+  try:
+    sel = parse_selection(text, ds.shape)
+    sel, shown = window(sel, ds.shape, row0, col0)
+  except ValueError as e:
+    return dict(page, rows=[], status=Text(str(e), style="red"))
+  if any(not len(part) for part, _ in shown):
+    return dict(page, rows=[], status="nothing selected")
+  try:
+    src = ds.asstr() if h5py.check_string_dtype(ds.dtype) else ds
+    values = src[sel]
+  except Exception as e:
+    return dict(page, rows=[], status=Text(f"cannot read: {e}", style="red"))
+  names = ds.dtype.names
+  status = []
+  if len(shown) == 0: # every axis fixed by an index: a single value
+    return dict(page, rows=[("", [h5_value(values)])], columns=["value"])
+  rows_part, nrows = shown[0]
+  page["nrows"] = nrows
+  status.append(f"rows {rows_part[0]}–{rows_part[-1]} ({len(rows_part)} of {nrows}" + (", [ ]: page" if len(rows_part) < nrows else "") + ")")
+  if len(shown) == 2:
+    cols_part, ncols = shown[1]
+    page["ncols"] = ncols
+    columns = [str(i) for i in cols_part]
+    status.append(f"columns {cols_part[0]}–{cols_part[-1]} ({len(cols_part)} of {ncols}" + (", { }: page" if len(cols_part) < ncols else "") + ")")
+    rows = [(str(i), [h5_value(v, 60) for v in row]) for i, row in zip(rows_part, values)]
+  elif names: # one axis of a compound type: a column per field
+    fields = names[col0:col0 + H5_COLS]
+    columns = list(fields)
+    if len(names) > H5_COLS:
+      status.append(f"fields {col0}–{col0 + len(fields) - 1} of {len(names)}, {{ }}: page")
+    rows = [(str(i), [h5_value(v[f], 60) for f in fields]) for i, v in zip(rows_part, values)]
+  else:
+    columns = ["value"]
+    rows = [(str(i), [h5_value(v, 200)]) for i, v in zip(rows_part, values)]
+  return dict(page, rows=rows, columns=columns, status=" · ".join(status))
+
 class H5Screen(SplitScreen):
-  """HDF5 browser: tree of groups and datasets, info and attributes of the selected one, and a table of its data"""
+  """HDF5 browser: tree of groups and datasets, info and attributes of the selected one, and a table of its data.
+  The file is read where it is: on a cluster only the parts shown, over the SSH session (a RemoteFile), never copied.
+  Every h5py call runs in a worker (one at a time); the UI shows the results."""
   SHOW_BACK = True
   BINDINGS = [
     Binding("escape", "back", "Back"),
@@ -168,10 +317,15 @@ class H5Screen(SplitScreen):
     self.start = start
     self.bases, self.env = list(bases), env
     self.file = None
-    self.local_path = None
-    self.current = None # data of the selected tree node
+    self.fobj = None      # the RemoteFile of a file on a cluster
+    self.connection = None
+    self.lock = threading.Lock() # h5py calls, one at a time
+    self.listings = {}    # group path -> (items, not listed)
+    self.current = None   # data of the selected tree node
+    self.page = None      # the last page read of the selected dataset
     self.dataset_selections = {} # dataset path -> selection text typed for it
     self.row0 = self.col0 = 0
+    self.file_size = None
 
   def compose_left(self):
     yield Static(id="hstatus")
@@ -186,27 +340,42 @@ class H5Screen(SplitScreen):
 
   def on_mount(self):
     self.sub_title = crumb_title(self.crumbs)
+    self.connection = conn()
     self.query_one("#htree", Tree).show_root = True
     self.action_reload(first=True)
     self.query_one("#htree").focus()
 
   def on_unmount(self):
-    self.gone = True
-    self.close_file()
-
-  gone = False
+    # in a thread: a worker may hold the lock while it waits for the cluster
+    threading.Thread(target=self.close_file, daemon=True).start()
 
   def close_file(self):
-    if self.file is not None:
-      try:
-        self.file.close()
-      except Exception:
-        pass
-      self.file = None
-    if self.local_path:
-      try: os.unlink(self.local_path)
-      except OSError: pass
-      self.local_path = None
+    with self.lock:
+      if self.file is not None:
+        try:
+          self.file.close()
+        except Exception:
+          pass
+        self.file = None
+      if self.fobj is not None:
+        self.fobj.close()
+        self.fobj = None
+
+  def h5(self, task, done, group="h5"):
+    """task(file) in a worker, h5py calls one at a time; done(result) on the UI thread"""
+    def run_it():
+      with self.lock:
+        if self.file is None:
+          raise OSError("the file is not open")
+        return task(self.file)
+    in_background(self, run_it, done, group=group, connection=self.connection)
+
+  def status_text(self, extra=""):
+    size = humanize.naturalsize(self.file_size) if self.file_size is not None else "?"
+    where = ""
+    if self.fobj is not None:
+      where = f" · read over SSH: {self.fobj.round_trips} reads, {humanize.naturalsize(self.fobj.bytes_read)}"
+    return f"{self.path}  {size}{where} · r: reload (e.g. while a job writes it){extra}"
 
   # --------------------------------------------------------------- tree
   def action_reload(self, first=False):
@@ -221,51 +390,94 @@ class H5Screen(SplitScreen):
           expanded.add(node.data["path"])
         stack.extend(node.children)
     target = self.start if first else (self.current or {}).get("path", "/")
-    self.query_one("#hstatus", Static).update(f"{self.path} · {'downloading' if conn() else 'opening'} …")
-    def fetch():
-      """the size, and on a remote cluster a local copy (h5py reads local files)"""
-      try:
+    self.query_one("#hstatus", Static).update(f"{self.path} · opening …")
+    connection = self.connection
+    def open_and_list():
+      """open the file (on a cluster: through a RemoteFile) and list the groups to show"""
+      import h5py
+      self.close_file()
+      with self.lock:
         size = fs_getsize(self.path)
-        local = conn().download(self.path, suffix=os.path.splitext(self.path)[1]) if conn() else None
-        if local and self.gone: # the window was closed meanwhile
-          os.unlink(local)
-          local = None
-        return size, local, ""
-      except OSError as e:
-        return None, None, str(e)
-    in_background(self, fetch, lambda result: self.fetched(result, expanded, target), group="fetch")
+        if connection is not None:
+          fobj = RemoteFile(connection, self.path, size)
+          try:
+            file = h5py.File(fobj, "r")
+          except Exception as e:
+            raise OSError(f"cannot read the HDF5 file over SSH ({e}); run slurp on the cluster to inspect it") from None
+        else:
+          fobj, file = None, open_h5(self.path)
+        self.file, self.fobj, self.file_size = file, fobj, size
+        listings = {}
+        wanted = {"/", *expanded}
+        parts = [p for p in (target or "/").split("/") if p]
+        wanted.update("/" + "/".join(parts[:i]) for i in range(len(parts)))
+        for gpath in sorted(wanted, key=lambda p: p.count("/")):
+          try:
+            if isinstance(file.get(gpath, getlink=False), h5py.Group):
+              listings[gpath] = list_group(file, gpath)
+          except Exception as e:
+            listings[gpath] = ([{"path": gpath, "kind": "error", "error": str(e), "label": h5_label("cannot list", "error", f": {e}")}], 0)
+        return listings
+    def opened(listings):
+      if listings is None:
+        self.query_one("#hstatus", Static).update(Text(f"{self.path} · cannot open", style="red"))
+        self.show_message(Text(f"cannot open {self.path}", style="red"))
+        return
+      self.listings = listings
+      tree.clear()
+      tree.root.data = {"path": "/", "kind": "group"}
+      self.add_children(tree.root)
+      tree.root.expand()
+      for p in sorted(expanded, key=lambda p: p.count("/")):
+        node = self.find_node(p)
+        if node is not None:
+          self.add_children(node)
+          node.expand()
+      self.goto(target)
+      self.query_one("#hstatus", Static).update(self.status_text())
+    in_background(self, open_and_list, opened, group="h5-open", connection=connection)
 
-  def fetched(self, result, expanded, target):
-    size, local_path, error = result or (None, None, "failed")
-    tree = self.query_one("#htree", Tree)
-    self.close_file()
-    self.local_path = local_path
-    tree.clear()
-    tree.root.data = {"path": "/", "kind": "group"}
-    try:
-      if error:
-        raise OSError(error)
-      self.file = open_h5(local_path or self.path)
-    except Exception as e:
-      self.query_one("#hstatus", Static).update(f"{self.path} · cannot open: {e}")
-      self.show_message(f"cannot open {self.path}:\n{e}")
+  def add_children(self, node):
+    """Tree nodes for the members of a group, from its listing (listed before, in a worker)"""
+    data = node.data
+    if not data or data["kind"] != "group" or data.get("loaded") or data["path"] not in self.listings:
+      return False
+    data["loaded"] = True
+    items, more = self.listings[data["path"]]
+    for item in items:
+      label = Text.assemble(*item["label"])
+      if item["kind"] == "group":
+        node.add(label, data=dict(item))
+      else:
+        node.add_leaf(label, data=dict(item))
+    if more:
+      node.add_leaf(Text(f"… {more} more members not listed", style="dim"), data=None)
+    return True
+
+  def load_children(self, node):
+    """The members of a group: from its listing, or listed in a worker first"""
+    data = node.data
+    if not data or data["kind"] != "group" or data.get("loaded"):
       return
-    size = humanize.naturalsize(size)
-    self.query_one("#hstatus", Static).update(f"{self.path}  {size} · r: reload (e.g. while a job writes it)")
-    self.load_children(tree.root)
-    tree.root.expand()
-    for p in sorted(expanded, key=lambda p: p.count("/")):
-      node = self.find_node(p)
-      if node is not None:
-        self.load_children(node)
-        node.expand()
-    self.goto(target)
+    if self.add_children(node):
+      return
+    gpath = data["path"]
+    node.set_label(Text.assemble(*h5_label(data.get("name", gpath), "group", "  listing …")))
+    def listed(result):
+      if result is None:
+        return
+      self.listings[gpath] = result
+      node.set_label(Text.assemble(*h5_label(data.get("name", "") or os.path.basename(self.path), "group")) if gpath != "/" else
+                     Text(os.path.basename(self.path)))
+      self.add_children(node)
+      self.query_one("#hstatus", Static).update(self.status_text())
+    self.h5(lambda f: list_group(f, gpath), listed, group=f"h5-list-{gpath}")
 
   def find_node(self, path, expand=False):
-    """Tree node of a path; with expand, the groups on the way are expanded"""
+    """Tree node of a path (from the groups listed so far); with expand, the groups on the way are expanded"""
     node = self.query_one("#htree", Tree).root
     for name in [p for p in path.split("/") if p]:
-      self.load_children(node)
+      self.add_children(node)
       if expand:
         node.expand()
       child = next((c for c in node.children if c.data and c.data.get("name") == name), None)
@@ -275,53 +487,27 @@ class H5Screen(SplitScreen):
     return node
 
   def goto(self, path):
+    """Select a path in the tree; groups on the way that are not listed yet are listed first (in a worker)"""
+    import h5py
+    parts = [p for p in (path or "/").split("/") if p]
+    missing = [g for g in ("/" + "/".join(parts[:i]) for i in range(len(parts))) if g not in self.listings]
+    if missing:
+      def list_them(file):
+        found = {}
+        for g in missing:
+          if isinstance(file.get(g, getlink=False), h5py.Group):
+            found[g] = list_group(file, g)
+        return found
+      def listed(found):
+        if found:
+          self.listings.update(found)
+          self.goto(path)
+      self.h5(list_them, listed, group="h5-goto")
+      return
     node = self.find_node(path or "/", expand=True)
     tree = self.query_one("#htree", Tree)
     self.call_after_refresh(lambda: tree.move_cursor(node))
     self.show(node.data)
-
-  def load_children(self, node):
-    import h5py
-    data = node.data
-    if not data or data["kind"] != "group" or data.get("loaded") or self.file is None:
-      return
-    data["loaded"] = True
-    try:
-      group = self.file[data["path"]]
-      names = list(group)
-    except Exception as e:
-      node.add_leaf(Text(f"cannot list: {e}", style="red"), data={"path": data["path"], "kind": "error", "error": str(e)})
-      return
-    for name in names[:H5_MEMBERS]:
-      path = data["path"].rstrip("/") + "/" + name
-      item = {"path": path, "name": name}
-      try:
-        link = group.get(name, getlink=True)
-      except Exception:
-        link = None
-      if isinstance(link, h5py.ExternalLink):
-        item.update(kind="external", file=link.filename, target=link.path)
-        node.add_leaf(Text.assemble((name, "bold magenta"), (f"  ⇢ {link.filename}:{link.path}", "dim")), data=item)
-        continue
-      soft = f"  → {link.path}" if isinstance(link, h5py.SoftLink) else ""
-      try:
-        obj = group[name]
-      except Exception as e:
-        item.update(kind="error", error=f"broken link{soft}: {e}")
-        node.add_leaf(Text.assemble((name, "red"), (soft or "  (cannot open)", "dim")), data=item)
-        continue
-      if isinstance(obj, h5py.Group):
-        item["kind"] = "group"
-        node.add(Text.assemble((name + "/", "bold blue"), (soft, "dim")), data=item)
-      elif isinstance(obj, h5py.Dataset):
-        item["kind"] = "dataset"
-        shape = "scalar" if obj.shape == () else "empty" if obj.shape is None else "×".join(map(str, obj.shape))
-        node.add_leaf(Text.assemble(name, (soft, "dim"), (f"  {shape} {obj.dtype}", "dim")), data=item)
-      else:
-        item["kind"] = "datatype"
-        node.add_leaf(Text.assemble(name, (soft, "dim"), ("  type", "dim")), data=item)
-    if len(names) > H5_MEMBERS:
-      node.add_leaf(Text(f"… {len(names) - H5_MEMBERS} more members not listed", style="dim"), data=None)
 
   @on(Tree.NodeExpanded, "#htree")
   def expanded(self, event):
@@ -355,7 +541,7 @@ class H5Screen(SplitScreen):
     self.show_table(None)
 
   def show(self, data):
-    self.current, self.row0, self.col0 = data, 0, 0
+    self.current, self.row0, self.col0, self.page = data, 0, 0, None
     if not data:
       return
     kind = data["kind"]
@@ -365,80 +551,35 @@ class H5Screen(SplitScreen):
       target = h5_link_target(self.path, data["file"])
       return self.show_message(Text.assemble((data["path"], "bold"), "\nexternal link to ", (f"{data['target']}", "bold"),
                                              " in ", (target, "bold"), "\nEnter or click: open it"))
-    try:
-      obj = self.file[data["path"]]
-      text = self.describe(obj, kind)
-    except Exception as e:
-      return self.show_message(Text(f"{data['path']}\ncannot read: {e}", style="red"))
-    self.query_one("#hinfotext", Static).update(text)
-    if kind == "dataset" and obj.shape:
-      inp = self.query_one("#hslice", Input)
-      inp.value = self.dataset_selections.get(data["path"], "")
-    self.show_data()
+    self.query_one("#hinfotext", Static).update(Text(f"{data['path']}\nreading …", style="dim"))
+    if kind == "dataset":
+      self.query_one("#hslice", Input).value = self.dataset_selections.get(data["path"], "")
+    text = self.query_one("#hslice", Input).value if kind == "dataset" else ""
+    row0, col0 = self.row0, self.col0
+    def read(file):
+      info = describe_item(file, data["path"], kind)
+      page = dataset_page(file, data["path"], text, row0, col0) if kind == "dataset" else None
+      return info, page
+    def shown(result):
+      if result is None or self.current is not data:
+        return
+      info, page = result
+      self.query_one("#hinfotext", Static).update(info)
+      self.show_page(page)
+      self.query_one("#hstatus", Static).update(self.status_text())
+    self.h5(read, shown, group="h5-show")
 
-  def describe(self, obj, kind):
-    t = Text()
-    t.append(obj.name, style="bold")
-    if kind == "group":
-      t.append(f"\ngroup with {len(obj)} members")
-    elif kind == "dataset":
-      shape = "scalar" if obj.shape == () else "empty (no dataspace)" if obj.shape is None else " × ".join(map(str, obj.shape))
-      t.append(f"\ndataset  {shape}  {obj.dtype}")
-      if obj.dtype.names:
-        t.append("\nfields: " + ", ".join(f"{n} {obj.dtype.fields[n][0]}" for n in obj.dtype.names))
-      layout = f"chunks {obj.chunks}" if obj.chunks else "contiguous"
-      filters = [f for f in (obj.compression and f"{obj.compression}" + (f"({obj.compression_opts})" if obj.compression_opts is not None else ""),
-                             obj.shuffle and "shuffle", obj.fletcher32 and "fletcher32", obj.scaleoffset and "scaleoffset") if f]
-      t.append(f"\n{layout}" + (", " + ", ".join(filters) if filters else ""))
-      try:
-        stored = obj.id.get_storage_size()
-        t.append(f"\n{humanize.naturalsize(obj.nbytes)} of data, {humanize.naturalsize(stored)} on disk")
-        if stored and obj.nbytes:
-          t.append(f" (ratio {obj.nbytes / stored:.2g})")
-      except Exception:
-        pass
-      if obj.fillvalue is not None and obj.shape:
-        t.append(f"\nfill value {h5_value(obj.fillvalue)}")
-      try:
-        dims = [", ".join(d.keys()) or (d.label if d.label else "") for d in obj.dims]
-        if any(dims):
-          t.append("\ndimensions: " + " × ".join(d or "-" for d in dims))
-      except Exception:
-        pass
-      if obj.shape == ():
-        t.append("\nvalue: ", style="bold")
-        t.append(self.read_scalar(obj))
-    else:
-      t.append(f"\nnamed datatype {obj.dtype}")
-    if obj.file.filename != self.file.filename:
-      t.append(f"\nin file {obj.file.filename}")
-    try:
-      attrs = list(obj.attrs)
-    except Exception as e:
-      t.append(f"\ncannot list the attributes: {e}", style="red")
-      return t
-    t.append(f"\n\n{len(attrs)} attribute{'s' if len(attrs) != 1 else ''}" + (":" if attrs else ""), style="bold" if attrs else "dim")
-    for name in attrs:
-      t.append(f"\n  {name}", style="bold")
-      try:
-        t.append(f" = {h5_value(obj.attrs[name])}")
-      except Exception as e:
-        t.append(f" (cannot read: {e})", style="red")
-    return t
-
-  def read_scalar(self, obj):
-    import h5py
-    try:
-      ds = obj.asstr() if h5py.check_string_dtype(obj.dtype) else obj
-      return h5_value(ds[()], width=2000)
-    except Exception as e:
-      return f"cannot read: {e}"
+  def show_page(self, page):
+    self.page = page
+    if page is None or page["rows"] is None:
+      return self.show_table(None)
+    self.show_table(page["rows"], page["columns"], page["status"])
 
   def show_table(self, rows, columns=(), status=""):
     table = self.query_one("#hdata", DataTable)
     table.clear(columns=True)
     sliced = rows is not None and self.current and self.current["kind"] == "dataset"
-    self.query_one("#hslice", Input).display = bool(sliced and self.file[self.current["path"]].shape)
+    self.query_one("#hslice", Input).display = bool(sliced and self.page and self.page["shape"])
     self.query_one("#hpage", Static).update(status)
     self.query_one("#hpage", Static).display = bool(status)
     table.display = rows is not None
@@ -450,48 +591,17 @@ class H5Screen(SplitScreen):
       table.add_row(*cells, label=label)
 
   def show_data(self):
-    """Table with the rows and columns of the current page of the selected dataset"""
-    import h5py
+    """Read the current page of the selected dataset (in a worker) and show it"""
     data = self.current
     if not data or data["kind"] != "dataset":
       return self.show_table(None)
-    ds = self.file[data["path"]]
-    if not ds.shape: # scalar or empty: shown in the info
-      return self.show_table(None)
-    text = self.query_one("#hslice", Input).value
-    try:
-      sel = parse_selection(text, ds.shape)
-      sel, shown = window(sel, ds.shape, self.row0, self.col0)
-    except ValueError as e:
-      return self.show_table([], status=Text(str(e), style="red"))
-    if any(not len(part) for part, _ in shown):
-      return self.show_table([], status="nothing selected")
-    try:
-      src = ds.asstr() if h5py.check_string_dtype(ds.dtype) else ds
-      values = src[sel]
-    except Exception as e:
-      return self.show_table([], status=Text(f"cannot read: {e}", style="red"))
-    names = ds.dtype.names
-    status = []
-    if len(shown) == 0: # every axis fixed by an index: a single value
-      return self.show_table([("", [h5_value(values)])], ["value"])
-    rows_part, nrows = shown[0]
-    status.append(f"rows {rows_part[0]}–{rows_part[-1]} ({len(rows_part)} of {nrows}" + (", [ ]: page" if len(rows_part) < nrows else "") + ")")
-    if len(shown) == 2:
-      cols_part, ncols = shown[1]
-      columns = [str(i) for i in cols_part]
-      status.append(f"columns {cols_part[0]}–{cols_part[-1]} ({len(cols_part)} of {ncols}" + (", { }: page" if len(cols_part) < ncols else "") + ")")
-      rows = [(str(i), [h5_value(v, 60) for v in row]) for i, row in zip(rows_part, values)]
-    elif names: # one axis of a compound type: a column per field
-      fields = names[self.col0:self.col0 + H5_COLS]
-      columns = list(fields)
-      if len(names) > H5_COLS:
-        status.append(f"fields {self.col0}–{self.col0 + len(fields) - 1} of {len(names)}, {{ }}: page")
-      rows = [(str(i), [h5_value(v[f], 60) for f in fields]) for i, v in zip(rows_part, values)]
-    else:
-      columns = ["value"]
-      rows = [(str(i), [h5_value(v, 200)]) for i, v in zip(rows_part, values)]
-    self.show_table(rows, columns, " · ".join(status))
+    text, row0, col0 = self.query_one("#hslice", Input).value, self.row0, self.col0
+    self.query_one("#hpage", Static).update(Text("reading …", style="dim"))
+    def shown(page):
+      if page is not None and self.current is data:
+        self.show_page(page)
+        self.query_one("#hstatus", Static).update(self.status_text())
+    self.h5(lambda f: dataset_page(f, data["path"], text, row0, col0), shown, group="h5-page")
 
   @on(Input.Submitted, "#hslice")
   def selection_submitted(self, event):
@@ -508,20 +618,15 @@ class H5Screen(SplitScreen):
       inp.focus()
 
   def action_page(self, rows, cols):
-    if not self.current or self.current["kind"] != "dataset":
+    if not self.current or self.current["kind"] != "dataset" or not self.page:
       return
     self.row0 = max(0, self.row0 + rows * H5_ROWS)
     self.col0 = max(0, self.col0 + cols * H5_COLS)
-    try:
-      ds = self.file[self.current["path"]]
-      sel = parse_selection(self.query_one("#hslice", Input).value, ds.shape)
-      _, shown = window(sel, ds.shape)
-      if shown: # do not page past the end
-        self.row0 = min(self.row0, max(0, (shown[0][1] - 1) // H5_ROWS * H5_ROWS))
-        ncols = shown[1][1] if len(shown) == 2 else len(ds.dtype.names or ())
-        self.col0 = min(self.col0, max(0, (ncols - 1) // H5_COLS * H5_COLS))
-    except Exception:
-      pass
+    page = self.page # do not page past the end (sizes of the selection from the last page read)
+    if page.get("nrows"):
+      self.row0 = min(self.row0, max(0, (page["nrows"] - 1) // H5_ROWS * H5_ROWS))
+    ncols = page.get("ncols") or page.get("nfields") or 0
+    self.col0 = min(self.col0, max(0, (ncols - 1) // H5_COLS * H5_COLS)) if ncols else 0
     self.show_data()
 
   def action_back(self):

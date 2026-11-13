@@ -613,32 +613,6 @@ class RemoteSSH:
       raise OSError(error.strip())
     return result.stdout
 
-  def download(self, path, suffix=""):
-    """Copy a (large) file over a channel of the connection, not through the command session"""
-    fd, local_path = tempfile.mkstemp(prefix="slurp-remote-", suffix=suffix)
-    try:
-      with os.fdopen(fd, "wb") as output:
-        proc = subprocess.Popen(self.command_argv(["cat", "--", path]), stdout=output, stdin=subprocess.DEVNULL,
-                                stderr=subprocess.PIPE)
-        while True:
-          try:
-            _, err = proc.communicate(timeout=0.2)
-            break
-          except subprocess.TimeoutExpired:
-            try:
-              check_cancelled()
-            except Cancelled:
-              proc.kill()
-              proc.communicate()
-              raise
-      if proc.returncode:
-        raise OSError(err.decode(errors="replace").strip() or f"cannot download {path}")
-      return local_path
-    except BaseException:
-      try: os.unlink(local_path)
-      except OSError: pass
-      raise
-
   def close(self):
     """End the session: the remote shell exits on the end of its input and removes its temporary directory"""
     if self.state != "closed":
@@ -678,6 +652,77 @@ def connection_health(connection):
   if c.state in ("connecting", "new"):
     return "warn", "connecting" if c.state == "connecting" else "not connected"
   return "bad", "disconnected" if c.state == "closed" or not c.wanted else "connection lost"
+
+class RemoteFile:
+  """A read-only file on the cluster as a Python file object (for h5py): reads fetch only the byte ranges asked for,
+  over the session of the connection, in blocks of RemoteFile.BLOCK with a cache of the last ones. No local copy.
+  Use it in workers only: a read is a round trip."""
+  BLOCK = 1 << 20
+  CACHED = 64 # blocks kept
+
+  def __init__(self, connection, path, size=None):
+    self.connection, self.path, self.pos = connection, path, 0
+    self.size = size if size is not None else connection.getsize(path)
+    self.blocks = collections.OrderedDict()
+    self.lock = threading.Lock()
+    self.round_trips = self.bytes_read = 0
+
+  def fetch(self, first, last):
+    """Blocks first..last (inclusive) into the cache, those not there in one read"""
+    missing = [b for b in range(first, last + 1) if b not in self.blocks]
+    if not missing:
+      return
+    lo, hi = missing[0], missing[-1]
+    data = self.connection.read(self.path, lo * self.BLOCK, (hi - lo + 1) * self.BLOCK)
+    self.round_trips += 1
+    self.bytes_read += len(data)
+    for b in range(lo, hi + 1):
+      self.blocks[b] = data[(b - lo) * self.BLOCK:(b - lo + 1) * self.BLOCK]
+      self.blocks.move_to_end(b)
+    while len(self.blocks) > self.CACHED:
+      self.blocks.popitem(last=False)
+
+  def read(self, n=-1):
+    with self.lock:
+      if n is None or n < 0:
+        n = self.size - self.pos
+      n = max(0, min(n, self.size - self.pos))
+      if n == 0:
+        return b""
+      first, last = self.pos // self.BLOCK, (self.pos + n - 1) // self.BLOCK
+      self.fetch(first, last)
+      out = b"".join(self.blocks.get(b, b"") for b in range(first, last + 1))
+      start = self.pos - first * self.BLOCK
+      data = out[start:start + n]
+      self.pos += len(data)
+      return data
+
+  def readinto(self, buffer):
+    data = self.read(len(buffer))
+    buffer[:len(data)] = data
+    return len(data)
+
+  def seek(self, offset, whence=0):
+    self.pos = offset if whence == 0 else self.pos + offset if whence == 1 else self.size + offset
+    return self.pos
+
+  def tell(self):
+    return self.pos
+
+  def seekable(self):
+    return True
+
+  def readable(self):
+    return True
+
+  def writable(self):
+    return False
+
+  def flush(self):
+    pass
+
+  def close(self):
+    self.blocks.clear()
 
 def fs_exists(path): return conn().exists(path) if conn() else os.path.exists(path)
 def fs_isfile(path): return conn().isfile(path) if conn() else os.path.isfile(path)
