@@ -98,6 +98,7 @@ class ClusterSession:
   loaded: bool = False
   loader: object | None = None         # worker loading the job list
   accounts: list | None = None         # Slurm accounts of the user (sacctmgr), None: not asked yet
+  since_value: str = "1d"              # finished jobs listed: within this time (as slurm.py -c), "off": none
   scope: str = "me"                    # whose jobs are listed: "me", "all" (all accounts) or an account
   views: list = field(default_factory=list) # the subtabs besides the job list
   current_view: str = "_default"       # mode of the subtab shown ("_default": the job list)

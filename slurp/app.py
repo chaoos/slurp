@@ -276,6 +276,7 @@ class Slurp(App):
       self.switch_mode(cluster.current_view if any(v.mode == cluster.current_view for v in cluster.views) else "_default")
     self.show_tab_shell()
     self.update_scope_select()
+    self.update_since_widgets()
     self.populate()
     self.refresh_status()
     if not cluster.loaded and cluster.loader is None and (not cluster.destination or cluster.connection.ready):
@@ -1006,7 +1007,30 @@ class Slurp(App):
   def cluster_shell_pressed(self, event):
     self.action_cluster_shell()
 
-  since_value = "1d" # how long ago finished jobs are listed (as in slurm.py -c), "off": none
+  @property
+  def since_value(self):
+    """How long ago finished jobs of the active tab are listed (as in slurm.py -c), "off": none"""
+    return self.cluster.since_value
+
+  @since_value.setter
+  def since_value(self, value):
+    self.cluster.since_value = value
+
+  setting_since = False
+
+  def update_since_widgets(self):
+    """The dropdown (and custom field) show the choice of the active tab"""
+    value = self.since_value
+    preset = value in [v for _, v in SINCE_CHOICES if v != "custom"]
+    select, custom = self.query_one("#since-choice", Select), self.query_one("#since", Input)
+    self.setting_since = True
+    try:
+      select.value = value if preset else "custom"
+      custom.set_class(not preset, "-custom")
+      if not preset:
+        custom.value = value
+    finally:
+      self.call_after_refresh(lambda: setattr(self, "setting_since", False))
 
   @on(Input.Submitted, "#since")
   def since_typed(self, event):
@@ -1022,6 +1046,8 @@ class Slurp(App):
 
   @on(Select.Changed, "#since-choice")
   def since_chosen(self, event):
+    if self.setting_since:
+      return
     custom = self.query_one("#since", Input)
     custom.set_class(event.value == "custom", "-custom")
     if event.value == "custom":
