@@ -1,5 +1,6 @@
 """The window of an array job: what the array is, and all its task ids by state (and exit code), to copy"""
 
+import time
 from datetime import datetime
 
 from rich.table import Table
@@ -92,6 +93,7 @@ class ArrayScreen(SplitScreen):
     for key, label in self.TASK_COLUMNS:
       table.add_column(label, key=key)
     self.action_reload()
+    self.set_interval(1, lambda: self.show_info() if self.loading else None) # the seconds asked so far
 
   def action_back(self):
     self.pop_back()
@@ -100,15 +102,18 @@ class ArrayScreen(SplitScreen):
   def action_reload(self):
     if self.loading:
       return
-    self.loading = True
+    self.loading, self.load_started, self.load_failed = True, time.monotonic(), False
     self.show_info()
     def loaded(overview):
       self.loading = False
-      if overview is not None:
+      if overview is None:
+        self.load_failed = True # (the error was shown) the tasks as they were
+      else:
         self.overview = overview
+        self.show_groups()
+        self.show_tasks()
       self.show_info()
-      self.show_groups()
-    in_background(self, lambda: array_overview(self.array_id), loaded, group="array")
+    in_background(self, lambda: array_overview(self.array_id), loaded, group="array", name=f"loading array {self.array_id}")
 
   def show_info(self):
     grid = Table.grid(padding=(0, 2))
@@ -161,11 +166,12 @@ class ArrayScreen(SplitScreen):
     for err in (self.overview or {}).get("errors", []):
       grid.add_row(Text("error", style="red"), err)
     if self.loading:
-      grid.add_row("", Text("asking Slurm …", style="dim"))
+      grid.add_row("", Text(f"asking Slurm … {time.monotonic() - self.load_started:.0f} s", style="yellow"))
+    elif getattr(self, "load_failed", False):
+      grid.add_row("", Text("loading failed (see the message); Reload tries again", style="red"))
     elif self.overview:
       grid.add_row("", Text(f"as of {datetime.now():%H:%M:%S}", style="dim"))
     self.info_table = grid
-    self.show_tasks()
     self.query_one("#arr-info", Static).update(grid)
 
   def show_tasks(self):
@@ -216,7 +222,7 @@ class ArrayScreen(SplitScreen):
       ids = groups[group]
       head = Horizontal(Static(Text.assemble(state_text(group), f"  {len(ids)} task{'s' if len(ids) != 1 else ''}"),
                                classes="arr-title"),
-                        Button("Copy ids", id=f"arr-copy-{n}", compact=True, tooltip="copy the ids of these tasks"),
+                        Button("Copy ids", classes="arr-copy", compact=True, tooltip="copy the ids of these tasks"),
                         classes="arr-head")
       body = Static(Text.assemble(", ".join(map(str, ids)), (f"\n= {compress_array_ids(ids)}", "dim")), classes="arr-ids")
       widgets.append(Vertical(head, body, classes="arr-group"))

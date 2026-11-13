@@ -640,7 +640,7 @@ def array_overview(array_id):
   fields = ["JobID", "State", "ExitCode", "Submit", "Start", "End", "Elapsed", "NodeList"]
   cmds = [["sacct", "-X", "-j", str(array_id), "-P", "-n", f"--format={','.join(fields)}"],
           ["squeue", "-r", "-j", str(array_id), "-h", "--format=%i|%T|%r"]]
-  acct, queue = run_many(cmds)
+  acct, queue = run_many(cmds, timeout=300) # sacct of a big array can take a while
   tasks = {}
   def indices(jid):
     m = re.fullmatch(rf"{re.escape(str(array_id))}_(\d+|\[(.+)\])", jid.strip())
