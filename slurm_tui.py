@@ -4373,7 +4373,8 @@ class SlurmTUI(App):
   #hdata { height: 1fr; }
   .split { height: 1fr; }
   .left { width: 1fr; height: 1fr; }
-  TerminalPane { width: 50%; height: 1fr; display: none; }
+  TerminalPane { width: 50%; height: 1fr; display: none; border: round $panel-lighten-3; }
+  TerminalPane:focus-within { border: round $accent; }
   Splitter { width: 1; height: 1fr; display: none; background: $panel-lighten-2; }
   Splitter:hover, Splitter.-dragging { background: $accent; }
   .tbar { height: 1; background: $panel; }
