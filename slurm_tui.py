@@ -4716,6 +4716,18 @@ class SlurmTUI(App):
         if str(button.label) != label:
           button.label, button.variant = label, variant
 
+  def mark_sort_column(self, table):
+    """▲ (ascending) or ▼ (descending) after the label of the column the list is sorted by"""
+    labels = dict(COLUMNS)
+    for key, column in table.columns.items():
+      label = labels.get(key.value, str(column.label))
+      if key.value == self.sort_column:
+        label += " ▼" if self.sort_reverse else " ▲"
+      if str(column.label) != label:
+        column.label = Text(label)
+        column.content_width = max(column.content_width, len(label))
+    table.refresh()
+
   def setup_job_columns(self, show_progress=None):
     table = self.query_one("#jobs", ClickTable)
     all_accounts = self.cluster.scope != "me"
@@ -4962,6 +4974,7 @@ class SlurmTUI(App):
       job.rec.get("SubmitLine"), job.rec.get("ExitCode"),
     )).casefold()]
     table.clear()
+    self.mark_sort_column(table)
     for job in sorted(visible_jobs, key=SORT_KEYS[self.sort_column], reverse=self.sort_reverse):
       rec = job.rec
       state = job.state if job.queued and job.state != "PENDING" else \
