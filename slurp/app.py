@@ -133,10 +133,10 @@ class Slurp(App):
   #memory-watch-bar { height: auto; }
   #memory-every { width: 22; margin-right: 1; }
   #memory-watch-status { width: 1fr; padding-top: 1; }
-  .memory-plot { height: 3; }
-  .memory-plot-label { width: 5; padding-top: 1; }
-  .memory-plot Sparkline { width: 1fr; height: 3; }
-  .memory-plot-text { width: 34; padding: 1 0 0 1; }
+  .memory-plot { height: 6; }
+  .memory-plot-label { width: 5; padding-top: 2; }
+  .memory-plot TimePlot { width: 1fr; height: 6; }
+  .memory-plot-text { width: 22; padding: 1 0 0 1; }
   #core-overview { height: 1fr; padding: 1; }
   #core-info { height: auto; }
   #open-gdb { margin-top: 1; }

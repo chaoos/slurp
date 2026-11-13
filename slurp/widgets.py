@@ -148,3 +148,46 @@ class ConnectionStatus(Static):
   def on_click(self, event):
     event.stop()
     self.app.action_connection()
+
+class TimePlot(Widget):
+  """Values over time as bars from zero (the last value at each moment), with the largest value on the y axis and
+  the first and last time on the x axis. data: [(epoch seconds, value or None)]"""
+  DEFAULT_CSS = "TimePlot { height: 5; }"
+  BLOCKS = " ▁▂▃▄▅▆▇█"
+  LABEL = 9 # columns of the y axis
+
+  def __init__(self, color="cyan", fmt=str, **kwargs):
+    super().__init__(**kwargs)
+    self.color, self.fmt, self.data = color, fmt, []
+
+  def set_data(self, data):
+    self.data = [(t, v) for t, v in data if v is not None]
+    self.refresh()
+
+  def render_line(self, y):
+    width, height = self.size.width, self.size.height
+    rows = max(1, height - 1) # the last line is the time axis
+    plot = max(1, width - self.LABEL)
+    base = self.rich_style
+    data = self.data
+    if y == rows: # time axis
+      if not data:
+        return Strip([Segment(" " * width, base)])
+      left, right = datetime.fromtimestamp(data[0][0]).strftime("%H:%M"), datetime.fromtimestamp(data[-1][0]).strftime("%H:%M")
+      axis = " " * self.LABEL + left + " " * max(1, plot - len(left) - len(right)) + right
+      return Strip([Segment(axis[:width].ljust(width), base + Style(dim=True))])
+    if len(data) < 2:
+      text = ("" if y else "  needs two measurements for a plot" if data else "  no measurements yet")
+      return Strip([Segment(text[:width].ljust(width), base + Style(dim=True))])
+    top = max(v for _, v in data) or 1
+    t0, t1 = data[0][0], data[-1][0]
+    label = (self.fmt(top) if y == 0 else "0" if y == rows - 1 else "").rjust(self.LABEL - 1)[:self.LABEL - 1] + "│"
+    cells, j = [], 0
+    for x in range(plot):
+      t = t0 + (t1 - t0) * x / max(plot - 1, 1)
+      while j + 1 < len(data) and data[j + 1][0] <= t:
+        j += 1
+      eighths = data[j][1] / top * rows * 8 # height of the bar, in eighths of a line
+      fill = int(min(8, max(0, eighths - (rows - 1 - y) * 8)))
+      cells.append(self.BLOCKS[fill])
+    return Strip([Segment(label, base + Style(dim=True)), Segment("".join(cells), base + Style(color=self.color))])

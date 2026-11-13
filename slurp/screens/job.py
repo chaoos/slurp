@@ -90,13 +90,14 @@ class JobScreen(SplitScreen):
           yield Select(MEMORY_EVERY, value=0, allow_blank=False, id="memory-every",
                        tooltip="query the memory again and again; every query is kept and written to a file")
           yield Static(id="memory-watch-status")
+        size = lambda v: humanize.naturalsize(v, format="%.3g")
         with Horizontal(classes="memory-plot"):
           yield Label("CPU", classes="memory-plot-label")
-          yield Sparkline([], id="spark-cpu", summary_function=max)
+          yield TimePlot(color="cyan", fmt=size, id="spark-cpu")
           yield Static(id="spark-cpu-text", classes="memory-plot-text")
         with Horizontal(classes="memory-plot"):
           yield Label("GPU", classes="memory-plot-label")
-          yield Sparkline([], id="spark-gpu", summary_function=max)
+          yield TimePlot(color="magenta", fmt=size, id="spark-gpu")
           yield Static(id="spark-gpu-text", classes="memory-plot-text")
       with Vertical(id="job-progress"):
         with Horizontal(id="progress-top"):
@@ -368,9 +369,10 @@ class JobScreen(SplitScreen):
     self.shown_samples = len(samples)
     for key, index in (("cpu", 1), ("gpu", 2)):
       values = [s[index] for s in samples if s[index] is not None]
-      self.query_one(f"#spark-{key}", Sparkline).data = values or [0]
+      self.query_one(f"#spark-{key}", TimePlot).set_data([(s[0], s[index]) for s in samples])
       self.query_one(f"#spark-{key}-text", Static).update(
-        f"{humanize.naturalsize(values[-1])} now, max {humanize.naturalsize(max(values))}" if values else "-")
+        f"{humanize.naturalsize(values[-1])} now\nmin {humanize.naturalsize(min(values))}\nmax {humanize.naturalsize(max(values))}"
+        if values else "-")
 
   def memory_loaded(self, result):
     if not self.is_mounted:
