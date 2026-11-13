@@ -1691,6 +1691,8 @@ class SplitScreen(Screen):
       if self.SHOW_BACK:
         yield Button("←", id="back", compact=True, tooltip="Back")
       yield Header()
+    if isinstance(self, MainScreen):
+      yield Static("No tabs. The + button above adds a connection (blank for this machine, or an SSH destination).", id="notabs")
     with Horizontal(classes="split"):
       with Vertical(classes="left"):
         yield from self.compose_left()
@@ -4289,6 +4291,9 @@ class SlurmTUI(App):
   #toolbar > * { margin-right: 1; }
   #toolbar Label { padding-top: 1; }
   #scope { width: 28; }
+  #notabs { display: none; padding: 2 4; color: $text-muted; }
+  MainScreen.-no-tabs #notabs { display: block; }
+  MainScreen.-no-tabs .split, MainScreen.-no-tabs #loadstatus, MainScreen.-no-tabs #connstatus { display: none; }
   #us { width: auto; height: auto; padding: 0; border: none; }
   #since { width: 12; }
   #topbar { height: 1; }
@@ -4407,7 +4412,10 @@ class SlurmTUI(App):
   # ---- tabs: the local machine and SSH destinations, each with its own connection, shell and job list
   @property
   def cluster(self):
-    return self.clusters[self.cluster_index]
+    """The active tab (an empty stand-in after the last tab was closed)"""
+    return self.clusters[self.cluster_index] if self.clusters else self.no_cluster
+
+  no_cluster = ClusterSession("")
 
   @property
   def jobs(self):
@@ -4503,9 +4511,6 @@ class SlurmTUI(App):
   def confirm_close_cluster(self, index):
     if not 0 <= index < len(self.clusters):
       return
-    if len(self.clusters) == 1:
-      self.notify("the last tab cannot be closed", severity="warning")
-      return
     cluster = self.clusters[index]
     what = ["its job list"]
     if cluster.destination:
@@ -4519,7 +4524,7 @@ class SlurmTUI(App):
   def close_cluster(self, cluster):
     """Close a tab: its loads, shells and SSH session end"""
     global ssh_connection
-    if cluster not in self.clusters or len(self.clusters) == 1:
+    if cluster not in self.clusters:
       return
     index = self.clusters.index(cluster)
     current = cluster is self.cluster
@@ -4540,14 +4545,20 @@ class SlurmTUI(App):
     if current:
       for _ in range(len(self.screen_stack) - 1):
         self.pop_screen()
-      self.activate_cluster(min(index, len(self.clusters) - 1))
+      if self.clusters:
+        self.activate_cluster(min(index, len(self.clusters) - 1))
+      else: # no tab left: only the + button
+        self.cluster_index, ssh_connection = 0, None
+        self.populate()
     elif index < self.cluster_index:
       self.cluster_index -= 1
+    self.screen_stack[0].set_class(not self.clusters, "-no-tabs")
     self.refresh_status()
 
   def add_cluster(self, destination):
     if destination is None:
       return
+    self.screen_stack[0].remove_class("-no-tabs")
     if not destination or is_local_destination(destination):
       self.clusters.append(ClusterSession("Local" if not destination else destination))
     else:
@@ -4876,6 +4887,8 @@ class SlurmTUI(App):
     await super().on_event(event)
 
   def check_action(self, action, parameters):
+    if not self.clusters and action not in ("quit", "command_palette", "help_quit"):
+      return False # no tab: only + (and quit)
     if action in ("open", "reload"): # keys of the job table, not of the other windows
       return self.screen is self.screen_stack[0]
     if action in ("switch_side", "close_shell"):
