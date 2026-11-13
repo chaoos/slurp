@@ -52,7 +52,7 @@ import slurm as sl
 
 log = logging.getLogger("slurp")
 
-TAIL_BYTES = 4*1024*1024 # files larger than this are shown from their end
+TAIL_BYTES = 1024*1024 # files larger than this are shown from their end (more on request, in parts this size)
 PROGRESS_TAIL_BYTES = 64*1024
 PROGRESS_TAIL_LINES = 30
 PROGRESS_PATTERN = re.compile(r"(?<!\d)(\d+)\s*/\s*(\d+)(?!\d)")

@@ -101,7 +101,7 @@ def is_markdown(path):
 def open_markdown(app, crumbs, path, bases=(), env=None):
   """(runs in a worker)"""
   try:
-    markdown = fs_read(path).decode("utf-8", errors="replace")
+    markdown = fs_read(path, size=TAIL_BYTES).decode("utf-8", errors="replace") # the first TAIL_BYTES at most
   except OSError as e:
     msg = f"cannot read {path}: {e}" # (e is gone after the except block)
     return lambda: app.notify(msg, severity="error")
@@ -129,7 +129,7 @@ class MarkdownScreen(SplitScreen):
   def action_reload(self):
     def read():
       try:
-        return fs_read(self.path).decode("utf-8", errors="replace")
+        return fs_read(self.path, size=TAIL_BYTES).decode("utf-8", errors="replace")
       except OSError as e:
         self.app.call_from_thread(self.notify, f"cannot read {self.path}: {e}", title=tab_name(), severity="error")
         return None
@@ -342,7 +342,7 @@ class FileScreen(SplitScreen):
     Binding("G", "bottom", "Bottom"),
     Binding("r", "reload", "Reload"),
     Binding("w", "watch", "Watch"),
-    Binding("A", "load_all", "Load all", show=False),
+    Binding("A", "load_more", "Earlier part", show=False),
     Binding("l", "less", "less"),
   ]
 
@@ -352,7 +352,7 @@ class FileScreen(SplitScreen):
     self.bases, self.env = list(bases), env # to resolve relative paths in the text
     self.following = follow and path is not None
     self.watching = False
-    self.full = False
+    self.start_pos = 0 # where in the file the text shown starts (only the end of a large file is read)
     self.file_pos = 0
     self.truncated = False
     self.term = ""
@@ -373,7 +373,7 @@ class FileScreen(SplitScreen):
     self.query_one("#text").focus()
 
   def check_action(self, action, parameters):
-    if action == "follow" or action == "load_all":
+    if action == "follow" or action == "load_more":
       return self.path is not None
     if action == "watch":
       return self.refresher is not None
@@ -393,7 +393,8 @@ class FileScreen(SplitScreen):
       else:
         parts.append(f"{self.path}  {humanize.naturalsize(self.file_size)}")
       if self.truncated:
-        parts.append(f"showing the last {humanize.naturalsize(TAIL_BYTES)} (A: load all)")
+        parts.append(f"showing the last {humanize.naturalsize((self.file_size or 0) - self.start_pos)} "
+                     f"(A: the {humanize.naturalsize(TAIL_BYTES)} before)")
       parts.append("following" if self.following else "not following (f)")
     if self.refresher:
       parts.append("watching every 5 s" if self.watching else "w: watch, r: run again")
@@ -405,11 +406,10 @@ class FileScreen(SplitScreen):
       self.area.load_text(clean(self.text or ""))
       self.update_status()
       return
-    full = self.full
     def read():
       try:
         size = fs_getsize(self.path)
-        truncated = not full and size > TAIL_BYTES
+        truncated = size > TAIL_BYTES
         offset = size - TAIL_BYTES if truncated else 0
         data = fs_read(self.path, offset, size - offset)
         return size, truncated, offset + len(data), data
@@ -423,9 +423,11 @@ class FileScreen(SplitScreen):
       return
     area = self.area
     self.file_size, self.truncated, self.file_pos, data = result
+    self.start_pos = self.file_pos - len(data)
     self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     if self.truncated:
-      data = data.partition(b"\n")[2] # drop the partial first line
+      first, newline, data = data.partition(b"\n") # drop the partial first line
+      self.start_pos += len(first) + len(newline)
     area.load_text(clean(self.decoder.decode(data)))
     area.history.clear()
     self.action_bottom()
@@ -508,9 +510,34 @@ class FileScreen(SplitScreen):
     area.move_cursor((area.document.line_count - 1, 0))
     area.scroll_end(animate=False)
 
-  def action_load_all(self):
-    self.full = True
-    self.load()
+  def action_load_more(self):
+    """Read the TAIL_BYTES before the text shown (in the background) and put them in front: a large file is never read
+    as a whole, only the parts asked for"""
+    if not self.path or self.start_pos <= 0:
+      self.notify("the whole file is shown")
+      return
+    end = self.start_pos
+    start = max(0, end - TAIL_BYTES)
+    def read():
+      return fs_read(self.path, start, end - start)
+    def got(data):
+      if data is None or self.start_pos != end:
+        return
+      new_start = start
+      if start > 0:
+        first, newline, data = data.partition(b"\n") # a partial line: it starts in the part before
+        new_start += len(first) + len(newline)
+      text = clean(data.decode("utf-8", errors="replace"))
+      area = self.area
+      row = area.cursor_location[0]
+      area.insert(text, (0, 0))
+      area.history.clear()
+      added = text.count("\n")
+      area.move_cursor((row + added, 0))
+      area.scroll_to(y=added, animate=False)
+      self.start_pos, self.truncated = new_start, new_start > 0
+      self.update_status()
+    in_background(self, read, got, group="load-more")
 
   def action_reload(self):
     if self.refresher:
