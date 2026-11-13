@@ -64,6 +64,8 @@ from .screens.job import *
 from .screens.main import *
 from .screens.connection import *
 from .screens.clusterinfo import *
+from .storage import *
+from .screens.storage import *
 from . import remote, state
 
 class Slurp(App):
@@ -160,6 +162,7 @@ class Slurp(App):
     Binding("d", "login_dir", "Home dir"),
     Binding("i", "interactive_job", "Interactive job"),
     Binding("C", "cluster_info", "Cluster info"),
+    Binding("Q", "quota", "Quota"),
     Binding("a", "abort_load", "Abort loading"),
     Binding("c", "connection", "Connection"),
     Binding("ctrl+w", "close_view", "Close subtab"),
@@ -928,6 +931,14 @@ class Slurp(App):
       self.action_abort_load()
     else:
       self.action_reload()
+
+  @on(Button.Pressed, "#quota")
+  def quota_pressed(self, event):
+    self.action_quota()
+
+  def action_quota(self):
+    if not isinstance(self.screen, QuotaScreen):
+      self.push_screen(QuotaScreen(self.cluster))
 
   @on(Button.Pressed, "#cluster-info")
   def cluster_info_pressed(self, event):
