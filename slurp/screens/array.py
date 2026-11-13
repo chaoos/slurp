@@ -40,6 +40,28 @@ def seconds(elapsed):
 
 GROUP_ORDER = ("RUNNING", "COMPLETING", "CONFIGURING", "PENDING", "SUSPENDED", "REQUEUED", "COMPLETED")
 
+def node_hours_text(tasks):
+  """The node hours all tasks of an array used together (nodes × elapsed time of each), bold, with the part of the
+  running tasks (so far) and the tasks counted"""
+  total, running, counted = 0.0, 0.0, 0
+  for t in tasks.values():
+    s = seconds(t.get("elapsed"))
+    try:
+      nodes = int(t.get("nodes") or 0)
+    except ValueError:
+      nodes = 0
+    if not s or not nodes or t["state"] == "PENDING": # (a requeued task may still show its last run)
+      continue
+    counted += 1
+    total += nodes * s / 3600
+    if t["state"] in ("RUNNING", "COMPLETING", "CONFIGURING"):
+      running += nodes * s / 3600
+  text = Text(f"{total:.2f}", style="bold")
+  text.append(f"   over {counted} task{'s' if counted != 1 else ''} that ran", style="dim")
+  if running:
+    text.append(f", {running:.2f} of them by running tasks (so far)", style="yellow")
+  return text
+
 def group_rank(group):
   state = group.split()[0]
   return (GROUP_ORDER.index(state) if state in GROUP_ORDER else len(GROUP_ORDER), group)
@@ -133,6 +155,7 @@ class ArrayScreen(SplitScreen):
                                      (f"{count(('PENDING',))} pending", "blue"), ", ",
                                      (f"{len(tasks) - count(('COMPLETED', 'RUNNING', 'COMPLETING', 'CONFIGURING', 'PENDING'))} "
                                       "failed, cancelled or else", "red")))
+      grid.add_row("Node hours (total)", node_hours_text(tasks))
       starts = [t["start"] for t in tasks.values() if is_time(t["start"])]
       ends = [t["end"] for t in tasks.values() if is_time(t["end"])]
       if starts:

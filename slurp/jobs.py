@@ -636,8 +636,9 @@ def env_summary(env):
 
 def array_overview(array_id):
   """All tasks of an array job, from Slurm (sacct for every task, squeue for those still queued; pending ranges like
-  12_[8-20%5] are expanded): {"tasks": {index: {"state", "exit", "reason", "start", "end", "node"}}, "errors"}"""
-  fields = ["JobID", "State", "ExitCode", "Submit", "Start", "End", "Elapsed", "NodeList"]
+  12_[8-20%5] are expanded): {"tasks": {index: {"state", "exit", "reason", "start", "end", "elapsed", "nodes", "node"}},
+  "errors"}"""
+  fields = ["JobID", "State", "ExitCode", "Submit", "Start", "End", "Elapsed", "NNodes", "NodeList"]
   cmds = [["sacct", "-X", "-j", str(array_id), "-P", "-n", f"--format={','.join(fields)}"],
           ["squeue", "-r", "-j", str(array_id), "-h", "--format=%i|%T|%r"]]
   acct, queue = run_many(cmds, timeout=300) # sacct of a big array can take a while
@@ -656,12 +657,12 @@ def array_overview(array_id):
     for i in indices(row["JobID"]):
       tasks[i] = {"state": (row["State"].split() or ["?"])[0].rstrip("+"), "exit": row["ExitCode"], "reason": "",
                   "submit": row["Submit"], "start": row["Start"], "end": row["End"], "elapsed": row["Elapsed"],
-                  "node": row["NodeList"]}
+                  "nodes": row["NNodes"], "node": row["NodeList"]}
   for line in queue.stdout.splitlines(): # up to date for queued tasks
     jid, _, rest = line.partition("|")
     state, _, reason = rest.partition("|")
     for i in indices(jid):
-      task = tasks.setdefault(i, {"exit": "", "submit": "", "start": "", "end": "", "elapsed": "", "node": ""})
+      task = tasks.setdefault(i, {"exit": "", "submit": "", "start": "", "end": "", "elapsed": "", "nodes": "", "node": ""})
       task.update(state=state.strip(), reason=reason.strip() if state.strip() == "PENDING" else "")
   # squeue answers "Invalid job id specified" when no task of the array is queued any more: no error
   queue_gone = queue.returncode and "invalid job id" in (queue.stderr or "").lower()
