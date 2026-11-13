@@ -1513,10 +1513,10 @@ class JobScreen(SplitScreen):
     self.details = {"files": [], "sstat": {}, "nodes": []}
 
   def compose_left(self):
+    with Horizontal(id="job-actions"):
+      yield Button("Cancel job", id="cancel-job", variant="error")
+      yield Button("Restart job", id="restart-job", variant="primary")
     with VerticalScroll(id="details"):
-      with Horizontal(id="job-actions"):
-        yield Button("Cancel job", id="cancel-job", variant="error")
-        yield Button("Restart job", id="restart-job", variant="primary")
       yield Static(id="info")
       yield Label("Files", classes="section")
       yield OptionList(Option("loading ...", disabled=True), id="files")
@@ -2159,7 +2159,7 @@ class SlurmTUI(App):
   #since { width: 12; }
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
-  #details { padding: 0 1; }
+  #details { height: 1fr; padding: 0 1; }
   #job-actions { height: auto; margin: 1 0; }
   #job-actions Button { margin-right: 1; }
   .section { margin-top: 1; text-style: bold; color: $accent; }
