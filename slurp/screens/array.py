@@ -14,6 +14,7 @@ from ..remote import *
 from ..jobs import *
 from ..widgets import *
 from .base import *
+from .dialogs import ConfirmScreen
 
 def seconds(elapsed):
   """Slurm elapsed time ([d-]hh:mm:ss) in seconds, None if it is not one"""
@@ -57,6 +58,9 @@ class ArrayScreen(SplitScreen):
       with Vertical(id="arr-buttons"):
         yield Button("Reload", id="arr-reload", variant="primary")
         yield Button("Copy all ids", id="arr-copy-all")
+        yield Button("Cancel pending tasks", id="arr-cancel-pending", variant="warning",
+                     tooltip="scancel --state=PENDING: the tasks that have not started")
+        yield Button("Cancel the whole array", id="arr-cancel", variant="error", tooltip="scancel of the array job")
     yield VerticalScroll(id="arr-groups")
 
   def on_mount(self):
@@ -151,6 +155,32 @@ class ArrayScreen(SplitScreen):
     self.app.copy_to_clipboard(text)
     self.copied = text
     self.notify(f"copied {len(ids)} ids of array {self.array_id} ({what})", timeout=4)
+
+  @on(Button.Pressed, "#arr-cancel, #arr-cancel-pending")
+  def cancel_pressed(self, event):
+    event.stop()
+    pending = event.button.id == "arr-cancel-pending"
+    tasks = (self.overview or {}).get("tasks", {})
+    states = ("PENDING",) if pending else ("PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED", "REQUEUED")
+    hit = sorted(i for i, t in tasks.items() if t["state"] in states)
+    what = "the pending tasks" if pending else "the whole array"
+    message = (f"Cancel {what} of job {self.array_id}"
+               + (f": {len(hit)} task{'s' if len(hit) != 1 else ''} ({compress_array_ids(hit)[:200]})" if hit else "")
+               + ("." if pending else ", running tasks included. Ended tasks are not affected."))
+    args = ["scancel", *(["--state=PENDING"] if pending else []), self.array_id]
+    self.app.push_screen(ConfirmScreen(f"Cancel {what}?", message + f"\n\n{shlex.join(args)}", "Cancel " + ("pending" if pending else "array")),
+                         lambda ok: self.cancel(args, what) if ok else None)
+
+  def cancel(self, args, what):
+    def done(res):
+      if res is None:
+        return
+      if res.returncode:
+        self.notify(f"scancel failed: {(res.stderr or res.stdout).strip()[:300]}", severity="error", timeout=10)
+      else:
+        self.notify(f"cancelled {what} of job {self.array_id}", timeout=5)
+      self.action_reload()
+    in_background(self, lambda: run_cmd(args, timeout=60, retry=False), done, group="array-cancel")
 
   @on(Button.Pressed, "#arr-copy-all")
   def copy_all(self, event):
