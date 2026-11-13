@@ -7,7 +7,7 @@ from rich.text import Text
 from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Static
+from textual.widgets import Button, DataTable, Static, TabbedContent, TabPane
 
 from ..state import *
 from ..remote import *
@@ -15,6 +15,7 @@ from ..jobs import *
 from ..widgets import *
 from .base import *
 from .dialogs import ConfirmScreen, copy_text
+from .job import JobScreen
 
 def epoch(value):
   try:
@@ -52,7 +53,9 @@ class ArrayScreen(SplitScreen):
   #arr-info { width: 1fr; height: auto; }
   #arr-buttons { width: auto; height: auto; }
   #arr-buttons Button { margin: 0 0 0 1; width: 26; }
+  #arr-tabs { height: 1fr; }
   #arr-groups { height: 1fr; padding: 0 1; }
+  #arr-tasks { height: 1fr; }
   .arr-group { height: auto; margin-top: 1; }
   .arr-head { height: auto; }
   .arr-title { width: 1fr; height: auto; padding-top: 1; }
@@ -74,10 +77,20 @@ class ArrayScreen(SplitScreen):
         yield Button("Cancel pending tasks", id="arr-cancel-pending", variant="warning",
                      tooltip="scancel --state=PENDING: the tasks that have not started")
         yield Button("Cancel the whole array", id="arr-cancel", variant="error", tooltip="scancel of the array job")
-    yield VerticalScroll(id="arr-groups")
+    with TabbedContent(id="arr-tabs"):
+      with TabPane("By state", id="arr-tab-states"):
+        yield VerticalScroll(id="arr-groups")
+      with TabPane("Tasks", id="arr-tab-tasks"):
+        yield ClickTable(id="arr-tasks", cursor_type="row", zebra_stripes=True)
+
+  TASK_COLUMNS = [("task", "Task"), ("state", "State"), ("exit", "Exit"), ("submit", "Submit"), ("wait", "Queue wait"),
+                  ("start", "Start"), ("end", "End"), ("elapsed", "Run time"), ("node", "Node")]
 
   def on_mount(self):
     self.sub_title = f"array {self.array_id}"
+    table = self.query_one("#arr-tasks", ClickTable)
+    for key, label in self.TASK_COLUMNS:
+      table.add_column(label, key=key)
     self.action_reload()
 
   def action_back(self):
@@ -152,7 +165,43 @@ class ArrayScreen(SplitScreen):
     elif self.overview:
       grid.add_row("", Text(f"as of {datetime.now():%H:%M:%S}", style="dim"))
     self.info_table = grid
+    self.show_tasks()
     self.query_one("#arr-info", Static).update(grid)
+
+  def show_tasks(self):
+    """Every task in a table, like the job list: a click opens its job window"""
+    table = self.query_one("#arr-tasks", ClickTable)
+    tasks = (self.overview or {}).get("tasks", {})
+    cursor = table.cursor_row
+    table.clear()
+    for i, t in sorted(tasks.items()):
+      start, submit = epoch(t.get("start")), epoch(t.get("submit"))
+      wait = duration_text(start - submit) if start and submit and t["state"] != "PENDING" else ""
+      state = t["state"] + (f" ({t['reason']})" if t.get("reason") and t["reason"] != "None" else "")
+      table.add_row(f"{self.array_id}_{i}", state_text(state), t.get("exit", ""), fmt_time(t.get("submit", "")), wait,
+                    ("~" if t["state"] == "PENDING" else "") + fmt_time(t.get("start", "")), fmt_time(t.get("end", "")),
+                    t.get("elapsed", "") if is_time(t.get("start", "")) and t["state"] != "PENDING" else "", t.get("node", ""),
+                    key=str(i))
+    if tasks and 0 <= cursor < table.row_count:
+      table.move_cursor(row=cursor)
+
+  @on(DataTable.RowSelected, "#arr-tasks")
+  def task_selected(self, event):
+    event.stop()
+    self.query_one("#arr-tasks", ClickTable).take_clicked_column()
+    jid = f"{self.array_id}_{event.row_key.value}"
+    job = self.app.jobs.get(jid)
+    if job is not None:
+      self.app.push_screen(JobScreen(job))
+      return
+    self.notify(f"loading job {jid} …", timeout=3)
+    def loaded(jobs):
+      job = next((j for j in jobs or [] if j.jid == jid), None)
+      if job is None:
+        self.notify(f"job {jid} is not known to Slurm", severity="warning")
+      elif self.is_attached:
+        self.app.push_screen(JobScreen(job))
+    in_background(self, lambda: annotate(load_jobs(None, jids=[jid])), loaded, group="array-task")
 
   def show_groups(self):
     tasks = (self.overview or {}).get("tasks", {})
