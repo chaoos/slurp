@@ -77,7 +77,7 @@ class Collector(logging.Handler):
     super().__init__(logging.WARNING)
     self.messages = []
   def emit(self, record):
-    self.messages.append(record.getMessage())
+    self.messages.append((tab_name(), record.getMessage())) # the tab of the thread that logs it
   def drain(self):
     msgs, self.messages = self.messages, []
     return msgs
@@ -135,6 +135,11 @@ def conn():
   """Connection of the cluster the running code works for: the one its worker was started with, else the active tab's"""
   return _thread.conn if hasattr(_thread, "conn") else ssh_connection
 
+def tab_name():
+  """Name of the tab the running code works for (shown as the title of its notifications)"""
+  c = conn()
+  return c.destination if c is not None else "Local"
+
 def check_cancelled():
   event = getattr(_thread, "cancel", None)
   if event is not None and event.is_set():
@@ -162,7 +167,7 @@ def start_worker(node, fn, group, exclusive=True, connection=CURRENT, name=""):
     except Exception as e:
       log.exception(f"{name or group} failed")
       if not abort.is_set():
-        app.call_from_thread(app.notify, f"{name or group} failed: {e}", severity="error", timeout=10)
+        app.call_from_thread(app.notify, f"{name or group} failed: {e}", title=tab_name(), severity="error", timeout=10)
       return None
     finally:
       del _thread.conn, _thread.cancel
@@ -179,7 +184,7 @@ def in_background(node, work, done, group="io", name="", connection=CURRENT):
       result = work()
     except Exception as e:
       log.exception(f"{name or group} failed")
-      app.call_from_thread(app.notify, f"{name or group} failed: {e}", severity="error", timeout=10)
+      app.call_from_thread(app.notify, f"{name or group} failed: {e}", title=tab_name(), severity="error", timeout=10)
       result = None
     app.call_from_thread(lambda: done(result) if node is app or node.is_attached else None)
   return start_worker(node, body, group, exclusive=False, connection=connection, name=name)
@@ -1734,7 +1739,7 @@ class MarkdownScreen(SplitScreen):
       try:
         return fs_read(self.path).decode("utf-8", errors="replace")
       except OSError as e:
-        self.app.call_from_thread(self.notify, f"cannot read {self.path}: {e}", severity="error")
+        self.app.call_from_thread(self.notify, f"cannot read {self.path}: {e}", title=tab_name(), severity="error")
         return None
     def show(markdown):
       if markdown is not None:
@@ -1801,7 +1806,7 @@ class DirScreen(SplitScreen):
           entries.append({"name": de.name, "dir": isdir, "size": st.st_size if st and not isdir else None,
                           "mtime": st.st_mtime if st else 0, "link": de.is_symlink()})
     except OSError as e:
-      self.app.call_from_thread(self.notify, f"cannot list {self.path}: {e}", severity="error")
+      self.app.call_from_thread(self.notify, f"cannot list {self.path}: {e}", title=tab_name(), severity="error")
     return entries
 
   scanning = False
@@ -4561,8 +4566,13 @@ class SlurmTUI(App):
     return True
 
   def show_warnings(self):
-    for msg in dict.fromkeys(collector.drain()):
-      self.notify(msg, severity="warning", timeout=8)
+    for tab, msg in dict.fromkeys(collector.drain()):
+      self.notify(msg, title=tab, severity="warning", timeout=8)
+
+  def notify(self, message, *, title="", severity="information", timeout=None, markup=True):
+    """Every notification names its tab (the active one unless the caller says which)"""
+    kwargs = {} if timeout is None else {"timeout": timeout}
+    super().notify(message, title=title or self.cluster.name, severity=severity, markup=markup, **kwargs)
 
   def action_reload(self):
     self.reload_cluster(self.cluster)
