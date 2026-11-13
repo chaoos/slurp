@@ -3184,7 +3184,22 @@ REPORTS_OFF = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1015l\x1b[?1006l\x1b[?1004
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--log", metavar="FILE", help="write a debug log (all slurm commands that are run) to FILE")
+  parser.add_argument("--serve", action="store_true", help="serve the app in a browser with textual-serve")
+  parser.add_argument("--host", default="127.0.0.1", help="web server bind address for --serve (default: 127.0.0.1)")
+  parser.add_argument("--port", type=int, default=8000, help="web server port for --serve (default: 8000)")
   args = parser.parse_args()
+
+  if args.serve:
+    try:
+      from textual_serve.server import Server
+    except ImportError:
+      parser.error("--serve requires textual-serve; install it with: pip install textual-serve")
+    command = [sys.executable, os.path.abspath(__file__)]
+    if args.log:
+      command += ["--log", args.log]
+    Server(shlex.join(command), host=args.host, port=args.port, title="Slurm TUI").serve()
+    return
+
   setup_logging(args.log)
   app = SlurmTUI()
   try:
