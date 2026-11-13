@@ -2900,6 +2900,62 @@ def command_args(text):
   """argv of a command typed in an editor: lines may end with a backslash, the lines are joined"""
   return shlex.split(text.replace("\\\n", " ").replace("\n", " "))
 
+INTERACTIVE_JOB = """sbatch --job-name=interactive \\
+  --nodes=1 --ntasks=1 \\
+  --time=01:00:00 \\
+  --output=/dev/null \\
+  --wrap='sleep infinity'"""
+
+class CommandScreen(ModalScreen[list[str] | None]):
+  """Confirm (and edit) a command before it is run: returns its argv, or None"""
+  DEFAULT_CSS = """
+  CommandScreen { align: center middle; }
+  #command-dialog { width: 100; max-width: 95%; height: auto; max-height: 90%; border: thick $accent; background: $surface; padding: 1 2; }
+  #command-title { text-style: bold; margin-bottom: 1; }
+  #command-text { height: auto; min-height: 3; max-height: 16; }
+  #command-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #command-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)] # also while the editor has the focus
+
+  def __init__(self, title, explanation, command, submit_label="Submit", first_word=None):
+    super().__init__()
+    self.dialog_title, self.explanation, self.command = title, explanation, command
+    self.submit_label, self.first_word = submit_label, first_word
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="command-dialog"):
+      yield Static(self.dialog_title, id="command-title")
+      yield Static(self.explanation, markup=False)
+      yield bash_editor(self.command, "command-text")
+      with Horizontal(id="command-buttons"):
+        yield Button("Cancel", id="command-cancel")
+        yield Button(self.submit_label, id="command-submit", variant="primary")
+
+  def on_mount(self):
+    self.query_one("#command-text").focus()
+
+  @on(Button.Pressed, "#command-submit")
+  def submit(self, event):
+    event.stop()
+    try:
+      args = command_args(self.query_one("#command-text", TextArea).text)
+    except ValueError as e:
+      self.notify(f"invalid command: {e}", severity="error")
+      return
+    if not args or (self.first_word and os.path.basename(args[0]) != self.first_word):
+      self.notify(f"the command must start with {self.first_word}", severity="error")
+      return
+    self.dismiss(args)
+
+  @on(Button.Pressed, "#command-cancel")
+  def cancel_pressed(self, event):
+    event.stop()
+    self.dismiss(None)
+
+  def action_cancel(self):
+    self.dismiss(None)
+
 class RestartScreen(ModalScreen[list[str] | None]):
   """Choose the command to submit when restarting a job"""
   DEFAULT_CSS = """
@@ -2912,7 +2968,7 @@ class RestartScreen(ModalScreen[list[str] | None]):
   #restart-buttons { height: auto; align-horizontal: right; margin-top: 1; }
   #restart-buttons Button { margin-left: 1; }
   """
-  BINDINGS = [Binding("escape", "cancel", "Cancel")]
+  BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)] # also while the editor has the focus
 
   def __init__(self, jid, default_args, retry_args=None, retry_label="Retry unfinished array tasks unavailable"):
     super().__init__()
@@ -3726,6 +3782,7 @@ class MainScreen(SplitScreen):
     with Horizontal(id="toolbar"):
       yield Button("Reload", id="reload", variant="primary")
       yield Button("Shell", id="cluster-shell", tooltip="shell on the cluster of this tab, in the pane on the right (t)")
+      yield Button("Interactive job", id="interactive-job", tooltip="submit a job that holds nodes for shells (i)")
       yield Label("finished since")
       yield Input("1d", id="since", placeholder="off")
       with Horizontal(id="accounts-toggle"):
@@ -4119,6 +4176,7 @@ class SlurmTUI(App):
     Binding("o", "open('stdout')", "Output file"),
     Binding("t", "cluster_shell", "Shell"),
     Binding("d", "login_dir", "Home dir"),
+    Binding("i", "interactive_job", "Interactive job"),
     Binding("a", "abort_load", "Abort loading"),
     Binding("c", "connection", "Connection"),
     Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
@@ -4759,6 +4817,38 @@ class SlurmTUI(App):
       self.action_abort_load()
     else:
       self.action_reload()
+
+  @on(Button.Pressed, "#interactive-job")
+  def interactive_job_pressed(self, event):
+    self.action_interactive_job()
+
+  def action_interactive_job(self):
+    """Submit a job that only holds its nodes; once it runs, its job window opens shells on them"""
+    cluster = self.cluster
+    if cluster.destination and not (cluster.connection and cluster.connection.ready):
+      self.notify("log in first", severity="warning")
+      return
+    explanation = ("The job runs 'sleep infinity' and so holds its nodes until its time limit or until it is cancelled. "
+                   "Once it runs, open it in the job list: Shell gives a shell on its node. Change the options as needed "
+                   "(partition, account, nodes, time, GPUs).")
+    self.push_screen(CommandScreen(f"Interactive job on {cluster.name}", explanation, INTERACTIVE_JOB, "Submit", "sbatch"),
+                     lambda args: self.submit_job(cluster, args) if args else None)
+
+  def submit_job(self, cluster, args):
+    home = cluster.connection.home if cluster.connection else os.path.expanduser("~")
+    def submit():
+      return run_cmd(args, timeout=60, env=SLURM_ENV, cwd=home or None, retry=False) # never twice
+    def submitted(res):
+      if res is None:
+        return
+      if res.returncode:
+        self.notify(f"sbatch failed: {(res.stderr or res.stdout).strip()[:300]}", title=cluster.name, severity="error", timeout=12)
+        return
+      jid = (re.findall(r"\d+", res.stdout) or ["?"])[-1]
+      self.notify(f"submitted interactive job {jid}", title=cluster.name, timeout=6)
+      if cluster is self.cluster:
+        self.reload_cluster(cluster)
+    in_background(self, submit, submitted, group="submit", connection=cluster.connection)
 
   @on(Button.Pressed, "#cluster-shell")
   def cluster_shell_pressed(self, event):
