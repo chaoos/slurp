@@ -2338,12 +2338,13 @@ class Splitter(Widget):
       self.release_mouse()
       self.remove_class("-dragging")
 
-COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("state", "State"), ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
+COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("user", "User"), ("state", "State"), ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
            ("start", "Start"), ("end", "End"), ("err", "Err"), ("cmd", "Command")]
 
 SORT_KEYS = {
   "jobid": lambda j: job_id_key(j.jid),
   "name":  lambda j: j.rec["JobName"],
+  "user":  lambda j: j.rec["User"].casefold(),
   "state": lambda j: j.state,
   "nodes": lambda j: int(j.rec["NNodes"] or 0),
   "time":  lambda j: j.node_hours() / max(int(j.rec["NNodes"] or 1), 1),
@@ -2386,9 +2387,8 @@ class MainScreen(SplitScreen):
       self.query_one("#jobs", ClickTable).focus()
 
   def on_mount(self):
+    self.app.setup_job_columns()
     table = self.query_one("#jobs", ClickTable)
-    for key, label in COLUMNS:
-      table.add_column(label, key=key)
     table.focus()
     self.app.action_reload()
 
@@ -2455,6 +2455,17 @@ class SlurmTUI(App):
 
   def get_default_screen(self):
     return MainScreen()
+
+  def setup_job_columns(self):
+    table = self.query_one("#jobs", ClickTable)
+    table.clear(columns=True)
+    all_accounts = self.query_one("#us", Checkbox).value
+    if not all_accounts and self.sort_column == "user":
+      self.sort_column, self.sort_reverse = "jobid", True
+    for key, label in COLUMNS:
+      if key == "user" and not all_accounts:
+        continue
+      table.add_column(label, key=key)
 
   # ---- the shell on the right
   def shell_changed(self):
@@ -2587,10 +2598,13 @@ class SlurmTUI(App):
       state = job.state if job.queued and job.state != "PENDING" else \
               f"{job.state} ({job.reason})" if job.queued else f"{job.state} ({rec['ExitCode']})"
       start = fmt_time(rec["Start"])
-      table.add_row(
-        job.jid, rec["JobName"], state_text(state), rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
-        ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]), err_text(job.err),
-        job.command[:150], key=job.jid)
+      values = [job.jid, rec["JobName"]]
+      if self.query_one("#us", Checkbox).value:
+        values.append(rec["User"])
+      values.extend((state_text(state), rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
+                     ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]), err_text(job.err),
+                     job.command[:150]))
+      table.add_row(*values, key=job.jid)
     if current in {job.jid for job in visible_jobs}:
       table.move_cursor(row=table.get_row_index(current))
     table.loading = False
@@ -2614,6 +2628,8 @@ class SlurmTUI(App):
   @on(Input.Submitted, "#since")
   @on(Checkbox.Changed, "#us")
   def reload_requested(self, event):
+    if isinstance(event, Checkbox.Changed):
+      self.setup_job_columns()
     self.action_reload()
 
   @on(Input.Changed, "#jfilter")
