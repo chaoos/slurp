@@ -358,27 +358,30 @@ def run_on_nodes(job, cmd, node=None):
   text += other + ([f"srun: {err.strip()}"] if err.strip() else [])
   return "\n".join(text) + "\n"
 
-def memory_probe_command(job_id):
-  """Per-node CPU RSS and GPU process-memory probe, limited to this job's PIDs."""
-  return (
-    f"pids=$(scontrol listpids {shlex.quote(str(job_id))} 2>/dev/null | "
-    "awk -v self=\"$SLURM_STEP_ID\" 'NR > 1 && $3 != self { printf \"%s%s\", sep, $1; sep=\",\" }'); "
-    "if [ -n \"$pids\" ]; then "
-    "cpu_kib=$(ps -o rss= -p \"$pids\" 2>/dev/null | awk '{sum += $1} END {print sum+0}'); "
-    "printf 'CPU_KIB=%s\\n' \"$cpu_kib\"; printf 'JOB_PIDS=%s\\n' \"$pids\"; "
-    "else printf 'CPU_UNAVAILABLE=no job process IDs found\\n'; printf 'JOB_PIDS=\\n'; fi; "
-    # NVIDIA: memory of the job's processes, and used/total of each GPU of the node
-    "if command -v nvidia-smi >/dev/null 2>&1; then "
-    "if gpu_output=$(nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null); then "
-    "printf '%s\\n' \"$gpu_output\" | sed 's/^/GPU=/'; "
-    "nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | sed 's/^/GPUDEV=/'; "
-    "else printf 'GPU_UNAVAILABLE=nvidia-smi query failed\\n'; fi; "
-    # AMD: rocm-smi lists processes with their VRAM in bytes, and the VRAM of each GPU
-    "elif command -v rocm-smi >/dev/null 2>&1; then "
-    "rocm-smi --showpids --csv 2>/dev/null | sed 's/^/AMDPROC=/'; "
-    "rocm-smi --showproductname --showmeminfo vram --csv 2>/dev/null | sed 's/^/AMDDEV=/'; "
-    "else printf 'GPU_UNAVAILABLE=no nvidia-smi or rocm-smi on the node\\n'; fi"
-  )
+SCRIPTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts") # shell scripts run on the nodes
+
+def run_script_on_nodes(job, script, *args, node=None, timeout=60):
+  """Run one of the scripts of slurp/scripts once per node of a running job, as a step of the job. The script is not
+  copied to the cluster: its text goes to srun on stdin (--input=all: to the task on every node), bash -s runs it.
+  -> {task: [lines]} (the output of each node), the other output, the error"""
+  text = open(os.path.join(SCRIPTS, script)).read()
+  srun = ["srun", f"--jobid={job.rec['JobIDRaw']}", "--overlap", "--ntasks-per-node=1", f"--job-name={STEP_NAME}",
+          "--input=all", "--label", "--quiet"]
+  srun += ["--nodes=1", "-w", node] if node else [f"--nodes={job.rec['NNodes'] or 1}"]
+  argv = ["sh", "-c", 'script=$1; shift; printf "%s" "$script" | "$@"', "sh", text, *srun, "bash", "-s", "--", *map(str, args)]
+  log.debug(f"running {script} on the nodes of job {job.jid}: {shlex.join(srun)} bash -s -- {shlex.join(map(str, args))}")
+  try:
+    res = run_cmd(argv, timeout=timeout)
+    out, err = res.stdout, res.stderr
+  except OSError as e:
+    out, err = "", str(e)
+  tasks, other = {}, []
+  for line in out.splitlines():
+    if (m := re.match(r'\s*(\d+): ?(.*)', line)):
+      tasks.setdefault(int(m.group(1)), []).append(m.group(2))
+    else:
+      other.append(line)
+  return tasks, other, err.strip()
 
 def amd_table(lines):
   """rows of a rocm-smi --csv table (as dicts by lower-case header), from the line with a header on"""
@@ -433,7 +436,10 @@ def current_memory_usage(job):
   fields = ["JobID", "MaxRSS", "AveRSS"]
   rows = parsable(run(["sstat", "-a", "-j", job.rec["JobIDRaw"], "-P", "-n", "-o", ",".join(fields)]), fields)
   sstat = {row["JobID"].partition(".")[2]: row for row in rows}
-  output = run_on_nodes(job, memory_probe_command(job.rec["JobIDRaw"]))
+  tasks, other, err = run_script_on_nodes(job, "memory_probe.sh", job.rec["JobIDRaw"])
+  if err:
+    log.warning(f"memory query of job {job.jid}: {err[:300]}")
+  output = "\n".join(line for task in sorted(tasks) for line in tasks[task])
   nodes = {}
   node = None
   for line in output.splitlines():
