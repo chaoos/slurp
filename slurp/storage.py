@@ -131,13 +131,14 @@ def oldest_files(directory, by="atime", limit=OLD_FILES_LIMIT):
   return {"files": files, "total": total, "by": by, "directory": directory, "time": datetime.now(),
           "error": "" if res.returncode == 0 or files else (res.stderr or "").strip()[:300]}
 
-def touch_files(paths, what="atime", directory=None):
+def touch_files(paths, what="atime", directory=None, exclude=""):
   """Touch files (access time, or access and modification time): the listed ones, or every file of the user in
-  directory. -> (number touched, error)"""
+  directory, without those whose path matches exclude (an extended regex). -> (number touched, error)"""
   flag = ["-a"] if what == "atime" else []
   if directory is not None:
-    script = f'find "$1" -xdev -type f -user "$(id -u)" -exec touch {" ".join(flag)} -c {{}} + ; echo DONE'
-    res = run_cmd(["sh", "-c", script, "sh", directory], timeout=7200, retry=False)
+    keep = '| grep -zvE -e "$2" ' if exclude else ""
+    script = (f'find "$1" -xdev -type f -user "$(id -u)" -print0 {keep}| xargs -0 -r touch {" ".join(flag)} -c -- ; echo DONE')
+    res = run_cmd(["sh", "-c", script, "sh", directory, exclude], timeout=7200, retry=False)
     return (None if "DONE" in res.stdout else 0), (res.stderr or "").strip()[:300]
   done, errors = 0, []
   for i in range(0, len(paths), 500):

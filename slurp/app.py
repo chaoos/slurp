@@ -82,6 +82,7 @@ class Slurp(App):
   #scratch-by { width: 24; }
   #scratch-days { width: 8; }
   #scratch-actions Button { margin-right: 1; }
+  #scratch-exclude { width: 1fr; margin-right: 1; }
   #scratch-status { height: auto; padding: 0 1; }
   #scratch-files { height: 1fr; }
   #notabs { display: none; padding: 2 4; color: $text-muted; }

@@ -2,6 +2,7 @@
 after some time without asking, and touching them"""
 
 import os
+import re
 import time
 from datetime import datetime
 
@@ -154,6 +155,8 @@ class ScratchScreen(SplitScreen):
       yield Label("days")
       yield Button("Search", id="scratch-search", variant="primary")
     with Horizontal(id="scratch-actions"):
+      yield Input(id="scratch-exclude", placeholder="exclude paths matching (regex, e.g. /keep/|\\.git/)",
+                  tooltip="files whose path matches are left out of the list and of every touch (Enter: apply)")
       yield Button("Touch selected", id="touch-selected")
       yield Button("Touch all listed", id="touch-listed")
       yield Button("Touch all my files there", id="touch-all", variant="warning")
@@ -220,6 +223,29 @@ class ScratchScreen(SplitScreen):
     worker = self.worker = in_background(self, lambda: oldest_files(directory, by), found, group="scratch-search",
                                          connection=self.connection())
 
+  def exclude(self):
+    """The compiled exclude regex (None: none or invalid)"""
+    text = self.query_one("#scratch-exclude", Input).value.strip()
+    if not text:
+      return None
+    try:
+      return re.compile(text)
+    except re.error as e:
+      self.notify(f"invalid exclude regex: {e}", severity="error")
+      return None
+
+  def visible(self):
+    """Indices of the listed files that are not excluded"""
+    if not self.result:
+      return []
+    rx = self.exclude()
+    return [i for i, f in enumerate(self.result["files"]) if rx is None or not rx.search(f["path"])]
+
+  @on(Input.Submitted, "#scratch-exclude")
+  def exclude_changed(self, event):
+    self.selected &= set(self.visible())
+    self.show()
+
   @on(Input.Submitted, "#scratch-days")
   @on(Select.Changed, "#scratch-by")
   def options_changed(self, event):
@@ -240,7 +266,9 @@ class ScratchScreen(SplitScreen):
       return
     now, limit = time.time(), self.days() * DAY
     old = 0
-    for i, f in enumerate(r["files"]):
+    shown = self.visible()
+    for i in shown:
+      f = r["files"][i]
       age = now - f[r["by"]]
       is_old = age > limit
       old += is_old
@@ -251,7 +279,9 @@ class ScratchScreen(SplitScreen):
     n, size = r["total"]
     what = "access" if r["by"] == "atime" else "modification"
     listed = f"the {len(r['files'])} with the oldest {what} are listed" if n > len(r["files"]) else "all listed"
-    self.status(f"{n} files ({humanize.naturalsize(size)}) of the user in {r['directory']}, {listed}; "
+    excluded = len(r["files"]) - len(shown)
+    self.status(f"{n} files ({humanize.naturalsize(size)}) of the user in {r['directory']}, {listed}"
+                + (f", {excluded} of them excluded" if excluded else "") + "; "
                 f"{old}{'+' if n > len(r['files']) and old == len(r['files']) else ''} not {'used' if r['by'] == 'atime' else 'changed'} "
                 f"for more than {self.days()} days (red), which an automatic cleanup may delete · "
                 f"searched in {r.get('seconds', 0):.0f} s at {r['time']:%H:%M}", "bold red" if old else "green")
@@ -273,7 +303,7 @@ class ScratchScreen(SplitScreen):
 
   def action_select_all(self):
     if self.result:
-      everything = set(range(len(self.result["files"])))
+      everything = set(self.visible())
       self.selected = set() if self.selected == everything else everything
       self.show()
 
@@ -288,18 +318,21 @@ class ScratchScreen(SplitScreen):
     if which == "touch-selected" and not self.selected:
       self.notify("select files first (click a row or Space; A selects all)", severity="warning")
       return
-    paths = [] if which == "touch-all" else [r["files"][i]["path"] for i in sorted(self.selected)] if which == "touch-selected" \
-            else [f["path"] for f in r["files"]]
+    shown = self.visible()
+    paths = [] if which == "touch-all" else [r["files"][i]["path"] for i in sorted(self.selected & set(shown))] \
+            if which == "touch-selected" else [r["files"][i]["path"] for i in shown]
     what = "atime" if r["by"] == "atime" else "both"
-    count = f"all {r['total'][0]} files of the user in {r['directory']}" if which == "touch-all" else f"{len(paths)} files"
+    exclude = self.query_one("#scratch-exclude", Input).value.strip() if self.exclude() else ""
+    count = f"all {r['total'][0]} files of the user in {r['directory']}" + (f" except those matching {exclude}" if exclude else "") \
+            if which == "touch-all" else f"{len(paths)} files"
     message = (f"Touch {count}: set their {'access time' if what == 'atime' else 'access and modification times'} to now, so "
                "that an automatic cleanup that looks at it does not delete them yet.\n\nNote: many sites do not allow keeping "
                "files in scratch this way (their usage policy may count it as circumventing the cleanup); scratch is not "
                "meant for keeping data. Move what you need to keep to a project or home filesystem.")
     self.app.push_screen(ConfirmScreen("Touch files?", message, "Touch", variant="warning"),
-                         lambda ok: self.touch(paths, what, r["directory"] if which == "touch-all" else None) if ok else None)
+                         lambda ok: self.touch(paths, what, r["directory"] if which == "touch-all" else None, exclude) if ok else None)
 
-  def touch(self, paths, what, directory):
+  def touch(self, paths, what, directory, exclude=""):
     self.status("touching …", "yellow")
     def done(result):
       if result is None:
@@ -308,7 +341,7 @@ class ScratchScreen(SplitScreen):
       self.notify(f"touched {'all files' if count is None else f'{count} files'}" + (f" (errors: {error})" if error else ""),
                   severity="warning" if error else "information")
       self.action_search()
-    in_background(self, lambda: touch_files(paths, what, directory), done, group="touch", connection=self.connection())
+    in_background(self, lambda: touch_files(paths, what, directory, exclude), done, group="touch", connection=self.connection())
 
   def action_back(self):
     self.pop_back()
