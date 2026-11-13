@@ -13,8 +13,9 @@ features and sample data; they are not screenshots from a live cluster.
 Browse queued and running jobs alongside recently completed jobs, sort by
 columns (the header marks the sort column with ▲ or ▼; Job ID cycles through job ID
 descending and ascending and array index ascending and descending, marked △/▽), and filter by job
-name, command, ID, state, user, account, or path. The completed-job time window
-uses the same duration syntax as `slurm.py`. The dropdown next to it selects
+name, command, ID, state, user, account, or path. The window of finished jobs is
+chosen from a list (only queued, 1 hour … 1 month) or typed (custom …, same
+duration syntax as `slurm.py -c`, e.g. `3d12h`); each tab keeps its own. The dropdown next to it selects
 whose jobs are listed: yours, those of one of your Slurm accounts, or those of
 all of them (the accounts come from `sacctmgr`). Progress appears when the
 output contains a line such as `65/100`; the **Done in** column estimates when
@@ -44,10 +45,17 @@ last few `n/N` lines, each with the remaining time and the time of day. The
 times are the timestamps of the lines if they have one, else the times slurp
 saw a new `n`. **Progress file…** picks another (log) file for this job, in
 the directory browser; **Use stdout** goes back. Only the end of the file is
-read (64 kB).
+read (64 kB), every 10 seconds while the job runs (the window shows when it was
+last read); a chosen file is also listed among the job's files as `progress`.
 
 For a running job, press **Query current memory** to request current CPU RSS
-and GPU process memory. This query is on demand; the fields are empty until
+and GPU process memory. The query is the script `slurp/scripts/memory_probe.sh`,
+run on every node of the job as a step (`srun --overlap --input=all … bash -s`)
+with the script on stdin, so nothing is copied to the cluster. Every query is
+kept: the dropdown next to it repeats it every 1, 5, 15, 30 or 60 minutes (also
+while the window is not shown), two sparklines plot CPU and GPU memory over
+time, and the measurements are appended to
+`~/.local/share/slurp/memory/<tab>-<job>.csv`. This query is on demand; the fields are empty until
 requested. GPU usage is gathered from the processes of the job reported by
 `nvidia-smi` (or `rocm-smi` on AMD nodes), together with the used and total
 memory of every GPU of the nodes. Completed and failed jobs show CPU peak memory from Slurm
