@@ -99,6 +99,8 @@ class ClusterSession:
   summary: str = ""                    # status line of the loaded list
   loaded: bool = False
   loader: object | None = None         # worker loading the job list
+  accounts: list | None = None         # Slurm accounts of the user (sacctmgr), None: not asked yet
+  scope: str = "me"                    # whose jobs are listed: "me", "all" (all accounts) or an account
   load_started: float = 0.0
   updated: object | None = None        # when the list was loaded
   show_login: bool = False             # the login is shown in the pane (until it is done)
@@ -863,15 +865,24 @@ def record_from_squeue(row):
   rec["NodeList"] = "" if row.get("NodeList") in ("", "(null)") else row["NodeList"]
   return rec
 
-def load_jobs(since, us, jids=None):
-  """Queued jobs plus jobs that finished after `since` (datetime or None), or only the given job ids"""
+def current_user():
   c = conn()
-  accts = ",".join(c.groups if c else sl.accounts())
-  user = c.user if c else sl.getpass.getuser()
+  return c.user if c else sl.getpass.getuser()
+
+def slurm_accounts():
+  """The Slurm accounts the user has associations with (sacctmgr), sorted"""
+  out = run(["sacctmgr", "-nP", "show", "associations", f"user={current_user()}", "format=account"])
+  return sorted({line.strip() for line in out.splitlines() if line.strip()})
+
+def load_jobs(since, scope="me", accounts=(), jids=None):
+  """Queued jobs plus jobs that finished after `since` (datetime or None), or only the given job ids.
+  scope: "me" (the user's jobs), "all" (the jobs of all the user's accounts) or the name of one account."""
+  accts = ",".join(accounts) if scope == "all" else scope
+  by_account = scope != "me" and bool(accts)
   # squeue and the finished jobs together (one round trip on a remote cluster), then the accounting of the queued jobs
-  cmds = [squeue_cmd(["-j", ",".join(jids)] if jids else ["-A", accts] if us else ["--me"])]
+  cmds = [squeue_cmd(["-j", ",".join(jids)] if jids else ["-A", accts] if by_account else ["--me"])]
   if since and not jids:
-    cmds.append(sacct_cmd([*(["-a", "-A", accts] if us else ["-u", user]), "-S", since.isoformat(), "-E", "now"]))
+    cmds.append(sacct_cmd([*(["-a", "-A", accts] if by_account else ["-u", current_user()]), "-S", since.isoformat(), "-E", "now"]))
   results = run_many(cmds)
   for cmd, res in zip(cmds, results):
     if res.returncode and not (jids and cmd[0] == "squeue"): # finished jobs are unknown to squeue
@@ -3184,7 +3195,7 @@ class JobScreen(SplitScreen):
   def load(self, refresh_job=False):
     job = self.job
     if refresh_job:
-      jobs = annotate(load_jobs(None, False, jids=[job.jid]))
+      jobs = annotate(load_jobs(None, jids=[job.jid]))
       job = next((j for j in jobs if j.jid == job.jid), job)
     details = load_details(job)
     if not get_current_worker().is_cancelled:
@@ -3786,9 +3797,8 @@ class MainScreen(SplitScreen):
       yield Button("Cluster info", id="cluster-info", tooltip="health and occupancy of the cluster (C)")
       yield Label("finished since")
       yield Input("1d", id="since", placeholder="off")
-      with Horizontal(id="accounts-toggle"):
-        yield Label("all my accounts")
-        yield Switch(id="us")
+      yield Select([("my jobs", "me"), ("all my accounts", "all")], value="me", allow_blank=False, id="scope",
+                   tooltip="whose jobs are listed: yours, or those of one or all of your Slurm accounts")
     yield Static(id="status")
     yield ClickTable(id="jobs", cursor_type="row", zebra_stripes=True)
     yield Input(id="jfilter", placeholder="filter jobs by name, command, ID, state, user, account, path…")
@@ -4278,8 +4288,7 @@ class SlurmTUI(App):
   #toolbar { height: auto; padding: 0 1; }
   #toolbar > * { margin-right: 1; }
   #toolbar Label { padding-top: 1; }
-  #accounts-toggle { width: auto; height: auto; }
-  #accounts-toggle Label { width: auto; height: auto; content-align: center middle; margin-right: 1; padding: 0; }
+  #scope { width: 28; }
   #us { width: auto; height: auto; padding: 0; border: none; }
   #since { width: 12; }
   #topbar { height: 1; }
@@ -4444,6 +4453,7 @@ class SlurmTUI(App):
     self.cluster_index = index
     ssh_connection = cluster.connection
     self.show_tab_shell()
+    self.update_scope_select()
     self.populate()
     self.refresh_status()
     if not cluster.loaded and cluster.loader is None and (not cluster.destination or cluster.connection.ready):
@@ -4708,7 +4718,7 @@ class SlurmTUI(App):
 
   def setup_job_columns(self, show_progress=None):
     table = self.query_one("#jobs", ClickTable)
-    all_accounts = self.query_one("#us", Switch).value
+    all_accounts = self.cluster.scope != "me"
     if show_progress is None:
       show_progress = any(progress_for_job(job) is not None for job in self.jobs.values())
     visible_columns = [(key, label) for key, label in COLUMNS
@@ -4890,23 +4900,29 @@ class SlurmTUI(App):
     if cluster.destination and cluster.connection is None:
       self.notify(f"not connected to {cluster.destination}", severity="warning")
       return
-    us = self.query_one("#us", Switch).value
+    scope = cluster.scope
     if cluster.loader is not None:
       cluster.loader.abort.set()
     cluster.load_started = time.monotonic()
-    cluster.loader = start_worker(self, lambda: self.load_worker(cluster, since, us), f"jobs-{id(cluster)}",
+    cluster.loader = start_worker(self, lambda: self.load_worker(cluster, since, scope), f"jobs-{id(cluster)}",
                                   connection=cluster.connection, name=f"loading the jobs of {cluster.name}")
     self.refresh_status()
 
-  def load_worker(self, cluster, since, us):
+  def load_worker(self, cluster, since, scope):
     worker = get_current_worker()
-    jobs = None
+    jobs, accounts = None, cluster.accounts
     try:
-      jobs = annotate(load_jobs(since, us))
+      if accounts is None:
+        accounts = slurm_accounts()
+      jobs = annotate(load_jobs(since, scope, accounts))
     finally:
-      self.call_from_thread(self.jobs_loaded, cluster, worker, jobs, since)
+      self.call_from_thread(self.jobs_loaded, cluster, worker, jobs, since, accounts)
 
-  def jobs_loaded(self, cluster, worker, jobs, since):
+  def jobs_loaded(self, cluster, worker, jobs, since, accounts=None):
+    if accounts is not None and cluster.accounts is None:
+      cluster.accounts = accounts
+      if cluster is self.cluster:
+        self.update_scope_select()
     if cluster.loader is not worker: # aborted or replaced by a newer reload
       return
     cluster.loader = None
@@ -4952,7 +4968,7 @@ class SlurmTUI(App):
               f"{job.state} ({job.reason})" if job.queued else f"{job.state} ({rec['ExitCode']})"
       start = fmt_time(rec["Start"])
       values = [job.jid, rec["JobName"]]
-      if self.query_one("#us", Switch).value:
+      if cluster.scope != "me":
         values.append(rec["User"])
       values.append(state_text(state))
       if "progress" in self.job_column_keys:
@@ -5041,11 +5057,32 @@ class SlurmTUI(App):
     self.action_cluster_shell()
 
   @on(Input.Submitted, "#since")
-  @on(Switch.Changed, "#us")
   def reload_requested(self, event):
-    if isinstance(event, Switch.Changed):
-      self.setup_job_columns()
     self.action_reload()
+
+  @on(Select.Changed, "#scope")
+  def scope_changed(self, event):
+    if self.setting_scope or event.value == self.cluster.scope or event.value is Select.NULL:
+      return
+    self.cluster.scope = event.value
+    self.setup_job_columns()
+    self.action_reload()
+
+  setting_scope = False
+
+  def update_scope_select(self):
+    """The accounts of the active tab in the dropdown, and its choice"""
+    select = self.query_one("#scope", Select)
+    cluster = self.cluster
+    options = [("my jobs", "me"), *((f"account {a}", a) for a in cluster.accounts or ()), ("all my accounts", "all")]
+    if cluster.scope not in [v for _, v in options]:
+      options.insert(-1, (f"account {cluster.scope}", cluster.scope))
+    self.setting_scope = True
+    try:
+      select.set_options(options)
+      select.value = cluster.scope
+    finally:
+      self.call_after_refresh(lambda: setattr(self, "setting_scope", False))
 
   @on(Input.Changed, "#jfilter")
   def job_filter_changed(self, event):
