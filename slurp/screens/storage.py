@@ -43,33 +43,35 @@ def usage_bar(used, limit):
   return RichProgressBar(total=limit, completed=min(used, limit), width=16, complete_style=style, finished_style="red"), \
          Text(f"{share:.0%}", style=style)
 
-class QuotaScreen(ModalScreen):
-  """Quotas of the user and the user's groups on the filesystems of the cluster of a tab"""
+class QuotaScreen(SplitScreen):
+  """Quotas of the user and the user's groups on the filesystems of the cluster of a tab (a subtab; loads in the
+  background)"""
+  SHOW_BACK = True
   DEFAULT_CSS = """
-  QuotaScreen { align: center middle; }
-  #quota-dialog { width: 140; max-width: 98%; height: 90%; border: thick $accent; background: $surface; padding: 0 1; }
-  #quota-title { text-style: bold; height: auto; margin-bottom: 1; }
-  #quota-body { height: 1fr; }
-  #quota-buttons { height: auto; align-horizontal: right; margin-top: 1; }
-  #quota-buttons Button { margin-left: 1; }
+  #quota-bar { height: auto; padding: 0 1; }
+  #quota-title { text-style: bold; width: 1fr; height: auto; padding-top: 1; }
+  #quota-body { height: 1fr; padding: 0 1; }
   """
-  BINDINGS = [Binding("escape", "close", "Close"), Binding("r", "reload", "Reload")]
+  BINDINGS = [Binding("escape", "back", "Back"), Binding("r", "reload", "Reload")]
 
   def __init__(self, cluster):
     super().__init__()
     self.cluster, self.info, self.loading = cluster, None, False
+    self.crumbs = ["quota"]
 
-  def compose(self) -> ComposeResult:
-    with Vertical(id="quota-dialog"):
+  def compose_left(self):
+    with Horizontal(id="quota-bar"):
       yield Static(id="quota-title")
-      with VerticalScroll(id="quota-body"):
-        yield Static(id="quota-info")
-      with Horizontal(id="quota-buttons"):
-        yield Button("Reload", id="quota-reload", variant="primary")
-        yield Button("Close", id="quota-close")
+      yield Button("Reload", id="quota-reload", variant="primary")
+    with VerticalScroll(id="quota-body"):
+      yield Static(id="quota-info")
 
   def on_mount(self):
+    self.sub_title = f"quota · {self.cluster.name}"
     self.action_reload()
+
+  def action_back(self):
+    self.pop_back()
 
   def set_title(self):
     state = "loading …" if self.loading else f"as of {self.info['time']:%H:%M:%S}" if self.info else ""
@@ -86,6 +88,7 @@ class QuotaScreen(ModalScreen):
       return
     self.loading = True
     self.set_title()
+    self.query_one("#quota-info", Static).update(Text("asking the filesystems (in the background) …", style="dim"))
     def loaded(info):
       self.loading = False
       if info is not None:
@@ -125,9 +128,6 @@ class QuotaScreen(ModalScreen):
     self.shown = Group(*parts)
     self.query_one("#quota-info", Static).update(self.shown)
 
-  @on(Button.Pressed, "#quota-close")
-  def action_close(self):
-    self.dismiss()
 
 DAY = 86400
 

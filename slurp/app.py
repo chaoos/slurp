@@ -1018,8 +1018,8 @@ class Slurp(App):
     self.action_quota()
 
   def action_quota(self):
-    if not isinstance(self.screen, QuotaScreen):
-      self.push_screen(QuotaScreen(self.cluster))
+    cluster = self.cluster
+    self.open_view("quota", lambda: QuotaScreen(cluster), key="quota")
 
   @on(Button.Pressed, "#scratch")
   def scratch_pressed(self, event):
