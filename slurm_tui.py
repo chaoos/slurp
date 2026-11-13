@@ -113,7 +113,7 @@ def parsable(out, fields):
 
 SACCT_FIELDS = ["JobID", "JobIDRaw", "JobName", "User", "Account", "Partition", "State", "ExitCode", "NNodes", "NTasks",
                 "NodeList", "Submit", "Start", "End", "Elapsed", "Timelimit", "WorkDir", "StdOut", "StdErr",
-                "MaxRSS", "AveRSS", "SubmitLine"]
+                "MaxRSS", "AveRSS", "TRESUsageInMax", "SubmitLine"]
 SQUEUE_FIELDS = ["JobID", "JobName", "User", "Account", "Partition", "State", "Reason", "NNodes", "Elapsed",
                  "Timelimit", "Start", "Submit", "WorkDir", "NodeList"]
 SQUEUE_FMT = "%i|%j|%u|%a|%P|%T|%r|%D|%M|%l|%S|%V|%Z|%N"
@@ -637,9 +637,6 @@ def load_details(job):
   add(Entry("sacct", "all accounting fields of the job and its steps", text=None, note="sacct -o ALL"))
 
   if job.running:
-    raw = job.rec["JobIDRaw"]
-    for row in parsable(run(["sstat", "-a", "-j", raw, "-P", "-n", "-o", "JobID,MaxRSS,AveRSS"]), ["JobID", "MaxRSS", "AveRSS"]):
-      d["sstat"][row["JobID"].partition(".")[2]] = row
     if job.rec["NodeList"]:
       d["nodes"] = run(["scontrol", "show", "hostnames", job.rec["NodeList"]]).split()
   return d
@@ -723,6 +720,83 @@ def run_on_nodes(job, cmd, node=None):
     text += tasks[task] + [""]
   text += other + ([f"srun: {err.strip()}"] if err.strip() else [])
   return "\n".join(text) + "\n"
+
+def memory_probe_command(job_id):
+  """Per-node CPU RSS and GPU process-memory probe, limited to this job's PIDs."""
+  return (
+    f"pids=$(scontrol listpids {shlex.quote(str(job_id))} 2>/dev/null | "
+    "awk -v self=\"$SLURM_STEP_ID\" 'NR > 1 && $3 != self { printf \"%s%s\", sep, $1; sep=\",\" }'); "
+    "if [ -n \"$pids\" ]; then "
+    "cpu_kib=$(ps -o rss= -p \"$pids\" 2>/dev/null | awk '{sum += $1} END {print sum+0}'); "
+    "printf 'CPU_KIB=%s\\n' \"$cpu_kib\"; printf 'JOB_PIDS=%s\\n' \"$pids\"; "
+    "else printf 'CPU_UNAVAILABLE=no job process IDs found\\n'; printf 'JOB_PIDS=\\n'; fi; "
+    "if command -v nvidia-smi >/dev/null 2>&1; then "
+    "if gpu_output=$(nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null); then "
+    "printf '%s\\n' \"$gpu_output\" | sed 's/^/GPU=/'; "
+    "else printf 'GPU_UNAVAILABLE=nvidia-smi query failed\\n'; fi; "
+    "else printf 'GPU_UNAVAILABLE=nvidia-smi not found\\n'; fi"
+  )
+
+def current_memory_usage(job):
+  """Query current process RSS and per-job GPU usage; called only by the detail button."""
+  fields = ["JobID", "MaxRSS", "AveRSS"]
+  rows = parsable(run(["sstat", "-a", "-j", job.rec["JobIDRaw"], "-P", "-n", "-o", ",".join(fields)]), fields)
+  sstat = {row["JobID"].partition(".")[2]: row for row in rows}
+  output = run_on_nodes(job, memory_probe_command(job.rec["JobIDRaw"]))
+  nodes = {}
+  node = None
+  for line in output.splitlines():
+    if line.startswith("== "):
+      node = line[3:].strip()
+      nodes[node] = {"cpu_kib": None, "pids": set(), "gpu_mib": 0, "gpu_error": ""}
+    elif node and line.startswith("CPU_KIB="):
+      try:
+        nodes[node]["cpu_kib"] = int(line.partition("=")[2])
+      except ValueError:
+        pass
+    elif node and line.startswith("CPU_UNAVAILABLE="):
+      nodes[node]["cpu_error"] = line.partition("=")[2]
+    elif node and line.startswith("JOB_PIDS="):
+      nodes[node]["pids"] = {pid for pid in line.partition("=")[2].split(",") if pid.isdigit()}
+    elif node and line.startswith("GPU_UNAVAILABLE="):
+      nodes[node]["gpu_error"] = line.partition("=")[2]
+    elif node and line.startswith("GPU="):
+      pid, sep, memory = line.partition("=")[2].partition(",")
+      pid = pid.strip()
+      match = re.match(r"\s*(\d+)", memory)
+      if sep and pid in nodes[node]["pids"] and match:
+        nodes[node]["gpu_mib"] += int(match.group(1))
+
+  cpu_values = [node_data["cpu_kib"] for node_data in nodes.values() if node_data["cpu_kib"] is not None]
+  cpu_bytes = sum(cpu_values) * 1024 if cpu_values else None
+  cpu_source = "ps"
+  if cpu_bytes is None:
+    step_counts = {step["JobID"].partition(".")[2]: int(step["NTasks"] or 0) for step in job.steps}
+    estimates = [sl.sacct_bytes(row.get("AveRSS") or "") * step_counts.get(step, 0)
+                 for step, row in sstat.items()]
+    estimates = [value for value in estimates if value]
+    if estimates:
+      cpu_bytes = sum(estimates)
+      cpu_source = "sstat estimate"
+  cpu_partial = len(cpu_values) < len(nodes)
+  gpu_nodes = [node_data for node_data in nodes.values() if not node_data["gpu_error"]]
+  gpu_bytes = sum(node_data["gpu_mib"] for node_data in gpu_nodes) * 1024**2 if gpu_nodes else None
+  gpu_partial = len(gpu_nodes) < len(nodes)
+  return {"cpu_bytes": cpu_bytes, "cpu_source": cpu_source, "cpu_partial": cpu_partial, "gpu_bytes": gpu_bytes,
+          "gpu_partial": gpu_partial, "gpu_errors": [d["gpu_error"] for d in nodes.values() if d["gpu_error"]],
+          "sstat": sstat}
+
+def peak_job_memory(job):
+  """Slurm-accounted CPU and (when configured) GPU peak memory for an ended job."""
+  records = [job.rec, *job.steps]
+  cpu_peak = max((sl.sacct_bytes(row.get("MaxRSS") or "") for row in records), default=0)
+  gpu_peaks = []
+  for row in records:
+    for tres in (row.get("TRESUsageInMax") or "").split(","):
+      key, sep, value = tres.partition("=")
+      if sep and key.strip().lower().endswith("gpumem"):
+        gpu_peaks.append(sl.sacct_bytes(value.strip()))
+  return cpu_peak, max(gpu_peaks, default=0)
 
 # ---------------------------------------------------------------------------
 # widgets and screens
@@ -2044,6 +2118,12 @@ class JobScreen(SplitScreen):
       yield Button("Restart job", id="restart-job", variant="primary")
     with VerticalScroll(id="details"):
       yield Static(id="info")
+      with Horizontal(id="memory-controls"):
+        yield Button("Query current memory", id="memory-query", variant="primary")
+        yield Label("CPU:")
+        yield Static(id="memory-cpu", markup=False)
+        yield Label("GPU:")
+        yield Static(id="memory-gpu", markup=False)
       with Vertical(id="job-progress"):
         yield ProgressBar(total=1, show_eta=False, id="progress-bar")
         yield Static(id="progress-line", markup=False)
@@ -2099,9 +2179,17 @@ class JobScreen(SplitScreen):
       ("Submitted with", rec["SubmitLine"]),
       ("Command", job.command),
     ]
+    state_name = job.state.split()[0].rstrip("+") if job.state else ""
+    if not job.queued and state_name in (FAILED_JOB_STATES | {"COMPLETED"}):
+      peak_cpu, peak_gpu = peak_job_memory(job)
+      rows.append(("Peak CPU memory (Slurm DB)", humanize.naturalsize(peak_cpu) if peak_cpu else "not reported"))
+      if peak_gpu:
+        rows.append(("Peak GPU memory (Slurm DB)", humanize.naturalsize(peak_gpu)))
     for key, val in rows:
       grid.add_row(key, val)
     self.query_one("#info", Static).update(grid)
+    self.query_one("#memory-controls", Horizontal).display = job.running
+    self.query_one("#memory-query", Button).disabled = not job.running
     progress = progress_for_job(job)
     progress_view = self.query_one("#job-progress", Vertical)
     if progress is not None:
@@ -2160,6 +2248,55 @@ class JobScreen(SplitScreen):
     self.job.progress = details.get("progress")
     self.show_job()
     self.show_files()
+    self.app.show_warnings()
+
+  @on(Button.Pressed, "#memory-query")
+  def memory_query_pressed(self, event):
+    event.stop()
+    if not self.job.running:
+      return
+    self.query_one("#memory-query", Button).disabled = True
+    self.query_one("#memory-cpu", Static).update("querying …")
+    self.query_one("#memory-gpu", Static).update("querying …")
+    self.query_current_memory()
+
+  @work(thread=True, exclusive=True, group="current-memory")
+  def query_current_memory(self):
+    try:
+      result = current_memory_usage(self.job)
+    except Exception as e:
+      result = {"error": str(e)}
+    if not get_current_worker().is_cancelled:
+      self.app.call_from_thread(self.memory_loaded, result)
+
+  def memory_loaded(self, result):
+    if not self.is_mounted:
+      return
+    if "error" in result:
+      self.query_one("#memory-cpu", Static).update(f"unavailable ({result['error']})")
+      self.query_one("#memory-gpu", Static).update("unavailable")
+      self.query_one("#memory-query", Button).disabled = not self.job.running
+      self.app.show_warnings()
+      return
+    self.details["sstat"] = result["sstat"]
+    cpu = result["cpu_bytes"]
+    cpu_text = f"{humanize.naturalsize(cpu)} RSS" if cpu is not None else "unavailable"
+    if cpu is not None and result["cpu_source"] != "ps":
+      cpu_text += f" ({result['cpu_source']})"
+    if cpu is not None and result["cpu_partial"]:
+      cpu_text += " (partial)"
+    gpu = result["gpu_bytes"]
+    if gpu is None:
+      errors = result["gpu_errors"]
+      gpu_text = f"unavailable ({errors[0]})" if errors else "unavailable"
+    else:
+      gpu_text = humanize.naturalsize(gpu)
+      if result["gpu_partial"]:
+        gpu_text += " (partial)"
+    self.query_one("#memory-cpu", Static).update(cpu_text)
+    self.query_one("#memory-gpu", Static).update(gpu_text)
+    self.query_one("#memory-query", Button).disabled = not self.job.running
+    self.show_steps()
     self.app.show_warnings()
 
   def action_back(self):
@@ -2736,6 +2873,10 @@ class SlurmTUI(App):
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
   #details { height: 1fr; padding: 0 1; }
+  #memory-controls { height: auto; margin: 1 0; }
+  #memory-controls > * { margin-right: 1; }
+  #memory-controls Label { width: auto; height: 1; content-align: center middle; padding: 0; }
+  #memory-cpu, #memory-gpu { width: auto; height: 1; }
   #job-progress { height: auto; margin-bottom: 1; padding: 0 1; }
   #progress-bar { width: 40; }
   #progress-line { height: auto; }
