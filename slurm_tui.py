@@ -4013,9 +4013,10 @@ class ConnectionScreen(ModalScreen):
 
   @on(Button.Pressed, "#conn-reconnect")
   def action_reconnect(self):
+    """Log in again: the window closes and the login comes up in the pane, with the focus"""
     if self.cluster.destination:
       self.app.reconnect(self.cluster)
-      self.show()
+      self.dismiss()
 
   @on(Button.Pressed, "#conn-disconnect")
   def disconnect_pressed(self):
