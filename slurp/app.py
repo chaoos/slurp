@@ -1056,7 +1056,8 @@ class Slurp(App):
       state = job.state if job.queued and job.state != "PENDING" else \
               f"{job.state} ({job.reason})" if job.queued else f"{job.state} ({rec['ExitCode']})"
       start = fmt_time(rec["Start"])
-      values = [job.jid, rec["JobName"]]
+      in_open_array = rows and job.jid.partition("_")[0] in rows and array_task_id(job) is not None # under its row
+      values = [("  " + job.jid) if in_open_array else job.jid, rec["JobName"]]
       if cluster.scope != "me":
         values.append(rec["User"])
       values.append(state_text(state))
