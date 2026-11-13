@@ -117,7 +117,16 @@ def in_background(node, work, done, group="io", name="", connection=CURRENT):
       log.exception(f"{name or group} failed")
       app.call_from_thread(app.notify, f"{name or group} failed: {e}", title=tab_name(), severity="error", timeout=10)
       result = None
-    app.call_from_thread(lambda: done(result) if node is app or node.is_attached else None)
+    tab = tab_name()
+    def show():
+      if not (node is app or node.is_attached):
+        return
+      try:
+        done(result)
+      except Exception as e: # showing a result must not end the app
+        log.exception(f"showing the result of {name or group} failed")
+        app.notify(f"showing {name or group} failed: {e}", title=tab, severity="error", timeout=10)
+    app.call_from_thread(show)
   return start_worker(node, body, group, exclusive=False, connection=connection, name=name)
 
 def cluster_work(group, exclusive=True):
