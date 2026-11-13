@@ -102,12 +102,27 @@ class ClusterSession:
   loader: object | None = None         # worker loading the job list
   accounts: list | None = None         # Slurm accounts of the user (sacctmgr), None: not asked yet
   scope: str = "me"                    # whose jobs are listed: "me", "all" (all accounts) or an account
+  views: list = field(default_factory=list) # the subtabs besides the job list
+  current_view: str = "_default"       # mode of the subtab shown ("_default": the job list)
   load_started: float = 0.0
   updated: object | None = None        # when the list was loaded
   show_login: bool = False             # the login is shown in the pane (until it is done)
   attempts: int = 0                    # logins since the session was last ready
   ready_generation: int | None = None  # session generation the app has seen ready
   broken_at: float | None = None       # when the session broke (or the last reconnect started)
+
+@dataclass
+class View:
+  """A subtab of a tab: a job window, a file or directory, a shell. It is a Textual mode, with its own window stack."""
+  id: int
+  title: str
+  kind: str                   # "job", "window" or "shell"
+  key: str = ""               # identifies what it shows (e.g. the job), to show it again instead of opening it twice
+  session: object | None = None # TerminalSession of a shell
+
+  @property
+  def mode(self):
+    return f"view-{self.id}"
 
 def is_local_destination(destination):
   return destination.lower() in {"localhost", "127.0.0.1", "::1"}
@@ -1781,7 +1796,7 @@ def open_path(app, crumbs, path, bases=(), env=None, follow=False):
   A view's open() runs in the worker and returns what to do on the UI thread."""
   def work():
     if fs_isdir(path):
-      return lambda: app.push_screen(DirScreen(crumbs, path, bases=bases, env=env))
+      return lambda: app.open_window(DirScreen(crumbs, path, bases=bases, env=env))
     if not fs_isfile(path):
       return lambda: app.notify(f"{path} does not exist (yet)", severity="warning")
     for view in FILE_VIEWS:
@@ -1790,7 +1805,7 @@ def open_path(app, crumbs, path, bases=(), env=None, follow=False):
     if is_binary(path):
       return lambda: app.notify(f"{path} is a binary file", severity="warning")
     more_bases = list(dict.fromkeys([*bases, os.path.dirname(path)]))
-    return lambda: app.push_screen(FileScreen([*crumbs, os.path.basename(path)], path=path, follow=follow,
+    return lambda: app.open_window(FileScreen([*crumbs, os.path.basename(path)], path=path, follow=follow,
                                               bases=more_bases, env=env))
   in_background(app, work, lambda show: show() if show else None, group="open", name=f"opening {path}")
 
@@ -1812,11 +1827,11 @@ def open_hdf5(app, crumbs, path, bases=(), env=None):
       cmd = ["h5dump", "-H", path]
       text = run(cmd)
       def show():
-        app.push_screen(FileScreen([*crumbs, os.path.basename(path)], text=text, refresher=lambda: run(cmd), bases=bases, env=env))
+        app.open_window(FileScreen([*crumbs, os.path.basename(path)], text=text, refresher=lambda: run(cmd), bases=bases, env=env))
         app.notify("h5py is not installed: showing the structure printed by h5dump -H", severity="warning")
       return show
     return lambda: app.notify(f"{path} is an HDF5 file: install h5py to browse it", severity="warning")
-  return lambda: app.push_screen(H5Screen(crumbs, path, bases=bases, env=env))
+  return lambda: app.open_window(H5Screen(crumbs, path, bases=bases, env=env))
 
 def is_markdown(path):
   return os.path.splitext(path)[1].lower() in {".md", ".markdown", ".mdown", ".mdx"}
@@ -1827,7 +1842,7 @@ def open_markdown(app, crumbs, path, bases=(), env=None):
     markdown = fs_read(path).decode("utf-8", errors="replace")
   except OSError as e:
     return lambda: app.notify(f"cannot read {path}: {e}", severity="error")
-  return lambda: app.push_screen(MarkdownScreen(crumbs, path, markdown, bases=bases, env=env))
+  return lambda: app.open_window(MarkdownScreen(crumbs, path, markdown, bases=bases, env=env))
 
 class SplitScreen(Screen):
   """Window with its content on the left and, while a shell is open, the terminal pane on the right"""
@@ -1840,6 +1855,8 @@ class SplitScreen(Screen):
         yield Button(cluster.name, id=f"cluster-tab-{index}", classes="cluster-tab", variant=variant, compact=True)
         yield Button("✕", id=f"cluster-close-{index}", classes="cluster-close", compact=True, tooltip="close the tab")
       yield Button("+", id="cluster-add", tooltip="Add a local or SSH cluster", compact=True)
+    with Horizontal(id="view-tabs"):
+      yield Button("Jobs", id="view-jobs", classes="view-tab", compact=True, tooltip="the job list")
     with Horizontal(id="topbar"):
       if self.SHOW_BACK:
         yield Button("←", id="back", compact=True, tooltip="Back")
@@ -1873,6 +1890,17 @@ class SplitScreen(Screen):
       event.stop()
       self.app.confirm_close_cluster(int(event.button.id.rsplit("-", 1)[1]))
       return
+    if event.button.id == "view-jobs":
+      event.stop()
+      self.app.show_view(None)
+      return
+    if event.button.id and event.button.id.startswith(("view-tab-", "view-close-")):
+      event.stop()
+      vid = int(event.button.id.rsplit("-", 1)[1])
+      view = next((v for v in self.app.cluster.views if v.id == vid), None)
+      if view is not None:
+        (self.app.show_view if event.button.id.startswith("view-tab-") else self.app.close_view)(view)
+      return
     if event.button.id != "back":
       return
     event.stop()
@@ -1882,6 +1910,9 @@ class SplitScreen(Screen):
     return []
 
   def pop_back(self):
+    if len(self.app.screen_stack) <= 1: # the first window of a subtab: back to the job list (the subtab stays)
+      self.app.show_view(None)
+      return
     self.app.pop_screen()
     # pop_screen completes after this key action; queue a full redraw behind it.
     self.app.call_later(self.app.refresh, layout=True)
@@ -2669,7 +2700,7 @@ class H5Screen(SplitScreen):
       target = h5_link_target(self.path, data["file"])
       def checked(ok):
         if ok:
-          self.app.push_screen(H5Screen(self.crumbs, target, start=data["target"], bases=self.bases, env=self.env))
+          self.app.open_window(H5Screen(self.crumbs, target, start=data["target"], bases=self.bases, env=self.env))
         elif ok is not None:
           self.notify(f"{target} of the external link does not exist or is no HDF5 file", severity="warning")
       in_background(self, lambda: fs_isfile(target) and is_hdf5(target), checked, group="link")
@@ -3024,7 +3055,7 @@ class CoreScreen(SplitScreen):
 
 def open_core_view(app, crumbs, path, bases=(), env=None):
   """(runs in a worker)"""
-  return lambda: app.push_screen(CoreScreen(crumbs, path, bases=bases, env=env))
+  return lambda: app.open_window(CoreScreen(crumbs, path, bases=bases, env=env))
 
 
 register_file_view("HDF5", is_hdf5, open_hdf5)
@@ -3791,13 +3822,13 @@ class JobScreen(SplitScreen):
     crumbs = ["Jobs", self.job.jid]
     if e.kind == "sacct":
       job = self.job
-      in_background(self, lambda: sacct_all(job), lambda text: self.app.push_screen(
+      in_background(self, lambda: sacct_all(job), lambda text: self.app.open_window(
         FileScreen([*crumbs, e.label], text=text, refresher=lambda: sacct_all(job), bases=bases, env=env)) if text is not None else None,
         group="sacct")
     elif e.path:
       open_path(self.app, crumbs, e.path, bases, env, follow=self.job.running and e.kind in ("stdout", "stderr"))
     elif e.text is not None:
-      self.app.push_screen(FileScreen([*crumbs, e.label], text=e.text, bases=bases, env=env))
+      self.app.open_window(FileScreen([*crumbs, e.label], text=e.text, bases=bases, env=env))
 
   @on(OptionList.OptionSelected, "#files")
   def file_selected(self, event):
@@ -4033,12 +4064,17 @@ class TerminalSession:
         pass
 
 class TerminalView(Widget, can_focus=True):
-  """Shows the shell of the app; while it has the focus all keys except Ctrl-] go to the shell"""
+  """Shows a shell (its own, in a shell subtab, else the login of the pane); while it has the focus all keys go to
+  the shell (in the pane all but Ctrl-] and Ctrl-X)"""
   DEFAULT_CSS = "TerminalView { height: 1fr; }"
+
+  def __init__(self, session=None):
+    super().__init__()
+    self.own_session = session
 
   @property
   def session(self):
-    return self.app.shell
+    return self.own_session or self.app.shell
 
   def attach(self):
     """The pane was shown or got a new session: start/resize the session with the size of this view"""
@@ -4061,18 +4097,24 @@ class TerminalView(Widget, can_focus=True):
     event.stop()
     event.prevent_default()
     key = event.key
-    if key == "ctrl+x":
+    if self.own_session is None and key == "ctrl+x":
       self.app.close_shell()
       return
-    if key == SWITCH_KEY:
-      self.app.action_switch_side()
+    if key == SWITCH_KEY: # the one key that does not go to the shell: back to the job list (or the other side)
+      if self.own_session is None:
+        self.app.action_switch_side()
+      else:
+        self.app.show_view(None)
       return
     s = self.session
     if s is None or s.vt is None and not s.done:
       return
     if s.done:
       if key == "enter":
-        self.app.restart_shell()
+        if self.own_session is not None:
+          self.screen.restart()
+        else:
+          self.app.restart_shell()
       return
     if key in TERM_ARROWS:
       data = ("\x1bO" if DECCKM in s.vt.mode else "\x1b[") + TERM_ARROWS[key]
@@ -4125,6 +4167,42 @@ class TerminalView(Widget, can_focus=True):
     if text:
       segments.append(Segment(text, style))
     return Strip(segments).adjust_cell_length(width, base)
+
+class TerminalScreen(SplitScreen):
+  """A shell in a subtab of its own"""
+  def __init__(self, session):
+    super().__init__()
+    self.session = session
+
+  def compose_left(self):
+    yield Static(id="shell-status")
+    yield TerminalView(session=self.session)
+
+  def on_mount(self):
+    self.sub_title = self.session.title
+    self.watch(self.app, "shell_version", self.update_status)
+    self.query_one(TerminalView).focus()
+
+  def on_screen_resume(self):
+    self.query_one(TerminalView).focus()
+    self.call_after_refresh(self.query_one(TerminalView).attach)
+
+  def update_status(self, _=None):
+    s = self.session
+    text = f"{s.title} · ended (exit code {s.code}) · Enter: start it again · ✕ of the subtab: close" if s.done else \
+           f"{s.title} · all keys go to the shell, Ctrl-] goes to the job list · ✕ of the subtab closes it"
+    self.query_one("#shell-status", Static).update(Text(text, style="bold" if not s.done else "yellow"))
+
+  def restart(self):
+    old = self.session
+    self.session = TerminalSession(self.app, old.args, old.title, via=old.via)
+    for view in self.app.cluster.views:
+      if view.session is old:
+        view.session = self.session
+    view = self.query_one(TerminalView)
+    view.own_session = self.session
+    self.call_after_refresh(view.attach)
+    self.update_status()
 
 class TerminalPane(Vertical):
   """Right side of every window: title bar with a close button and the shell"""
@@ -4242,6 +4320,9 @@ class MainScreen(SplitScreen):
       self.query_one("#jobs", ClickTable).focus()
 
   def on_mount(self):
+    self.app.main = self
+    # the job list is the default mode; Textual does not register that one, so it could not be switched back to
+    self.app._modes.setdefault(self.app.DEFAULT_MODE, lambda: self)
     self.app.setup_job_columns()
     table = self.query_one("#jobs", ClickTable)
     table.focus()
@@ -4748,6 +4829,14 @@ class SlurmTUI(App):
   #cluster-tabs { height: 1; padding: 0 1; background: $panel; }
   #cluster-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 1; }
   #cluster-tabs Button.cluster-tab { margin-right: 0; }
+  #view-tabs { height: 1; padding: 0 1; background: $boost; }
+  #view-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 0; }
+  #view-tabs Button.view-close { width: 3; min-width: 3; padding: 0; margin-right: 1; color: $text-muted; }
+  #view-tabs Button.view-close:hover { color: $error; }
+  #shell-status { height: 1; padding: 0 1; background: $panel; }
+  TerminalScreen TerminalView { border: round $panel-lighten-3; }
+  TerminalScreen TerminalView:focus { border: round $accent; }
+  MainScreen.-no-tabs #view-tabs { display: none; }
   #cluster-tabs Button.cluster-close { width: 3; min-width: 3; padding: 0; margin-right: 2; color: $text-muted; }
   #cluster-tabs Button.cluster-close:hover { color: $error; }
   #topbar Header { dock: none; width: 1fr; height: 1; }
@@ -4817,6 +4906,7 @@ class SlurmTUI(App):
     Binding("C", "cluster_info", "Cluster info"),
     Binding("a", "abort_load", "Abort loading"),
     Binding("c", "connection", "Connection"),
+    Binding("ctrl+w", "close_view", "Close subtab"),
     Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
     Binding("ctrl+x", "close_shell", "Close shell"),
   ]
@@ -4851,6 +4941,9 @@ class SlurmTUI(App):
   def shutdown(self):
     """End the shells, logins and remote shells of all tabs"""
     for cluster in self.clusters:
+      for view in cluster.views:
+        if view.session is not None:
+          view.session.terminate()
       for terminal in (cluster.terminal, cluster.login_terminal):
         if terminal:
           terminal.terminate()
@@ -4912,6 +5005,8 @@ class SlurmTUI(App):
       self.login(cluster)
     self.cluster_index = index
     ssh_connection = cluster.connection
+    if self.current_mode != cluster.current_view:
+      self.switch_mode(cluster.current_view if any(v.mode == cluster.current_view for v in cluster.views) else "_default")
     self.show_tab_shell()
     self.update_scope_select()
     self.populate()
@@ -4937,7 +5032,7 @@ class SlurmTUI(App):
     """The pane shows the login of the active tab while it needs the user, else the shell of the tab"""
     cluster = self.cluster
     login = cluster.login_terminal if self.login_visible(cluster) else None
-    want = login or cluster.terminal
+    want = login
     if want is self.shell:
       return
     self.shell = want
@@ -4954,11 +5049,96 @@ class SlurmTUI(App):
       if self.needs_login(cluster):
         self.activate_cluster(index)
       return
-    if self.shell is not None and self.shell is not self.cluster.login_terminal:
-      self.cluster.terminal = self.shell
-    for _ in range(len(self.screen_stack) - 1):
-      self.pop_screen()
     self.activate_cluster(index)
+
+  # ---- subtabs: the job list (the default mode) and the views of the active tab, each a mode with its own windows
+  next_view_id = 0
+
+  def find_view(self, key):
+    return next((v for v in self.cluster.views if key and v.key == key), None)
+
+  def open_view(self, title, make_screen, kind="window", key="", session=None):
+    """A new subtab of the active tab (or the one that shows key already)"""
+    if not self.clusters:
+      return
+    view = self.find_view(key)
+    if view is None:
+      SlurmTUI.next_view_id += 1
+      view = View(SlurmTUI.next_view_id, title, kind, key, session)
+      self.add_mode(view.mode, make_screen)
+      self.cluster.views.append(view)
+    self.show_view(view)
+
+  def open_window(self, screen, title=""):
+    """A window: from the job list it opens as a subtab, within a subtab it opens on top of it (← goes back)"""
+    if self.current_mode == "_default" and not isinstance(self.screen, ModalScreen):
+      crumbs = getattr(screen, "crumbs", None)
+      self.open_view(title or (crumbs[-1] if crumbs else "") or type(screen).__name__, lambda: screen)
+    else:
+      self.push_screen(screen)
+
+  def show_view(self, view):
+    """Show a subtab of the active tab (None: the job list)"""
+    mode = view.mode if view is not None else "_default"
+    self.cluster.current_view = mode
+    if self.current_mode != mode:
+      self.switch_mode(mode)
+    self.call_after_refresh(self.refresh_status)
+
+  def close_view(self, view, cluster=None):
+    """Close a subtab: its windows go away, its shell ends"""
+    cluster = cluster or self.cluster
+    if view not in cluster.views:
+      return
+    if view.session is not None:
+      view.session.terminate()
+    cluster.views.remove(view)
+    if self.current_mode == view.mode:
+      index = 0
+      self.show_view(None)
+    if cluster.current_view == view.mode:
+      cluster.current_view = "_default"
+    def remove():
+      try:
+        self.remove_mode(view.mode)
+      except Exception as e:
+        log.debug(f"removing the subtab {view.title}: {e}")
+    self.call_after_refresh(remove)
+    self.refresh_status()
+
+  def action_close_view(self):
+    view = next((v for v in self.cluster.views if v.mode == self.current_mode), None)
+    if view is not None:
+      self.close_view(view)
+
+  def refresh_view_tabs(self, screen):
+    bar = screen.query("#view-tabs").first(Horizontal) if screen.query("#view-tabs") else None
+    jobs = bar.query("#view-jobs") if bar is not None else None
+    if not jobs:
+      return
+    jobs.first().variant = "primary" if self.current_mode == "_default" else "default"
+    wanted = {str(v.id) for v in self.cluster.views}
+    have = set()
+    for b in bar.query("Button.view-tab, Button.view-close"): # remove only the buttons of closed subtabs (ids stay unique)
+      if b.id == "view-jobs":
+        continue
+      vid = b.id.rsplit("-", 1)[1]
+      if vid not in wanted or getattr(b, "removing", False):
+        if not getattr(b, "removing", False):
+          b.removing = True
+          b.remove()
+      else:
+        have.add(vid)
+    for v in self.cluster.views:
+      if str(v.id) not in have:
+        bar.mount(Button(v.title[:40], id=f"view-tab-{v.id}", classes="view-tab", compact=True, tooltip=v.title),
+                  Button("✕", id=f"view-close-{v.id}", classes="view-close", compact=True, tooltip="close the subtab"))
+    for v in self.cluster.views:
+      for b in bar.query(f"#view-tab-{v.id}"):
+        b.variant = "primary" if self.current_mode == v.mode else "default"
+        label = ("▸ " if v.kind == "shell" else "") + v.title[:40] + (" (ended)" if v.session is not None and v.session.done else "")
+        if str(b.label) != label:
+          b.label = label
 
   def confirm_close_cluster(self, index):
     if not 0 <= index < len(self.clusters):
@@ -4967,8 +5147,11 @@ class SlurmTUI(App):
     what = ["its job list"]
     if cluster.destination:
       what.insert(0, "its SSH session")
-    if cluster.terminal is not None and not cluster.terminal.done:
-      what.append("its shell")
+    shells = sum(v.session is not None and not v.session.done for v in cluster.views)
+    if shells:
+      what.append(f"its {shells} shell{'s' if shells > 1 else ''}")
+    if len(cluster.views) > shells:
+      what.append(f"its other subtabs ({len(cluster.views) - shells})")
     self.push_screen(ConfirmScreen(f"Close the tab {cluster.name}?", f"This ends {', '.join(what[:-1])} and {what[-1]}."
                                    if len(what) > 1 else f"This ends {what[0]}.", "Close tab"),
                      lambda ok: self.close_cluster(cluster) if ok else None)
@@ -4993,10 +5176,12 @@ class SlurmTUI(App):
     if self.shell is not None and self.shell in (cluster.terminal, cluster.login_terminal):
       self.shell = None
       self.shell_changed()
+    if current and self.current_mode != "_default":
+      self.switch_mode("_default")
+    for view in list(cluster.views):
+      self.close_view(view, cluster)
     self.clusters.pop(index)
     if current:
-      for _ in range(len(self.screen_stack) - 1):
-        self.pop_screen()
       if self.clusters:
         self.activate_cluster(min(index, len(self.clusters) - 1))
       else: # no tab left: only the + button
@@ -5004,13 +5189,13 @@ class SlurmTUI(App):
         self.populate()
     elif index < self.cluster_index:
       self.cluster_index -= 1
-    self.screen_stack[0].set_class(not self.clusters, "-no-tabs")
+    self.main.set_class(not self.clusters, "-no-tabs")
     self.refresh_status()
 
   def add_cluster(self, destination):
     if destination is None:
       return
-    self.screen_stack[0].remove_class("-no-tabs")
+    self.main.remove_class("-no-tabs")
     if not destination or is_local_destination(destination):
       self.clusters.append(ClusterSession("Local" if not destination else destination))
     else:
@@ -5134,7 +5319,7 @@ class SlurmTUI(App):
     return cluster.name + mark + (" ⟳" if cluster.loader is not None else "")
 
   def refresh_cluster_tabs(self):
-    for screen in self.screen_stack:
+    for screen in dict.fromkeys([self.main, *self.screen_stack]):
       if not isinstance(screen, SplitScreen) or not screen.is_mounted:
         continue
       tabs = screen.query("#cluster-tabs").first(Horizontal) if screen.query("#cluster-tabs") else None
@@ -5163,9 +5348,12 @@ class SlurmTUI(App):
   def refresh_status(self):
     """Tabs, the footer (state of the session of the active tab and of a load) and the status line of the job table"""
     self.refresh_cluster_tabs()
+    for screen in dict.fromkeys([self.main, *self.screen_stack]):
+      if isinstance(screen, SplitScreen) and screen.is_mounted:
+        self.refresh_view_tabs(screen)
     cluster = self.cluster
     loading, connection = self.load_text(cluster), self.connection_text(cluster)
-    for screen in self.screen_stack:
+    for screen in dict.fromkeys([self.main, *self.screen_stack]):
       if not isinstance(screen, SplitScreen) or not screen.is_mounted:
         continue
       for widget in screen.query("#loadstatus"):
@@ -5221,24 +5409,16 @@ class SlurmTUI(App):
     for view in self.screen.query(TerminalView):
       view.refresh()
 
-  def open_shell(self, args, title, focus=False, via=CURRENT):
-    """Shell in the pane on the right. It runs on the cluster of the active tab, over its SSH connection."""
+  def open_shell(self, args, title, focus=True, via=CURRENT):
+    """A shell in a subtab of its own. It runs on the cluster of the active tab, over its SSH connection."""
     via = self.ssh if via is CURRENT else via
     if via is not None and not via.ready:
       self.notify("log in first", severity="warning")
       return
-    if self.shell and not self.shell.done:
-      self.notify("a shell is already open on the right, close it first (✕)", severity="warning")
-      self.focus_terminal()
-      return
-    if self.shell:
-      self.shell.terminate()
-    if not focus and not isinstance(self.focused, TerminalView):
-      self.screen.left_focus = self.focused
-    self.shell = TerminalSession(self, args, title, via=via)
-    self.cluster.terminal = self.shell
-    self.shell_changed()
-    self.call_after_refresh(self.focus_terminal if focus else self.focus_left)
+    same = sum(v.kind == "shell" and v.title.split(" (")[0] == title for v in self.cluster.views)
+    title = f"{title} ({same + 1})" if same else title
+    session = TerminalSession(self, args, title, via=via)
+    self.open_view(title, lambda: TerminalScreen(session), kind="shell", session=session)
 
   def action_cluster_shell(self):
     cluster = self.cluster
@@ -5342,11 +5522,13 @@ class SlurmTUI(App):
     if not self.clusters and action not in ("quit", "command_palette", "help_quit"):
       return False # no tab: only + (and quit)
     if action in ("open", "reload"): # keys of the job table, not of the other windows
-      return self.screen is self.screen_stack[0]
+      return self.screen is self.main
     if action in ("switch_side", "close_shell"):
       return self.shell is not None
     if action == "abort_load":
       return self.cluster.loader is not None
+    if action == "close_view":
+      return self.current_mode != "_default"
     if action in ("quit", "command_palette", "help_quit") and isinstance(self.focused, TerminalView):
       return False # Ctrl-Q, Ctrl-P, Ctrl-C go to the shell
     return True
@@ -5461,7 +5643,7 @@ class SlurmTUI(App):
       table.add_row(*values, key=job.jid)
     if current in {job.jid for job in visible_jobs}:
       table.move_cursor(row=table.get_row_index(current))
-    if self.screen is self.screen_stack[0] and (self.focused is None or not isinstance(self.focused, (Input, TerminalView, TextArea))):
+    if self.screen is self.main and (self.focused is None or not isinstance(self.focused, (Input, TerminalView, TextArea))):
       table.focus() # an unfocused table is drawn in other colours (e.g. after a tab switch or a reload)
     if not cluster.loaded:
       cluster.summary = "no jobs loaded yet" if not cluster.destination or (cluster.connection and cluster.connection.ready) \
@@ -5598,7 +5780,7 @@ class SlurmTUI(App):
     if col == "err" and job.stderr_path() and job.err[0] == "file":
       self.open_file(job, job.stderr_path())
     else:
-      self.push_screen(JobScreen(job))
+      self.open_view(f"job {job.jid}", lambda: JobScreen(job), kind="job", key=f"job {job.jid}")
 
   def open_file(self, job, path):
     open_path(self, ["Jobs", job.jid], path, [job.rec["WorkDir"]], job_vars(job), follow=job.running)
