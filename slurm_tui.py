@@ -3783,6 +3783,7 @@ class MainScreen(SplitScreen):
       yield Button("Reload", id="reload", variant="primary")
       yield Button("Shell", id="cluster-shell", tooltip="shell on the cluster of this tab, in the pane on the right (t)")
       yield Button("Interactive job", id="interactive-job", tooltip="submit a job that holds nodes for shells (i)")
+      yield Button("Cluster info", id="cluster-info", tooltip="health and occupancy of the cluster (C)")
       yield Label("finished since")
       yield Input("1d", id="since", placeholder="off")
       with Horizontal(id="accounts-toggle"):
@@ -4101,6 +4102,176 @@ class ConnectionStatus(Static):
     event.stop()
     self.app.action_connection()
 
+NODE_FLAGS = {"*": "not responding", "~": "powered off", "#": "powering up", "!": "powering down", "%": "powering down",
+              "$": "maintenance", "@": "pending reboot", "^": "rebooting", "-": "planned"}
+
+def cluster_info():
+  """Nodes, partitions, reasons, reservations and the queue of the cluster (one round trip on a remote cluster)"""
+  cmds = [["sinfo", "-h", "-N", "-o", "%N|%T"],
+          ["sinfo", "-h", "-o", "%P|%a|%F|%l|%D"],
+          ["sinfo", "-h", "-R", "-o", "%E|%T|%D|%N|%H"],
+          ["squeue", "-h", "-a", "-r", "--format=%T|%D|%r"],
+          ["scontrol", "show", "reservation", "-o"]]
+  res = run_many(cmds)
+  info = {"errors": [f"{shlex.join(c[:3])}: {(r.stderr or '').strip()[:200]}" for c, r in zip(cmds, res) if r.returncode
+                     and "No reservations" not in (r.stdout + r.stderr)],
+          "time": datetime.now()}
+  nodes = {}
+  for line in res[0].stdout.splitlines():
+    name, _, state = line.partition("|")
+    if name and state:
+      nodes[name] = state.strip()
+  states, flags = collections.Counter(), collections.Counter()
+  for state in nodes.values():
+    base = state.rstrip("".join(NODE_FLAGS)).split("+")[0].lower()
+    states[base] += 1
+    for ch, label in NODE_FLAGS.items():
+      if state.endswith(ch) or f"+{ch}" in state:
+        flags[label] += 1
+    for extra in state.lower().split("+")[1:]:
+      flags[extra.rstrip("".join(NODE_FLAGS))] += 1
+  info["nodes"], info["states"], info["flags"] = len(nodes), states, flags
+  info["partitions"] = []
+  for line in res[1].stdout.splitlines():
+    f = line.split("|")
+    if len(f) == 5:
+      counts = (f[2].split("/") + ["0"] * 4)[:4]
+      info["partitions"].append({"name": f[0], "avail": f[1], "alloc": counts[0], "idle": counts[1], "other": counts[2],
+                                 "total": counts[3], "limit": f[3]})
+  info["reasons"] = [dict(zip(["reason", "state", "count", "nodes", "since"], line.split("|", 4)))
+                     for line in res[2].stdout.splitlines() if line.count("|") >= 4]
+  jobs, job_nodes, pending_reasons = collections.Counter(), collections.Counter(), collections.Counter()
+  for line in res[3].stdout.splitlines():
+    f = line.split("|")
+    if len(f) == 3:
+      jobs[f[0]] += 1
+      job_nodes[f[0]] += int(f[1]) if f[1].isdigit() else 0
+      if f[0] == "PENDING":
+        pending_reasons[f[2]] += 1
+  info["jobs"], info["job_nodes"], info["pending_reasons"] = jobs, job_nodes, pending_reasons
+  info["reservations"] = []
+  for line in res[4].stdout.splitlines():
+    fields = dict(re.findall(r"(\w+)=(\S*)", line))
+    if "ReservationName" in fields:
+      info["reservations"].append(fields)
+  return info
+
+def nodes_text(n):
+  return f"{n} node" if n == 1 else f"{n} nodes"
+
+class ClusterInfoScreen(ModalScreen):
+  """Health and occupancy of the cluster of a tab"""
+  DEFAULT_CSS = """
+  ClusterInfoScreen { align: center middle; }
+  #ci-dialog { width: 120; max-width: 98%; height: 90%; border: thick $accent; background: $surface; padding: 0 1; }
+  #ci-title { text-style: bold; height: 1; margin-bottom: 1; }
+  #ci-body { height: 1fr; }
+  #ci-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #ci-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "close", "Close"), Binding("r", "reload", "Reload")]
+
+  def __init__(self, cluster):
+    super().__init__()
+    self.cluster = cluster
+    self.info = None
+    self.loading = False
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="ci-dialog"):
+      yield Static(id="ci-title")
+      with VerticalScroll(id="ci-body"):
+        yield Static(id="ci-info")
+      with Horizontal(id="ci-buttons"):
+        yield Button("Reload", id="ci-reload", variant="primary")
+        yield Button("Close", id="ci-close")
+
+  def on_mount(self):
+    self.action_reload()
+
+  def title_text(self):
+    state = "loading …" if self.loading else f"as of {self.info['time']:%H:%M:%S}" if self.info else ""
+    return Text(f"Cluster {self.cluster.name} · {state}")
+
+  @on(Button.Pressed, "#ci-reload")
+  def action_reload(self):
+    if self.loading:
+      return
+    self.loading = True
+    self.query_one("#ci-title", Static).update(self.title_text())
+    def loaded(info):
+      self.loading = False
+      if info is not None:
+        self.info = info
+      self.show()
+    in_background(self, cluster_info, loaded, group="cluster-info",
+                  connection=self.cluster.connection if self.cluster.destination else None)
+
+  def show(self):
+    self.query_one("#ci-title", Static).update(self.title_text())
+    info = self.info
+    if info is None:
+      return
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="bold", no_wrap=True)
+    grid.add_column()
+    def section(title):
+      grid.add_row("", "")
+      grid.add_row(Text(title, style="bold underline"), "")
+    s, total = info["states"], info["nodes"]
+    unhealthy = {k: v for k, v in s.items() if k in ("down", "drained", "draining", "fail", "failing", "maint", "unknown",
+                                                    "inval", "future", "reboot_requested", "planned", "power_down")}
+    section("Health")
+    if unhealthy or info["flags"]:
+      for state, n in sorted(unhealthy.items(), key=lambda kv: -kv[1]):
+        grid.add_row(state, Text(nodes_text(n), style="red" if state in ("down", "fail", "failing") else "yellow"))
+      for flag, n in info["flags"].most_common():
+        grid.add_row(flag, Text(nodes_text(n), style="yellow"))
+    else:
+      grid.add_row("", Text("all nodes are up", style="green"))
+    for r in info["reasons"][:25]:
+      grid.add_row(Text(r["state"], style="yellow"), Text(f"{nodes_text(int(r['count']) if r['count'].isdigit() else r['count'])} ({r['nodes']}): {r['reason']}  since {r['since'].replace('T', ' ')}"))
+    if info["reservations"]:
+      section("Reservations")
+      for r in info["reservations"]:
+        flags = r.get("Flags", "")
+        style = "bold yellow" if "MAINT" in flags else ""
+        grid.add_row(Text(r["ReservationName"], style=style),
+                     f"{r.get('StartTime', '?').replace('T', ' ')} – {r.get('EndTime', '?').replace('T', ' ')}, "
+                     f"{r.get('NodeCnt', '?')} nodes, {r.get('State', '')} {flags}")
+    section("Occupancy")
+    busy = s.get("allocated", 0) + s.get("mixed", 0) + s.get("completing", 0)
+    grid.add_row("Nodes", f"{total} in total")
+    if total:
+      grid.add_row("in use", f"{busy} ({busy / total:.0%}): {s.get('allocated', 0)} allocated, {s.get('mixed', 0)} partly (mixed)"
+                   + (f", {s.get('completing', 0)} completing" if s.get("completing") else ""))
+      grid.add_row("free", Text(f"{s.get('idle', 0)} idle", style="green"))
+      if s.get("reserved") or s.get("planned"):
+        grid.add_row("reserved", f"{s.get('reserved', 0) + s.get('planned', 0)}")
+    jobs, job_nodes = info["jobs"], info["job_nodes"]
+    grid.add_row("Jobs", f"{jobs.get('RUNNING', 0)} running on {job_nodes.get('RUNNING', 0)} nodes, "
+                 f"{jobs.get('PENDING', 0)} pending asking for {job_nodes.get('PENDING', 0)} nodes"
+                 + "".join(f", {n} {st.lower()}" for st, n in jobs.items() if st not in ("RUNNING", "PENDING")))
+    if info["pending_reasons"]:
+      grid.add_row("pending because", ", ".join(f"{reason} {n}" for reason, n in info["pending_reasons"].most_common(6)))
+    if info["partitions"]:
+      section("Partitions")
+      table = Table(box=None, padding=(0, 1), header_style="bold")
+      for col in ("partition", "avail", "allocated", "idle", "other", "total", "time limit"):
+        table.add_column(col, justify="right" if col in ("allocated", "idle", "other", "total") else "left")
+      for p in info["partitions"]:
+        table.add_row(p["name"], Text(p["avail"], style="" if p["avail"] == "up" else "red"), p["alloc"], p["idle"],
+                      p["other"], p["total"], p["limit"])
+      grid.add_row("", table)
+    for err in info["errors"]:
+      grid.add_row(Text("error", style="red"), err)
+    self.query_one("#ci-info", Static).update(grid)
+    self.shown = grid
+
+  @on(Button.Pressed, "#ci-close")
+  def action_close(self):
+    self.dismiss()
+
 class SlurmTUI(App):
   TITLE = "slurm_tui"
   CSS = """
@@ -4177,6 +4348,7 @@ class SlurmTUI(App):
     Binding("t", "cluster_shell", "Shell"),
     Binding("d", "login_dir", "Home dir"),
     Binding("i", "interactive_job", "Interactive job"),
+    Binding("C", "cluster_info", "Cluster info"),
     Binding("a", "abort_load", "Abort loading"),
     Binding("c", "connection", "Connection"),
     Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
@@ -4817,6 +4989,18 @@ class SlurmTUI(App):
       self.action_abort_load()
     else:
       self.action_reload()
+
+  @on(Button.Pressed, "#cluster-info")
+  def cluster_info_pressed(self, event):
+    self.action_cluster_info()
+
+  def action_cluster_info(self):
+    cluster = self.cluster
+    if cluster.destination and cluster.connection is None:
+      self.notify("not connected", severity="warning")
+      return
+    if not isinstance(self.screen, ClusterInfoScreen):
+      self.push_screen(ClusterInfoScreen(cluster))
 
   @on(Button.Pressed, "#interactive-job")
   def interactive_job_pressed(self, event):
