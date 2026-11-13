@@ -25,7 +25,7 @@ in Slurm's short codes, coloured: `30R 10PD 100CD 10F` (running, pending,
 completed, failed; CA cancelled, TO timeout, …); clicking ▸ (or Space) lists
 every task under it and closes it again, and **group arrays** (or `g`) switches
 between grouped arrays and every task. Enter or a click elsewhere opens the window
-of the array: what it is, queue waits and run times (min, avg, median, max),
+of the array: what it is, the node hours of all its tasks together, queue waits and run times (min, avg, median, max),
 all its tasks by state (ended ones also by exit code, pending ones by reason)
 with their number and ids, to copy, a list of every task (a click opens its job
 window), the nodes in use, and buttons to cancel the whole array or only its pending tasks
@@ -37,7 +37,8 @@ for it.
 ## Job details and controls
 
 Open a row to inspect accounting fields, steps, output and error files, the
-batch script, and files referenced by the job. **Cancel job** and **Restart
+batch script, and files referenced by the job. **Node hours (total)** is nodes ×
+elapsed time (for a running job so far, with the most it can take by its time limit). **Cancel job** and **Restart
 job** ask for confirmation; restart lets you use the original submission,
 retry eligible array IDs, or edit a custom command (in a bash editor). If
 the cluster keeps them, restart also offers the environment the job was
@@ -235,10 +236,17 @@ without a connection it says so, with Reconnect.
 
 ## Copying
 
-Copy buttons put the text on the clipboard with the tool of the machine slurp
-runs on (`wl-copy`, `xclip`, `xsel`, `pbcopy`) and also send it to the terminal
-(OSC 52, which some terminals ignore). Without such a tool a window shows the
-text selected, to copy with the terminal's own selection.
+Copy buttons send the text to the terminal (OSC 52, wrapped for tmux and GNU
+screen) and put it on the clipboard with the tool of the machine slurp runs on
+(`wl-copy`, `xclip`, `xsel`, `pbcopy`; over SSH only a forwarded display counts).
+OSC 52 is the only way to your clipboard when you ssh to the machine slurp runs
+on, and only some terminals take it (kitty, WezTerm, iTerm2, Alacritty, foot,
+Windows Terminal; in tmux with `set -g set-clipboard on`; not GNOME Terminal or
+Konsole). Without a tool a window says so and offers **Plain text** (slurp steps
+aside and prints the text in the normal screen, where the terminal's own mouse
+selection works; Enter comes back), **Save to a file** (`~/.cache/slurp/copied.txt`)
+and **It arrived, don't ask again** (stored as `"copy": "terminal"` in the
+settings; remove it to get the window again).
 
 ## Settings
 
