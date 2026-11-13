@@ -4127,7 +4127,7 @@ def cluster_info():
   res = run_many(cmds)
   info = {"errors": [f"{shlex.join(c[:3])}: {(r.stderr or '').strip()[:200]}" for c, r in zip(cmds, res) if r.returncode
                      and "No reservations" not in (r.stdout + r.stderr)],
-          "time": datetime.now()}
+          "time": datetime.now(), "failed": all(r.returncode for r in res[:4])}
   nodes = {}
   for line in res[0].stdout.splitlines():
     name, _, state = line.partition("|")
@@ -4196,6 +4196,8 @@ class ClusterInfoScreen(ModalScreen):
         yield Static(id="ci-info")
       with Horizontal(id="ci-buttons"):
         yield Button("Reload", id="ci-reload", variant="primary")
+        if self.cluster.destination:
+          yield Button("Reconnect", id="ci-reconnect")
         yield Button("Close", id="ci-close")
 
   def on_mount(self):
@@ -4205,9 +4207,30 @@ class ClusterInfoScreen(ModalScreen):
     state = "loading …" if self.loading else f"as of {self.info['time']:%H:%M:%S}" if self.info else ""
     return Text(f"Cluster {self.cluster.name} · {state}")
 
+  def not_connected(self):
+    """Why the tab cannot be asked now (None: it can)"""
+    c = self.cluster.connection
+    if not self.cluster.destination:
+      return None if self.cluster.name else "no tab"
+    if c is None or not c.ready:
+      state = "not connected" if c is None or c.state in ("new", "closed") else \
+              "connecting" if c.state == "connecting" else f"connection lost ({c.error or 'the session ended'})"
+      return f"No connection to {self.cluster.destination}: {state}. Reconnect logs in again, Reload asks once connected."
+    return None
+
+  @on(Button.Pressed, "#ci-reconnect")
+  def reconnect_pressed(self):
+    self.app.reconnect(self.cluster)
+    self.dismiss()
+
   @on(Button.Pressed, "#ci-reload")
   def action_reload(self):
     if self.loading:
+      return
+    why = self.not_connected()
+    if why:
+      self.query_one("#ci-title", Static).update(Text(f"Cluster {self.cluster.name}"))
+      self.query_one("#ci-info", Static).update(Text(why, style="bold yellow"))
       return
     self.loading = True
     self.query_one("#ci-title", Static).update(self.title_text())
@@ -4223,6 +4246,10 @@ class ClusterInfoScreen(ModalScreen):
     self.query_one("#ci-title", Static).update(self.title_text())
     info = self.info
     if info is None:
+      return
+    if info["failed"]:
+      self.query_one("#ci-info", Static).update(Text("Could not query the cluster:\n" + "\n".join(info["errors"]), style="red"))
+      self.shown = Text("failed")
       return
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold", no_wrap=True)
@@ -5040,9 +5067,6 @@ class SlurmTUI(App):
 
   def action_cluster_info(self):
     cluster = self.cluster
-    if cluster.destination and cluster.connection is None:
-      self.notify("not connected", severity="warning")
-      return
     if not isinstance(self.screen, ClusterInfoScreen):
       self.push_screen(ClusterInfoScreen(cluster))
 
