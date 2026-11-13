@@ -2416,7 +2416,7 @@ class SlurmTUI(App):
   #toolbar Label { padding-top: 1; }
   #since { width: 12; }
   #topbar { height: 1; }
-  #topbar Header { width: 1fr; height: 1; }
+  #topbar Header { dock: none; width: 1fr; height: 1; }
   #back { width: 3; min-width: 3; height: 1; padding: 0; }
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
