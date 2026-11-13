@@ -719,7 +719,9 @@ class Slurp(App):
         label += " ▽ array" if self.sort_reverse else " △ array"
       if str(column.label) != label:
         column.label = Text(label)
-        column.content_width = max(column.content_width, len(label))
+      # the width again from the label: the rows added next widen it as needed (DataTable never narrows a column, so
+      # one long cell would keep it wide after the list changed)
+      column.content_width = len(label)
     table.refresh()
 
   def setup_job_columns(self, show_progress=None):
