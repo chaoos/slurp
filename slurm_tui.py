@@ -41,7 +41,7 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen, Screen
 from textual.strip import Strip
 from textual.widget import Widget
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, MarkdownViewer, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
 from textual.widgets.option_list import Option
 from textual.widgets.text_area import Selection
 from textual.worker import get_current_worker
@@ -921,6 +921,18 @@ def open_hdf5(app, crumbs, path, bases=(), env=None):
     return
   app.push_screen(H5Screen(crumbs, path, bases=bases, env=env))
 
+def is_markdown(path):
+  return os.path.splitext(path)[1].lower() in {".md", ".markdown", ".mdown", ".mdx"}
+
+def open_markdown(app, crumbs, path, bases=(), env=None):
+  try:
+    with open(path, encoding="utf-8", errors="replace") as f:
+      markdown = f.read()
+  except OSError as e:
+    app.notify(f"cannot read {path}: {e}", severity="error")
+    return
+  app.push_screen(MarkdownScreen(crumbs, path, markdown, bases=bases, env=env))
+
 class SplitScreen(Screen):
   """Window with its content on the left and, while a shell is open, the terminal pane on the right"""
   SHOW_BACK = False
@@ -951,6 +963,37 @@ class SplitScreen(Screen):
     self.app.pop_screen()
     # pop_screen completes after this key action; queue a full redraw behind it.
     self.app.call_later(self.app.refresh, layout=True)
+
+class MarkdownScreen(SplitScreen):
+  """Render a Markdown file with Textual's viewer and table of contents."""
+  SHOW_BACK = True
+  BINDINGS = [Binding("escape", "back", "Back"), Binding("r", "reload", "Reload")]
+
+  def __init__(self, crumbs, path, markdown, bases=(), env=None):
+    super().__init__()
+    self.path = path
+    self.crumbs = [*crumbs, os.path.basename(path)]
+    self.markdown = markdown
+    self.bases, self.env = list(bases), env
+
+  def compose_left(self):
+    yield MarkdownViewer(self.markdown, id="markdown-viewer", show_table_of_contents=True)
+
+  def on_mount(self):
+    self.sub_title = crumb_title(self.crumbs)
+    self.query_one("#markdown-viewer", MarkdownViewer).focus()
+
+  def action_reload(self):
+    try:
+      with open(self.path, encoding="utf-8", errors="replace") as f:
+        self.markdown = f.read()
+    except OSError as e:
+      self.notify(f"cannot read {self.path}: {e}", severity="error")
+      return
+    self.query_one("#markdown-viewer", MarkdownViewer).update(self.markdown)
+
+  def action_back(self):
+    self.pop_back()
 
 DIR_COLUMNS = [("name", "Name"), ("size", "Size"), ("mtime", "Modified")]
 DIR_LIMIT = 20000 # entries listed at most
@@ -1967,6 +2010,7 @@ def open_core_view(app, crumbs, path, bases=(), env=None):
 
 
 register_file_view("HDF5", is_hdf5, open_hdf5)
+register_file_view("Markdown", is_markdown, open_markdown)
 register_file_view("ELF core dump", is_core_dump, open_core_view)
 
 
