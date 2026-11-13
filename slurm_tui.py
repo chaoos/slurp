@@ -3022,6 +3022,102 @@ class CommandScreen(ModalScreen[list[str] | None]):
   def action_cancel(self):
     self.dismiss(None)
 
+def array_range(start, stop, step):
+  """sbatch --array expression of a range"""
+  return f"{start}-{stop}" + (f":{step}" if step != 1 else "") if stop != start else str(start)
+
+class RunArrayScreen(ModalScreen[list[str] | None]):
+  """Submit the job of an array again with another --array range (start, stop, step), with a warning when the
+  range covers tasks of the array that are running, queued or completed"""
+  DEFAULT_CSS = """
+  RunArrayScreen { align: center middle; }
+  #array-dialog { width: 100; max-width: 95%; height: auto; max-height: 90%; border: thick $accent; background: $surface; padding: 1 2; }
+  #array-title { text-style: bold; margin-bottom: 1; }
+  #array-fields { height: auto; }
+  #array-fields Label { padding: 1 1 0 0; }
+  #array-fields Input { width: 14; margin-right: 2; }
+  #array-warning { height: auto; margin: 1 0; }
+  #array-command { height: auto; min-height: 3; max-height: 10; }
+  #array-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #array-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+
+  def __init__(self, jid, args, states, ids):
+    super().__init__()
+    self.jid, self.args, self.states = jid, list(args), states
+    self.start, self.stop = (min(ids), max(ids)) if ids else (0, 0)
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="array-dialog"):
+      yield Static(f"Run the array of job {self.jid} with another range", id="array-title")
+      with Horizontal(id="array-fields"):
+        for label, key, value in (("start", "array-start", self.start), ("stop", "array-stop", self.stop), ("step", "array-step", 1)):
+          yield Label(label)
+          yield Input(str(value), id=key, type="integer")
+      yield Static(id="array-warning")
+      yield bash_editor("", "array-command")
+      with Horizontal(id="array-buttons"):
+        yield Button("Cancel", id="array-cancel")
+        yield Button("Submit array", id="array-submit", variant="primary")
+
+  def on_mount(self):
+    self.update()
+    self.query_one("#array-start").focus()
+
+  def task_ids(self):
+    try:
+      start, stop, step = (int(self.query_one(f"#array-{k}", Input).value) for k in ("start", "stop", "step"))
+    except ValueError:
+      return None
+    if start < 0 or stop < start or step < 1:
+      return None
+    return start, stop, step
+
+  @on(Input.Changed)
+  def update(self, event=None):
+    warning = self.query_one("#array-warning", Static)
+    r = self.task_ids()
+    if r is None:
+      warning.update(Text("start, stop and step must be numbers with 0 ≤ start ≤ stop and step ≥ 1", style="red"))
+      return
+    start, stop, step = r
+    ids = range(start, stop + 1, step)
+    busy = {}
+    for i in ids:
+      state = self.states.get(str(i), "").split()
+      state = state[0].rstrip("+") if state else ""
+      if state in ("RUNNING", "COMPLETED", "PENDING", "COMPLETING", "CONFIGURING"):
+        busy.setdefault(state.lower(), []).append(i)
+    if busy:
+      warning.update(Text("Warning: the range overlaps tasks of this array that are " + "; ".join(
+        f"{state} ({compress_array_ids(tasks)})" for state, tasks in busy.items()) + ". They would run again.",
+        style="bold yellow"))
+    else:
+      warning.update(Text(f"{len(ids)} tasks, none of them running, queued or completed", style="green"))
+    self.query_one("#array-command", TextArea).load_text(shlex.join(with_array_spec(self.args, array_range(start, stop, step))))
+
+  @on(Button.Pressed, "#array-submit")
+  def submit(self, event):
+    event.stop()
+    try:
+      args = command_args(self.query_one("#array-command", TextArea).text)
+    except ValueError as e:
+      self.notify(f"invalid command: {e}", severity="error")
+      return
+    if not args or os.path.basename(args[0]) != "sbatch":
+      self.notify("the command must start with sbatch", severity="error")
+      return
+    self.dismiss(args)
+
+  @on(Button.Pressed, "#array-cancel")
+  def cancel_pressed(self, event):
+    event.stop()
+    self.dismiss(None)
+
+  def action_cancel(self):
+    self.dismiss(None)
+
 class RestartScreen(ModalScreen[list[str] | None]):
   """Choose the command to submit when restarting a job"""
   DEFAULT_CSS = """
@@ -3129,6 +3225,7 @@ class JobScreen(SplitScreen):
     with Horizontal(id="job-actions"):
       yield Button("Cancel job", id="cancel-job", variant="error")
       yield Button("Restart job", id="restart-job", variant="primary")
+      yield Button("Run array", id="run-array", tooltip="submit the array again with another range")
     with VerticalScroll(id="details"):
       yield Static(id="info")
       with Horizontal(id="memory-controls"):
@@ -3169,6 +3266,7 @@ class JobScreen(SplitScreen):
     job, rec = self.job, self.job.rec
     self.query_one("#cancel-job", Button).disabled = not (job.queued or job.running)
     self.query_one("#restart-job", Button).disabled = restart_args(job) is None
+    self.query_one("#run-array", Button).display = array_task_id(job) is not None and restart_args(job) is not None
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold")
     grid.add_column()
@@ -3338,6 +3436,35 @@ class JobScreen(SplitScreen):
       self.notify("The original sbatch command is not available for this job", severity="warning")
       return
     self.prepare_restart_options(args)
+
+  @on(Button.Pressed, "#run-array")
+  def run_array_pressed(self, event):
+    event.stop()
+    args = restart_args(self.job)
+    if args is None or array_task_id(self.job) is None:
+      return
+    self.prepare_run_array(args)
+
+  @cluster_work("array-options")
+  def prepare_run_array(self, args):
+    parent = self.job.jid.partition("_")[0]
+    try:
+      states = array_task_states(parent)
+    except Exception as e:
+      states = {}
+      self.app.call_from_thread(self.notify, f"the states of the array tasks are unknown: {e}", title=tab_name(), severity="warning")
+    try:
+      ids = expand_array_spec(original_array_spec(self.job) or "")
+    except ValueError:
+      ids = sorted(int(i) for i in states if i.isdigit())
+    self.app.call_from_thread(self.show_run_array, args, states, ids)
+
+  def show_run_array(self, args, states, ids):
+    if not self.is_mounted:
+      return
+    cwd = self.job.rec.get("WorkDir")
+    self.app.push_screen(RunArrayScreen(self.job.jid.partition("_")[0], args, states, ids),
+                         lambda a: self.run_job_action("restart", a, cwd=cwd) if a else None)
 
   @cluster_work("restart-options")
   def prepare_restart_options(self, default_args):
