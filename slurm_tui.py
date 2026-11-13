@@ -40,7 +40,7 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen, Screen
 from textual.strip import Strip
 from textual.widget import Widget
-from textual.widgets import Button, Checkbox, DataTable, Footer, Header, Input, Label, OptionList, Select, Static, TextArea, Tree
+from textual.widgets import Button, Checkbox, DataTable, Footer, Header, Input, Label, OptionList, RadioButton, RadioSet, Select, Static, TextArea, Tree
 from textual.widgets.option_list import Option
 from textual.widgets.text_area import Selection
 from textual.worker import get_current_worker
@@ -258,6 +258,99 @@ def array_task_id(job):
       return match.group(1)
   return None
 
+def array_spec_in_args(args):
+  for i, arg in enumerate(args[1:], 1):
+    if arg in ("-a", "--array"):
+      return args[i + 1] if i + 1 < len(args) else None
+    if arg.startswith("--array="):
+      return arg.split("=", 1)[1]
+    if arg.startswith("-a") and arg != "-a":
+      return arg[2:].lstrip("=")
+  return None
+
+def original_array_spec(job):
+  """Array expression from sbatch arguments or a #SBATCH directive in its script"""
+  submit_line = job.rec.get("SubmitLine") or ""
+  try:
+    args = shlex.split(submit_line)
+  except ValueError:
+    args = []
+  if spec := array_spec_in_args(args):
+    return spec
+  workdir = job.rec.get("WorkDir") or "."
+  for path in existing_files([submit_line], workdir):
+    text = read_text(path)
+    spec = None
+    for line in text.splitlines():
+      line = line.strip()
+      if not line:
+        continue
+      if line.startswith("#SBATCH"):
+        try:
+          directive = shlex.split(line[len("#SBATCH"):].strip())
+        except ValueError:
+          continue
+        spec = array_spec_in_args(["sbatch", *directive]) or spec
+      elif not line.startswith("#"):
+        break
+    if spec:
+      return spec
+  return None
+
+def expand_array_spec(spec, limit=1_000_000):
+  """Expand Slurm array lists/ranges such as 1,4-10:2%3 to task IDs"""
+  ids = set()
+  spec = spec.split("%", 1)[0]
+  for part in spec.split(","):
+    match = re.fullmatch(r"(\d+)(?:-(\d+)(?::(\d+))?)?", part.strip())
+    if not match:
+      raise ValueError(f"unsupported Slurm array range: {spec}")
+    start = int(match.group(1))
+    end = int(match.group(2) or start)
+    step = int(match.group(3) or 1)
+    if end < start or step < 1:
+      raise ValueError(f"invalid Slurm array range: {spec}")
+    ids.update(range(start, end + 1, step))
+    if len(ids) > limit:
+      raise ValueError(f"array has more than {limit} task IDs")
+  return sorted(ids)
+
+def compress_array_ids(ids):
+  """Compress sorted task IDs into the range-list syntax accepted by sbatch"""
+  ids = sorted(set(ids))
+  if not ids:
+    return ""
+  ranges = []
+  start = previous = ids[0]
+  for value in ids[1:]:
+    if value == previous + 1:
+      previous = value
+      continue
+    ranges.append(str(start) if start == previous else f"{start}-{previous}")
+    start = previous = value
+  ranges.append(str(start) if start == previous else f"{start}-{previous}")
+  return ",".join(ranges)
+
+def array_ids_not_running_or_completed(task_ids, states):
+  def should_retry(task_id):
+    state = states.get(str(task_id), "").split()
+    return not state or state[0].rstrip("+") not in ("RUNNING", "COMPLETED")
+  return [task_id for task_id in task_ids if should_retry(task_id)]
+
+def with_array_spec(args, spec):
+  """Replace any existing --array option in an sbatch argv with one specific expression"""
+  filtered, skip = [], False
+  for arg in args[1:]:
+    if skip:
+      skip = False
+    elif arg in ("-a", "--array"):
+      skip = True
+    elif arg.startswith("--array=") or (arg.startswith("-a") and arg != "-a"):
+      continue
+    else:
+      filtered.append(arg)
+  return [args[0], f"--array={spec}", *filtered]
+
 def restart_args(job):
   """Original sbatch command as argv, or None when the job cannot be resubmitted this way"""
   submit_line = (job.rec.get("SubmitLine") or "").strip()
@@ -270,19 +363,30 @@ def restart_args(job):
   task_id = array_task_id(job)
   if task_id is not None:
     # Replace command-line array ranges and add a single-task override for any #SBATCH directive.
-    original, rest = args[0], args[1:]
-    filtered, skip = [], False
-    for arg in rest:
-      if skip:
-        skip = False
-      elif arg in ("-a", "--array"):
-        skip = True
-      elif arg.startswith("--array=") or (arg.startswith("-a") and arg != "-a"):
-        continue
-      else:
-        filtered.append(arg)
-    args = [original, f"--array={task_id}", *filtered]
+    args = with_array_spec(args, task_id)
   return args
+
+def array_task_states(parent_id):
+  """Current/accounted states by array task ID; fail if either Slurm query is unavailable"""
+  env = os.environ | {"SLURM_TIME_FORMAT": "standard"}
+  states = {}
+  commands = [
+    ["sacct", "-X", "-j", str(parent_id), "-n", "-P", "--format=JobIDRaw,State"],
+    ["squeue", "-r", "-j", str(parent_id), "-h", "--format=%i|%T"],
+  ]
+  for cmd in commands:
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=45, env=env)
+    if result.returncode:
+      raise RuntimeError(result.stderr.strip() or f"{shlex.join(cmd)} failed")
+    for line in result.stdout.splitlines():
+      fields = line.split("|", 1)
+      if len(fields) != 2:
+        continue
+      jid, state = fields[0].strip().split(".", 1)[0], fields[1].strip()
+      match = re.fullmatch(rf"{re.escape(str(parent_id))}_(\d+)", jid)
+      if match:
+        states[match.group(1)] = state
+  return states
 
 def err_status(job):
   if not (job.rec["StdOut"] or job.rec["StdErr"]) or not job.started:
@@ -1520,6 +1624,93 @@ class ConfirmScreen(ModalScreen[bool]):
     self.dismiss(False)
 
 
+class RestartScreen(ModalScreen[list[str] | None]):
+  """Choose the command to submit when restarting a job"""
+  DEFAULT_CSS = """
+  RestartScreen { align: center middle; }
+  #restart-dialog { width: 100; max-width: 95%; max-height: 90%; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+  #restart-title { text-style: bold; margin-bottom: 1; }
+  #restart-options { max-height: 10; }
+  #restart-command-label { margin-top: 1; }
+  #restart-command { width: 1fr; }
+  #restart-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #restart-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+  def __init__(self, jid, default_args, retry_args=None, retry_label="Retry unfinished array tasks unavailable"):
+    super().__init__()
+    self.jid = jid
+    self.default_args = list(default_args)
+    self.retry_args = list(retry_args) if retry_args else None
+    self.retry_label = retry_label
+    self.default_command = shlex.join(self.default_args)
+    self.retry_command = shlex.join(self.retry_args) if self.retry_args else self.default_command
+    self.custom_command = self.default_command
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="restart-dialog"):
+      yield Static(f"Restart job {self.jid}", id="restart-title")
+      with RadioSet(id="restart-options"):
+        yield RadioButton("Use the current restart command", value=True)
+        yield RadioButton(self.retry_label, disabled=self.retry_args is None)
+        yield RadioButton("Custom command")
+      yield Label("Command to submit (editable in Custom mode)", id="restart-command-label")
+      yield Input(self.default_command, id="restart-command", disabled=True)
+      with Horizontal(id="restart-buttons"):
+        yield Button("Cancel", id="restart-cancel")
+        yield Button("Submit job", id="restart-submit", variant="primary")
+
+  def on_mount(self):
+    self.query_one("#restart-options", RadioSet).focus()
+
+  @on(RadioSet.Changed, "#restart-options")
+  def option_changed(self, event):
+    command = self.query_one("#restart-command", Input)
+    if event.index == 2:
+      command.disabled = False
+      command.value = self.custom_command
+      command.focus()
+    else:
+      command.disabled = True
+      command.value = self.default_command if event.index == 0 else self.retry_command
+
+  @on(Input.Changed, "#restart-command")
+  def custom_command_changed(self, event):
+    if self.query_one("#restart-options", RadioSet).pressed_index == 2:
+      self.custom_command = event.value
+
+  @on(Button.Pressed, "#restart-cancel")
+  def cancel(self, event):
+    event.stop()
+    self.dismiss(None)
+
+  @on(Button.Pressed, "#restart-submit")
+  def submit(self, event):
+    event.stop()
+    index = self.query_one("#restart-options", RadioSet).pressed_index
+    if index == 0:
+      args = self.default_args
+    elif index == 1 and self.retry_args is not None:
+      args = self.retry_args
+    elif index == 2:
+      try:
+        args = shlex.split(self.query_one("#restart-command", Input).value)
+      except ValueError as e:
+        self.notify(f"Invalid command: {e}", severity="error")
+        return
+      if not args or os.path.basename(args[0]) != "sbatch":
+        self.notify("The restart command must start with sbatch", severity="error")
+        return
+    else:
+      self.notify("Select a restart command", severity="warning")
+      return
+    self.dismiss(list(args))
+
+  def action_cancel(self):
+    self.dismiss(None)
+
+
 class JobScreen(SplitScreen):
   """Details, files and steps of one job, commands on its nodes"""
   BINDINGS = [
@@ -1666,12 +1857,38 @@ class JobScreen(SplitScreen):
     if args is None:
       self.notify("The original sbatch command is not available for this job", severity="warning")
       return
+    self.prepare_restart_options(args)
+
+  @work(thread=True, exclusive=True, group="restart-options")
+  def prepare_restart_options(self, default_args):
     task_id = array_task_id(self.job)
-    title = "Restart array task?" if task_id is not None else "Restart job?"
-    scope = f"Only array task {task_id} will be submitted as a new job.\n" if task_id is not None else ""
+    retry_args, retry_label = None, "Retry array IDs not running/completed (not an array task)"
+    if task_id is not None:
+      parent_id = self.job.jid.partition("_")[0]
+      try:
+        spec = original_array_spec(self.job)
+        if not spec:
+          raise ValueError("the original array range is unavailable")
+        all_ids = expand_array_spec(spec)
+        states = array_task_states(parent_id)
+        retry_ids = array_ids_not_running_or_completed(all_ids, states)
+        if retry_ids:
+          retry_spec = compress_array_ids(retry_ids)
+          retry_args = with_array_spec(default_args, retry_spec)
+          retry_label = f"Retry IDs not running/completed (--array={retry_spec})"
+        else:
+          retry_label = "Retry IDs not running/completed (none found)"
+      except Exception as e:
+        retry_label = f"Retry IDs not running/completed (unavailable: {str(e)[:80]})"
+    self.app.call_from_thread(self.show_restart_options, default_args, retry_args, retry_label)
+
+  def show_restart_options(self, default_args, retry_args, retry_label):
+    if not self.is_mounted:
+      return
+    cwd = self.job.rec.get("WorkDir")
     self.app.push_screen(
-      ConfirmScreen(title, f"{scope}Submit a new job using this command:\n{shlex.join(args)}", "Restart job", variant="primary"),
-      lambda confirmed: self.run_job_action("restart", args, cwd=self.job.rec.get("WorkDir")) if confirmed else None,
+      RestartScreen(self.job.jid, default_args, retry_args, retry_label),
+      lambda args: self.run_job_action("restart", args, cwd=cwd) if args is not None else None,
     )
 
   @work(thread=True, exclusive=True, group="job-action")
