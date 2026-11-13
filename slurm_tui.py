@@ -797,6 +797,99 @@ class JobProgress:
   current: int
   total: int
   line: str
+  points: list = field(default_factory=list) # (epoch seconds or None, n, N) of the n/N lines in the tail, oldest first
+  path: str = ""                             # the file it was read from
+  estimate: dict = field(default_factory=dict)
+
+PROGRESS = {} # (tab, job id) -> {"file": progress file chosen for the job or None, "points": [(epoch seen, n, N)]}
+
+def progress_state(jid):
+  return PROGRESS.setdefault((tab_name(), jid), {"file": None, "points": []})
+
+def progress_path(job):
+  """The file checked for n/N lines: the one chosen for the job, else its output file"""
+  return progress_state(job.jid)["file"] or job.stdout_path()
+
+LINE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})|(?<![\d:])(\d{2}):(\d{2}):(\d{2})(?![\d:])")
+
+def line_time(line):
+  """Epoch seconds of a timestamp in a log line (date and time, or a time of today), None without one"""
+  m = LINE_TIME.search(line)
+  if not m:
+    return None
+  try:
+    if m.group(1):
+      return datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}").timestamp()
+    now = datetime.now()
+    t = now.replace(hour=int(m.group(3)), minute=int(m.group(4)), second=int(m.group(5)), microsecond=0)
+    return (t.timestamp() - 86400) if t > now else t.timestamp()
+  except ValueError:
+    return None
+
+def job_start(job):
+  try:
+    return datetime.fromisoformat(job.rec["Start"]).timestamp() if is_time(job.rec["Start"]) else None
+  except ValueError:
+    return None
+
+def estimate_progress(job, progress):
+  """When the job will reach N/N: from the average rate since the start of the job, and from the rate of the last
+  few progress points. The points are the timestamps of the n/N lines if they have them, else the times the app saw
+  a new n (at reloads, so they are a little late)."""
+  n, total = progress.current, progress.total
+  file_points = [(t, c) for t, c, tot in progress.points if t is not None and tot == total]
+  seen = [(t, c) for t, c, tot in progress_state(job.jid)["points"] if tot == total]
+  points, source = (file_points, "timestamps in the file") if len(file_points) >= 2 else (seen, "seen at reloads")
+  est = {"source": source}
+  last_t = points[-1][0] if points and points[-1][1] == n else time.time()
+  start = job_start(job)
+  if start and n > 0 and last_t > start:
+    rate = n / (last_t - start)
+    est["overall"] = (rate, last_t + (total - n) / rate)
+  recent = []
+  for t, c in points:
+    if not recent or c != recent[-1][1]:
+      recent.append((t, c))
+  recent = recent[-6:]
+  if len(recent) >= 2 and recent[-1][1] > recent[0][1] and recent[-1][0] > recent[0][0]:
+    rate = (recent[-1][1] - recent[0][1]) / (recent[-1][0] - recent[0][0])
+    est["recent"] = (rate, recent[-1][0] + (total - recent[-1][1]) / rate, len(recent))
+  return est
+
+def record_progress(job, progress):
+  """Remember when the app saw a new n/N of the job, and estimate the end"""
+  if progress is None:
+    return None
+  points = progress_state(job.jid)["points"]
+  if not points or points[-1][1:] != (progress.current, progress.total):
+    points.append((time.time(), progress.current, progress.total))
+    del points[:-200]
+  progress.estimate = estimate_progress(job, progress)
+  return progress
+
+def duration_text(seconds):
+  seconds = max(0, int(seconds))
+  if seconds < 60:
+    return f"{seconds} s"
+  if seconds < 3600:
+    return f"{seconds // 60} min"
+  if seconds < 86400:
+    return f"{seconds // 3600} h {seconds // 60 % 60} min"
+  return f"{seconds // 86400} d {seconds // 3600 % 24} h"
+
+def eta_text(eta):
+  now = time.time()
+  when = datetime.fromtimestamp(eta)
+  at = when.strftime("%H:%M" if when.date() == datetime.now().date() else "%m-%d %H:%M")
+  return f"~{duration_text(eta - now)} (at {at})" if eta > now else f"overdue (expected {at})"
+
+def rate_text(rate):
+  return f"{rate * 3600:.3g}/h" if rate * 60 < 1 else f"{rate * 60:.3g}/min" if rate < 1 else f"{rate:.3g}/s"
+
+def best_eta(progress):
+  """The estimate shown in the job list: the recent rate if known, else the average since the start"""
+  est = progress.estimate if progress else {}
+  return (est.get("recent") or est.get("overall") or (None, None))[1]
 
 @dataclass
 class Job:
@@ -1104,7 +1197,8 @@ def err_status(job, sizes=None):
     return ("missing", 0)
 
 def output_progress(path, tail=None):
-  """Latest valid n/N entry in the tail of an output file (read here unless given)"""
+  """Latest valid n/N entry in the tail of a file (only its last PROGRESS_TAIL_BYTES are read, here unless given),
+  with the n/N points of the tail and their timestamps (if the lines have one)"""
   if not path:
     return None
   if tail is None:
@@ -1113,15 +1207,20 @@ def output_progress(path, tail=None):
       tail = fs_read(path, max(0, size - PROGRESS_TAIL_BYTES), PROGRESS_TAIL_BYTES).decode("utf-8", errors="replace")
     except OSError:
       return None
-  for line in reversed(tail.splitlines()[-PROGRESS_TAIL_LINES:]):
+  latest, points = None, []
+  for line in tail.splitlines()[-PROGRESS_TAIL_LINES * 20:]:
     for match in reversed(list(PROGRESS_PATTERN.finditer(line))):
       try:
         current, total = map(int, match.groups())
       except ValueError: # extremely long digit sequences
         continue
       if current <= total:
-        return JobProgress(current, total, line.strip())
-  return None
+        latest = (current, total, line.strip())
+        points.append((line_time(line), current, total))
+        break
+  if latest is None:
+    return None
+  return JobProgress(*latest, points=points[-50:], path=path)
 
 def annotate(jobs):
   """Command, error file and progress of the jobs. On a remote cluster the sizes of the error files, the tails of
@@ -1131,10 +1230,10 @@ def annotate(jobs):
     for job in jobs:
       job.command = command_of(job, cache)
       job.err = err_status(job)
-      job.progress = output_progress(job.stdout_path()) if job.running else None
+      job.progress = record_progress(job, output_progress(progress_path(job))) if job.running else None
     return jobs
   err_paths = sorted({p for job in jobs if err_status(job, {})[0] == "missing" and (p := job.stderr_path())})
-  out_paths = sorted({p for job in jobs if job.running and (p := job.stdout_path())})
+  out_paths = sorted({p for job in jobs if job.running and (p := progress_path(job))})
   scripts = sorted({job.jid.split("_")[0]: job.jid for job in jobs if job.queued and not step_commands(job)}.items())
   cmds = ([["stat", "-L", "-c", "%s", "--", p] for p in err_paths] +
           [["tail", "-c", str(PROGRESS_TAIL_BYTES), "--", p] for p in out_paths] +
@@ -1149,8 +1248,8 @@ def annotate(jobs):
   for job in jobs:
     job.command = command_of(job, cache)
     job.err = err_status(job, sizes)
-    path = job.stdout_path()
-    job.progress = output_progress(path, tails.get(path)) if job.running and tails.get(path) is not None else None
+    path = progress_path(job)
+    job.progress = record_progress(job, output_progress(path, tails.get(path))) if job.running and tails.get(path) is not None else None
   return jobs
 
 # ---------------------------------------------------------------------------
@@ -1310,7 +1409,7 @@ def sacct_all(job):
 
 def load_details(job):
   """Everything shown in the job window that needs extra queries or file system access"""
-  d = {"files": [], "sstat": {}, "nodes": [], "progress": output_progress(job.stdout_path()) if job.running else None}
+  d = {"files": [], "sstat": {}, "nodes": [], "progress": record_progress(job, output_progress(progress_path(job))) if job.running else None}
   workdir = job.rec["WorkDir"]
   files = d["files"]
 
@@ -1837,9 +1936,11 @@ class DirScreen(SplitScreen):
     Binding("full_stop", "hidden", "Hidden files"),
   ]
 
-  def __init__(self, crumbs, path, bases=(), env=None):
+  def __init__(self, crumbs, path, bases=(), env=None, pick=None):
     super().__init__()
     self.path = os.path.normpath(path)
+    self.pick = pick # pick mode: a file is chosen (pick(path)) instead of opened; directories open in place
+    self.base_crumbs = list(crumbs)
     self.crumbs = [*crumbs, self.path.rstrip("/") + "/"]
     self.bases, self.env = list(bases), env # passed on to the files opened from here (e.g. the job's WorkDir)
     self.entries = []
@@ -1925,6 +2026,8 @@ class DirScreen(SplitScreen):
       except Exception:
         pass
     status = f"{self.path} · {len(shown)} of {len(self.entries)} entries"
+    if self.pick is not None:
+      status = "choose a file (Enter or click) · Esc: cancel · " + status
     if len(self.entries) >= DIR_LIMIT:
       status += f" (only the first {DIR_LIMIT} are listed)"
     if self.pattern:
@@ -1934,6 +2037,18 @@ class DirScreen(SplitScreen):
 
   def open(self, name):
     path = os.path.dirname(self.path) if name == ".." else os.path.join(self.path, name)
+    if self.pick is not None:
+      entry = next((e for e in self.entries if e["name"] == name), None)
+      if name == ".." or entry and entry["dir"]:
+        self.path = os.path.normpath(path)
+        self.crumbs = [*self.base_crumbs, self.path.rstrip("/") + "/"]
+        self.sub_title = crumb_title(self.crumbs)
+        self.action_reload()
+      else:
+        pick, self.pick = self.pick, None
+        self.app.pop_screen()
+        pick(path)
+      return
     open_path(self.app, self.crumbs, path, bases=self.bases, env=self.env)
 
   @on(DataTable.RowSelected, "#dir")
@@ -3305,7 +3420,11 @@ class JobScreen(SplitScreen):
         yield Label("GPU:")
         yield Static(id="memory-gpu", markup=False)
       with Vertical(id="job-progress"):
-        yield ProgressBar(total=1, show_eta=False, id="progress-bar")
+        with Horizontal(id="progress-top"):
+          yield ProgressBar(total=1, show_eta=False, id="progress-bar")
+          yield Button("Progress file…", id="progress-file", compact=True,
+                       tooltip="choose the (log) file checked for n/N lines, for this job")
+          yield Button("Use stdout", id="progress-stdout", compact=True)
         yield Static(id="progress-line", markup=False)
       yield Label("Files", classes="section")
       yield OptionList(Option("loading ...", disabled=True), id="files")
@@ -3373,14 +3492,59 @@ class JobScreen(SplitScreen):
     self.query_one("#memory-query", Button).disabled = not job.running
     progress = progress_for_job(job)
     progress_view = self.query_one("#job-progress", Vertical)
-    if progress is not None:
+    chosen = PROGRESS.get((tab_name(), job.jid), {}).get("file")
+    self.query_one("#progress-stdout", Button).display = bool(chosen)
+    if progress is not None or job.running:
       progress_view.display = True
-      self.query_one("#progress-bar", ProgressBar).update(total=max(progress.total, 1), progress=progress.current)
-      self.query_one("#progress-line", Static).update(progress.line)
+      self.query_one("#progress-file", Button).display = job.running
+      if progress is None:
+        self.query_one("#progress-bar", ProgressBar).update(total=None)
+        self.query_one("#progress-line", Static).update(
+          f"no n/N line in the end of {chosen or job.stdout_path() or 'the output file'} (yet)")
+      else:
+        self.query_one("#progress-bar", ProgressBar).update(total=max(progress.total, 1), progress=progress.current)
+        self.query_one("#progress-line", Static).update(self.progress_text(job, progress, chosen))
     else:
       progress_view.display = False
     self.query_one("#nodes").display = job.running
     self.show_steps()
+
+  def progress_text(self, job, progress, chosen):
+    lines = [f"{progress.current}/{progress.total} ({progress.current / max(progress.total, 1):.0%}): {progress.line}"]
+    est = progress.estimate
+    if job.running and progress.current < progress.total:
+      if "overall" in est:
+        rate, eta = est["overall"]
+        lines.append(f"since the start: {rate_text(rate)}, done in {eta_text(eta)}")
+      if "recent" in est:
+        rate, eta, count = est["recent"]
+        lines.append(f"last {count} updates: {rate_text(rate)}, done in {eta_text(eta)}")
+      if not ("overall" in est or "recent" in est):
+        lines.append("no estimate yet")
+      else:
+        lines.append(f"(times: {est['source']})")
+    if progress.path:
+      lines.append(f"from {progress.path}" + (" (chosen for this job)" if chosen else ""))
+    return "\n".join(lines)
+
+  @on(Button.Pressed, "#progress-file")
+  def choose_progress_file(self, event):
+    event.stop()
+    state = progress_state(self.job.jid)
+    start = os.path.dirname(state["file"] or self.job.stdout_path() or "") or self.job.rec.get("WorkDir") or "/"
+    def picked(path):
+      progress_state(self.job.jid)["file"] = path
+      progress_state(self.job.jid)["points"].clear() # another file, other points
+      self.notify(f"progress of job {self.job.jid} from {path}", timeout=4)
+      self.load()
+    self.app.push_screen(DirScreen(["Jobs", self.job.jid, "progress file"], start, pick=picked))
+
+  @on(Button.Pressed, "#progress-stdout")
+  def progress_from_stdout(self, event):
+    event.stop()
+    progress_state(self.job.jid)["file"] = None
+    progress_state(self.job.jid)["points"].clear()
+    self.load()
 
   def show_steps(self):
     table = self.query_one("#steps", ClickTable)
@@ -4022,7 +4186,7 @@ class Splitter(Widget):
       self.release_mouse()
       self.remove_class("-dragging")
 
-COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("user", "User"), ("state", "State"), ("progress", "Progress"),
+COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("user", "User"), ("state", "State"), ("progress", "Progress"), ("eta", "Done in"),
            ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
            ("start", "Start"), ("end", "End"), ("err", "Err"), ("cmd", "Command")]
 
@@ -4032,6 +4196,7 @@ SORT_KEYS = {
   "user":  lambda j: j.rec["User"].casefold(),
   "state": lambda j: j.state,
   "progress": lambda j: (p.current / p.total if (p := progress_for_job(j)) and p.total else 0),
+  "eta": lambda j: best_eta(j.progress) or float("inf"),
   "nodes": lambda j: int(j.rec["NNodes"] or 0),
   "time":  lambda j: j.node_hours() / max(int(j.rec["NNodes"] or 1), 1),
   "start": lambda j: j.rec["Start"] if is_time(j.rec["Start"]) else "",
@@ -4602,6 +4767,8 @@ class SlurmTUI(App):
   #memory-gpu { width: auto; height: auto; }
   #job-progress { height: auto; margin-bottom: 1; padding: 0 1; }
   #progress-bar { width: 40; }
+  #progress-top { height: auto; }
+  #progress-top Button { margin-left: 2; }
   #progress-line { height: auto; }
   #core-overview { height: 1fr; padding: 1; }
   #core-info { height: auto; }
@@ -5030,13 +5197,13 @@ class SlurmTUI(App):
     if show_progress is None:
       show_progress = any(progress_for_job(job) is not None for job in self.jobs.values())
     visible_columns = [(key, label) for key, label in COLUMNS
-                       if (key != "user" or all_accounts) and (key != "progress" or show_progress)]
+                       if (key != "user" or all_accounts) and (key not in ("progress", "eta") or show_progress)]
     column_keys = [key for key, _ in visible_columns]
     if column_keys == self.job_column_keys:
       return
     if not all_accounts and self.sort_column == "user":
       self.sort_column, self.sort_reverse = "jobid", True
-    if not show_progress and self.sort_column == "progress":
+    if not show_progress and self.sort_column in ("progress", "eta"):
       self.sort_column, self.sort_reverse = "jobid", True
     table.clear(columns=True)
     for key, label in visible_columns:
@@ -5285,6 +5452,9 @@ class SlurmTUI(App):
       if "progress" in self.job_column_keys:
         progress = progress_for_job(job)
         values.append(RichProgressBar(total=max(progress.total, 1), completed=progress.current, width=8) if progress else "")
+        eta = best_eta(job.progress) if job.running and job.progress and job.progress.current < job.progress.total else None
+        values.append(Text(duration_text(eta - time.time()) if eta and eta > time.time() else "overdue" if eta else "",
+                           style="" if not eta or eta > time.time() else "yellow"))
       values.extend((rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
                      ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]), err_text(job.err),
                      job.command[:150]))
