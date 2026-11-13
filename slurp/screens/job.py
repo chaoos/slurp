@@ -77,6 +77,7 @@ class JobScreen(SplitScreen):
       yield Button("Cancel job", id="cancel-job", variant="error")
       yield Button("Restart job", id="restart-job", variant="primary")
       yield Button("Run array", id="run-array", tooltip="submit the array again with another range")
+      yield Button("Array", id="array-window", tooltip="all tasks of the array by state, to copy or cancel")
     with VerticalScroll(id="details"):
       yield Static(id="info")
       with Horizontal(id="memory-controls"):
@@ -143,6 +144,7 @@ class JobScreen(SplitScreen):
     self.query_one("#cancel-job", Button).disabled = not (job.queued or job.running)
     self.query_one("#restart-job", Button).disabled = restart_args(job) is None
     self.query_one("#run-array", Button).display = array_task_id(job) is not None and restart_args(job) is not None
+    self.query_one("#array-window", Button).display = array_task_id(job) is not None
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold")
     grid.add_column()
@@ -455,6 +457,11 @@ class JobScreen(SplitScreen):
       self.notify("The original sbatch command is not available for this job", severity="warning")
       return
     self.prepare_restart_options(args)
+
+  @on(Button.Pressed, "#array-window")
+  def array_window_pressed(self, event):
+    event.stop()
+    self.app.open_array(self.job.jid.partition("_")[0], self.job)
 
   @on(Button.Pressed, "#run-array")
   def run_array_pressed(self, event):
