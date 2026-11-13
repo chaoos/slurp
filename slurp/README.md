@@ -20,8 +20,13 @@ whose jobs are listed: yours, those of one of your Slurm accounts, or those of
 all of them (the accounts come from `sacctmgr`). Progress appears when the
 output contains a line such as `65/100`; the **Done in** column estimates when
 a running job gets to the end. Ten or more tasks of an array in one state are
-shown as one row (`9600_[1-30] ▸ 30 tasks`); Enter or a click opens it and
-lists every task, and closes it again.
+shown as one row (`9600_[1-30] ▸ 30 tasks`); clicking ▸ (or Space) lists every
+task under it and closes it again. Enter or a click elsewhere opens the window
+of the array: what it is, all its tasks by state (ended ones also by exit code,
+pending ones by reason) with their number and ids, to copy, run times and the
+nodes in use, and buttons to cancel the whole array or only its pending tasks
+(after a confirmation). The job window of an array task has an **Array** button
+for it.
 
 ![Illustrative slurp job list with status and progress columns](docs/jobs.svg)
 
@@ -317,8 +322,8 @@ top-left `←` button to go back.
 
 | Screen | Main controls |
 |---|---|
-| Job list | `/` search jobs; `Enter` open; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
-| Job details | `Cancel job` / `Restart job` / `Run array`; `r` reload; `s` shell on the node (subtab) |
+| Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
+| Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (subtab) |
 | Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |
