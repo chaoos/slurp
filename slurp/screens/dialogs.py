@@ -12,6 +12,7 @@ import os
 import re
 import select
 import shlex
+import base64
 import shutil
 import struct
 import subprocess
@@ -451,6 +452,22 @@ CLIPBOARD_TOOLS = [ # (needed environment, command): the first one there gets th
   (None, ["clip.exe"]),
 ]
 
+def osc52(text):
+  """The escape sequence that asks the terminal to put text on the clipboard (OSC 52), wrapped for tmux and GNU screen,
+  which otherwise keep it to themselves (tmux also needs 'set -g allow-passthrough on' or 'set -g set-clipboard on')"""
+  seq = f"\x1b]52;c;{base64.b64encode(text.encode()).decode()}\x07"
+  if os.environ.get("TMUX"):
+    return "\x1bPtmux;" + seq.replace("\x1b", "\x1b\x1b") + "\x1b\\"
+  if os.environ.get("STY"): # screen: in pieces of at most 768 bytes
+    return "".join(f"\x1bP{seq[i:i + 760]}\x1b\\" for i in range(0, len(seq), 760))
+  return seq
+
+def send_osc52(app, text):
+  app._clipboard = text # (as App.copy_to_clipboard)
+  if app._driver is not None:
+    app._driver.write(osc52(text))
+    app._driver.flush()
+
 def local_clipboard(text):
   """Put text on the clipboard of this machine with its tool (wl-copy, xclip, xsel, pbcopy, clip.exe): the tool
   used, or None if there is none (or it failed)"""
@@ -500,7 +517,7 @@ class CopyScreen(ModalScreen):
 def copy_text(app, text, what="the text"):
   """Copy text: with the clipboard tool of this machine if there is one, and with the terminal (OSC 52; works only
   in terminals that allow it); without a tool, a window shows the text to copy by hand"""
-  app.copy_to_clipboard(text) # OSC 52, through the terminal
+  send_osc52(app, text) # OSC 52, through the terminal (wrapped for tmux and screen)
   tool = local_clipboard(text)
   if tool:
     app.notify(f"copied {what} ({tool})", timeout=4)
