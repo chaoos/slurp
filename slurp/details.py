@@ -219,6 +219,9 @@ def load_details(job):
   for kind, path in [("stdout", job.stdout_path()), ("stderr", job.stderr_path())]:
     if path:
       add(Entry(kind, path, path=path))
+  chosen = progress_state(job.jid)["file"]
+  if chosen and chosen != job.stdout_path(): # the file chosen for the progress
+    add(Entry("progress", chosen, path=chosen, note="checked for n/N"))
   if job.merged():
     files.append(Entry("stderr", "goes to the stdout file"))
   if workdir:
