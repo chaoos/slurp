@@ -11,7 +11,8 @@ features and sample data; they are not screenshots from a live cluster.
 ## Job list
 
 Browse queued and running jobs alongside recently completed jobs, sort by
-columns (the header marks the sort column with ▲ or ▼), and filter by job
+columns (the header marks the sort column with ▲ or ▼; Job ID cycles through job ID
+descending and ascending and array index ascending and descending, marked △/▽), and filter by job
 name, command, ID, state, user, account, or path. The completed-job time window
 uses the same duration syntax as `slurm.py`. The dropdown next to it selects
 whose jobs are listed: yours, those of one of your Slurm accounts, or those of
@@ -26,7 +27,13 @@ a running job gets to the end.
 Open a row to inspect accounting fields, steps, output and error files, the
 batch script, and files referenced by the job. **Cancel job** and **Restart
 job** ask for confirmation; restart lets you use the original submission,
-retry eligible array IDs, or edit a custom command (in a bash editor). For an
+retry eligible array IDs, or edit a custom command (in a bash editor). If
+the cluster keeps them, restart also offers the environment the job was
+submitted with (`sacct --env-vars`: uenv, loaded modules, all variables; sbatch
+then runs under `env -i` with exactly these, without the old job's `SLURM_*`)
+and the batch script as submitted (`scontrol write batch_script` /
+`sacct --batch-script`, saved as `.slurp-restart-<job>.sh` next to the job), so
+the job runs again as it ran before even if the file on disk changed. For an
 array task, **Run array** submits the array again with another range (start,
 stop, step) and warns when the range covers tasks that are running, queued or
 completed.
@@ -149,8 +156,12 @@ into the open session and costs a round trip; no ssh process is started for
 it. Several commands can run at the same time, so a slow `sacct` does not hold
 up browsing, and aborting one stops only that command. The login scripts of
 the cluster run once, when the session starts, and what they print is
-ignored. Interactive shells (Shell, node shells, GDB) and HDF5 downloads open
-as extra channels of the same connection, without a new login.
+ignored. Interactive shells (Shell, node shells, GDB) open as extra channels
+of the same connection, without a new login. Files are never copied: text
+files are read in parts (the last 1 MB, `A` for the part before, following
+reads only what was appended), and HDF5 files are read in place by h5py
+through a file object that fetches only the byte ranges it asks for (1 MiB
+blocks), so a large file costs only what is browsed.
 
 Clicking the connection state in the footer (or `c`) opens the connection
 window of the tab: its state, the course of a (re)connect (connecting,
@@ -161,8 +172,9 @@ connection (bytes, rtt, retransmissions, from `ss`), and a log of the session
 events. **Reconnect** ends the session and logs in again, **Disconnect** ends
 it until the tab is selected again.
 
-The footer shows the state of the session of the active tab (green with the
-round-trip time when it answers) and the tab buttons mark each tab: `●`
+The footer shows the state of the session of the active tab, tinted by its
+health: green (answers, with the round-trip time), yellow (slow, connecting),
+red (no answer, lost); the connection window shows the same in its title and the tab buttons mark each tab: `●`
 connected, `◌` connecting or not answering, `○` not connected. A heartbeat
 notices a session that stops answering ("no answer for …" in the footer);
 after 60 seconds without an answer, or when the session breaks, the app
@@ -175,8 +187,7 @@ point: all commands and remote file access run in the background.
 
 The remote host needs Slurm commands, a POSIX shell, and standard Linux file
 tools; it does not need Python, a copy of this repository, or Textual
-installed. HDF5 files are copied from the remote host into a temporary local
-copy for the `h5py` viewer, which is removed when the viewer closes.
+installed.
 
 Each tab keeps its own job list, shell, and session. Switching tabs shows the
 list as it was loaded; `r` (or **Reload**) loads it again. While a list
@@ -193,8 +204,26 @@ name; the fields write the command, which stays editable. Once the job runs, its
 window opens shells on its node. **Cluster info** (or `C`) shows the health
 of the cluster (nodes down, drained, in maintenance, not responding, with
 the reasons; reservations), its occupancy (busy and idle nodes, running and
-pending jobs and why they wait) and the partitions, with its own Reload;
+pending jobs and why they wait) and the partitions, with its own Reload; its
+title says healthy (green), degraded (yellow) or unhealthy (red) and why;
 without a connection it says so, with Reconnect.
+
+## Storage: quota and old files in scratch
+
+**Quota** (or `Q`) lists your quotas, and those of your groups where they
+use space or have a limit: `lfs quota` on each Lustre filesystem and on
+`$SCRATCH`, `$HOME`, `$PROJECT`, `$STORE`, `$WORK`, `quota` on the others,
+with space and files (inodes), used, limit and soft limit, and a bar coloured
+by how full it is. The output of a site's own `quota` command is shown too.
+
+Scratch filesystems are usually cleaned up automatically: files not used for
+some time are deleted without asking. **Scratch** (or `X`) searches your files
+in `$SCRATCH` in the background (one `find` on the cluster; it can be
+aborted) and lists the 2000 with the oldest access (or modification) time;
+those older than the given number of days (30) are red. **Touch selected**,
+**Touch all listed** and **Touch all my files there** set their access time
+to now (after a confirmation). Mind that many sites do not allow keeping files
+in scratch this way; move what you need to keep elsewhere.
 
 ## Browser access
 
@@ -260,11 +289,11 @@ top-left `←` button to go back.
 
 | Screen | Main controls |
 |---|---|
-| Job list | `/` search jobs; `Enter` open; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `c` connection window; `e` open stderr; `o` open stdout; `q` quit |
+| Job list | `/` search jobs; `Enter` open; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `c` connection window; `e` open stderr; `o` open stdout; `q` quit |
 | Job details | `Cancel job` / `Restart job` / `Run array`; `r` reload; `e` / `o` open error/output; `s` shell on the node (subtab) |
-| Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` load all; `l` open in `less`; `r` reload |
+| Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
-| HDF5 | `s` enter a dataset selection; `[` / `]` change row page; `{` / `}` change column page; `r` reload |
+| HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |
 | Markdown | `r` reload; use the viewer's table of contents and link navigation |
 | Shell (subtab) | `Ctrl-]` back to the job list; `Ctrl-D` exits the shell, Enter starts it again; `✕` of the subtab closes it |
 | Subtabs | `Ctrl-W` close the subtab shown (outside a shell) |
