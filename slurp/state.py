@@ -99,6 +99,7 @@ class ClusterSession:
   loader: object | None = None         # worker loading the job list
   accounts: list | None = None         # Slurm accounts of the user (sacctmgr), None: not asked yet
   since_value: str = "1d"              # finished jobs listed: within this time (as slurm.py -c), "off": none
+  collapse_arrays: bool = True        # big arrays as one row in the job list (else every task)
   expanded: set = field(default_factory=set) # collapsed array rows that are open ("array id|state")
   scope: str = "me"                    # whose jobs are listed: "me", "all" (all accounts) or an account
   views: list = field(default_factory=list) # the subtabs besides the job list

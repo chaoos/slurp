@@ -84,6 +84,7 @@ class MainScreen(SplitScreen):
     Binding("slash", "filter", "Filter jobs"),
     Binding("escape", "clear_filter", "Clear filter", show=False),
     Binding("space", "app.toggle_group", "Open/close array", show=False),
+    Binding("g", "app.toggle_collapse", "Group arrays"),
   ]
 
   def compose_left(self):
@@ -100,6 +101,8 @@ class MainScreen(SplitScreen):
       yield Input("1d", id="since", placeholder="e.g. 3d12h", tooltip="s, m, h, d, w, mo, y, combined (1d12h); Enter: load")
       yield Select([("my jobs", "me"), ("all my accounts", "all")], value="me", allow_blank=False, id="scope",
                    tooltip="whose jobs are listed: yours, or those of one or all of your Slurm accounts")
+      yield Checkbox("group arrays", value=True, id="collapse-arrays", compact=True,
+                     tooltip="big arrays as one row (on) or every task individually (off) (g)")
     yield Static(id="status")
     yield ClickTable(id="jobs", cursor_type="row", zebra_stripes=True)
     yield Input(id="jfilter", placeholder="filter jobs by name, command, ID, state, user, account, path…")

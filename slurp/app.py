@@ -77,6 +77,7 @@ class Slurp(App):
   #toolbar > * { margin-right: 1; }
   #toolbar Label { padding-top: 1; }
   #scope { width: 28; }
+  #collapse-arrays { width: auto; margin-top: 1; }
   #scratch-bar, #scratch-actions { height: auto; padding: 0 1; }
   #scratch-bar Label { padding: 1 1 0 0; width: auto; }
   #scratch-dir { width: 1fr; }
@@ -202,6 +203,7 @@ class Slurp(App):
       cluster = ClusterSession(destination or "Local", destination)
       cluster.since_value = tab.get("since") or "1d"
       cluster.scope = tab.get("scope") or "me"
+      cluster.collapse_arrays = tab.get("collapse_arrays", True)
       self.clusters.append(cluster)
     self.cluster_index = min(max(int(saved.get("active", 0) or 0), 0), max(len(self.clusters) - 1, 0))
     for destination in state.initial_ssh_destinations:
@@ -307,6 +309,7 @@ class Slurp(App):
     self.show_tab_shell()
     self.update_scope_select()
     self.update_since_widgets()
+    self.query_one("#collapse-arrays", Checkbox).value = cluster.collapse_arrays # (no reload: only the rows change)
     self.populate()
     self.refresh_status()
     if not cluster.loaded and cluster.loader is None and (not cluster.destination or cluster.connection.ready):
@@ -493,7 +496,8 @@ class Slurp(App):
 
   def save_tabs(self):
     """The open tabs (and which one is shown, and their choices) in the config, for the next start"""
-    update_config(tabs=[{"destination": c.destination, "since": c.since_value, "scope": c.scope} for c in self.clusters],
+    update_config(tabs=[{"destination": c.destination, "since": c.since_value, "scope": c.scope,
+                         "collapse_arrays": c.collapse_arrays} for c in self.clusters],
                   active=self.cluster_index)
 
   def add_cluster(self, destination):
@@ -1038,7 +1042,7 @@ class Slurp(App):
     self.mark_sort_column(table)
     ordered = sorted(visible_jobs, key=SORT_KEYS[self.sort_column], reverse=self.sort_reverse)
     try:
-      items = list(self.collapse(ordered, cluster))
+      items = list(self.collapse(ordered, cluster)) if cluster.collapse_arrays else ordered
       rows = {item[0]: self.group_row(*item, cluster) for item in items if isinstance(item, tuple)}
     except Exception: # the list must show in any case: then without collapsed arrays
       log.exception("collapsing arrays in the job list failed")
@@ -1290,6 +1294,16 @@ class Slurp(App):
       self.open_file(job, job.stderr_path())
     else:
       self.open_view(f"job {job.jid}", lambda: JobScreen(job), kind="job", key=f"job {job.jid}")
+
+  @on(Checkbox.Changed, "#collapse-arrays")
+  def collapse_changed(self, event):
+    if event.value != self.cluster.collapse_arrays:
+      self.cluster.collapse_arrays = event.value
+      self.populate()
+      self.save_tabs()
+
+  def action_toggle_collapse(self):
+    self.query_one("#collapse-arrays", Checkbox).value = not self.cluster.collapse_arrays
 
   def toggle_group(self, key):
     self.cluster.expanded.symmetric_difference_update({key})
