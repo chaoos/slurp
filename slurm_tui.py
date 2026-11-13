@@ -9,6 +9,7 @@ running job.
 import argparse
 import asyncio
 import codecs
+import collections
 import fcntl
 import functools
 import json
@@ -297,7 +298,20 @@ class RemoteSSH:
     self.pending = {}            # command id -> {"event", "result" or "error"}
     self.next_id = 0
     self.token = ""
-    threading.Thread(target=self.heartbeat, daemon=True, name=f"heartbeat {destination}").start()
+    # diagnostics (the connection window)
+    self.events = collections.deque(maxlen=200) # (datetime, text)
+    self.hostname = ""           # of the login node
+    self.bytes_sent = self.bytes_received = 0 # in the command channel, all sessions
+    self.commands = 0            # sent, all sessions
+    self.started_at = self.ready_at = None # datetime of the start / the login of the current session
+    self.exit_code = None        # of the ssh process of the last session that ended
+    self.latencies = collections.deque(maxlen=50) # heartbeat round trips, seconds
+    self.argv = []
+    self.heartbeat_thread = None
+
+  def event(self, text):
+    self.events.append((datetime.now(), text))
+    log.debug(f"{self.destination}: {text}")
 
   @property
   def ready(self):
@@ -327,14 +341,24 @@ class RemoteSSH:
       self.generation += 1
       generation, self.token = self.generation, os.urandom(8).hex()
       self.state, self.error, self.connecting_since = "connecting", "", time.monotonic()
-      self.ping_sent = None
+      self.ping_sent, self.started_at, self.ready_at, self.exit_code = None, datetime.now(), None, None
+      replaced, self.pending = self.pending, {}
+    for entry in replaced.values(): # waiting for a session that was replaced: sent again in the new one
+      entry["error"] = "the session was replaced"
+      entry["event"].set()
+    if not os.path.isdir(self.socket_dir): # closed before
+      self.socket_dir = tempfile.mkdtemp(prefix=f"slurm-tui-{os.getuid()}-")
+      self.control_path = os.path.join(self.socket_dir, "control")
     try:
       os.unlink(self.control_path) # left by a broken session: ssh -M would not listen on it
     except OSError:
       pass
-    argv = ["ssh", "-M", "-S", self.control_path, "-o", "ControlMaster=yes", "-o", "ControlPersist=no",
-            "-T", "-x", "-a", self.destination, "exec /bin/sh"]
-    log.debug(f"starting the session: {shlex.join(argv)}")
+    if self.heartbeat_thread is None or not self.heartbeat_thread.is_alive():
+      self.heartbeat_thread = threading.Thread(target=self.heartbeat, daemon=True, name=f"heartbeat {self.destination}")
+      self.heartbeat_thread.start()
+    argv = self.argv = ["ssh", "-M", "-S", self.control_path, "-o", "ControlMaster=yes", "-o", "ControlPersist=no",
+                        "-T", "-x", "-a", self.destination, "exec /bin/sh"]
+    self.event(f"session {generation}: connecting")
     proc = subprocess.Popen([sys.executable, "-c", CTTY_STDERR, *argv], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=tty, start_new_session=True, env=os.environ | {"TERM": "xterm-256color"})
     self.proc = proc
@@ -343,7 +367,7 @@ class RemoteSSH:
              "trap 'rm -rf \"$d\"' EXIT\n"
              "trap 'exit 1' HUP INT TERM PIPE\n"
              'out() { until mkdir "$d/l" 2>/dev/null; do sleep 0.01; done; cat "$1"; rm -f "$1"; rmdir "$d/l"; }\n'
-             f"printf '\\n%s ready\\n%s\\n%s\\n%s\\n' {self.token} \"$(id -un)\" \"$(id -Gn)\" \"$HOME\"\n")
+             f"printf '\\n%s ready\\n%s\\n%s\\n%s\\n%s\\n' {self.token} \"$(id -un)\" \"$(id -Gn)\" \"$HOME\" \"$(hostname)\"\n")
     try:
       proc.stdin.write(setup.encode())
       proc.stdin.flush()
@@ -361,6 +385,7 @@ class RemoteSSH:
       chunk = os.read(fd, 1 << 16)
       if not chunk:
         raise EOFError("the session ended")
+      self.bytes_received += len(chunk)
       buf += chunk
     def line():
       nonlocal buf
@@ -381,13 +406,14 @@ class RemoteSSH:
         buf = buf[-len(marker):] if len(buf) > 1 << 20 else buf
         more()
       buf = buf.partition(marker)[2]
-      user, groups, home = (line().decode(errors="replace").strip() for _ in range(3))
+      user, groups, home, hostname = (line().decode(errors="replace").strip() for _ in range(4))
       with self.lock:
         if generation != self.generation or self.state == "closed":
           return
-        self.user, self.groups, self.home = user, groups.split(), home
-        self.state, self.last_answer = "ready", time.monotonic()
-      log.debug(f"session {self.destination} ready: {user} {home}")
+        self.user, self.groups, self.home, self.hostname = user, groups.split(), home, hostname
+        self.state, self.last_answer, self.ready_at = "ready", time.monotonic(), datetime.now()
+      self.event(f"session {generation}: connected as {user} on {hostname} "
+                 f"after {time.monotonic() - self.connecting_since:.1f} s")
       tok = token.encode()
       while True:
         head = line().split()
@@ -409,7 +435,7 @@ class RemoteSSH:
         if current:
           if self.state != "closed":
             self.state = "broken"
-          self.error = (self.error or error) if self.state == "broken" else ""
+          self.error = (self.error or error or "the session ended") if self.state == "broken" else ""
           failed, self.pending = self.pending, {}
         else:
           failed = {}
@@ -417,16 +443,32 @@ class RemoteSSH:
         entry["error"] = f"connection to {self.destination} lost: {error}"
         entry["event"].set()
       if current:
-        log.debug(f"session {self.destination} ended: {error}")
+        if isinstance(error, str) and error.startswith("unexpected output"):
+          try:
+            proc.kill()
+          except OSError:
+            pass
         try:
-          proc.kill() # e.g. after a protocol error
-        except OSError:
-          pass
+          self.exit_code = proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+          proc.kill()
+          self.exit_code = proc.wait()
+        if self.state != "closed":
+          self.event(f"session {generation} ended: {self.error} (ssh exit code {self.exit_code})")
+      else:
+        try:
+          code = proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+          proc.kill()
+          code = proc.wait()
+        self.event(f"session {generation} ended: replaced by session {self.generation} (ssh exit code {code})")
 
   def send(self, text):
+    data = text.encode()
     with self.write_lock:
-      self.proc.stdin.write(text.encode())
+      self.proc.stdin.write(data)
       self.proc.stdin.flush()
+      self.bytes_sent += len(data)
 
   def wrap(self, cid, argv, env=None, cwd=None):
     """Shell code that runs a command in the background and writes its result as one frame"""
@@ -461,6 +503,7 @@ class RemoteSSH:
         entries.append((cid, {"event": threading.Event()}))
         self.pending[cid] = entries[-1][1]
       script = "".join(self.wrap(cid, *r) for (cid, _), r in zip(entries, requests))
+      self.commands += len(requests)
     log.debug(f"round trip with {len(requests)} command(s): {shlex.join(map(str, requests[0][0][:4]))} ...")
     try:
       try:
@@ -512,9 +555,11 @@ class RemoteSSH:
       try:
         self.request([(["true"], None, None)], timeout=PING_DEAD)
         self.latency = time.monotonic() - sent
+        self.latencies.append(self.latency)
       except TimeoutError:
         if generation == self.generation and self.ready:
           log.warning(f"session {self.destination}: no answer for {PING_DEAD} s, reconnecting")
+          self.event(f"session {generation}: no answer to the heartbeat for {PING_DEAD} s, giving it up")
           self.error = f"no answer for {PING_DEAD} s"
           self.kill_session()
       except (EOFError, OSError):
@@ -660,6 +705,8 @@ class RemoteSSH:
 
   def close(self):
     """End the session: the remote shell exits on the end of its input and removes its temporary directory"""
+    if self.state != "closed":
+      self.event("closed")
     with self.lock:
       self.state = "closed"
       failed, self.pending = self.pending, {}
@@ -1635,6 +1682,7 @@ class SplitScreen(Screen):
     with Horizontal(id="bottombar"):
       yield Footer()
       yield Static(id="loadstatus")
+      yield ConnectionStatus(id="connstatus")
 
   def on_mount(self):
     self.call_after_refresh(self.app.refresh_status)
@@ -3720,6 +3768,260 @@ class AddClusterScreen(ModalScreen[str | None]):
   def action_cancel(self):
     self.dismiss(None)
 
+def process_tree(pid):
+  """pid and its descendants (e.g. the ssh -W of a ProxyJump, which holds the TCP connection)"""
+  children = {}
+  for entry in os.listdir("/proc"):
+    if entry.isdigit():
+      try:
+        with open(f"/proc/{entry}/stat") as f:
+          ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+        children.setdefault(ppid, []).append(int(entry))
+      except (OSError, ValueError, IndexError):
+        pass
+  pids, todo = [], [pid]
+  while todo:
+    p = todo.pop()
+    pids.append(p)
+    todo += children.get(p, [])
+  return pids
+
+def tcp_connections(pids):
+  """TCP sockets of the processes, from ss: [{"local", "peer", "pid", "bytes_sent", "bytes_received", "rtt", ...}]"""
+  try:
+    out = subprocess.run(["ss", "-tinpH"], capture_output=True, text=True, timeout=5).stdout
+  except (OSError, subprocess.TimeoutExpired):
+    return None
+  conns, header = [], None
+  for line in out.splitlines():
+    if not line[:1].isspace():
+      header = line
+      continue
+    if header is None:
+      continue
+    pid = next((p for p in pids if f"pid={p}," in header), None)
+    if pid is None:
+      continue
+    fields = header.split()
+    info = {"local": fields[3] if len(fields) > 4 else "?", "peer": fields[4] if len(fields) > 4 else "?", "pid": pid,
+            "state": fields[0] if fields else "?"}
+    for key, pattern in [("bytes_sent", r"bytes_sent:(\d+)"), ("bytes_received", r"bytes_received:(\d+)"),
+                         ("rtt", r"\brtt:([\d.]+)"), ("retrans", r"retrans:\d+/(\d+)"), ("lastrcv", r"lastrcv:(\d+)"),
+                         ("lastsnd", r"lastsnd:(\d+)")]:
+      m = re.search(pattern, line)
+      info[key] = float(m.group(1)) if m else None
+    conns.append(info)
+  return conns
+
+def ssh_config(destination):
+  """What OpenSSH makes of a destination (ssh -G: no connection is made)"""
+  try:
+    out = subprocess.run(["ssh", "-G", destination], capture_output=True, text=True, timeout=5).stdout
+  except (OSError, subprocess.TimeoutExpired):
+    return {}
+  conf = {}
+  for line in out.splitlines():
+    key, _, value = line.partition(" ")
+    conf.setdefault(key, value)
+  return conf
+
+def ago(seconds):
+  if seconds is None:
+    return "-"
+  seconds = int(seconds)
+  if seconds < 60:
+    return f"{seconds} s"
+  if seconds < 3600:
+    return f"{seconds // 60} min {seconds % 60} s"
+  return f"{seconds // 3600} h {seconds // 60 % 60} min"
+
+class ConnectionScreen(ModalScreen):
+  """The SSH session of a tab: state, the course of a (re)connect, traffic and diagnostics; reconnect/disconnect"""
+  DEFAULT_CSS = """
+  ConnectionScreen { align: center middle; }
+  #conn-dialog { width: 110; max-width: 98%; height: 90%; border: thick $accent; background: $surface; padding: 0 1; }
+  #conn-title { text-style: bold; height: 1; margin-bottom: 1; }
+  #conn-body { height: 1fr; }
+  #conn-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #conn-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "close", "Close"), Binding("R", "reconnect", "Reconnect")]
+
+  def __init__(self, cluster):
+    super().__init__()
+    self.cluster = cluster
+    self.config, self.tcp, self.tcp_time = None, None, 0.0
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="conn-dialog"):
+      yield Static(id="conn-title")
+      with VerticalScroll(id="conn-body"):
+        yield Static(id="conn-info")
+      with Horizontal(id="conn-buttons"):
+        if self.cluster.destination:
+          yield Button("Reconnect", id="conn-reconnect", variant="primary", tooltip="end the session and log in again (R)")
+          yield Button("Disconnect", id="conn-disconnect", variant="error")
+        yield Button("Close", id="conn-close")
+
+  def on_mount(self):
+    self.query_one("#conn-title", Static).update(
+      Text(f"Connection of the tab {self.cluster.name}" + (f" · ssh {self.cluster.destination}" if self.cluster.destination else "")))
+    if self.cluster.destination:
+      dest = self.cluster.destination
+      in_background(self, lambda: ssh_config(dest), self.got_config, group="ssh-config", connection=None)
+    self.set_interval(0.5, self.show)
+    self.show()
+
+  def got_config(self, config):
+    self.config = config or {}
+    self.show()
+
+  def poll_tcp(self):
+    """the TCP connection of the ssh process, from ss (every 2 s, in the background)"""
+    c = self.cluster.connection
+    proc = c.proc if c else None
+    if proc is None or proc.poll() is not None or time.monotonic() - self.tcp_time < 2:
+      return
+    self.tcp_time = time.monotonic()
+    pid = proc.pid
+    def got(conns):
+      self.tcp = conns
+    in_background(self, lambda: tcp_connections(process_tree(pid)), got, group="tcp", connection=None)
+
+  def status(self):
+    """The course of the current (re)connect, in words"""
+    cluster, c = self.cluster, self.cluster.connection
+    if c is None or c.state == "new":
+      return Text("not connected", style="dim")
+    now = time.monotonic()
+    if c.state == "ready":
+      waiting = c.responding()
+      if waiting is not None and waiting > PING_SLOW:
+        return Text(f"connected, but no answer to the heartbeat for {waiting:.0f} s "
+                    f"(given up after {PING_DEAD} s)", style="bold red")
+      return Text(f"connected since {c.ready_at:%Y-%m-%d %H:%M:%S} ({ago((datetime.now() - c.ready_at).total_seconds())})",
+                  style="bold green")
+    if c.state == "connecting":
+      t = cluster.login_terminal
+      printed = t is not None and t.vt is not None and any(line.strip() for line in t.vt.display)
+      text = Text(f"connecting for {now - c.connecting_since:.0f} s (attempt {max(cluster.attempts, 1)})", style="bold yellow")
+      if printed:
+        text.append(" · the login may wait for input: answer it in the pane on the right (close this window)",
+                    style="yellow")
+      return text
+    if c.state == "closed":
+      return Text("disconnected (closed) · Reconnect logs in again", style="bold")
+    delay = SlurmTUI.RECONNECT_DELAYS[min(cluster.attempts, len(SlurmTUI.RECONNECT_DELAYS) - 1)]
+    left = max(0, delay - (now - (cluster.broken_at or now)))
+    text = Text(f"failed: {c.error or 'the session ended'}" + (f" (ssh exit code {c.exit_code})" if c.exit_code is not None else ""),
+                style="bold red")
+    if c.wanted:
+      text.append(f" · next attempt in {left:.0f} s" if left >= 1 else " · reconnecting", style="red")
+    return text
+
+  def show(self):
+    if not self.is_mounted:
+      return
+    cluster, c = self.cluster, self.cluster.connection
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="bold", no_wrap=True)
+    grid.add_column()
+    def section(title):
+      grid.add_row("", "")
+      grid.add_row(Text(title, style="bold underline"), "")
+    if not cluster.destination:
+      grid.add_row("Machine", f"local ({os.uname().nodename}), commands run directly, no SSH")
+      self.query_one("#conn-info", Static).update(grid)
+      return
+    self.poll_tcp()
+    grid.add_row("Status", self.status())
+    if c is not None:
+      grid.add_row("Logged in as", f"{c.user or '-'} on {c.hostname or '-'}" + (f" (home {c.home})" if c.home else ""))
+      if c.groups:
+        grid.add_row("Groups", ", ".join(c.groups))
+      grid.add_row("Session", f"number {c.generation}" + (f", started {c.started_at:%H:%M:%S}" if c.started_at else "")
+                   + (f", reconnect attempts {cluster.attempts}" if cluster.attempts > 1 else ""))
+    conf = self.config
+    if conf is None:
+      grid.add_row("Destination", f"{cluster.destination} …")
+    elif conf:
+      target = f"{conf.get('user', '?')}@{conf.get('hostname', '?')}:{conf.get('port', '?')}"
+      grid.add_row("Destination", f"{cluster.destination} → {target}")
+      for key, label in [("proxyjump", "Proxy jump"), ("identityfile", "Identity file"),
+                         ("serveraliveinterval", "Server alive"), ("connecttimeout", "Connect timeout")]:
+        value = conf.get(key)
+        if value and value != "none":
+          if key == "serveraliveinterval":
+            value = f"every {value} s, gives up after {conf.get('serveralivecountmax', '?')} missed"
+          grid.add_row(label, value)
+    if c is not None:
+      section("Command channel")
+      now = time.monotonic()
+      grid.add_row("Traffic", f"{humanize.naturalsize(c.bytes_sent)} sent, {humanize.naturalsize(c.bytes_received)} received, "
+                   f"{c.commands} commands (all sessions)")
+      grid.add_row("Waiting", f"{len(c.pending)} commands" + (f", last answer {ago(now - c.last_answer)} ago" if c.last_answer else ""))
+      if c.latencies:
+        grid.add_row("Heartbeat", f"round trip {c.latencies[-1] * 1000:.0f} ms (average {sum(c.latencies) / len(c.latencies) * 1000:.0f} ms, "
+                     f"max {max(c.latencies) * 1000:.0f} ms of {len(c.latencies)}), every {PING_INTERVAL} s when idle")
+      else:
+        grid.add_row("Heartbeat", f"none yet (sent after {PING_INTERVAL} s without an answer from the cluster)")
+      section("SSH process")
+      proc = c.proc
+      if proc is None:
+        grid.add_row("Process", "-")
+      else:
+        code = proc.poll()
+        grid.add_row("Process", f"pid {proc.pid}, " + ("running" if code is None else f"ended with exit code {code}"))
+      grid.add_row("Control socket", c.control_path)
+      if c.argv:
+        grid.add_row("Command", shlex.join(c.argv))
+      if self.tcp is None:
+        grid.add_row("TCP", "…" if proc is not None and proc.poll() is None else "-")
+      elif not self.tcp:
+        grid.add_row("TCP", "no TCP connection of the ssh process found")
+      for conn in self.tcp or []:
+        details = [f"{conn['local']} → {conn['peer']} ({conn['state']})"]
+        if conn["bytes_sent"] is not None:
+          details.append(f"{humanize.naturalsize(conn['bytes_sent'])} sent, {humanize.naturalsize(conn['bytes_received'] or 0)} received "
+                         "(the whole connection, shells included)")
+        if conn["rtt"] is not None:
+          details.append(f"rtt {conn['rtt']:.1f} ms" + (f", {conn['retrans']:.0f} retransmissions" if conn["retrans"] else "")
+                         + (f", last data received {conn['lastrcv'] / 1000:.1f} s ago" if conn["lastrcv"] is not None else ""))
+        grid.add_row("TCP", "\n".join(details))
+      t = cluster.login_terminal
+      lines = [line.rstrip() for line in t.vt.display if line.strip()] if t is not None and t.vt is not None else []
+      if lines:
+        section("Login output")
+        for line in lines[-10:]:
+          grid.add_row("", Text(line))
+      section("Events")
+      for when, text in list(c.events)[-25:][::-1]:
+        style = "red" if any(w in text for w in ("ended", "no answer", "failed")) else "green" if "connected as" in text else ""
+        grid.add_row(f"{when:%H:%M:%S}", Text(text, style=style))
+    self.query_one("#conn-info", Static).update(grid)
+    self.shown = grid
+
+  @on(Button.Pressed, "#conn-reconnect")
+  def action_reconnect(self):
+    if self.cluster.destination:
+      self.app.reconnect(self.cluster)
+      self.show()
+
+  @on(Button.Pressed, "#conn-disconnect")
+  def disconnect_pressed(self):
+    self.app.disconnect(self.cluster)
+    self.show()
+
+  @on(Button.Pressed, "#conn-close")
+  def action_close(self):
+    self.dismiss()
+
+class ConnectionStatus(Static):
+  """State of the SSH session in the footer; a click opens the connection window"""
+  def on_click(self, event):
+    event.stop()
+    self.app.action_connection()
+
 class SlurmTUI(App):
   TITLE = "slurm_tui"
   CSS = """
@@ -3737,6 +4039,8 @@ class SlurmTUI(App):
   #bottombar { dock: bottom; height: 1; }
   #bottombar Footer { dock: none; width: 1fr; }
   #loadstatus { width: auto; height: 1; padding: 0 1; background: $footer-background; color: $warning; }
+  #connstatus { width: auto; height: 1; padding: 0 1; background: $footer-background; }
+  #connstatus:hover { background: $accent; }
   #back { width: 3; min-width: 3; height: 1; padding: 0; }
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
@@ -3790,6 +4094,7 @@ class SlurmTUI(App):
     Binding("o", "open('stdout')", "Output file"),
     Binding("t", "cluster_shell", "Shell"),
     Binding("a", "abort_load", "Abort loading"),
+    Binding("c", "connection", "Connection"),
     Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
     Binding("ctrl+x", "close_shell", "Close shell"),
   ]
@@ -3853,8 +4158,6 @@ class SlurmTUI(App):
     if cluster.connection is None:
       cluster.connection = RemoteSSH(cluster.destination)
     c = cluster.connection
-    if c.state == "closed": # the user closed the login before: a new connection
-      c = cluster.connection = RemoteSSH(cluster.destination)
     c.wanted = True
     if cluster.login_terminal and not cluster.login_terminal.done:
       cluster.login_terminal.terminate()
@@ -3943,6 +4246,44 @@ class SlurmTUI(App):
 
   RECONNECT_DELAYS = (0, 5, 15, 30, 60) # seconds before the 1st, 2nd, ... attempt to reconnect a broken session
 
+  def action_connection(self):
+    if not isinstance(self.screen, ConnectionScreen):
+      self.push_screen(ConnectionScreen(self.cluster), lambda _: self.connection_window_closed())
+
+  def connection_window_closed(self):
+    """A login started in the window waits in the pane: give it the keys"""
+    if self.shell is not None and self.shell is self.cluster.login_terminal and not self.shell.done:
+      self.call_after_refresh(self.focus_terminal)
+
+  def reconnect(self, cluster):
+    """End the session of a tab (if any) and log in again"""
+    global ssh_connection
+    if cluster.connection is not None:
+      cluster.connection.event("reconnect requested")
+    if cluster.login_terminal is not None:
+      cluster.login_terminal.terminate()
+    cluster.attempts, cluster.broken_at = 0, None
+    self.login(cluster, show=True)
+    if cluster is self.cluster:
+      ssh_connection = cluster.connection
+      self.show_tab_shell()
+    self.refresh_status()
+
+  def disconnect(self, cluster):
+    """End the session of a tab; it stays disconnected until the tab is selected or Reconnect is pressed"""
+    c = cluster.connection
+    if c is None:
+      return
+    c.wanted = False
+    c.close()
+    if cluster.login_terminal is not None:
+      cluster.login_terminal.terminate()
+    cluster.show_login = False
+    if self.shell is cluster.login_terminal:
+      self.shell = cluster.terminal
+      self.shell_changed()
+    self.refresh_status()
+
   def tick(self):
     """Every 0.25 s (only reads state, never waits): notice logins and broken sessions, reconnect, update the status"""
     self.spinner_frame += 1
@@ -3951,6 +4292,12 @@ class SlurmTUI(App):
       c = cluster.connection
       if c is None or not cluster.destination:
         continue
+      t = cluster.login_terminal
+      if t is not None and t.done and not getattr(t, "recorded", False):
+        t.recorded = True
+        lines = [line.strip() for line in t.vt.display if line.strip()] if t.vt is not None else []
+        if lines and c.state != "closed":
+          c.event("ssh said: " + " | ".join(lines[-3:]))
       if c.ready and cluster.ready_generation != c.generation: # (re)connected
         cluster.ready_generation, cluster.attempts, cluster.show_login = c.generation, 0, False
         cluster.broken_at = None
@@ -4003,7 +4350,7 @@ class SlurmTUI(App):
     if cluster.loader is None:
       return Text("")
     waiting = " (waiting for the connection)" if cluster.connection and not cluster.connection.ready else ""
-    return Text(f"{self.spinner()} loading jobs {time.monotonic() - cluster.load_started:.0f} s{waiting} · a: abort  ",
+    return Text(f"{self.spinner()} loading jobs {time.monotonic() - cluster.load_started:.0f} s{waiting} · a: abort",
                 style="yellow")
 
   def tab_label(self, cluster):
@@ -4039,12 +4386,14 @@ class SlurmTUI(App):
     """Tabs, the footer (state of the session of the active tab and of a load) and the status line of the job table"""
     self.refresh_cluster_tabs()
     cluster = self.cluster
-    footer = Text.assemble(self.load_text(cluster), self.connection_text(cluster))
+    loading, connection = self.load_text(cluster), self.connection_text(cluster)
     for screen in self.screen_stack:
       if not isinstance(screen, SplitScreen) or not screen.is_mounted:
         continue
       for widget in screen.query("#loadstatus"):
-        widget.update(footer)
+        widget.update(loading)
+      for widget in screen.query("#connstatus"):
+        widget.update(connection)
       if isinstance(screen, MainScreen) and screen.query("#reload"):
         screen.query_one("#status", Static).update(Text(cluster.summary))
         button = screen.query_one("#reload", Button)
@@ -4135,9 +4484,13 @@ class SlurmTUI(App):
       return
     cluster = self.cluster
     if self.shell is cluster.login_terminal: # closing the login gives up the connection
-      cluster.connection.wanted = False
-      cluster.connection.close()
-      cluster.login_terminal, cluster.show_login = None, False
+      self.disconnect(cluster)
+      cluster.login_terminal = None
+      self.shell = None
+      self.shell_changed()
+      self.call_after_refresh(self.focus_left)
+      self.refresh_status()
+      return
     if cluster.terminal is self.shell:
       cluster.terminal = None
     self.shell.terminate()
