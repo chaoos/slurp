@@ -164,8 +164,6 @@ class Slurp(App):
   BINDINGS = [
     Binding("q", "quit", "Quit"),
     Binding("r", "reload", "Reload"),
-    Binding("e", "open('stderr')", "Error file"),
-    Binding("o", "open('stdout')", "Output file"),
     Binding("t", "cluster_shell", "Shell"),
     Binding("d", "login_dir", "Home dir"),
     Binding("i", "interactive_job", "Interactive job"),
@@ -791,7 +789,7 @@ class Slurp(App):
   def check_action(self, action, parameters):
     if not self.clusters and action not in ("quit", "command_palette", "help_quit"):
       return False # no tab: only + (and quit)
-    if action in ("open", "reload"): # keys of the job table, not of the other windows
+    if action == "reload": # a key of the job table, not of the other windows
       return self.screen is self.main
     if action in ("switch_side", "close_shell"):
       return self.shell is not None
@@ -1078,14 +1076,6 @@ class Slurp(App):
   def open_file(self, job, path):
     open_path(self, ["Jobs", job.jid], path, [job.rec["WorkDir"]], job_vars(job), follow=job.running)
 
-  def action_open(self, kind):
-    job = self.current_job()
-    path = job and (job.stderr_path() if kind == "stderr" else job.stdout_path())
-    if not path:
-      self.notify(f"no {kind} file" + (" (stderr goes to the output file)" if job and kind == "stderr" and job.merged() else ""),
-                  severity="warning")
-      return
-    self.open_file(job, path)
 
 REPORTS_OFF = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1015l\x1b[?1006l\x1b[?1004l" # mouse and focus reporting off
 

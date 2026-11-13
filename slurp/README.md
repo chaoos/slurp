@@ -289,8 +289,8 @@ top-left `←` button to go back.
 
 | Screen | Main controls |
 |---|---|
-| Job list | `/` search jobs; `Enter` open; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `c` connection window; `e` open stderr; `o` open stdout; `q` quit |
-| Job details | `Cancel job` / `Restart job` / `Run array`; `r` reload; `e` / `o` open error/output; `s` shell on the node (subtab) |
+| Job list | `/` search jobs; `Enter` open; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `c` connection window; `q` quit |
+| Job details | `Cancel job` / `Restart job` / `Run array`; `r` reload; `s` shell on the node (subtab) |
 | Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |

@@ -64,8 +64,6 @@ class JobScreen(SplitScreen):
   BINDINGS = [
     Binding("escape,backspace", "back", "Back"),
     Binding("r", "reload", "Reload"),
-    Binding("e", "open('stderr')", "Error file"),
-    Binding("o", "open('stdout')", "Output file"),
     Binding("s", "shell", "Shell on node"),
   ]
 
@@ -467,13 +465,6 @@ class JobScreen(SplitScreen):
 
   def action_reload(self):
     self.load(refresh_job=True)
-
-  def action_open(self, kind):
-    for e in self.details["files"]:
-      if e.kind == kind and e.path:
-        self.open_entry(e)
-        return
-    self.notify(f"no {kind} file", severity="warning")
 
   def context(self):
     """Base directories and variables to resolve paths in texts of this job"""
