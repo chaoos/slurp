@@ -2113,6 +2113,11 @@ SORT_KEYS = {
 
 class MainScreen(SplitScreen):
   """The job table"""
+  BINDINGS = [
+    Binding("slash", "filter", "Filter jobs"),
+    Binding("escape", "clear_filter", "Clear filter", show=False),
+  ]
+
   def compose_left(self):
     with Horizontal(id="toolbar"):
       yield Button("Reload", id="reload", variant="primary")
@@ -2121,6 +2126,22 @@ class MainScreen(SplitScreen):
       yield Checkbox("all my accounts", id="us")
     yield Static(id="status")
     yield ClickTable(id="jobs", cursor_type="row", zebra_stripes=True)
+    yield Input(id="jfilter", placeholder="filter jobs by name, command, ID, state, user, account, path…")
+
+  def action_filter(self):
+    search = self.query_one("#jfilter", Input)
+    search.add_class("visible")
+    search.value = self.app.job_filter
+    search.focus()
+
+  def action_clear_filter(self):
+    search = self.query_one("#jfilter", Input)
+    if search.has_class("visible"):
+      search.value = ""
+      search.remove_class("visible")
+      self.app.job_filter = ""
+      self.app.populate()
+      self.query_one("#jobs", ClickTable).focus()
 
   def on_mount(self):
     table = self.query_one("#jobs", ClickTable)
@@ -2151,8 +2172,8 @@ class SlurmTUI(App):
   #presets Button { margin-right: 1; min-width: 8; }
   #fstatus { height: 1; padding: 0 1; background: $panel; }
   #text { height: 1fr; }
-  #search, #dfilter { dock: bottom; display: none; }
-  #search.visible, #dfilter.visible { display: block; }
+  #search, #dfilter, #jfilter { dock: bottom; display: none; }
+  #search.visible, #dfilter.visible, #jfilter.visible { display: block; }
   #dstatus { height: 1; padding: 0 1; background: $panel; }
   #dir { height: 1fr; }
   #hstatus, #hpage { height: 1; padding: 0 1; background: $panel; }
@@ -2188,6 +2209,7 @@ class SlurmTUI(App):
     self.jobs = {}
     self.sort_column, self.sort_reverse = "jobid", True
     self.since = None
+    self.job_filter = ""
 
   def get_default_screen(self):
     return MainScreen()
@@ -2300,7 +2322,7 @@ class SlurmTUI(App):
     if not get_current_worker().is_cancelled:
       self.call_from_thread(self.populate, jobs)
 
-  def populate(self, jobs):
+  def populate(self, jobs=None):
     table = self.query_one("#jobs", ClickTable)
     current = None
     if table.row_count:
@@ -2308,9 +2330,17 @@ class SlurmTUI(App):
         current = table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0)).row_key.value
       except Exception:
         pass
-    self.jobs = {job.jid: job for job in jobs}
+    if jobs is not None:
+      self.jobs = {job.jid: job for job in jobs}
+    all_jobs = list(self.jobs.values())
+    pattern = self.job_filter.casefold()
+    visible_jobs = [job for job in all_jobs if not pattern or pattern in " ".join(str(value or "") for value in (
+      job.jid, job.rec.get("JobName"), job.state, job.rec.get("User"), job.rec.get("Account"),
+      job.rec.get("Partition"), job.rec.get("NodeList"), job.rec.get("WorkDir"), job.command,
+      job.rec.get("SubmitLine"), job.rec.get("ExitCode"),
+    )).casefold()]
     table.clear()
-    for job in sorted(jobs, key=SORT_KEYS[self.sort_column], reverse=self.sort_reverse):
+    for job in sorted(visible_jobs, key=SORT_KEYS[self.sort_column], reverse=self.sort_reverse):
       rec = job.rec
       state = job.state if job.queued and job.state != "PENDING" else \
               f"{job.state} ({job.reason})" if job.queued else f"{job.state} ({rec['ExitCode']})"
@@ -2319,18 +2349,20 @@ class SlurmTUI(App):
         job.jid, rec["JobName"], state_text(state), rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
         ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]), err_text(job.err),
         job.command[:150], key=job.jid)
-    if current in self.jobs:
+    if current in {job.jid for job in visible_jobs}:
       table.move_cursor(row=table.get_row_index(current))
     table.loading = False
     if not isinstance(self.focused, Input): # loading took the focus away from the table (to the Reload button)
       table.focus()
-    queued = [j for j in jobs if j.queued]
+    queued = [j for j in all_jobs if j.queued]
     running = sum(j.running for j in queued)
-    finished = [j for j in jobs if not j.queued]
-    errors = sum(j.err[0] == "file" and j.err[1] > 0 for j in jobs)
+    finished = [j for j in all_jobs if not j.queued]
+    errors = sum(j.err[0] == "file" and j.err[1] > 0 for j in all_jobs)
     status = f"{len(queued)} queued ({running} running, {len(queued)-running} pending)"
     if self.since:
       status += f" · {len(finished)} finished since {self.since:%m-%d %H:%M}, {sum(j.node_hours() for j in finished):.1f} node hours"
+    if pattern:
+      status += f" · {len(visible_jobs)} of {len(all_jobs)} jobs match '{self.job_filter}'"
     if errors:
       status += f" · {errors} with output in their error file"
     self.query_one("#status", Static).update(status + f" · updated {datetime.now():%H:%M:%S}")
@@ -2341,6 +2373,16 @@ class SlurmTUI(App):
   @on(Checkbox.Changed, "#us")
   def reload_requested(self, event):
     self.action_reload()
+
+  @on(Input.Changed, "#jfilter")
+  def job_filter_changed(self, event):
+    self.job_filter = event.value
+    self.populate(list(self.jobs.values()))
+
+  @on(Input.Submitted, "#jfilter")
+  def job_filter_submitted(self, event):
+    event.input.remove_class("visible")
+    self.query_one("#jobs", ClickTable).focus()
 
   @on(DataTable.HeaderSelected, "#jobs")
   def sort_by(self, event):
