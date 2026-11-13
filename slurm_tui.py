@@ -1674,6 +1674,7 @@ class SplitScreen(Screen):
       for index, cluster in enumerate(self.app.clusters):
         variant = "primary" if index == self.app.cluster_index else "default"
         yield Button(cluster.name, id=f"cluster-tab-{index}", classes="cluster-tab", variant=variant, compact=True)
+        yield Button("✕", id=f"cluster-close-{index}", classes="cluster-close", compact=True, tooltip="close the tab")
       yield Button("+", id="cluster-add", tooltip="Add a local or SSH cluster", compact=True)
     with Horizontal(id="topbar"):
       if self.SHOW_BACK:
@@ -1701,6 +1702,10 @@ class SplitScreen(Screen):
     if event.button.id and event.button.id.startswith("cluster-tab-"):
       event.stop()
       self.app.select_cluster(int(event.button.id.rsplit("-", 1)[1]))
+      return
+    if event.button.id and event.button.id.startswith("cluster-close-"):
+      event.stop()
+      self.app.confirm_close_cluster(int(event.button.id.rsplit("-", 1)[1]))
       return
     if event.button.id != "back":
       return
@@ -4040,6 +4045,9 @@ class SlurmTUI(App):
   #topbar { height: 1; }
   #cluster-tabs { height: 1; padding: 0 1; background: $panel; }
   #cluster-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 1; }
+  #cluster-tabs Button.cluster-tab { margin-right: 0; }
+  #cluster-tabs Button.cluster-close { width: 3; min-width: 3; padding: 0; margin-right: 2; color: $text-muted; }
+  #cluster-tabs Button.cluster-close:hover { color: $error; }
   #topbar Header { dock: none; width: 1fr; height: 1; }
   #bottombar { dock: bottom; height: 1; }
   #bottombar Footer { dock: none; width: 1fr; }
@@ -4240,6 +4248,51 @@ class SlurmTUI(App):
       self.pop_screen()
     self.activate_cluster(index)
 
+  def confirm_close_cluster(self, index):
+    if not 0 <= index < len(self.clusters):
+      return
+    if len(self.clusters) == 1:
+      self.notify("the last tab cannot be closed", severity="warning")
+      return
+    cluster = self.clusters[index]
+    what = ["its job list"]
+    if cluster.destination:
+      what.insert(0, "its SSH session")
+    if cluster.terminal is not None and not cluster.terminal.done:
+      what.append("its shell")
+    self.push_screen(ConfirmScreen(f"Close the tab {cluster.name}?", f"This ends {', '.join(what[:-1])} and {what[-1]}."
+                                   if len(what) > 1 else f"This ends {what[0]}.", "Close tab"),
+                     lambda ok: self.close_cluster(cluster) if ok else None)
+
+  def close_cluster(self, cluster):
+    """Close a tab: its loads, shells and SSH session end"""
+    global ssh_connection
+    if cluster not in self.clusters or len(self.clusters) == 1:
+      return
+    index = self.clusters.index(cluster)
+    current = cluster is self.cluster
+    if cluster.loader is not None:
+      cluster.loader.abort.set()
+      cluster.loader.cancel()
+      cluster.loader = None
+    for terminal in (cluster.terminal, cluster.login_terminal):
+      if terminal is not None:
+        terminal.terminate()
+    if cluster.connection is not None:
+      cluster.connection.wanted = False
+      cluster.connection.close()
+    if self.shell is not None and self.shell in (cluster.terminal, cluster.login_terminal):
+      self.shell = None
+      self.shell_changed()
+    self.clusters.pop(index)
+    if current:
+      for _ in range(len(self.screen_stack) - 1):
+        self.pop_screen()
+      self.activate_cluster(min(index, len(self.clusters) - 1))
+    elif index < self.cluster_index:
+      self.cluster_index -= 1
+    self.refresh_status()
+
   def add_cluster(self, destination):
     if destination is None:
       return
@@ -4386,7 +4439,11 @@ class SlurmTUI(App):
             button.label = label
         else:
           tabs.mount(Button(label, id=button_id, classes="cluster-tab", variant=variant, compact=True),
+                     Button("✕", id=f"cluster-close-{index}", classes="cluster-close", compact=True, tooltip="close the tab"),
                      before=add.first())
+      for button in tabs.query("Button.cluster-tab, Button.cluster-close"): # of closed tabs
+        if int(button.id.rsplit("-", 1)[1]) >= len(self.clusters):
+          button.remove()
 
   def refresh_status(self):
     """Tabs, the footer (state of the session of the active tab and of a load) and the status line of the job table"""
