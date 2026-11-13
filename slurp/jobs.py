@@ -131,6 +131,95 @@ def progress_path(job):
   """The file checked for n/N lines: the one chosen for the job, else its output file"""
   return progress_state(job.jid)["file"] or job.stdout_path()
 
+# ---- progress files of a whole array, guessed from the one chosen for one of its tasks
+
+ARRAY_PATTERNS = {} # (tab, array job id) -> pattern from progress_pattern()
+_saved_array_patterns = None
+
+def progress_pattern(path, task, raw):
+  """A pattern for the progress files of the other tasks of an array, from the file chosen for one task: digit groups
+  equal to the task's index (zero padding allowed) or else to its job id become placeholders, all other digit
+  groups (dates, times, ...) match any digits. None if neither the index nor the job id is in the path."""
+  # the index as it is written: exactly, else zero-padded (07 for 7) if it is nowhere exactly (a time like 10-01-07
+  # must not count as task 1 when the name also has a plain 1)
+  groups = re.findall(r"\d+", path)
+  exact = task is not None and str(task) in groups
+  def is_task(part):
+    if task is None:
+      return False
+    return part == str(task) if exact else part.lstrip("0") == str(int(task)) and len(part) > len(str(task))
+  def template(text, regex):
+    out, found = [], set()
+    for i, part in enumerate(re.split(r"(\d+)", text)):
+      if i % 2 == 0:
+        out.append(re.escape(part) if regex else part)
+      elif is_task(part):
+        out.append("{task}"); found.add("task")
+      elif part == raw:
+        out.append("{raw}"); found.add("raw")
+      else:
+        out.append(r"\d+" if regex else part)
+    return "".join(out), found
+  directory, name = os.path.split(path)
+  dir_tpl, dir_found = template(directory, False)
+  name_tpl, name_found = template(name, True)
+  if not (dir_found | name_found):
+    return None
+  return {"dir": dir_tpl, "name": name_tpl}
+
+def pattern_for(pattern, task, raw):
+  """(directory, compiled name regex) of the pattern for a task"""
+  directory = pattern["dir"].replace("{task}", str(task)).replace("{raw}", str(raw))
+  name = pattern["name"].replace("{task}", "0*" + re.escape(str(task))).replace("{raw}", re.escape(str(raw)))
+  return directory, re.compile(name + "$")
+
+def array_pattern(array_id):
+  global _saved_array_patterns
+  key = (tab_name(), array_id)
+  if key not in ARRAY_PATTERNS:
+    if _saved_array_patterns is None:
+      from .config import load_config
+      _saved_array_patterns = dict(load_config().get("array_progress_patterns") or {})
+    saved = _saved_array_patterns.get(f"{key[0]}|{array_id}")
+    if saved:
+      ARRAY_PATTERNS[key] = saved
+  return ARRAY_PATTERNS.get(key)
+
+def set_array_pattern(array_id, pattern):
+  global _saved_array_patterns
+  from .config import load_config, update_config
+  ARRAY_PATTERNS[(tab_name(), array_id)] = pattern
+  saved = dict(load_config().get("array_progress_patterns") or {})
+  saved[f"{tab_name()}|{array_id}"] = pattern
+  _saved_array_patterns = saved
+  update_config(array_progress_patterns=saved)
+
+def guess_array_progress(jobs, only_missing=True):
+  """Progress files for the running tasks of arrays that have a pattern, without a file of their own: the newest file
+  of each task's directory that matches (one listing per directory). -> {job id: file}"""
+  wanted = []
+  for job in jobs:
+    task = array_task_id(job)
+    if task is None or not job.running or only_missing and progress_state(job.jid)["file"]:
+      continue
+    pattern = array_pattern(job.jid.partition("_")[0])
+    if pattern:
+      wanted.append((job, *pattern_for(pattern, task, job.rec.get("JobIDRaw", ""))))
+  listings, found = {}, {}
+  for job, directory, rx in wanted:
+    if directory not in listings:
+      try:
+        with fs_scandir(directory) as entries:
+          listings[directory] = [(e.name, e.stat().st_mtime) for e in entries if e.is_file()]
+      except OSError:
+        listings[directory] = []
+    matches = [(mtime, name) for name, mtime in listings[directory] if rx.match(name)]
+    if matches:
+      path = os.path.join(directory, max(matches)[1])
+      progress_state(job.jid)["file"] = path
+      found[job.jid] = path
+  return found
+
 LINE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})|(?<![\d:])(\d{2}):(\d{2}):(\d{2})(?![\d:])")
 
 def line_time(line):
@@ -611,6 +700,7 @@ def output_progress(path, tail=None):
 def annotate(jobs):
   """Command, error file and progress of the jobs. On a remote cluster the sizes of the error files, the tails of
   the output files and the batch scripts are fetched together, in one round trip."""
+  guess_array_progress(jobs) # progress files of array tasks, from the pattern of their array
   if conn() is None:
     cache = {}
     for job in jobs:

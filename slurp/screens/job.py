@@ -256,9 +256,32 @@ class JobScreen(SplitScreen):
     start = os.path.dirname(state["file"] or self.job.stdout_path() or "") or self.job.rec.get("WorkDir") or "/"
     def picked(path):
       set_progress_file(self.job.jid, path)
+      self.guess_array(path)
       self.notify(f"progress of job {self.job.jid} from {path}", timeout=4)
       self.load()
     self.app.push_screen(DirScreen(["Jobs", self.job.jid, "progress file"], start, pick=picked))
+
+  def guess_array(self, path):
+    """For an array task: the progress files of the other tasks, from the name of the file chosen for this one"""
+    task = array_task_id(self.job)
+    if task is None:
+      return
+    array_id = self.job.jid.partition("_")[0]
+    pattern = progress_pattern(path, task, self.job.rec.get("JobIDRaw", ""))
+    if pattern is None:
+      self.notify(f"the name of {os.path.basename(path)} has neither the array index {task} nor the job id: the progress "
+                  "files of the other tasks cannot be guessed", severity="warning", timeout=8)
+      return
+    set_array_pattern(array_id, pattern)
+    tasks = [j for j in self.app.jobs.values() if j.jid.partition("_")[0] == array_id and j.jid != self.job.jid]
+    running = [j for j in tasks if j.running]
+    def guessed(found):
+      if found is None:
+        return
+      self.notify(f"array {array_id}: progress files found for {len(found)} of {len(running)} other running tasks"
+                  + (f" ({len(tasks) - len(running)} not running)" if len(tasks) > len(running) else "")
+                  + "; the others are looked for again at every reload", timeout=8)
+    in_background(self, lambda: guess_array_progress(running), guessed, group="guess-array")
 
   @on(Button.Pressed, "#progress-stdout")
   def progress_from_stdout(self, event):
