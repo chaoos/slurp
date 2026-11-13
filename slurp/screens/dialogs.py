@@ -483,13 +483,16 @@ def local_clipboard(text):
       continue
   return None
 
+COPIED_FILE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "slurp", "copied.txt")
+
 class CopyScreen(ModalScreen):
-  """Text to copy by hand, when no clipboard tool took it: selected, for the selection of the terminal"""
+  """Text that went to the terminal (OSC 52) without knowing if it arrived: ways to get it by hand"""
   DEFAULT_CSS = """
   CopyScreen { align: center middle; }
-  #copy-dialog { width: 100; max-width: 95%; height: auto; max-height: 80%; border: thick $accent; background: $surface; padding: 1 2; }
-  #copy-text { height: auto; min-height: 3; max-height: 20; }
-  #copy-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #copy-dialog { width: 100; max-width: 95%; height: auto; max-height: 90%; border: thick $accent; background: $surface; padding: 1 2; }
+  #copy-text { height: auto; min-height: 3; max-height: 12; }
+  #copy-buttons { height: auto; margin-top: 1; }
+  #copy-buttons Button { margin-right: 1; }
   """
   BINDINGS = [Binding("escape", "close", "Close", priority=True)]
 
@@ -500,29 +503,66 @@ class CopyScreen(ModalScreen):
   def compose(self) -> ComposeResult:
     with Vertical(id="copy-dialog"):
       yield Static(f"Copy {self.what}", classes="section")
-      yield Static("No clipboard tool here (wl-copy, xclip, xsel) and the terminal may ignore copying by the app "
-                   "(OSC 52). Copy the text below with the selection of your terminal (often Shift + drag), or install "
-                   "xclip / wl-clipboard to make the copy buttons work.", markup=False)
+      yield Static("Sent to your terminal (OSC 52), which puts it on your clipboard if it allows that: kitty, "
+                   "WezTerm, iTerm2, Alacritty, foot, Windows Terminal do; GNOME Terminal and Konsole don't; in tmux "
+                   "it needs 'set -g set-clipboard on'. Over SSH that is the only way to your clipboard. "
+                   "If it didn't arrive: Plain text shows it outside of slurp, to select with the mouse.", markup=False)
       yield TextArea(self.text, id="copy-text", read_only=True, soft_wrap=True)
       with Horizontal(id="copy-buttons"):
-        yield Button("Close", id="copy-close", variant="primary")
+        yield Button("Plain text", id="copy-plain", variant="primary")
+        yield Button("Save to a file", id="copy-save")
+        yield Button("It arrived, don't ask again", id="copy-arrived")
+        yield Button("Close", id="copy-close")
 
   def on_mount(self):
-    area = self.query_one("#copy-text", TextArea)
-    area.focus()
-    area.select_all()
+    self.query_one("#copy-plain", Button).focus()
+
+  @on(Button.Pressed, "#copy-plain")
+  def plain(self):
+    """The text in the normal screen of the terminal, where its own selection works"""
+    try:
+      with self.app.suspend():
+        sys.stdout.write("\x1b[2J\x1b[H" + self.text + "\n\n(select it with the mouse; Enter goes back to slurp) ")
+        sys.stdout.flush()
+        try:
+          input()
+        except EOFError:
+          pass
+    except Exception as e: # (no suspending in some drivers, e.g. the web or headless)
+      self.notify(f"cannot leave the app for that: {e}", severity="warning")
+
+  @on(Button.Pressed, "#copy-save")
+  def save(self):
+    try:
+      os.makedirs(os.path.dirname(COPIED_FILE), exist_ok=True)
+      with open(COPIED_FILE, "w") as f:
+        f.write(self.text + "\n")
+      self.notify(f"saved {self.what} to {COPIED_FILE}", timeout=8)
+    except OSError as e:
+      self.notify(f"cannot save to {COPIED_FILE}: {e}", severity="error")
+
+  @on(Button.Pressed, "#copy-arrived")
+  def arrived(self):
+    from ..config import update_config
+    update_config(copy="terminal")
+    self.notify("copying now only goes to the terminal (to ask again: remove \"copy\" from the config)", timeout=6)
+    self.dismiss()
 
   @on(Button.Pressed, "#copy-close")
   def action_close(self):
     self.dismiss()
 
 def copy_text(app, text, what="the text"):
-  """Copy text: with the clipboard tool of this machine if there is one, and with the terminal (OSC 52; works only
-  in terminals that allow it); without a tool, a window shows the text to copy by hand"""
+  """Copy text: to the terminal (OSC 52; only terminals that allow it put it on the clipboard) and with the clipboard
+  tool of this machine if there is one; without a tool, a window offers ways to get the text by hand, unless the
+  terminal's copying was confirmed to work ("copy": "terminal" in the config)"""
+  from ..config import load_config
   send_osc52(app, text) # OSC 52, through the terminal (wrapped for tmux and screen)
   tool = local_clipboard(text)
   if tool:
     app.notify(f"copied {what} ({tool})", timeout=4)
+  elif load_config().get("copy") == "terminal":
+    app.notify(f"copied {what} (through the terminal)", timeout=4)
   else:
     app.push_screen(CopyScreen(text, what))
   return tool
