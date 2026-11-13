@@ -442,3 +442,68 @@ class AddClusterScreen(ModalScreen[str | None]):
 
   def action_cancel(self):
     self.dismiss(None)
+
+CLIPBOARD_TOOLS = [ # (needed environment, command): the first one there gets the text
+  ("WAYLAND_DISPLAY", ["wl-copy"]),
+  ("DISPLAY", ["xclip", "-selection", "clipboard"]),
+  ("DISPLAY", ["xsel", "--clipboard", "--input"]),
+  (None, ["pbcopy"]),
+  (None, ["clip.exe"]),
+]
+
+def local_clipboard(text):
+  """Put text on the clipboard of this machine with its tool (wl-copy, xclip, xsel, pbcopy, clip.exe): the tool
+  used, or None if there is none (or it failed)"""
+  for env, cmd in CLIPBOARD_TOOLS:
+    if env and not os.environ.get(env) or not shutil.which(cmd[0]):
+      continue
+    try:
+      if subprocess.run(cmd, input=text.encode(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3).returncode == 0:
+        return cmd[0]
+    except (OSError, subprocess.TimeoutExpired):
+      continue
+  return None
+
+class CopyScreen(ModalScreen):
+  """Text to copy by hand, when no clipboard tool took it: selected, for the selection of the terminal"""
+  DEFAULT_CSS = """
+  CopyScreen { align: center middle; }
+  #copy-dialog { width: 100; max-width: 95%; height: auto; max-height: 80%; border: thick $accent; background: $surface; padding: 1 2; }
+  #copy-text { height: auto; min-height: 3; max-height: 20; }
+  #copy-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  """
+  BINDINGS = [Binding("escape", "close", "Close", priority=True)]
+
+  def __init__(self, text, what):
+    super().__init__()
+    self.text, self.what = text, what
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="copy-dialog"):
+      yield Static(f"Copy {self.what}", classes="section")
+      yield Static("No clipboard tool here (wl-copy, xclip, xsel) and the terminal may ignore copying by the app "
+                   "(OSC 52). Copy the text below with the selection of your terminal (often Shift + drag), or install "
+                   "xclip / wl-clipboard to make the copy buttons work.", markup=False)
+      yield TextArea(self.text, id="copy-text", read_only=True, soft_wrap=True)
+      with Horizontal(id="copy-buttons"):
+        yield Button("Close", id="copy-close", variant="primary")
+
+  def on_mount(self):
+    area = self.query_one("#copy-text", TextArea)
+    area.focus()
+    area.select_all()
+
+  @on(Button.Pressed, "#copy-close")
+  def action_close(self):
+    self.dismiss()
+
+def copy_text(app, text, what="the text"):
+  """Copy text: with the clipboard tool of this machine if there is one, and with the terminal (OSC 52; works only
+  in terminals that allow it); without a tool, a window shows the text to copy by hand"""
+  app.copy_to_clipboard(text) # OSC 52, through the terminal
+  tool = local_clipboard(text)
+  if tool:
+    app.notify(f"copied {what} ({tool})", timeout=4)
+  else:
+    app.push_screen(CopyScreen(text, what))
+  return tool

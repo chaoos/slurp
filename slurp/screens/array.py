@@ -14,7 +14,7 @@ from ..remote import *
 from ..jobs import *
 from ..widgets import *
 from .base import *
-from .dialogs import ConfirmScreen
+from .dialogs import ConfirmScreen, copy_text
 
 def seconds(elapsed):
   """Slurm elapsed time ([d-]hh:mm:ss) in seconds, None if it is not one"""
@@ -152,9 +152,8 @@ class ArrayScreen(SplitScreen):
 
   def copy(self, ids, what):
     text = ",".join(map(str, ids))
-    self.app.copy_to_clipboard(text)
     self.copied = text
-    self.notify(f"copied {len(ids)} ids of array {self.array_id} ({what})", timeout=4)
+    copy_text(self.app, text, f"{len(ids)} ids of array {self.array_id} ({what})")
 
   @on(Button.Pressed, "#arr-cancel, #arr-cancel-pending")
   def cancel_pressed(self, event):
