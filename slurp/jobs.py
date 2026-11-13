@@ -99,8 +99,33 @@ class JobProgress:
 
 PROGRESS = {} # (tab, job id) -> {"file": progress file chosen for the job or None, "points": [(epoch seen, n, N)]}
 
+_saved_progress_files = None # from the config: "tab|job id" -> file
+
 def progress_state(jid):
-  return PROGRESS.setdefault((tab_name(), jid), {"file": None, "points": []})
+  global _saved_progress_files
+  key = (tab_name(), jid)
+  if key not in PROGRESS:
+    if _saved_progress_files is None:
+      from .config import load_config
+      _saved_progress_files = dict(load_config().get("progress_files") or {})
+    PROGRESS[key] = {"file": _saved_progress_files.get(f"{key[0]}|{jid}"), "points": []}
+  return PROGRESS[key]
+
+def set_progress_file(jid, path):
+  """Choose the progress file of a job (None: its output); kept in the config"""
+  global _saved_progress_files
+  from .config import load_config, update_config
+  state = progress_state(jid)
+  state["file"] = path
+  state["points"].clear() # another file, other points
+  files = dict(load_config().get("progress_files") or {})
+  key = f"{tab_name()}|{jid}"
+  if path:
+    files[key] = path
+  else:
+    files.pop(key, None)
+  _saved_progress_files = files
+  update_config(progress_files=files)
 
 def progress_path(job):
   """The file checked for n/N lines: the one chosen for the job, else its output file"""

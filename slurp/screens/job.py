@@ -254,8 +254,7 @@ class JobScreen(SplitScreen):
     state = progress_state(self.job.jid)
     start = os.path.dirname(state["file"] or self.job.stdout_path() or "") or self.job.rec.get("WorkDir") or "/"
     def picked(path):
-      progress_state(self.job.jid)["file"] = path
-      progress_state(self.job.jid)["points"].clear() # another file, other points
+      set_progress_file(self.job.jid, path)
       self.notify(f"progress of job {self.job.jid} from {path}", timeout=4)
       self.load()
     self.app.push_screen(DirScreen(["Jobs", self.job.jid, "progress file"], start, pick=picked))
@@ -263,8 +262,7 @@ class JobScreen(SplitScreen):
   @on(Button.Pressed, "#progress-stdout")
   def progress_from_stdout(self, event):
     event.stop()
-    progress_state(self.job.jid)["file"] = None
-    progress_state(self.job.jid)["points"].clear()
+    set_progress_file(self.job.jid, None)
     self.load()
 
   def show_steps(self):
