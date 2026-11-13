@@ -1464,12 +1464,66 @@ def memory_probe_command(job_id):
     "cpu_kib=$(ps -o rss= -p \"$pids\" 2>/dev/null | awk '{sum += $1} END {print sum+0}'); "
     "printf 'CPU_KIB=%s\\n' \"$cpu_kib\"; printf 'JOB_PIDS=%s\\n' \"$pids\"; "
     "else printf 'CPU_UNAVAILABLE=no job process IDs found\\n'; printf 'JOB_PIDS=\\n'; fi; "
+    # NVIDIA: memory of the job's processes, and used/total of each GPU of the node
     "if command -v nvidia-smi >/dev/null 2>&1; then "
     "if gpu_output=$(nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null); then "
     "printf '%s\\n' \"$gpu_output\" | sed 's/^/GPU=/'; "
+    "nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | sed 's/^/GPUDEV=/'; "
     "else printf 'GPU_UNAVAILABLE=nvidia-smi query failed\\n'; fi; "
-    "else printf 'GPU_UNAVAILABLE=nvidia-smi not found\\n'; fi"
+    # AMD: rocm-smi lists processes with their VRAM in bytes, and the VRAM of each GPU
+    "elif command -v rocm-smi >/dev/null 2>&1; then "
+    "rocm-smi --showpids --csv 2>/dev/null | sed 's/^/AMDPROC=/'; "
+    "rocm-smi --showproductname --showmeminfo vram --csv 2>/dev/null | sed 's/^/AMDDEV=/'; "
+    "else printf 'GPU_UNAVAILABLE=no nvidia-smi or rocm-smi on the node\\n'; fi"
   )
+
+def amd_table(lines):
+  """rows of a rocm-smi --csv table (as dicts by lower-case header), from the line with a header on"""
+  rows, header = [], None
+  for line in lines:
+    cells = [c.strip() for c in line.split(",")]
+    if header is None:
+      if len(cells) > 1 and any(c.lower() in ("pid", "device") for c in cells):
+        header = [c.lower() for c in cells]
+      continue
+    if len(cells) == len(header):
+      rows.append(dict(zip(header, cells)))
+  return rows
+
+def parse_gpu_probe(lines, pids):
+  """Memory of the job's processes (bytes, None if unknown) and [(gpu, name, used, total bytes)] of a node"""
+  proc, devices = None, []
+  amd_proc, amd_dev = [], []
+  for line in lines:
+    key, _, value = line.partition("=")
+    if key == "GPU":
+      pid, sep, memory = value.partition(",")
+      match = re.match(r"\s*(\d+)", memory)
+      if sep and pid.strip() in pids and match:
+        proc = (proc or 0) + int(match.group(1)) * 1024**2
+      elif proc is None:
+        proc = 0
+    elif key == "GPUDEV":
+      f = [c.strip() for c in value.split(",")]
+      if len(f) == 4 and f[2].isdigit() and f[3].isdigit():
+        devices.append((f[0], f[1], int(f[2]) * 1024**2, int(f[3]) * 1024**2))
+    elif key == "AMDPROC":
+      amd_proc.append(value)
+    elif key == "AMDDEV":
+      amd_dev.append(value)
+  if amd_proc or amd_dev:
+    proc = 0
+    for row in amd_table(amd_proc):
+      vram = next((v for k, v in row.items() if "vram" in k), "")
+      if row.get("pid") in pids and vram.isdigit():
+        proc += int(vram)
+    for row in amd_table(amd_dev):
+      used = next((v for k, v in row.items() if "vram" in k and "used" in k), "")
+      total = next((v for k, v in row.items() if "vram" in k and "total" in k and "used" not in k), "")
+      name = next((v for k, v in row.items() if "series" in k or "product" in k or "name" in k), "")
+      if used.isdigit() and total.isdigit():
+        devices.append((row.get("device", "?"), name, int(used), int(total)))
+  return proc, devices
 
 def current_memory_usage(job):
   """Query current process RSS and per-job GPU usage; called only by the detail button."""
@@ -1482,7 +1536,7 @@ def current_memory_usage(job):
   for line in output.splitlines():
     if line.startswith("== "):
       node = line[3:].strip()
-      nodes[node] = {"cpu_kib": None, "pids": set(), "gpu_mib": 0, "gpu_error": ""}
+      nodes[node] = {"cpu_kib": None, "pids": set(), "gpu_lines": [], "gpu_error": ""}
     elif node and line.startswith("CPU_KIB="):
       try:
         nodes[node]["cpu_kib"] = int(line.partition("=")[2])
@@ -1494,12 +1548,10 @@ def current_memory_usage(job):
       nodes[node]["pids"] = {pid for pid in line.partition("=")[2].split(",") if pid.isdigit()}
     elif node and line.startswith("GPU_UNAVAILABLE="):
       nodes[node]["gpu_error"] = line.partition("=")[2]
-    elif node and line.startswith("GPU="):
-      pid, sep, memory = line.partition("=")[2].partition(",")
-      pid = pid.strip()
-      match = re.match(r"\s*(\d+)", memory)
-      if sep and pid in nodes[node]["pids"] and match:
-        nodes[node]["gpu_mib"] += int(match.group(1))
+    elif node and line.split("=", 1)[0] in ("GPU", "GPUDEV", "AMDPROC", "AMDDEV"):
+      nodes[node]["gpu_lines"].append(line)
+  for data in nodes.values():
+    data["gpu_bytes"], data["gpus"] = parse_gpu_probe(data["gpu_lines"], data["pids"])
 
   cpu_values = [node_data["cpu_kib"] for node_data in nodes.values() if node_data["cpu_kib"] is not None]
   cpu_bytes = sum(cpu_values) * 1024 if cpu_values else None
@@ -1513,12 +1565,13 @@ def current_memory_usage(job):
       cpu_bytes = sum(estimates)
       cpu_source = "sstat estimate"
   cpu_partial = len(cpu_values) < len(nodes)
-  gpu_nodes = [node_data for node_data in nodes.values() if not node_data["gpu_error"]]
-  gpu_bytes = sum(node_data["gpu_mib"] for node_data in gpu_nodes) * 1024**2 if gpu_nodes else None
+  gpu_nodes = [node_data for node_data in nodes.values() if not node_data["gpu_error"] and node_data["gpu_bytes"] is not None]
+  gpu_bytes = sum(node_data["gpu_bytes"] for node_data in gpu_nodes) if gpu_nodes else None
   gpu_partial = len(gpu_nodes) < len(nodes)
+  gpus = [(name, *gpu) for name, data in nodes.items() for gpu in data["gpus"]]
   return {"cpu_bytes": cpu_bytes, "cpu_source": cpu_source, "cpu_partial": cpu_partial, "gpu_bytes": gpu_bytes,
           "gpu_partial": gpu_partial, "gpu_errors": [d["gpu_error"] for d in nodes.values() if d["gpu_error"]],
-          "sstat": sstat}
+          "gpus": gpus, "sstat": sstat}
 
 def peak_job_memory(job):
   """Slurm-accounted CPU and (when configured) GPU peak memory for an ended job."""
@@ -3250,9 +3303,15 @@ class JobScreen(SplitScreen):
       errors = result["gpu_errors"]
       gpu_text = f"unavailable ({errors[0]})" if errors else "unavailable"
     else:
-      gpu_text = humanize.naturalsize(gpu)
+      gpu_text = humanize.naturalsize(gpu) + " (processes of the job)"
       if result["gpu_partial"]:
         gpu_text += " (partial)"
+    gpus = result.get("gpus") or []
+    if gpus:
+      used, total = sum(g[3] for g in gpus), sum(g[4] for g in gpus)
+      gpu_text = (gpu_text + "\n" if gpu is not None else "") + \
+        f"GPUs of the nodes: {humanize.naturalsize(used)} of {humanize.naturalsize(total)} used ({used / max(total, 1):.0%})\n" + \
+        "\n".join(f"  {node} GPU {idx} {name}: {humanize.naturalsize(u)} / {humanize.naturalsize(t)}" for node, idx, name, u, t in gpus[:16])
     self.query_one("#memory-cpu", Static).update(cpu_text)
     self.query_one("#memory-gpu", Static).update(gpu_text)
     self.query_one("#memory-query", Button).disabled = not self.job.running
@@ -4342,7 +4401,8 @@ class SlurmTUI(App):
   #memory-controls { height: auto; margin: 1 0; }
   #memory-controls > * { margin-right: 1; }
   #memory-controls Label { width: auto; height: 1; content-align: center middle; padding: 0; }
-  #memory-cpu, #memory-gpu { width: auto; height: 1; }
+  #memory-cpu { width: auto; height: 1; }
+  #memory-gpu { width: auto; height: auto; }
   #job-progress { height: auto; margin-bottom: 1; padding: 0 1; }
   #progress-bar { width: 40; }
   #progress-line { height: auto; }
