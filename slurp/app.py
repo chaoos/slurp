@@ -161,6 +161,7 @@ class Slurp(App):
   #htree { width: 40%; height: 1fr; border-right: vkey $panel-lighten-2; }
   #hright { width: 1fr; height: 1fr; }
   #hinfo { height: auto; max-height: 45%; padding: 0 1; }
+  #hmarkdown { height: 1fr; display: none; padding: 0 1; border-top: solid $panel-lighten-2; }
   #hdata { height: 1fr; }
   .split { height: 1fr; }
   .left { width: 1fr; height: 1fr; }

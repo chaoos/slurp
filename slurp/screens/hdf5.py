@@ -193,6 +193,21 @@ def list_group(file, gpath):
     items.append(item)
   return items, max(0, len(names) - H5_MEMBERS)
 
+MARKDOWN_SUFFIXES = (".md", ".markdown", ".mdown", ".mkd")
+
+def markdown_value(file, path):
+  """The text of a scalar string dataset whose name ends in .md (or .markdown, ...), None for anything else"""
+  import h5py
+  if not path.lower().endswith(MARKDOWN_SUFFIXES):
+    return None
+  ds = file[path]
+  if not isinstance(ds, h5py.Dataset) or ds.shape != () or h5py.check_string_dtype(ds.dtype) is None and ds.dtype.kind not in "SUO":
+    return None
+  value = ds.asstr()[()] if h5py.check_string_dtype(ds.dtype) else ds[()]
+  if isinstance(value, bytes):
+    value = value.decode("utf-8", errors="replace")
+  return value if isinstance(value, str) else None
+
 def describe_item(file, path, kind):
   """Info text of a group, dataset or named type"""
   obj = file[path]
@@ -334,6 +349,7 @@ class H5Screen(SplitScreen):
       with Vertical(id="hright"):
         with VerticalScroll(id="hinfo"):
           yield Static(id="hinfotext")
+        yield Markdown(id="hmarkdown")
         yield Input(id="hslice", placeholder="selection, e.g. [0, :, 10:20] or [..., 3] (Enter: apply)")
         yield Static(id="hpage")
         yield DataTable(id="hdata", zebra_stripes=True)
@@ -538,6 +554,7 @@ class H5Screen(SplitScreen):
   # --------------------------------------------------------------- info and data
   def show_message(self, text):
     self.query_one("#hinfotext", Static).update(text)
+    self.query_one("#hmarkdown").display = False
     self.show_table(None)
 
   def show(self, data):
@@ -559,12 +576,17 @@ class H5Screen(SplitScreen):
     def read(file):
       info = describe_item(file, data["path"], kind)
       page = dataset_page(file, data["path"], text, row0, col0) if kind == "dataset" else None
-      return info, page
+      markdown = markdown_value(file, data["path"]) if kind == "dataset" else None
+      return info, page, markdown
     def shown(result):
       if result is None or self.current is not data:
         return
-      info, page = result
+      info, page, markdown = result
       self.query_one("#hinfotext", Static).update(info)
+      md = self.query_one("#hmarkdown", Markdown)
+      md.display = markdown is not None
+      if markdown is not None: # a string named *.md: rendered
+        md.update(markdown)
       self.show_page(page)
       self.query_one("#hstatus", Static).update(self.status_text())
     self.h5(read, shown, group="h5-show")
