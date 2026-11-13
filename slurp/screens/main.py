@@ -83,6 +83,7 @@ class MainScreen(SplitScreen):
   BINDINGS = [
     Binding("slash", "filter", "Filter jobs"),
     Binding("escape", "clear_filter", "Clear filter", show=False),
+    Binding("space", "app.toggle_group", "Open/close array", show=False),
   ]
 
   def compose_left(self):

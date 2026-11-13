@@ -634,6 +634,46 @@ def env_summary(env):
     parts.append(f"Python env {env.get('VIRTUAL_ENV') or env.get('CONDA_DEFAULT_ENV')}")
   return f"{len(env)} variables" + (": " + "; ".join(parts) if parts else "")
 
+def array_overview(array_id):
+  """All tasks of an array job, from Slurm (sacct for every task, squeue for those still queued; pending ranges like
+  12_[8-20%5] are expanded): {"tasks": {index: {"state", "exit", "reason", "start", "end", "node"}}, "errors"}"""
+  fields = ["JobID", "State", "ExitCode", "Start", "End", "Elapsed", "NodeList"]
+  cmds = [["sacct", "-X", "-j", str(array_id), "-P", "-n", f"--format={','.join(fields)}"],
+          ["squeue", "-r", "-j", str(array_id), "-h", "--format=%i|%T|%r"]]
+  acct, queue = run_many(cmds)
+  tasks = {}
+  def indices(jid):
+    m = re.fullmatch(rf"{re.escape(str(array_id))}_(\d+|\[(.+)\])", jid.strip())
+    if not m:
+      return []
+    if m.group(2) is None:
+      return [int(m.group(1))]
+    try:
+      return expand_array_spec(m.group(2))
+    except ValueError:
+      return []
+  for row in parsable(acct.stdout, fields):
+    for i in indices(row["JobID"]):
+      tasks[i] = {"state": (row["State"].split() or ["?"])[0].rstrip("+"), "exit": row["ExitCode"], "reason": "",
+                  "start": row["Start"], "end": row["End"], "elapsed": row["Elapsed"], "node": row["NodeList"]}
+  for line in queue.stdout.splitlines(): # up to date for queued tasks
+    jid, _, rest = line.partition("|")
+    state, _, reason = rest.partition("|")
+    for i in indices(jid):
+      task = tasks.setdefault(i, {"exit": "", "start": "", "end": "", "elapsed": "", "node": ""})
+      task.update(state=state.strip(), reason=reason.strip() if state.strip() == "PENDING" else "")
+  errors = [f"{shlex.join(c[:3])}: {(r.stderr or '').strip()[:200]}" for c, r in zip(cmds, (acct, queue)) if r.returncode]
+  return {"tasks": tasks, "errors": errors}
+
+def task_group(task):
+  """How a task of an array is grouped: its state, with the exit code of an ended task or the reason of a pending one"""
+  state = task["state"]
+  if state == "PENDING" and task.get("reason") and task["reason"] != "None":
+    return f"PENDING ({task['reason']})"
+  if state not in ("RUNNING", "PENDING", "CONFIGURING", "COMPLETING", "SUSPENDED", "REQUEUED") and task.get("exit"):
+    return f"{state} (exit {task['exit']})"
+  return state
+
 def array_task_states(parent_id):
   """Current/accounted states by array task ID; fail if either Slurm query is unavailable"""
   states = {}

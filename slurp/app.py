@@ -64,6 +64,7 @@ from .screens.job import *
 from .screens.main import *
 from .screens.connection import *
 from .screens.clusterinfo import *
+from .screens.array import *
 from .storage import *
 from .screens.storage import *
 from . import remote, state
@@ -1255,11 +1256,12 @@ class Slurp(App):
 
   @on(DataTable.RowSelected, "#jobs")
   def job_selected(self, event):
-    if str(event.row_key.value).startswith("group|"): # open or close the row of an array
+    if str(event.row_key.value).startswith("group|"): # the row of an array
       key = event.row_key.value.partition("|")[2]
-      self.query_one("#jobs", ClickTable).take_clicked_column()
-      self.cluster.expanded.symmetric_difference_update({key})
-      self.populate()
+      if self.query_one("#jobs", ClickTable).take_clicked_column() == "jobid": # on ▸: open or close the row
+        self.toggle_group(key)
+      else: # Enter or a click elsewhere: the window of the array
+        self.open_array(key.partition("|")[0])
       return
     job = self.jobs.get(event.row_key.value)
     col = self.query_one("#jobs", ClickTable).take_clicked_column()
@@ -1269,6 +1271,31 @@ class Slurp(App):
       self.open_file(job, job.stderr_path())
     else:
       self.open_view(f"job {job.jid}", lambda: JobScreen(job), kind="job", key=f"job {job.jid}")
+
+  def toggle_group(self, key):
+    self.cluster.expanded.symmetric_difference_update({key})
+    self.populate()
+
+  def action_toggle_group(self):
+    """Space on the row of an array (or on one of its tasks when it is open): open or close it"""
+    table = self.query_one("#jobs", ClickTable)
+    if not table.row_count:
+      return
+    key = str(table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0)).row_key.value)
+    if key.startswith("group|"):
+      self.toggle_group(key.partition("|")[2])
+    elif (job := self.jobs.get(key)) and array_task_id(job) is not None:
+      group = f"{job.jid.partition('_')[0]}|{job.state.split()[0].rstrip('+') if job.state else '?'}"
+      if group in self.cluster.expanded:
+        self.toggle_group(group)
+
+  def open_array(self, array_id, job=None):
+    """The window of an array job (a subtab from the job list, else on top of the window it is opened from)"""
+    job = job or next((j for j in self.jobs.values() if j.jid.partition("_")[0] == str(array_id)), None)
+    if self.current_mode == "_default":
+      self.open_view(f"array {array_id}", lambda: ArrayScreen(array_id, job), kind="job", key=f"array {array_id}")
+    else:
+      self.push_screen(ArrayScreen(array_id, job))
 
   def open_file(self, job, path):
     open_path(self, ["Jobs", job.jid], path, [job.rec["WorkDir"]], job_vars(job), follow=job.running)
