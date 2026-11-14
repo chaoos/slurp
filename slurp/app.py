@@ -105,7 +105,9 @@ class Slurp(App):
   #view-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 0; }
   #view-tabs Button.view-close { width: 3; min-width: 3; padding: 0; margin-right: 1; color: $text-muted; }
   #view-tabs Button.view-close:hover { color: $error; }
-  #shell-status { height: 1; padding: 0 1; background: $panel; }
+  #shell-bar { height: 1; background: $panel; }
+  #shell-status { width: 1fr; height: 1; padding: 0 1; background: $panel; }
+  #shell-help { height: 1; min-height: 1; padding: 0 1; }
   TerminalScreen TerminalView { border: round $panel-lighten-3; }
   TerminalScreen TerminalView:focus { border: round $accent; }
   MainScreen.-no-tabs #view-tabs { display: none; }
@@ -177,7 +179,7 @@ class Slurp(App):
   .tbar { height: 1; background: $panel; }
   TerminalPane:focus-within .tbar { background: $accent; color: $text; }
   .ttitle { width: 1fr; height: 1; padding: 0 1; }
-  .tclose { width: 3; min-width: 3; height: 1; }
+  .tclose, .tinfo { width: 3; min-width: 3; height: 1; }
   """
   BINDINGS = [
     Binding("q", "quit", "Quit"),
@@ -1018,7 +1020,7 @@ class Slurp(App):
   def focus_left(self):
     widget = getattr(self.screen, "left_focus", None)
     if widget is None or not widget.is_attached or widget.screen is not self.screen or not widget.focusable:
-      chain = [w for w in self.screen.focus_chain if not w.has_class("tclose") and not isinstance(w, TerminalView)]
+      chain = [w for w in self.screen.focus_chain if not w.has_class("tclose") and not w.has_class("tinfo") and w.id != "shell-help" and not isinstance(w, TerminalView)]
       widget = chain[0] if chain else None
     if widget is not None:
       widget.focus()

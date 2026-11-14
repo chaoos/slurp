@@ -350,6 +350,7 @@ class TerminalPane(Vertical):
   def compose(self) -> ComposeResult:
     with Horizontal(classes="tbar"):
       yield Static(classes="ttitle")
+      yield Button("ⓘ", classes="tinfo", compact=True, tooltip="copy, paste, keys, closing")
       yield Button("✕", classes="tclose", compact=True, tooltip="close the shell (Ctrl-X)")
     yield TerminalView()
 
@@ -373,6 +374,13 @@ class TerminalPane(Vertical):
 
   def set_width(self, width):
     self.styles.width = width if width else "50%"
+
+  @on(Button.Pressed, ".tinfo")
+  def info_pressed(self, event):
+    event.stop()
+    if self.app.shell is not None:
+      from .screens.shell import TerminalHelpScreen
+      self.app.push_screen(TerminalHelpScreen(self.app.shell, pane=True), lambda _: self.query_one(TerminalView).focus())
 
   @on(Button.Pressed, ".tclose")
   def close_pressed(self, event):

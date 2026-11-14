@@ -44,6 +44,7 @@ from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Mar
 from textual.widgets.option_list import Option
 from textual.widgets.text_area import Selection
 from textual.suggester import SuggestFromList
+from textual.widgets import Markdown
 from textual.worker import get_current_worker
 
 import slurm as sl
@@ -53,6 +54,164 @@ from ..widgets import *
 from ..terminal import *
 from ..screens.base import *
 
+def shell_kind(session):
+  """What a terminal runs: login (the SSH login of a tab), node (a step in a job), gdb, cluster or local"""
+  args = list(session.args or [])
+  if session.login is not None:
+    return "login"
+  if args[:1] == ["srun"] and any(a.startswith("--jobid=") for a in args):
+    return "node"
+  if args[:1] == ["gdb"]:
+    return "gdb"
+  return "cluster" if session.via is not None else "local"
+
+def screen_text(session):
+  """The visible screen of a terminal as plain text (trailing blanks and empty lines cut)"""
+  vt = session.vt if session else None
+  if vt is None:
+    return ""
+  return "\n".join(line.rstrip() for line in vt.display).rstrip("\n")
+
+TERMINAL_HELP_COMMON = """
+## Copying out of the terminal
+
+slurp gets the mouse, so a plain drag selects nothing here. Use one of these:
+
+- **Copy the screen** below: everything visible in this terminal, as text, to your clipboard.
+- **Your terminal's own selection, holding a modifier key** so the drag skips slurp:
+  `Shift`+drag on Linux, Windows Terminal, and in a browser (with `slurp --serve`); `Option`+drag in iTerm2;
+  `Fn`+drag in macOS Terminal. Then copy as your terminal does (`Ctrl+Shift+C`, `Cmd+C`, or selecting already
+  copies). This selects whole screen lines, so with the pane on the right it also takes the window on the left.
+- `Ctrl+C` does **not** copy: it goes to the shell and interrupts the running command.
+
+## Pasting into the terminal
+
+- Your terminal's paste: `Ctrl+Shift+V` (Linux), `Cmd+V` (macOS), `Ctrl+V` or right click (Windows Terminal),
+  `Shift+Insert`, or `Shift`+middle click.
+- A plain `Ctrl+V` goes to the shell as a key (in bash it inserts the next key literally); it does not paste.
+- Pasted lines can run as commands: a shell with bracketed paste (bash 5.1 or newer, zsh) waits for your Enter;
+  older shells run every line that ends with a newline right away.
+
+## Keys
+
+| Key | What it does |
+|---|---|
+| All keys | go to the program in the terminal, including `Ctrl+C`, `Ctrl+D`, `Ctrl+Z`, `Ctrl+Q`, `Ctrl+P`, `Ctrl+W`, `Esc` |
+| `Ctrl+]` | the one key slurp keeps: {switch} |{extra}
+| `Ctrl+D` or `exit` | ends the shell; then `Enter` starts a new one (the old one's state is gone) |
+"""
+
+TERMINAL_HELP_KIND = {
+  "login": """
+## This terminal: the login of the tab
+
+The SSH login of this tab runs here: password, passphrase or one-time code prompts appear and are typed here. Once
+logged in, slurp sends all its commands, shells and drives through this one connection.
+
+**Closing it** (`✕` or `Ctrl+X`) **gives up the connection**: the job list of the tab stops updating, its shells and
+drives end, and the connection window offers to log in again.
+""",
+  "cluster": """
+## This terminal: a shell on the login node
+
+A login shell on the cluster of the tab, as a new channel of the tab's SSH connection (no new login).
+Login nodes are shared by everyone: edit, compile and submit here, but run heavy computations in jobs
+(Interactive job, or a shell on the node of a running job).
+""",
+  "node": """
+## This terminal: a shell on the node of a job
+
+The shell runs as an extra step of the job (`srun --overlap`), with the job's resources. It ends at the job's
+time limit or when the job ends. Closing it ends only this step, never the job.
+""",
+  "gdb": """
+## This terminal: GDB
+
+GDB runs on the cluster of the tab. `quit` (or `Ctrl+D`) ends it; `Ctrl+C` interrupts the program being debugged.
+""",
+  "local": """
+## This terminal: a shell on this machine
+
+A login shell on the machine slurp runs on, as the user running slurp.
+""",
+}
+
+TERMINAL_HELP_CLOSE = """
+## Closing
+
+{close}
+
+When it closes, the shell and everything running in it gets a hangup and ends: unsaved files in an editor are
+lost and running commands stop. The same happens when you close the tab, quit slurp, or the tab's SSH connection
+is lost.
+
+## Good to know
+
+- **It keeps running in the background**: switching subtabs, windows or tabs does not stop it.
+- **No scrollback**: only the visible screen is kept, and the mouse wheel does nothing here. For long output use
+  `less` (`command | less`), write it to a file, or run `tmux` / `screen` in the shell.
+- **For work that must survive** slurp, a lost connection or closing: start it in `tmux` / `screen` on the
+  cluster (and attach again later) or submit it as a job with `sbatch`.
+- The terminal is emulated by slurp: bash, vim, less, htop and the like work, with colors; its size follows the
+  window. For long or heavy interactive work, a shell **From your own terminal** (`t` in the job list, `s` in the
+  job window) gives your terminal's scrollback, selection and fonts.
+"""
+
+class TerminalHelpScreen(ModalScreen):
+  """How to copy from and paste into a terminal, its keys, closing it, and how to treat it"""
+  DEFAULT_CSS = """
+  TerminalHelpScreen { align: center middle; }
+  #thelp-dialog { width: 110; max-width: 95%; height: 90%; border: thick $accent; background: $surface; padding: 1 2; }
+  #thelp-text { height: 1fr; }
+  #thelp-buttons { height: auto; margin-top: 1; }
+  #thelp-buttons Button { margin-right: 1; }
+  """
+  BINDINGS = [Binding("escape", "close", "Close", priority=True)]
+
+  def __init__(self, session, pane=False):
+    super().__init__()
+    self.session, self.pane = session, pane
+
+  def help_text(self):
+    kind = shell_kind(self.session)
+    if self.pane:
+      switch = "switches between the window on the left and this terminal"
+      close = ("`✕` in the title bar of the terminal, or `Ctrl+X`. This is the login of the tab: closing it gives up "
+               "the connection (see above)." if kind == "login" else "`✕` in the title bar of the terminal, or `Ctrl+X`.")
+    else:
+      switch = "back to the job list; this shell keeps running in its subtab"
+      close = ("`✕` next to the name of the subtab in the subtab bar. `Ctrl+W` closes subtabs only while you are "
+               "not in a shell, since in a shell it goes to the shell.")
+    extra = "\n| `Ctrl+X` | in this pane, also kept by slurp: closes the terminal |" if self.pane else ""
+    text = (TERMINAL_HELP_KIND[kind] + TERMINAL_HELP_COMMON.replace("{switch}", switch).replace("{extra}", extra)
+            + TERMINAL_HELP_CLOSE.replace("{close}", close))
+    return f"# {self.session.title}\n" + text
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="thelp-dialog"):
+      with VerticalScroll(id="thelp-text"):
+        yield Markdown(self.help_text())
+      with Horizontal(id="thelp-buttons"):
+        yield Button("Copy the screen", id="thelp-copy", variant="primary")
+        yield Button("Close", id="thelp-close")
+
+  def on_mount(self):
+    self.query_one("#thelp-close", Button).focus()
+
+  @on(Button.Pressed, "#thelp-copy")
+  def copy_screen(self):
+    from .dialogs import copy_text
+    text = screen_text(self.session)
+    if not text:
+      self.notify("the screen is empty", severity="warning")
+      return
+    self.dismiss()
+    copy_text(self.app, text, "the screen of the terminal")
+
+  @on(Button.Pressed, "#thelp-close")
+  def action_close(self):
+    self.dismiss()
+
 class TerminalScreen(SplitScreen):
   """A shell in a subtab of its own"""
   def __init__(self, session):
@@ -60,7 +219,9 @@ class TerminalScreen(SplitScreen):
     self.session = session
 
   def compose_left(self):
-    yield Static(id="shell-status")
+    with Horizontal(id="shell-bar"):
+      yield Static(id="shell-status")
+      yield Button("ⓘ Help", id="shell-help", compact=True, tooltip="copy, paste, keys, closing")
     yield TerminalView(session=self.session)
 
   def on_mount(self):
@@ -72,10 +233,15 @@ class TerminalScreen(SplitScreen):
     self.query_one(TerminalView).focus()
     self.call_after_refresh(self.query_one(TerminalView).attach)
 
+  @on(Button.Pressed, "#shell-help")
+  def show_help(self, event):
+    event.stop()
+    self.app.push_screen(TerminalHelpScreen(self.session), lambda _: self.query_one(TerminalView).focus())
+
   def update_status(self, _=None):
     s = self.session
     text = f"{s.title} · ended (exit code {s.code}) · Enter: start it again · ✕ of the subtab: close" if s.done else \
-           f"{s.title} · all keys go to the shell, Ctrl-] goes to the job list · ✕ of the subtab closes it"
+           f"{s.title} · all keys go to the shell, Ctrl-] goes to the job list · ✕ of the subtab closes it · ⓘ: copy, paste"
     self.query_one("#shell-status", Static).update(Text(text, style="bold" if not s.done else "yellow"))
 
   def restart(self):
