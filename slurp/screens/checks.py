@@ -3,12 +3,20 @@
 from rich.text import Text
 from textual import on
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Collapsible, Label, MarkdownViewer, Static, TextArea
 
 from .. import checks
 from ..screens.base import SplitScreen, crumb_title
+
+def code(text, language):
+  """Syntax-highlighted code (plain text if highlighting is not available)"""
+  try:
+    from textual.highlight import highlight
+    return highlight(text, language=language)
+  except Exception:
+    return Text(text)
 
 def finding_title(f, with_line=True):
   where = f"line {f.line} · " if with_line and f.line else ""
@@ -34,7 +42,7 @@ class FindingsView(Vertical):
   FindingsView Collapsible { padding: 0; margin: 0; border: none; background: transparent; }
   FindingsView Collapsible > Contents { padding: 0 0 0 3; }
   FindingsView .fv-body { height: auto; }
-  FindingsView .fv-snippet { background: $boost; padding: 0 1; width: 1fr; height: auto; }
+  FindingsView .fv-snippet { background: $boost; border-left: outer $accent; padding: 0 1; width: 1fr; height: auto; }
   FindingsView .fv-row { height: auto; margin-top: 1; }
   FindingsView .fv-row Button { margin-left: 1; min-width: 8; }
   FindingsView Collapsible.-error CollapsibleTitle { color: $error; }
@@ -77,7 +85,7 @@ class FindingsView(Vertical):
     for i, f in enumerate(self.findings):
       body = [Static(finding_body(f), classes="fv-body")]
       if f.snippet:
-        body.append(Horizontal(Static(f.snippet, classes="fv-snippet", markup=False),
+        body.append(Horizontal(Static(code(f.snippet, "bash"), classes="fv-snippet"),
                                Button("Copy", classes="fv-copy", name=str(i), compact=True), classes="fv-row"))
       buttons = []
       if self.line_buttons and f.line:
@@ -219,13 +227,14 @@ class FixPreviewScreen(ModalScreen):
 
   def compose(self):
     import difflib
-    diff = "".join(difflib.unified_diff(self.old.replace("\r", "").splitlines(True), self.new.splitlines(True),
+    diff = self.diff = "".join(difflib.unified_diff(self.old.replace("\r", "").splitlines(True), self.new.splitlines(True),
                                         self.path, self.target))
     with Vertical(id="fx-dialog"):
       yield Static(f"Fixed copy of {self.path}", id="fx-title")
       yield Static(Text("\n".join(f"• {d}" for d in self.done) + "\n\nThe original stays as it is. Fixes that need your "
                         "decision (memory units, time limits, paths) are not made: see the findings.", style=""), id="fx-done")
-      yield TextArea(diff, id="fx-diff", read_only=True, language=None)
+      with VerticalScroll(id="fx-diff"):
+        yield Static(code(diff, "diff"), id="fx-diff-text")
       with Horizontal(id="fx-buttons"):
         yield Button("Cancel", id="fx-cancel")
         yield Button(f"Write {self.target.rsplit('/', 1)[-1]}", id="fx-write", variant="primary")

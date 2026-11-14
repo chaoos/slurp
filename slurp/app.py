@@ -134,6 +134,10 @@ class Slurp(App):
   #cluster-tabs Button.cluster-close:hover { color: $error; }
   #topbar Header { dock: none; width: 1fr; height: 1; }
   #view-help { width: 3; min-width: 3; height: 1; text-style: bold; }
+  /* code in Markdown (rule catalogue, guides, help, .md files): a framed block, the same in every theme (Textual's
+     ANSI themes make it transparent and without margins, so it looked like stray indented text) */
+  MarkdownFence, MarkdownFence:ansi { margin: 1 0 1 1; padding: 0; background: $boost; border-left: outer $accent; }
+  MarkdownFence > Label, MarkdownFence:ansi > Label { padding: 0 1; }
   .help-corner { dock: right; width: 3; min-width: 3; height: 1; text-style: bold; }
   #bottombar { dock: bottom; height: 1; }
   #bottombar Footer { dock: none; width: 1fr; }
@@ -1235,7 +1239,8 @@ class Slurp(App):
       except Exception as e:
         log.debug(f"facts for the guides: {e!r}")
         return None
-    in_background(self, facts, lambda f: self.open_window(GuidesScreen(guides_markdown(f, cluster.name), anchor), "Guides"),
+    in_background(self, facts, lambda f: self.open_doc_tab("guides", "Guides", lambda: GuidesScreen(guides_markdown(f, cluster.name), anchor),
+                                                           GuidesScreen, lambda screen: screen.jump(anchor) if anchor else None),
                   group="guides")
 
   def action_new_script(self):
@@ -1299,10 +1304,25 @@ class Slurp(App):
   def action_rule_catalogue(self, rule_id=""):
     """The rule catalogue, at a rule (shown in the catalogue window if one is open)"""
     from .screens.checks import RuleCatalogueScreen
-    if isinstance(self.screen, RuleCatalogueScreen):
-      self.screen.show_rule(rule_id)
+    self.open_doc_tab("rules", "Rule catalogue", lambda: RuleCatalogueScreen(rule_id), RuleCatalogueScreen,
+                      lambda screen: screen.show_rule(rule_id))
+
+  def open_doc_tab(self, key, title, make_screen, cls, show):
+    """A document (rule catalogue, guides) in a subtab of its own: one per tab, shown again (and moved to what is
+    asked) when it is open already"""
+    if not self.clusters:
+      self.push_screen(make_screen())
       return
-    self.open_window(RuleCatalogueScreen(rule_id), "Rule catalogue")
+    view = self.find_view(key)
+    if view is None:
+      self.open_view(title, make_screen, key=key)
+      return
+    self.show_view(view)
+    def moved():
+      screen = next((s for s in reversed(self.screen_stack) if isinstance(s, cls)), None)
+      if screen is not None:
+        show(screen)
+    self.call_after_refresh(moved)
 
   def action_abort_load(self):
     cluster = self.cluster
