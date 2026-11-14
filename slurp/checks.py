@@ -818,11 +818,32 @@ SKIP_PROGRAMS = {"echo", "cd", "export", "module", "ml", "source", ".", "set", "
                  "xargs", "seq", "basename", "dirname", "realpath", "readlink", "id", "whoami", "which", "type",
                  "command", "alias", "source", "srun", "sbatch", "scontrol", "squeue", "sacct", "scancel"}
 
+def launcher_options(words):
+  """The options of a launcher line (srun, mpirun: the words before the program; what follows belongs to the
+  program: srun -n 4 ./sim -c 8 gives -n 4, the -c 8 is the program's)"""
+  prog, args = launched_program(words)
+  if prog is None:
+    return words[1:]
+  end = len(words) - len(args) - 1
+  return words[1:end]
+
+MPI_FLAGS = {"oversubscribe", "nooversubscribe", "display-map", "report-bindings", "tag-output", "timestamp-output",
+             "v", "q", "quiet", "verbose", "use-hwthread-cpus", "allow-run-as-root", "display-allocation", "noprefix",
+             "show-progress", "merge-stderr-to-stdout", "h", "help", "V", "version"}
+
 def launched_program(words):
   """The program a launcher line runs (after its options)"""
+  mpi = bool(words) and os.path.basename(words[0]) in ("mpirun", "mpiexec", "mpiexec.hydra", "aprun")
   i = 1
   while i < len(words):
     w = words[i]
+    if w.startswith("-") and mpi and not w.startswith("--") and "=" not in w:
+      # mpirun's options are single-dash words (-np 4, -host a,b, -x VAR): a value follows unless it is a known flag
+      if w[1:] not in MPI_FLAGS and i + 1 < len(words) and not words[i + 1].startswith("-"):
+        i += 2
+      else:
+        i += 1
+      continue
     if w.startswith("-"):
       name = w.lstrip("-").split("=")[0]
       if "=" not in w and not (name in FLAG_OPTIONS or len(w) > 2 and w.startswith("-") and not w.startswith("--")) \

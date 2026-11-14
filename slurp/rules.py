@@ -961,7 +961,12 @@ def n04(ctx):
   if "SRUN_CPUS_PER_TASK" in s.assignments() or re.search(r"SRUN_CPUS_PER_TASK", s.text):
     return
   for line, t, launcher in s.launcher_lines():
-    if launcher == "srun" and not re.search(r"(?:^|\s)(-c\s*\S|-c$|--cpus-per-task)", t):
+    try:
+      words = shlex.split(t)
+    except ValueError:
+      words = t.split()
+    options = " ".join(launcher_options(words)) # (only srun's own options: the program's -c is not srun's)
+    if launcher == "srun" and not re.search(r"(?:^|\s)(-c\s*\S|-c$|--cpus-per-task)", options):
       yield F("N04", f"--cpus-per-task={cpt}, but this srun gets 1 CPU per task", line,
               snippet="export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK")
       return
@@ -1165,7 +1170,7 @@ def u06(ctx):
 # ===========================================================================
 # G: good practice
 
-from .checks import relative_uses, alternative_bases, is_relative_path, LAUNCHERS # noqa: E402
+from .checks import relative_uses, alternative_bases, is_relative_path, LAUNCHERS, launcher_options # noqa: E402
 
 SETUP_PATTERN = (r"(^|[;\s])(source|\.)\s+\S*activate|conda\s+activate|mamba\s+activate|uenv\s+(start|run|view)|"
                  r"spack\s+(env\s+activate|load)|(^|[;\s])(source|\.)\s+\S+")
@@ -1340,7 +1345,7 @@ def g04(ctx):
       words = shlex.split(t)
     except ValueError:
       continue
-    c = literal_counts(words)
+    c = literal_counts([words[0], *launcher_options(words)]) # (the launcher's options, not the program's)
     n, cpus = c.get("ntasks"), c.get("cpus")
     if n is not None and ntasks:
       if launcher != "srun" and n != ntasks:
