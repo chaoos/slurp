@@ -24,7 +24,8 @@ and **Done: current pace** (at the rate of the last few `n/N` lines; `-` until t
 The list shows as soon as Slurm answers; the command, error file and progress of
 each job (files on the cluster) follow, with spinners in those cells for jobs
 not seen before (the others keep their values meanwhile). The sizes of the error
-files of ended jobs are kept, and asked in one `stat` for many files. An array with ten or more tasks in the list is
+files of ended jobs are kept, and asked in one `stat` for many files; the progress
+of all running jobs is read by one command that sends back only the `n/N` lines. An array with ten or more tasks in the list is
 one row (`9600_[1-150] ▸ 150 tasks`) whose state is the mix of its tasks' states
 in Slurm's short codes, coloured: `30R 10PD 100CD 10F` (running, pending,
 completed, failed; CA cancelled, TO timeout, …); clicking ▸ (or Space) lists
