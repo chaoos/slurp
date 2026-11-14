@@ -58,7 +58,7 @@ def parsable(out, fields):
 
 SACCT_FIELDS = ["JobID", "JobIDRaw", "JobName", "User", "Account", "Partition", "State", "ExitCode", "NNodes", "NTasks",
                 "NodeList", "Submit", "Start", "End", "Elapsed", "Timelimit", "WorkDir", "StdOut", "StdErr",
-                "MaxRSS", "AveRSS", "TRESUsageInMax", "SubmitLine"]
+                "MaxRSS", "AveRSS", "TRESUsageInMax", "ReqMem", "AllocCPUS", "TotalCPU", "SubmitLine"]
 SQUEUE_FIELDS = ["JobID", "JobName", "User", "Account", "Partition", "State", "Reason", "NNodes", "Elapsed",
                  "Timelimit", "Start", "Submit", "WorkDir", "NodeList"]
 SQUEUE_FMT = "%i|%j|%u|%a|%P|%T|%r|%D|%M|%l|%S|%V|%Z|%N"
@@ -312,6 +312,8 @@ class Job:
   err: tuple = (None, 0)                 # ("file"|"merged"|"missing"|None, size)
   progress: JobProgress | None = None      # latest n/N progress entry from a running job's output
   annotated: bool = True                 # False while command, error file and progress are still being read
+  script: str | None = None              # the batch script as submitted (queued jobs, fetched by annotate)
+  checks: list | None = None             # findings of the checks (None: not checked yet)
 
   @property
   def jid(self):
@@ -778,6 +780,7 @@ def annotate(jobs):
     cache = {}
     for job in jobs:
       job.command = command_of(job, cache)
+      job.script = cache.get(job.jid.split("_")[0]) if job.queued else None
       job.err = err_status(job)
       job.progress = record_progress(job, output_progress(progress_path(job))) if job.running else None
       job.annotated = True
@@ -809,6 +812,7 @@ def annotate(jobs):
   cache = {key: res.stdout for (key, _), res in zip(scripts, results[len(progress_cmds):])}
   for job in jobs:
     job.command = command_of(job, cache)
+    job.script = cache.get(job.jid.split("_")[0]) if job.queued else None
     job.err = err_status(job, sizes)
     path = progress_path(job)
     job.progress = record_progress(job, output_progress(path, tails.get(path))) if job.running and tails.get(path) is not None else None
