@@ -260,9 +260,21 @@ settings; remove it to get the window again).
 every time: **In slurp** (a subtab, as before) or **From your own terminal**.
 The latter makes a *link*: an `ssh` command and a password for the terminal or
 SSH client on your own machine (OpenSSH in any terminal, cmd or PowerShell,
-PuTTY, …). **Drive** (`F`) makes a link to your login directory as a drive (SFTP):
-`sshfs` on Linux and macOS, SSHFS-Win on Windows, or WinSCP, Cyberduck and file
-managers. The node of a job only gets shells, never a drive.
+PuTTY, …). **Drive** (`F`) asks where your login directory goes as a drive:
+
+- **On this machine** (where slurp runs): `sshfs` through the session of the tab
+  (no login), at a path you choose (default `~/mnt/<tab>`, remembered per tab
+  as `"drive_mounts"` in the settings), read only if you like. The connection
+  window shows its state (connecting, mounted since, not answering,
+  reconnecting, failed and why, or something else mounted there) and offers
+  Mount…, Unmount, Remount and Force unmount. When the session of the tab
+  breaks, the drive stops answering and comes back with the session; if sshfs
+  gives up or dies, slurp mounts it again when the session is there. Quitting
+  slurp (or closing the tab) unmounts it. Needs `sshfs` on this machine.
+- **On your own machine**: a link (below): `sshfs` on Linux and macOS,
+  SSHFS-Win on Windows, or WinSCP, Cyberduck and file managers.
+
+The node of a job only gets shells, never a drive.
 
 It works wherever your machine is, also when slurp runs behind several hops:
 slurp runs a small SSH server for each link (on `127.0.0.1` only) and connects
