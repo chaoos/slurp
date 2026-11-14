@@ -339,3 +339,119 @@ class LinkScreen(ModalScreen):
     if event is not None:
       event.stop()
     self.dismiss()
+
+class DriveScreen(ModalScreen):
+  """Drive: where the login directory of the tab goes. On this machine (where slurp runs: sshfs through the tab's
+  session, at a path remembered per tab) or on the user's own machine (a link). Dismissed with "link" for the
+  latter."""
+  DEFAULT_CSS = """
+  DriveScreen { align: center middle; }
+  #drive-dialog { width: 96; max-width: 98%; height: auto; max-height: 95%; border: thick $accent; background: $surface; padding: 0 1; }
+  #drive-title { text-style: bold; margin: 1 0; }
+  .drive-section { text-style: bold underline; margin-top: 1; }
+  .drive-text { height: auto; margin-bottom: 1; }
+  .drive-row { height: auto; margin-bottom: 1; }
+  .drive-row Label { width: 12; padding-top: 1; }
+  .drive-row Input { width: 1fr; }
+  #drive-state { height: auto; margin-bottom: 1; }
+  .drive-buttons { height: auto; align-horizontal: right; margin-bottom: 1; }
+  .drive-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "close", "Close")]
+
+  def __init__(self, cluster, home, local_reason=None):
+    super().__init__()
+    self.cluster, self.home, self.local_reason = cluster, home, local_reason
+
+  def compose(self) -> ComposeResult:
+    import socket
+    from .. import mounts
+    drive = self.app.drive_of(self.cluster)
+    with Vertical(id="drive-dialog"):
+      yield Static(f"Drive: {self.cluster.name} {self.home}", id="drive-title", markup=False)
+      yield Static(f"On this machine ({socket.gethostname()}, where slurp runs)", classes="drive-section", markup=False)
+      yield Static("sshfs through the session of this tab (no login); slurp shows its state in the connection window "
+                   "and unmounts it when it quits." + (f"\nNot possible: {self.local_reason}" if self.local_reason else ""),
+                   classes="drive-text", markup=False)
+      with Horizontal(classes="drive-row"):
+        yield Label("Path")
+        yield Input(drive.path, id="drive-path", disabled=bool(self.local_reason), tooltip="an empty or new directory; remembered for this tab")
+      with Horizontal(classes="drive-row"):
+        yield Label("Read only")
+        yield Switch(value=drive.read_only, id="drive-ro", disabled=bool(self.local_reason))
+      yield Static(id="drive-state")
+      with Horizontal(classes="drive-buttons"):
+        yield Button("Unmount", id="drive-unmount", variant="error")
+        yield Button("Mount here", id="drive-mount", variant="primary", disabled=bool(self.local_reason))
+      yield Static("On your own machine", classes="drive-section")
+      yield Static("A link: sshfs on Linux and macOS, SSHFS-Win on Windows, WinSCP, file managers; wherever your "
+                   "machine is (through a relay).", classes="drive-text", markup=False)
+      with Horizontal(classes="drive-buttons"):
+        yield Button("Close", id="drive-close")
+        yield Button("Make a link…", id="drive-link", disabled=share.available() is not None,
+                     tooltip=share.available())
+
+  def on_mount(self):
+    self.show_state()
+    self.set_interval(0.5, self.show_state)
+
+  def show_state(self):
+    if not self.is_mounted:
+      return
+    drive = self.app.drive_of(self.cluster)
+    text = drive_state_text(drive)
+    self.query_one("#drive-state", Static).update(text)
+    ours = drive.state in ("mounting", "mounted", "broken", "unmounting", "reconnecting")
+    self.query_one("#drive-unmount", Button).display = ours
+    self.query_one("#drive-mount", Button).display = not ours
+
+  @on(Button.Pressed, "#drive-mount")
+  def mount_pressed(self, event):
+    event.stop()
+    path = self.query_one("#drive-path", Input).value.strip()
+    if not path:
+      self.notify("give a path", severity="error")
+      return
+    self.app.mount_drive(self.cluster, path, self.query_one("#drive-ro", Switch).value)
+
+  @on(Button.Pressed, "#drive-unmount")
+  def unmount_pressed(self, event):
+    event.stop()
+    self.app.unmount_drive(self.cluster)
+
+  @on(Button.Pressed, "#drive-link")
+  def link_pressed(self, event):
+    event.stop()
+    self.dismiss("link")
+
+  @on(Button.Pressed, "#drive-close")
+  def action_close(self, event=None):
+    if event is not None:
+      event.stop()
+    self.dismiss(None)
+
+def drive_state_text(drive):
+  """The state of a drive on this machine in words"""
+  import humanize
+  now = time.time()
+  if drive.state == "mounted":
+    since = f" since {datetime.fromtimestamp(drive.mounted_at):%H:%M:%S}" if drive.mounted_at else ""
+    return Text(f"mounted at {drive.path}{since}" + (" (read only)" if drive.read_only else ""), style="bold green")
+  if drive.state == "mounting":
+    return Text(f"connecting … {now - drive.started:.0f} s ({drive.path})", style="yellow")
+  if drive.state == "broken":
+    return Text(f"mounted at {drive.path}, but the files do not answer (connection lost? sshfs reconnects when the "
+                "tab is connected again; or Remount)", style="bold red")
+  if drive.state == "unmounting":
+    return Text("unmounting …", style="yellow")
+  if drive.state == "reconnecting":
+    c = drive.cluster.connection
+    waiting = "waiting for the session of the tab" if c is None or not c.ready else f"next attempt in {max(0, drive.retry_at - now):.0f} s"
+    return Text(f"connection lost: mounted again when the tab is connected ({waiting}"
+                + (f", attempt {drive.attempts}" if drive.attempts else "") + ")", style="bold yellow")
+  if drive.state == "failed":
+    return Text(f"failed: {drive.error}", style="red")
+  if drive.state == "foreign":
+    source, kind = drive.foreign or ("?", "?")
+    return Text(f"{drive.path}: mounted, but not by slurp ({source}, {kind})", style="yellow")
+  return Text(f"not mounted (path {drive.path})", style="dim")

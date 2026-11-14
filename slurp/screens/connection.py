@@ -52,7 +52,7 @@ from ..state import *
 from ..remote import *
 from ..widgets import *
 from .. import share
-from .links import LinkScreen, link_state
+from .links import LinkScreen, link_state, drive_state_text
 from .dialogs import ConfirmScreen
 
 def process_tree(pid):
@@ -132,7 +132,10 @@ class ConnectionScreen(ModalScreen):
   #conn-dialog.-warn { border: thick $warning; }
   #conn-dialog.-bad { border: thick $error; }
   #conn-body { height: 1fr; }
-  #conn-links-title { text-style: bold underline; height: auto; }
+  #conn-links-title, #conn-drive-title { text-style: bold underline; height: auto; }
+  #conn-drive { height: auto; }
+  #conn-drive-buttons { height: auto; margin-bottom: 1; }
+  #conn-drive-buttons Button { margin-right: 1; }
   #conn-links { height: auto; max-height: 14; margin-bottom: 1; }
   #conn-buttons { height: auto; align-horizontal: right; margin-top: 1; }
   #conn-buttons Button { margin-left: 1; }
@@ -148,6 +151,15 @@ class ConnectionScreen(ModalScreen):
     with Vertical(id="conn-dialog"):
       yield Static(id="conn-title")
       with VerticalScroll(id="conn-body"):
+        if self.cluster.destination:
+          yield Static("Drive on this machine", id="conn-drive-title")
+          yield Static(id="conn-drive")
+          with Horizontal(id="conn-drive-buttons"):
+            yield Button("Mount…", id="conn-drive-mount", variant="primary", tooltip="choose the path and mount (Drive, F)")
+            yield Button("Unmount", id="conn-drive-unmount")
+            yield Button("Remount", id="conn-drive-remount", tooltip="unmount and mount again (e.g. when it does not answer)")
+            yield Button("Force unmount", id="conn-drive-force", variant="error",
+                         tooltip="also when files are in use (lazy: it goes when they are closed)")
         yield Static(id="conn-links-title")
         yield ClickTable(id="conn-links", cursor_type="row", zebra_stripes=True)
         yield Static(id="conn-info")
@@ -165,6 +177,57 @@ class ConnectionScreen(ModalScreen):
     dialog = self.query_one("#conn-dialog")
     for other in HEALTH_STYLES:
       dialog.set_class(other == level, f"-{other}")
+
+  def show_drive(self):
+    """The login directory as a drive on this machine: state, details, the buttons that fit"""
+    if not self.cluster.destination:
+      return
+    drive = self.app.drive_of(self.cluster)
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="bold", no_wrap=True)
+    grid.add_column()
+    grid.add_row("State", drive_state_text(drive))
+    grid.add_row("Path", drive.path + (" (read only)" if drive.read_only else ""))
+    if drive.source:
+      grid.add_row("Files", f"{drive.source}, through the session of this tab (sshfs"
+                   + (f", {drive.server}" if drive.server else ", the cluster's sftp") + ")")
+    if drive.proc is not None:
+      grid.add_row("sshfs", f"pid {drive.proc.pid}, started {datetime.fromtimestamp(drive.started):%H:%M:%S}"
+                   + (", reconnects by itself when the session is back" if drive.state == "broken" else ""))
+    if drive.messages and drive.state in ("failed", "broken", "mounting"):
+      grid.add_row("Messages", Text("\n".join(drive.messages[-3:]), style="dim"))
+    self.query_one("#conn-drive", Static).update(grid)
+    state = drive.state
+    ours = drive.proc is not None
+    self.query_one("#conn-drive-mount", Button).display = state in ("unmounted", "failed")
+    self.query_one("#conn-drive-unmount", Button).display = state in ("mounted", "mounting", "broken", "reconnecting", "foreign")
+    self.query_one("#conn-drive-remount", Button).display = ours and state in ("mounted", "broken")
+    self.query_one("#conn-drive-force", Button).display = state in ("mounted", "broken", "foreign")
+
+  @on(Button.Pressed, "#conn-drive-mount")
+  def drive_mount_pressed(self, event):
+    event.stop()
+    self.app.action_cluster_drive()
+
+  @on(Button.Pressed, "#conn-drive-unmount")
+  def drive_unmount_pressed(self, event):
+    event.stop()
+    self.app.unmount_drive(self.cluster)
+
+  @on(Button.Pressed, "#conn-drive-remount")
+  def drive_remount_pressed(self, event):
+    event.stop()
+    self.app.remount_drive(self.cluster)
+
+  @on(Button.Pressed, "#conn-drive-force")
+  def drive_force_pressed(self, event):
+    event.stop()
+    drive = self.app.drive_of(self.cluster)
+    def done(yes):
+      if yes:
+        self.app.unmount_drive(self.cluster, lazy=True)
+    self.app.push_screen(ConfirmScreen("Force unmount", f"Unmount {drive.path} even if files are in use there? "
+                                       "Programs using them get errors; it is gone when they close them.", "Force unmount"), done)
 
   links_shown = None
 
@@ -290,6 +353,7 @@ class ConnectionScreen(ModalScreen):
     if not self.is_mounted:
       return
     self.show_title()
+    self.show_drive()
     self.show_links()
     cluster, c = self.cluster, self.cluster.connection
     grid = Table.grid(padding=(0, 2))

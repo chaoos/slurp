@@ -70,7 +70,8 @@ from .screens.storage import *
 from . import remote, state
 from .config import load_config, update_config
 from .share import ShareManager, SFTP_SERVERS, MAX_FAILURES
-from .screens.links import ShellChoiceScreen, LinkSetupScreen, LinkScreen
+from .screens.links import ShellChoiceScreen, LinkSetupScreen, LinkScreen, DriveScreen
+from . import mounts
 
 class Slurp(App):
   TITLE = "slurp"
@@ -462,6 +463,8 @@ class Slurp(App):
                      lambda ok: self.close_cluster(cluster) if ok else None)
 
   def close_cluster(self, cluster):
+    if cluster.drive is not None:
+      cluster.drive.stop() # (its session ends)
     """Close a tab: its loads, shells and SSH session end"""
     if cluster not in self.clusters:
       return
@@ -560,6 +563,12 @@ class Slurp(App):
     self.spinner_frame += 1
     now = time.monotonic()
     self.link_manager.tick()
+    if self.spinner_frame % 4 == 0: # (each second) the drives on this machine
+      for c in self.clusters:
+        if c.drive is not None:
+          old = c.drive.state
+          if c.drive.poll() != old:
+            self.refresh_status()
     if self.screen is self.main and any(not job.annotated for job in self.cluster.jobs.values()):
       table = self.main.query_one("#jobs") # (turn the spinners of the cells still coming)
       clear = getattr(table, "_clear_caches", None)
@@ -831,6 +840,13 @@ class Slurp(App):
     probe = "for p; do [ -x \"$p\" ] && echo \"$p\" && exit 0; done; exit 0"
     def found(out):
       path = (out or "").strip().splitlines()[0] if (out or "").strip() else ""
+      cluster.sftp_server = path
+      local_reason = ("this is the local tab: its files are already here" if not cluster.destination else mounts.available())
+      def chosen(where):
+        if where == "link":
+          link_setup(path)
+      self.push_screen(DriveScreen(cluster, home, local_reason), chosen)
+    def link_setup(path):
       if not path and not cluster.destination:
         self.notify("no sftp-server on this machine: a drive is not possible", severity="error")
         return
@@ -870,13 +886,70 @@ class Slurp(App):
       self.notify(f"{what} takes no more logins: {message}", title=link.tab, timeout=5)
     self.refresh_status()
 
+  # ---- the login directory as a drive on this machine (slurp/mounts.py)
+  def drive_of(self, cluster):
+    if cluster.drive is None:
+      cluster.drive = mounts.LocalDrive(cluster, self.drive_event)
+    return cluster.drive
+
+  def drive_task(self, cluster, coro, done=None, quiet=False):
+    """Run a mount or unmount on the event loop; its error as a notification (quiet: only logged)"""
+    async def run():
+      try:
+        err = await coro
+      except Exception as e:
+        log.exception("drive action failed")
+        err = str(e)
+      if err and quiet:
+        log.debug(f"drive of {cluster.name}: {err}")
+      elif err:
+        self.notify(f"drive of {cluster.name}: {err}", title=cluster.name, severity="error", timeout=10)
+      elif done:
+        done()
+      self.refresh_status()
+    asyncio.ensure_future(run())
+
+  def mount_drive(self, cluster, path, read_only):
+    self.drive_task(cluster, self.drive_of(cluster).mount(path, read_only, getattr(cluster, "sftp_server", "")))
+
+  def unmount_drive(self, cluster, lazy=False):
+    self.drive_task(cluster, self.drive_of(cluster).unmount(lazy))
+
+  def remount_drive(self, cluster):
+    self.drive_task(cluster, self.drive_of(cluster).remount())
+
+  def drive_event(self, kind, drive, message):
+    if kind == "stuck":
+      self.notify(f"drive at {drive.path} did not answer for 30 s: mounting it again", title=drive.cluster.name,
+                  severity="warning", timeout=8)
+      self.drive_task(drive.cluster, drive.remount())
+    elif kind == "remount": # (lost before; the session of the tab is there again)
+      self.drive_task(drive.cluster, drive.mount(drive.path, drive.read_only, drive.server), quiet=True)
+    elif kind == "lost":
+      self.notify(f"drive at {drive.path} lost its connection: it is mounted again when the session of the tab is back",
+                  title=drive.cluster.name, severity="warning", timeout=8)
+    elif kind == "mounted":
+      self.notify(f"drive {'mounted again' if message else 'mounted'} at {drive.path}", title=drive.cluster.name, timeout=5)
+    elif kind == "ended" and message:
+      self.notify(f"drive at {drive.path} ended: {message}", title=drive.cluster.name, severity="error", timeout=10)
+    elif kind == "ended":
+      self.notify(f"drive at {drive.path} unmounted", title=drive.cluster.name, timeout=4)
+    self.refresh_status()
+
   def links_text(self):
     """For the footer: open links and sessions (they must stay visible)"""
     active, live = self.link_manager.active(), self.link_manager.live_sessions()
-    if not active:
+    drives = [c.drive for c in self.clusters if c.drive is not None and c.drive.state in ("mounting", "mounted", "broken", "reconnecting")]
+    if not active and not drives:
       return None
-    return Text(f" · ⇄ {len(active)} link{'s' if len(active) != 1 else ''}" + (f", {len(live)} session{'s' if len(live) != 1 else ''} open" if live else ""),
-                style="bold magenta")
+    text = Text()
+    if active:
+      text.append(f" · ⇄ {len(active)} link{'s' if len(active) != 1 else ''}" + (f", {len(live)} session{'s' if len(live) != 1 else ''} open" if live else ""),
+                  style="bold magenta")
+    for d in drives:
+      text.append(f" · ⛁ {d.path}" + {"mounting": " …", "broken": " (not answering)", "reconnecting": " (reconnecting)"}.get(d.state, ""),
+                  style="bold red" if d.state in ("broken", "reconnecting") else "bold magenta")
+    return text
 
   @on(Button.Pressed, "#cluster-drive")
   def cluster_drive_pressed(self, event):
@@ -958,16 +1031,24 @@ class Slurp(App):
 
   async def action_quit(self):
     live = self.link_manager.live_sessions()
-    if live and not getattr(self, "quit_confirmed", False):
+    drives = [c.drive for c in self.clusters if c.drive is not None and (c.drive.proc is not None or c.drive.state == "reconnecting")]
+    if (live or drives) and not getattr(self, "quit_confirmed", False):
       def done(yes):
         if yes:
           self.quit_confirmed = True
           self.run_action("quit")
-      self.push_screen(ConfirmScreen("Quit slurp", f"{len(live)} session{'s' if len(live) != 1 else ''} through links "
-                                     "(shells and drives on your own machine) are open. They end when slurp quits; "
-                                     "a mounted drive then fails until it is unmounted.", "Quit"), done)
+      parts = []
+      if live:
+        parts.append(f"{len(live)} session{'s' if len(live) != 1 else ''} through links (shells and drives on your own "
+                     "machine) are open: they end, a drive mounted through one fails until it is unmounted.")
+      for d in drives:
+        parts.append(f"The drive at {d.path} is unmounted.")
+      self.push_screen(ConfirmScreen("Quit slurp", " ".join(parts), "Quit"), done)
       return
     self.link_manager.shutdown()
+    for c in self.clusters:
+      if c.drive is not None:
+        c.drive.stop()
     await self.real_quit()
 
   async def real_quit(self):
