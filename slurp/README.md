@@ -277,8 +277,11 @@ Windows Terminal; in tmux with `set -g set-clipboard on`; not GNOME Terminal or
 Konsole). Without a tool a window says so and offers **Plain text** (slurp steps
 aside and prints the text in the normal screen, where the terminal's own mouse
 selection works; Enter comes back), **Save to a file** (`~/.cache/slurp/copied.txt`)
-and **It arrived, don't ask again** (stored as `"copy": "terminal"` in the
-settings; remove it to get the window again).
+and **It arrived, don't ask again** (stored as `"copy": "terminal"` for a
+terminal and `"copy_web": "terminal"` for a browser view, the kind that is
+active; Options, `F3`, changes them back). While a browser is the active view,
+this machine's clipboard tool is not used: it would fill the clipboard of the
+machine slurp runs on, not the browser's.
 
 ## Shells and drives from your own terminal
 
@@ -490,7 +493,8 @@ they are selected. The dot of an SSH tab is coloured by the health of its
 session (green, yellow, red; grey when not connected yet).
 
 **Options** (`F3`) shows the settings and changes them: the two themes, the
-scrollback of shells, what Copy does without a clipboard tool, the relay of
+scrollback of shells, what Copy does without a clipboard tool (for a terminal
+and for a browser), the relay of
 links, the rules the checks do not report, and what slurp remembers (drives on
 this machine, progress files and patterns, the tabs of the next start), with
 Forget. Save writes `config.json`; the settings below are the same, by hand: `"terminal_scrollback"` (lines a shell keeps
