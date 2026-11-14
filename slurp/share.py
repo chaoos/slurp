@@ -149,7 +149,7 @@ class Session:
 
 @dataclass(eq=False)
 class Link:
-  kind: str                      # "shell" or "drive"
+  kind: str                      # "shell", "drive" or "web" (the slurp running here, in a browser)
   title: str                     # what it opens ("shell on daint", "drive: daint /users/x")
   tab: str                       # the tab it belongs to
   argv: object                   # () -> argv of the command a session runs (a shell: in a pty; a drive: sftp)
@@ -160,6 +160,8 @@ class Link:
   public_key: str = ""           # the authorized key (auth "key")
   path: str = ""                 # a drive: its directory (the login directory)
   read_only: bool = False
+  web_port: int = 0              # a web link: the port of the web view on 127.0.0.1 (the only place it forwards to)
+  web_token: str = ""            # a web link: the token of the web view's URL
   id: str = field(default_factory=lambda: secrets.token_hex(4))
   name: str = field(default_factory=lambda: secrets.token_hex(12)) # the random name at an ssh-j relay
   password: str = field(default_factory=make_password)
@@ -229,6 +231,18 @@ def client_commands(link):
   p = [] if port == 22 else ["-p", str(port)]
   ssh_opts = ["-J", link.jump(), *p, "-o", f"HostKeyAlias={alias}"]
   out = []
+  if link.kind == "web":
+    local = 8000
+    url = f"http://localhost:{local}/?token={link.web_token}"
+    out.append(("1. The tunnel: Linux, macOS, Windows (OpenSSH)",
+                shlex.join(["ssh", "-N", "-L", f"{local}:127.0.0.1:{link.web_port}", *ssh_opts, f"{user}@{host}"]),
+                f"in a terminal, cmd or PowerShell; asks for the password, then waits: leave it open while you use the "
+                f"web view (if port {local} is taken on your machine, use another one, here and in the URL)"))
+    out.append(("2. Then open in your browser", url,
+                "the slurp running here, in the browser: a view of the same slurp (who is active can take over)"))
+    out.append(("PuTTY", f"the proxy settings as for a shell link, and Connection > SSH > Tunnels: source port {local}, "
+                f"destination 127.0.0.1:{link.web_port}, Local, Add; Connection > SSH: Don't start a shell", "then the URL"))
+    return out
   if link.kind == "shell":
     out.append(("Linux, macOS, Windows (OpenSSH)", shlex.join(["ssh", *ssh_opts, f"{user}@{host}"]),
                 "works in a terminal, cmd or PowerShell; asks for the password"))
@@ -698,7 +712,22 @@ class _Server(asyncssh.SSHServer if asyncssh else object):
 
   def session_requested(self):
     log.debug(f"link {self.link.id}: session requested")
+    if self.link.kind == "web":
+      return False # (a web link only forwards to the web view: ssh -N)
     return _Channel(self.manager, self.link, self.conn)
+
+  def connection_requested(self, dest_host, dest_port, orig_host, orig_port):
+    """ssh -L: only a web link, only to its web view"""
+    link = self.link
+    allowed = link.kind == "web" and link.web_port and dest_port == link.web_port and dest_host in ("127.0.0.1", "localhost")
+    log.debug(f"link {link.id}: forwarding to {dest_host}:{dest_port} {'allowed' if allowed else 'refused'}")
+    if allowed:
+      session = next((s for s in link.sessions if s.conn is self.conn and s.ended is None), None)
+      if session is not None and not session.kind:
+        session.kind = "web"
+        self.manager._started(session)
+      return True
+    return False
 
   def begin_auth(self, username):
     return True # a login is always needed

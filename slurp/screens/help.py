@@ -27,7 +27,8 @@ Your queued and running jobs and those that ended recently, of the active tab's 
   `r` reloads, `a` aborts a load. **finished since** chooses how far back ended jobs are listed, the dropdown
   next to it whose jobs (yours, an account's, all your accounts').
 - **Toolbar:** Shell (`t`, in slurp or from your own terminal), Drive (`F`, your login directory on this machine or
-  yours), Interactive job (`i`), Cluster info (`C`), Quota (`Q`), Scratch (`X`, old files the purge would take).
+  yours), Web (`W`, this slurp in your browser from anywhere, through a link), Interactive job (`i`), Cluster info (`C`),
+  Quota (`Q`), Scratch (`X`, old files the purge would take).
 - `n` writes a new job script from a template; `!` shows only the jobs with problems; `/` filters by any text.
 """),
   "JobScreen": ("Job window", """

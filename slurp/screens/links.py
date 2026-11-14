@@ -34,7 +34,8 @@ def relay_setting():
   return load_config().get("link_relay") or share.DEFAULT_RELAY
 
 def warning_text(relay, kind):
-  what = "a shell" if kind == "shell" else "your files (read and write, unless read only)"
+  what = ("a shell" if kind == "shell" else "this slurp itself, with all its tabs, shells and drives" if kind == "web"
+          else "your files (read and write, unless read only)")
   if share.is_public(relay):
     return Text(PUBLIC_WARNING.format(relay=share.parse_relay(relay)[1], what=what), style="yellow")
   return Text(OWN_NOTE.format(relay=relay), style="dim")
@@ -105,17 +106,22 @@ class LinkSetupScreen(ModalScreen):
   """
   BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
-  def __init__(self, kind, title, tab, argv, path="", read_only_argv=None):
-    """kind "shell" or "drive"; argv: () -> argv of a session; a drive: read_only_argv the same read only
-    (None: not possible here)"""
+  def __init__(self, kind, title, tab, argv, path="", read_only_argv=None, web=None):
+    """kind "shell", "drive" or "web"; argv: () -> argv of a session; a drive: read_only_argv the same read only
+    (None: not possible here); a web link: web = (port, token) of the web view"""
     super().__init__()
     self.kind, self.what, self.tab, self.argv, self.path, self.read_only_argv = kind, title, tab, argv, path, read_only_argv
+    self.web = web
 
   def compose(self) -> ComposeResult:
     with Vertical(id="setup-dialog"):
-      yield Static(("Shell from your own terminal: " if self.kind == "shell" else "Drive for your own machine: ") + self.what,
-                   id="setup-title", markup=False)
+      yield Static({"shell": "Shell from your own terminal: ", "web": "Remote web access: "}.get(self.kind, "Drive for your own machine: ")
+                   + self.what, id="setup-title", markup=False)
       with VerticalScroll(id="setup-body"):
+        if self.kind == "web":
+          yield Static("This slurp in your browser, from anywhere: an ssh tunnel through the relay (only to the web "
+                       "view, nothing else), then a URL. The browser is another view of this same slurp: one view is "
+                       "active at a time, the others can take over.", markup=False, classes="setup-row")
         if self.kind == "drive":
           yield Static(f"Your files on the cluster as a drive (SFTP): sshfs on Linux and macOS, SSHFS-Win on Windows, "
                        f"or WinSCP, Cyberduck, file managers. It starts in {self.path}.", markup=False, classes="setup-row")
@@ -177,7 +183,8 @@ class LinkSetupScreen(ModalScreen):
     read_only = self.kind == "drive" and self.query_one("#setup-ro", Switch).value
     link = share.Link(self.kind, self.what, self.tab, self.read_only_argv if read_only else self.argv, relay=relay,
                       uses=uses or None, expiry=None if expiry == -1 else expiry, auth="key" if by_key else "password",
-                      public_key=key if by_key else "", path=self.path, read_only=read_only)
+                      public_key=key if by_key else "", path=self.path, read_only=read_only,
+                      web_port=self.web[0] if self.web else 0, web_token=self.web[1] if self.web else "")
     if relay != relay_setting():
       update_config(link_relay=relay) # (the relay is a setting: the next link uses it too)
     try:
@@ -240,7 +247,7 @@ class LinkScreen(ModalScreen):
   def compose(self) -> ComposeResult:
     link = self.link
     with Vertical(id="lv-dialog"):
-      yield Static(f"Link {link.id}: {'shell' if link.kind == 'shell' else 'drive'} · {link.title}" + (" · read only" if link.read_only else ""),
+      yield Static(f"Link {link.id}: {link.kind} · {link.title}" + (" · read only" if link.read_only else ""),
                    id="lv-title", markup=False)
       with VerticalScroll(id="lv-body"):
         yield Static(id="lv-state")
