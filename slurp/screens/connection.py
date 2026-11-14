@@ -262,16 +262,27 @@ class ConnectionScreen(ModalScreen):
     signature = [(k, tuple(str(v) for v in values)) for k, values in rows]
     if signature == self.links_shown:
       return
+    old_keys = [k for k, _ in (self.links_shown or [])]
     self.links_shown = signature
     if not table.columns:
       for label in ("Link", "What", "Relay / client", "Logins / traffic", "Sessions"):
-        table.add_column(label)
+        table.add_column(label, key=label)
+    if old_keys == [k for k, _ in rows] and table.row_count == len(rows):
+      # the same rows, new values (traffic, durations): update the cells, the view (scrolling, cursor) stays as it is
+      columns = [c.key for c in table.ordered_columns]
+      for key, values in rows:
+        for column, value in zip(columns, values):
+          table.update_cell(key, column, value, update_width=True)
+      return
+    # rows came or went: build anew, but keep where the table was scrolled to (it is wide: often scrolled sideways)
+    x, y = table.scroll_x, table.scroll_y
     cursor = table.cursor_row
     table.clear()
     for key, values in rows:
       table.add_row(*values, key=key)
     if 0 <= cursor < table.row_count:
-      table.move_cursor(row=cursor)
+      table.move_cursor(row=cursor, scroll=False)
+    table.call_after_refresh(table.scroll_to, x, y, animate=False)
 
   @on(DataTable.RowSelected, "#conn-links")
   def link_selected(self, event):
