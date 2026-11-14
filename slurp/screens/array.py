@@ -179,9 +179,11 @@ class ArrayScreen(SplitScreen):
         grid.add_row("Running for (running)", stats_text(running_for))
         left = count(("PENDING",)) + count(("RUNNING", "COMPLETING", "CONFIGURING"))
         running = count(("RUNNING", "COMPLETING", "CONFIGURING"))
-        if left and running:
+        if left and running and done:
           grid.add_row("Rest, roughly", f"{left} tasks × median / {running} at a time ≈ "
                        f"{duration_text(left * done[len(done) // 2] / running)}")
+        elif left and running:
+          grid.add_row("Rest, roughly", Text("no estimate until a task has completed", style="dim"))
       nodes = {t["node"] for t in tasks.values() if t["state"] == "RUNNING" and t.get("node")}
       if nodes:
         grid.add_row("Running on", f"{len(nodes)} node{'s' if len(nodes) != 1 else ''}: " + ", ".join(sorted(nodes)[:8])
