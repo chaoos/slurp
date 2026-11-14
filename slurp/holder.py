@@ -253,6 +253,7 @@ class Holder:
     self.cols, self.rows = cols, rows
     self.views = []
     self.active = None
+    self.subscribers = [] # the app's connections that want to know which kind of view is active (its theme)
     self.screen, self.stream = make_shadow(cols, rows)
     self.master = None
     self.proc = None
@@ -340,7 +341,19 @@ class Holder:
       self.active = None
       if self.views: # the most recently attached remaining view takes over by itself
         self.activate(max(self.views, key=lambda v: v.since), note=f"{view.label} went away at {clock(time.time())}")
+      else:
+        self.announce()
     self.refresh_locks()
+
+  def announce(self):
+    """Tell the app which kind of view is active (terminal or web: each has its theme)"""
+    message = frame(b"M", {"type": "active", "kind": self.active.kind if self.active else None,
+                           "label": self.active.label if self.active else ""})
+    for writer in list(self.subscribers):
+      if writer.is_closing():
+        self.subscribers.remove(writer)
+      else:
+        writer.write(message)
 
   def activate(self, view, note=""):
     old = self.active
@@ -358,6 +371,7 @@ class Holder:
       self.set_size(view.width, view.height) # (the app draws itself again at this size)
     log.info(f"active: {view.label}")
     self.refresh_locks()
+    self.announce()
 
   def resize(self, view, width, height):
     view.width, view.height = max(width, 20), max(height, 5)
@@ -486,6 +500,15 @@ class Holder:
       writer.write(frame(b"M", reply))
       await writer.drain()
       writer.close()
+      return
+    if hello.get("type") == "subscribe": # (the app: told whenever the active view changes)
+      self.subscribers.append(writer)
+      writer.write(frame(b"M", {"type": "active", "kind": self.active.kind if self.active else None,
+                                "label": self.active.label if self.active else ""}))
+      while await read_frame(reader) is not None:
+        pass
+      if writer in self.subscribers:
+        self.subscribers.remove(writer)
       return
     def send(data):
       if not writer.is_closing():
@@ -799,3 +822,30 @@ def control(cmd, timeout=5, **kw):
 
 def under_holder():
   return bool(os.environ.get("SLURP_HOLDER"))
+
+def subscribe(changed):
+  """(a thread of the app) changed(kind, label) whenever the active view changes; returns when the holder goes"""
+  path = os.environ.get("SLURP_HOLDER")
+  if not path:
+    return
+  s = socket.socket(socket.AF_UNIX)
+  try:
+    s.connect(path)
+    s.sendall(frame(b"M", {"type": "subscribe"}))
+    data = b""
+    while True:
+      chunk = s.recv(65536)
+      if not chunk:
+        return
+      data += chunk
+      while len(data) >= 5 and len(data) >= 5 + struct.unpack(">I", data[1:5])[0]:
+        size = struct.unpack(">I", data[1:5])[0]
+        kind, payload, data = data[:1], data[5:5 + size], data[5 + size:]
+        if kind == b"M":
+          meta = json.loads(payload)
+          if meta.get("type") == "active":
+            changed(meta.get("kind"), meta.get("label", ""))
+  except OSError:
+    return
+  finally:
+    s.close()

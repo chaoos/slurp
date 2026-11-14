@@ -227,6 +227,7 @@ class Slurp(App):
     Binding("question_mark", "view_help", "Help", key_display="?"),
     Binding("f1", "guides", "Guides"),
     Binding("f2", "rule_catalogue", "Rules", show=False),
+    Binding("f3", "options", "Options"),
   ]
   shell_version = reactive(0) # bumped when the shell is opened, closed or ends: the panes update
   pane_width = reactive(0)    # width of the terminal pane in columns, 0: half of the window
@@ -266,18 +267,43 @@ class Slurp(App):
 
   def on_mount(self):
     self.set_interval(0.25, self.tick)
-    config = load_config()
-    theme = config.get(self.theme_key()) or (config.get("theme") if self.is_web else None) # (the browser: the terminal's
-    if theme and theme in self.available_themes:                                          # until one is chosen there)
-      self.theme = theme
+    self.view_kind = "web" if self.is_web else "terminal" # (under the session holder: of the active view)
+    self.theme_applied = None
+    self.apply_theme()
     self.watch(self, "theme", self.theme_changed, init=False)
+    from . import holder
+    if holder.under_holder(): # the theme follows the active view: the terminal's or the browser's
+      import threading
+      threading.Thread(target=holder.subscribe, daemon=True, name="active view",
+                       args=(lambda kind, label: self.call_from_thread(self.active_view_changed, kind),)).start()
 
-  def theme_key(self):
-    """The config key of the theme: "theme" in a terminal, "theme_web" in the browser (slurp --serve)"""
-    return "theme_web" if self.is_web else "theme"
+  def theme_key(self, kind=None):
+    """The config key of the theme: "theme" in a terminal, "theme_web" in a browser (slurp --serve, or the web view
+    being the active one)"""
+    return "theme_web" if (kind or self.view_kind) == "web" else "theme"
+
+  def configured_theme(self, kind=None):
+    """The theme stored for a kind of view (a browser without its own: the terminal's)"""
+    config = load_config()
+    theme = config.get(self.theme_key(kind)) or (config.get("theme") if self.theme_key(kind) == "theme_web" else None)
+    return theme if theme in self.available_themes else None
+
+  def apply_theme(self):
+    theme = self.configured_theme()
+    if theme and theme != self.theme:
+      self.theme_applied = theme # (switched to, not chosen: not stored again)
+      self.theme = theme
+
+  def active_view_changed(self, kind):
+    if kind and kind != self.view_kind:
+      self.view_kind = kind
+      self.apply_theme()
 
   def theme_changed(self, theme):
-    """A theme chosen (e.g. with the command palette) is the default from now on, in the terminal or in the browser"""
+    """A theme chosen (e.g. with the command palette) is the default from now on, for this kind of view"""
+    if theme == self.theme_applied:
+      self.theme_applied = None
+      return
     update_config(**{self.theme_key(): theme})
 
   def on_unmount(self):
@@ -1202,7 +1228,7 @@ class Slurp(App):
     await super().on_event(event)
 
   def check_action(self, action, parameters):
-    if not self.clusters and action not in ("quit", "command_palette", "help_quit", "view_help", "guides", "rule_catalogue"):
+    if not self.clusters and action not in ("quit", "command_palette", "help_quit", "view_help", "guides", "rule_catalogue", "options"):
       return False # no tab: only + (and quit)
     if action == "reload": # a key of the job table, not of the other windows
       return self.screen is self.main
@@ -1311,7 +1337,7 @@ class Slurp(App):
   def check_login_nodes(self):
     """B09: your processes on the login nodes that use a lot of CPU for long (said once per process)"""
     from .checks import login_hogs, RULES
-    if "B09" in set(load_config().get("checks_muted", [])):
+    if "B09" in set((load_config().get("checks_muted") or [])):
       return
     for cluster in self.clusters:
       if cluster.destination and cluster.connection is not None and cluster.connection.ready:
@@ -1393,6 +1419,21 @@ class Slurp(App):
     cluster.checking = True
     in_background(self, work, done, group=f"checks-{cluster.name}", name="checking the jobs",
                   connection=cluster.connection if cluster.destination else None)
+
+  def action_options(self):
+    """Options: the settings in config.json"""
+    from .screens.options import OptionsScreen
+    def saved(changes):
+      if changes is None:
+        return
+      self.apply_theme() # (the theme of the kind of view that is active now)
+      self.notify("options saved", timeout=3)
+      if "checks_muted" in changes:
+        for screen in self.screen_stack:
+          recheck = getattr(screen, "recheck", None)
+          if recheck:
+            recheck()
+    self.push_screen(OptionsScreen(), saved)
 
   def action_toggle_problems(self):
     self.problems_only = not self.problems_only
