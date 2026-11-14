@@ -119,6 +119,15 @@ shell, except `Ctrl-]`, which goes back to the job list; `Ctrl-W` closes the
 subtab shown (outside a shell). Every tab can be closed, also the last one;
 then only the `+` button remains.
 
+**ⓘ Help** in the bar of a shell (and `ⓘ` in the title bar of the login pane)
+explains that terminal: how to copy out of it (slurp has the mouse, so hold
+`Shift` while dragging, `Option` in iTerm2, `Fn` in macOS Terminal; `Ctrl+C`
+interrupts and does not copy) and paste into it (your terminal's paste, not a
+plain `Ctrl+V`), which keys go where, how to close it and that closing ends
+everything running in it, and how to treat it: no scrollback (use `less` or
+`tmux`), `tmux` or `sbatch` for work that must survive, and login nodes are
+shared. Its **Copy the screen** button copies the visible screen as text.
+
 ![Illustrative Markdown, HDF5, and right-side shell views](docs/files.svg)
 
 ## Install and launch
@@ -414,9 +423,9 @@ top-left `←` button to go back.
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |
 | Markdown | `r` reload; use the viewer's table of contents and link navigation |
-| Shell (subtab) | `Ctrl-]` back to the job list; `Ctrl-D` exits the shell, Enter starts it again; `✕` of the subtab closes it |
+| Shell (subtab) | `Ctrl-]` back to the job list; `Ctrl-D` exits the shell, Enter starts it again; `✕` of the subtab closes it; **ⓘ Help** copy, paste, keys, closing |
 | Subtabs | `Ctrl-W` close the subtab shown (outside a shell) |
-| Login pane | `Ctrl-]` switch between the window and the login; `Ctrl-X` gives up the login |
+| Login pane | `Ctrl-]` switch between the window and the login; `Ctrl-X` gives up the login; `ⓘ` copy, paste, keys, closing |
 
 When using tmux, enable mouse support with `set -g mouse on` if you want to
 click and scroll inside the app.
