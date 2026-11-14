@@ -360,7 +360,7 @@ The rules, by category:
 | E | Environment | modules without versions or `module purge`, `conda activate` without the hook, `pip install` in jobs, modules that cannot be loaded, site advice |
 | N | NUMA placement | tasks not aligned with NUMA domains, threads and tasks not bound, GPUs not assigned to tasks, `srun` without `--cpus-per-task` (Slurm 22.05+) |
 | U | Usage and outcome | much more time or memory than used, low CPU usage, why a job failed (OOM, TIMEOUT, exit codes), why it waits (pending reasons), known errors in the logs, long jobs without checkpoints |
-| G | Good practice | the script sets up its own environment instead of relying on the shell it is submitted from (compared with the environment Slurm kept of the submission, `sacct --env-vars`, where the cluster stores it, and by Check environment after a fresh login); failures that look like successes (`echo done` after `srun`, a failed step under a COMPLETED job); array logs without both `%A` and `%a` (the tasks race on one file, or the next run overwrites them); not submitting from inside a job; task and CPU counts from Slurm, not literal; runs that overwrite each other's files; a record of what ran; no interactive commands; the script works from any directory (relative paths before it sets its directory; relative logs with a `cd` but no `--chdir`); `$0` is Slurm's copy of the script |
+| G | Good practice | the script sets up its own environment instead of relying on the shell it is submitted from (compared with the environment Slurm kept of the submission, `sacct --env-vars`, where the cluster stores it, and by replaying its setup after a fresh login); failures that look like successes (`echo done` after `srun`, a failed step under a COMPLETED job); array logs without both `%A` and `%a` (the tasks race on one file, or the next run overwrites them); not submitting from inside a job; task and CPU counts from Slurm, not literal; runs that overwrite each other's files; a record of what ran; no interactive commands; the script works from any directory (relative paths before it sets its directory; relative logs with a `cd` but no `--chdir`); `$0` is Slurm's copy of the script |
 
 **In the job list** the **Checks** column shows the errors (✖) and warnings
 (⚠) of each job: the scripts of queued jobs, the records of all, and the paths
@@ -371,12 +371,13 @@ they name (checked on the cluster in one round trip, after the list is shown).
 severe first; each opens to show why it matters, how to fix it and the link
 to the catalogue. It checks the script as submitted (or as the accounting
 stored it), the record, the paths and programs, your quota where the job
-writes, and the end of its logs. Its buttons:
+writes, and the end of its logs, and then, a few seconds later, its
+environment: the script's setup lines (module loads, exports, sources, `cd`;
+never its commands) are replayed on the login node in a clean environment, as
+after a fresh login, and the programs are checked: found at all (G01), shared
+libraries (`ldd`), GPU code (`cuobjdump`). **Check** runs all of it again.
+Its other buttons:
 
-- **Check environment** replays the script's setup lines (module loads,
-  exports, sources, `cd`; never its commands) on the login node, in a clean
-  environment as after a fresh login, and checks the programs: found at all
-  (G01), shared libraries (`ldd`), GPU code (`cuobjdump`).
 - **Placement** (running jobs) asks the nodes where the tasks and threads run,
   draws each node by NUMA domain with its GPUs, and names the problems: shared
   cores, unbound tasks, tasks spread over domains, GPUs of another domain.
@@ -530,8 +531,8 @@ top-left `←` button to go back.
 | Screen | Main controls |
 |---|---|
 | Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `!` only jobs with problems; `n` new job script; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
-| Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (in slurp or your own terminal); Checks: `Check again`, `Check environment`, `Placement`, `Fixed copy…`, `What changed`, `Rule catalogue` |
-| Script view | `r` check again; `x` explain the `#SBATCH` lines; `e` edit in place (`Ctrl+S` save, `Esc` stop editing); buttons `Check environment`, `Test`, `Fixed copy…`, `Submit…` |
+| Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (in slurp or your own terminal); Checks: `Check`, `Placement`, `Fixed copy…`, `What changed`, `Rule catalogue` |
+| Script view | `r` check (all checks, the environment too); `x` explain the `#SBATCH` lines; `e` edit in place (`Ctrl+S` save, `Esc` stop editing); buttons `Test`, `Fixed copy…`, `Submit…` |
 | Everywhere | `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue |
 | Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
