@@ -479,16 +479,21 @@ When no web link is left (revoked, expired), the web view stops listening.
 ## Settings
 
 slurp keeps a few settings in `~/.config/slurp/config.json` (or under
-`$XDG_CONFIG_HOME`): the theme (chosen with the command palette, `Ctrl-P`;
-`"theme"` in the terminal, `"theme_web"` in the browser with `--serve`, which
-starts with the terminal's until one is chosen there), the
+`$XDG_CONFIG_HOME`): the theme (`"theme"` in a terminal, `"theme_web"` in a
+browser, which uses the terminal's until it has its own; with several views
+the theme follows the active one, and choosing a theme with the command
+palette, `Ctrl-P`, sets it for that kind of view), the
 open tabs with the one shown and their choices (finished since, accounts),
 the progress files chosen for jobs and the patterns for arrays. At the next
 start the tabs are back, and the tab shown connects; the others connect when
 they are selected. The dot of an SSH tab is coloured by the health of its
 session (green, yellow, red; grey when not connected yet).
 
-Settings you may edit by hand: `"terminal_scrollback"` (lines a shell keeps
+**Options** (`F3`) shows the settings and changes them: the two themes, the
+scrollback of shells, what Copy does without a clipboard tool, the relay of
+links, the rules the checks do not report, and what slurp remembers (drives on
+this machine, progress files and patterns, the tabs of the next start), with
+Forget. Save writes `config.json`; the settings below are the same, by hand: `"terminal_scrollback"` (lines a shell keeps
 above its screen, default 10000, 0 for none), `"checks_muted"` (rule ids the
 checks do not report), `"link_relay"` (the relay of links), `"copy"`.
 
@@ -578,7 +583,7 @@ top-left `←` button to go back.
 | Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `!` only jobs with problems; `n` new job script; `W` remote web access; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
 | Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (in slurp or your own terminal); Checks: `Check`, `Placement`, `Fixed copy…`, `What changed`, `Rule catalogue` |
 | Script view | `r` check (all checks, the environment too); `x` explain the `#SBATCH` lines; `e` edit in place (`Ctrl+S` save, `Esc` stop editing); buttons `Test`, `Fixed copy…`, `Submit…` |
-| Everywhere | `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue |
+| Everywhere | `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue; `F3` options |
 | Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |
