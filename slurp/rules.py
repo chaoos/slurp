@@ -560,7 +560,7 @@ def p01(ctx):
 def p02(ctx):
   chdir = ctx.opt("chdir")
   if chdir:
-    p = ctx.abspath(chdir)
+    p = ctx.workdir() if ctx.expand(chdir) is not None else None
     info = ctx.probe("d", p)
     if info is not None and not info.exists:
       yield F("P02", f"--chdir={chdir}: {p} does not exist", ctx.directive_line("chdir"))

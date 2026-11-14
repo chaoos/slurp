@@ -669,8 +669,14 @@ class Context:
 
   def workdir(self):
     d = self.opt("chdir")
-    if d and not os.path.isabs(d) and self.job is not None:
-      d = os.path.join(self.job.rec.get("WorkDir") or "", d)
+    if d and not os.path.isabs(d) and "$" not in d and not d.startswith("~"):
+      if self.job is not None: # (Slurm's WorkDir is the --chdir, resolved already)
+        d = self.job.rec.get("WorkDir") or d
+      else: # relative to where it is submitted: the script's directory as the guess
+        base = self.script_dir or (os.path.dirname(self.script.path) if self.script and self.script.path else "")
+        d = os.path.normpath(os.path.join(base, d)) if base else d
+    elif d and not os.path.isabs(d): # ($VARS, ~: expanded as the user meant them; S05 says Slurm does not)
+      d = self.expand(d) or d
     if not d and self.job is not None:
       d = self.job.rec.get("WorkDir") or ""
     if not d and self.script and self.script.path:
@@ -767,10 +773,8 @@ def interesting_paths(ctx):
         out.append(("d", os.path.dirname(p)))
         out.append(("f", p))
   chdir = ctx.opt("chdir")
-  if chdir:
-    p = ctx.abspath(chdir)
-    if p:
-      out.append(("d", p))
+  if chdir and ctx.expand(chdir) is not None and not is_placeholder(chdir):
+    out.append(("d", ctx.workdir()))
   wd = ctx.workdir()
   if wd:
     out.append(("d", wd))
