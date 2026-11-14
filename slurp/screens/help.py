@@ -215,8 +215,8 @@ The settings slurp keeps in `config.json` (the path is shown at the bottom), to 
   active: when a browser takes over, its theme is used, when a terminal does, the terminal's. Choosing a theme with the
   command palette (`Ctrl-P`) sets it for the kind of view that is active.
 - **Shells:** how many lines a shell keeps above its screen (scrolled back with the mouse wheel).
-- **Copying:** what Copy does when this machine has no clipboard tool: ask how to get the text, or only send it to
-  the terminal (OSC 52).
+- **Copying:** for a terminal and for a browser: when copying cannot be confirmed (no clipboard tool here; in a
+  browser always), ask how to get the text, or only send it (OSC 52) without asking.
 - **Links:** the relay of links for your own terminal and browser.
 - **Checks:** the rules not to report.
 - **What slurp remembers:** drives on this machine, progress files and patterns, the tabs of the next start; Forget

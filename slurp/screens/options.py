@@ -65,8 +65,14 @@ class OptionsScreen(ModalScreen):
         yield Static("Lines a shell keeps above its screen (0: none), for shells opened from now on.", classes="op-note")
         yield Static("Copying", classes="op-section")
         with Horizontal(classes="op-row"):
-          yield Label("Copy")
+          yield Label("Copy in a terminal")
           yield Select(COPY_CHOICES, value=c.get("copy") or "", allow_blank=False, id="op-copy")
+        with Horizontal(classes="op-row"):
+          yield Label("Copy in a browser")
+          yield Select(COPY_CHOICES, value=c.get("copy_web") or "", allow_blank=False, id="op-copy-web")
+        yield Static("Copy sends the text to the active view (OSC 52); whether it arrives depends on that terminal or "
+                     "browser. \"It arrived, don't ask again\" in the copy window sets this for the kind of view "
+                     "that is active.", classes="op-note")
         yield Static("Links", classes="op-section")
         with Horizontal(classes="op-row"):
           yield Label("Relay")
@@ -120,6 +126,7 @@ class OptionsScreen(ModalScreen):
       return
     changes = {"theme": theme, "theme_web": web or None, "terminal_scrollback": scrollback,
                "copy": self.query_one("#op-copy", Select).value or None,
+               "copy_web": self.query_one("#op-copy-web", Select).value or None,
                "link_relay": self.query_one("#op-relay", Input).value.strip() or None,
                "checks_muted": sorted(self.query_one("#op-muted", SelectionList).selected)}
     drives = dict(self.config.get("drive_mounts") or {})

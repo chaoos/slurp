@@ -544,24 +544,33 @@ class CopyScreen(ModalScreen):
   @on(Button.Pressed, "#copy-arrived")
   def arrived(self):
     from ..config import update_config
-    update_config(copy="terminal")
-    self.notify("copying now only goes to the terminal (to ask again: remove \"copy\" from the config)", timeout=6)
+    key = copy_key(self.app)
+    update_config(**{key: "terminal"})
+    where = "in a browser" if key == "copy_web" else "in a terminal"
+    self.notify(f"copying {where} now only goes to the terminal, without asking (to ask again: Options, F3)", timeout=6)
     self.dismiss()
 
   @on(Button.Pressed, "#copy-close")
   def action_close(self):
     self.dismiss()
 
+def copy_key(app):
+  """The config key of how copying goes, for the kind of view that is active: "copy" in a terminal, "copy_web" in a
+  browser (they differ: a browser's terminal may not pass OSC 52 on, a terminal's may)"""
+  return "copy_web" if getattr(app, "view_kind", "terminal") == "web" or app.is_web else "copy"
+
 def copy_text(app, text, what="the text"):
   """Copy text: to the terminal (OSC 52; only terminals that allow it put it on the clipboard) and with the clipboard
-  tool of this machine if there is one; without a tool, a window offers ways to get the text by hand, unless the
-  terminal's copying was confirmed to work ("copy": "terminal" in the config)"""
+  tool of this machine if there is one (not while a browser is the active view: that would be this machine's
+  clipboard, not the browser's); without a tool, a window offers ways to get the text by hand, unless copying was
+  confirmed to work for this kind of view ("copy" / "copy_web": "terminal" in the config)"""
   from ..config import load_config
   send_osc52(app, text) # OSC 52, through the terminal (wrapped for tmux and screen)
-  tool = local_clipboard(text)
+  key = copy_key(app)
+  tool = local_clipboard(text) if key == "copy" else None
   if tool:
     app.notify(f"copied {what} ({tool})", timeout=4)
-  elif load_config().get("copy") == "terminal":
+  elif load_config().get(key) == "terminal":
     app.notify(f"copied {what} (through the terminal)", timeout=4)
   else:
     app.push_screen(CopyScreen(text, what))
