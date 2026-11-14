@@ -138,6 +138,17 @@ class ArrayScreen(SplitScreen):
     in_background(self, lambda: array_overview(self.array_id), loaded, group="array", name=f"loading array {self.array_id}")
 
   def show_info(self):
+    """The information about the array; a mistake in it is shown there and logged, it does not end the app"""
+    try:
+      self.fill_info()
+    except Exception as e:
+      log.exception(f"array {self.array_id}: showing the information failed")
+      grid = Table.grid(padding=(0, 2))
+      grid.add_row(Text("error", style="red"), f"showing the information failed: {type(e).__name__}: {e}")
+      self.info_table = grid
+      self.query_one("#arr-info", Static).update(grid)
+
+  def fill_info(self):
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold")
     grid.add_column()
