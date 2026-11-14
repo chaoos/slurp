@@ -360,6 +360,7 @@ The rules, by category:
 | E | Environment | modules without versions or `module purge`, `conda activate` without the hook, `pip install` in jobs, modules that cannot be loaded, site advice |
 | N | NUMA placement | tasks not aligned with NUMA domains, threads and tasks not bound, GPUs not assigned to tasks, `srun` without `--cpus-per-task` (Slurm 22.05+) |
 | U | Usage and outcome | much more time or memory than used, low CPU usage, why a job failed (OOM, TIMEOUT, exit codes), why it waits (pending reasons), known errors in the logs, long jobs without checkpoints |
+| G | Good practice | the script sets up its own environment instead of relying on the shell it is submitted from (compared with the environment Slurm kept of the submission, `sacct --env-vars`, where the cluster stores it, and by Check environment after a fresh login); failures that look like successes (`echo done` after `srun`, a failed step under a COMPLETED job); not submitting from inside a job; task and CPU counts from Slurm, not literal; runs that overwrite each other's files; a record of what ran; no interactive commands; the script works from any directory (relative paths before it sets its directory; relative logs with a `cd` but no `--chdir`); `$0` is Slurm's copy of the script |
 
 **In the job list** the **Checks** column shows the errors (✖) and warnings
 (⚠) of each job: the scripts of queued jobs, the records of all, and the paths
@@ -373,8 +374,9 @@ stored it), the record, the paths and programs, your quota where the job
 writes, and the end of its logs. Its buttons:
 
 - **Check environment** replays the script's setup lines (module loads,
-  exports, sources, `cd`; never its commands) on the login node and checks the
-  programs: shared libraries (`ldd`), GPU code (`cuobjdump`).
+  exports, sources, `cd`; never its commands) on the login node, in a clean
+  environment as after a fresh login, and checks the programs: found at all
+  (G01), shared libraries (`ldd`), GPU code (`cuobjdump`).
 - **Placement** (running jobs) asks the nodes where the tasks and threads run,
   draws each node by NUMA domain with its GPUs, and names the problems: shared
   cores, unbound tasks, tasks spread over domains, GPUs of another domain.
