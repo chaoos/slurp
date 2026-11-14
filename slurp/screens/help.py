@@ -208,6 +208,20 @@ The text was sent to your terminal's clipboard (OSC 52), which only some termina
 `~/.cache/slurp/copied.txt`, **It arrived** stops asking.
 """),
   "ConfirmScreen": ("Confirm", "Confirm or cancel the action named (Esc cancels)."),
+  "OptionsScreen": ("Options", """
+The settings slurp keeps in `config.json` (the path is shown at the bottom), to see and change; **Save** writes them.
+
+- **Appearance:** the theme in a terminal and the one in a browser (or the same). The theme follows the view that is
+  active: when a browser takes over, its theme is used, when a terminal does, the terminal's. Choosing a theme with the
+  command palette (`Ctrl-P`) sets it for the kind of view that is active.
+- **Shells:** how many lines a shell keeps above its screen (scrolled back with the mouse wheel).
+- **Copying:** what Copy does when this machine has no clipboard tool: ask how to get the text, or only send it to
+  the terminal (OSC 52).
+- **Links:** the relay of links for your own terminal and browser.
+- **Checks:** the rules not to report.
+- **What slurp remembers:** drives on this machine, progress files and patterns, the tabs of the next start; Forget
+  removes them (on Save).
+"""),
 }
 
 def help_markdown(screen):
