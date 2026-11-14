@@ -129,11 +129,11 @@ def is_local_destination(destination):
   return destination.lower() in {"localhost", "127.0.0.1", "::1"}
 
 def setup_logging(logfile):
-  for name in ("slurp", "utils"): # "utils" is the logger of slurm.py / helpers.py
+  for name in ("slurp", "utils", "asyncssh"): # "utils" is the logger of slurm.py / helpers.py, asyncssh that of links
     lg = logging.getLogger(name)
     lg.handlers.clear()
     lg.propagate = False
-    lg.setLevel(logging.DEBUG if logfile else logging.WARNING)
+    lg.setLevel((logging.INFO if name == "asyncssh" else logging.DEBUG) if logfile else logging.WARNING)
     lg.addHandler(collector)
     if logfile:
       fh = logging.FileHandler(logfile)

@@ -467,6 +467,7 @@ class _Channel(asyncssh.SSHServerSession if asyncssh else object):
     return True
 
   def session_started(self):
+    log.debug(f"link {self.link.id}: session started ({self.mode}, terminal {self.term})")
     if self.mode == "shell" and not self.term:
       self.mode, self.refusal = "refuse", "this link needs a terminal (ssh -t)"
     if self.mode in (None, "refuse"):
@@ -677,8 +678,10 @@ class _Server(asyncssh.SSHServer if asyncssh else object):
 
   def connection_made(self, conn):
     self.conn = conn
+    log.debug(f"link {self.link.id}: connection from {conn.get_extra_info('peername')}")
 
   def session_requested(self):
+    log.debug(f"link {self.link.id}: session requested")
     return _Channel(self.manager, self.link, self.conn)
 
   def begin_auth(self, username):
@@ -697,13 +700,19 @@ class _Server(asyncssh.SSHServer if asyncssh else object):
 
   async def validate_password(self, username, password):
     link = self.link
+    log.debug(f"link {link.id}: password for {username!r}")
+    await asyncio.sleep(0) # (see validate_public_key)
     if link.open() and secrets.compare_digest(password.encode(), link.password.encode()):
       return True # (counted when the login completes)
     return await self._reject(username)
 
-  def validate_public_key(self, username, key):
+  async def validate_public_key(self, username, key):
     """Only checks: a client first asks which of its keys would do, then logs in with one (keys are not counted
-    as failures either: a client may offer several, and they cannot be guessed)"""
+    as failures either: a client may offer several, and they cannot be guessed).
+    Both checks pause once before they answer: Textual runs the event loop with eager tasks, so asyncssh's login
+    task starts inside create_task, before asyncssh has stored it as the connection's login; an answer without
+    a pause came before that, and asyncssh dropped the success (the client waited until the login timeout)."""
+    await asyncio.sleep(0)
     try:
       wanted = asyncssh.import_public_key(self.link.public_key)
     except (ValueError, asyncssh.KeyImportError):
@@ -715,6 +724,7 @@ class _Server(asyncssh.SSHServer if asyncssh else object):
 
   def auth_completed(self):
     link = self.link
+    log.debug(f"link {link.id}: login completed")
     if not link.open(): # (used up meanwhile by another login)
       self.conn.close()
       return
