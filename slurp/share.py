@@ -105,6 +105,15 @@ def parse_relay(relay):
 def is_public(relay):
   return parse_relay(relay) == ("ssh-j", PUBLIC_RELAY)
 
+def die_with_parent():
+  """In the child, before exec: the kernel ends it when slurp ends, even when slurp crashes or is killed (Linux;
+  elsewhere nothing). A relay tunnel must never outlive slurp."""
+  try:
+    import ctypes
+    ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGTERM) # PR_SET_PDEATHSIG
+  except Exception:
+    pass
+
 def make_password():
   """20 characters without ones that are easy to confuse"""
   alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -307,7 +316,8 @@ class ShareManager:
       started = time.monotonic()
       try:
         proc = link.tunnel = await asyncio.create_subprocess_exec(*argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                                                  stderr=subprocess.PIPE, start_new_session=True)
+                                                                  stderr=subprocess.PIPE, start_new_session=True,
+                                                                  preexec_fn=die_with_parent if sys.platform.startswith("linux") else None)
       except OSError as e:
         link.relay_state, link.relay_error = "broken", f"cannot run ssh: {e}"
         self.events("relay", link, None, link.relay_error)
