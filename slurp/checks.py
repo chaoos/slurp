@@ -1011,10 +1011,12 @@ def check_script_text(text, path="", facts=None, probes=None, job=None, **kw):
   ctx = make_context(text, path, job=job, facts=facts, probes=probes, **kw)
   return run_rules(ctx), ctx
 
-def check_file(path, with_probe=True):
-  """Findings of a script file on the cluster of the current tab (worker): the script, the facts, the probe, the quota"""
+def check_file(path, with_probe=True, text=None):
+  """Findings of a script file on the cluster of the current tab (worker): the script, the facts, the probe, the quota.
+  text: check this text as the content of path (an edited, unsaved version) instead of reading the file."""
   from .details import read_text
-  text = read_text(path)
+  if text is None:
+    text = read_text(path)
   facts = gather_facts()
   ctx = make_context(text, path, facts=facts)
   ctx.script_dir = os.path.dirname(path)

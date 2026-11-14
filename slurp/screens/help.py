@@ -99,7 +99,7 @@ A batch script with the findings of the checks below it.
 - **Check** (`r`) runs all checks: the script, its paths, programs and quota on the cluster at once, then its
   environment a few seconds later: the setup lines (module loads, sources, exports; never the job's commands) replayed
   on the login node after a fresh login, the programs found and their shared libraries (`ldd`). Opening and saving the
-  script run it too.
+  script run it too; while you edit, Check checks the edited text, saved or not.
 - **Edit** (`e`) makes the script editable right here: the checks follow as you type (the script, and its
   paths and programs on the cluster), Go to line jumps into it, `Ctrl+S` saves, `Ctrl+Z` undoes, **Revert** goes back
   to the file, `Esc` or **Done** stops editing (asking about unsaved changes, as do closing the subtab and quitting).

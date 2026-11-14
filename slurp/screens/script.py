@@ -100,15 +100,21 @@ class ScriptScreen(SplitScreen):
     """All checks: first those of the script, its paths and the quota (shown at once), then its environment (the setup
     replayed on the login node after a fresh login: seconds), added when done"""
     self.query_one("#sc-findings", FindingsView).show_text(Text("checking the script …", style="dim"))
-    self.check_worker()
+    if self.live_timer is not None: # (this check covers what the as-you-type one would)
+      self.live_timer.stop()
+      self.live_timer = None
+    self.check_worker(self.current_text() if self.editing else None)
+    if self.editing: # (a click on Check does not end the typing)
+      self.query_one("#script-text", TextArea).focus()
 
   @cluster_work("check")
-  def check_worker(self):
+  def check_worker(self, text=None):
+    """text: the edited version (while editing: checked as it is, saved or not), else the file"""
     try:
-      mtime = fs_stat(self.path).st_mtime
+      mtime = fs_stat(self.path).st_mtime if text is None else self.mtime
     except OSError:
       mtime = None
-    findings, ctx = checks.check_file(self.path)
+    findings, ctx = checks.check_file(self.path, text=text)
     worker = get_current_worker()
     if worker.is_cancelled:
       return
@@ -125,18 +131,26 @@ class ScriptScreen(SplitScreen):
     if ctx is not self.ctx or (self.editing and self.current_text() != ctx.script.text):
       return # (a newer check, or typed on meanwhile)
     self.findings = findings
-    self.query_one("#sc-findings", FindingsView).show(findings)
+    self.query_one("#sc-findings", FindingsView).show(findings, "(checks of the edited, unsaved version)" if self.unsaved() else "")
     self.show_status()
 
   def checked(self, findings, ctx, mtime, environment_follows=False):
-    self.findings, self.ctx, self.mtime = findings, ctx, mtime
-    self.text = ctx.script.text if ctx.script else ""
-    if self.editing:
-      self.saved_text = self.text
+    if self.editing and ctx.script is not None and ctx.script.text != self.saved_text:
+      # the edited text was checked: the file (its text, time) stays as it is
+      if ctx.script.text != self.current_text():
+        return # (typed on meanwhile: the as-you-type check follows)
+      self.findings, self.ctx = findings, ctx
     else:
-      self.show_text()
+      self.findings, self.ctx, self.mtime = findings, ctx, mtime
+      self.text = ctx.script.text if ctx.script else ""
+      if self.editing:
+        self.saved_text = self.text
+      else:
+        self.show_text()
     view = self.query_one("#sc-findings", FindingsView)
-    view.show(findings, "(checking the environment on the login node …)" if environment_follows else "")
+    unsaved = " of the edited, unsaved version" if self.unsaved() else ""
+    view.show(findings, (f"(checks{unsaved}; checking the environment on the login node …)" if environment_follows
+                         else f"(checks{unsaved})" if unsaved else ""))
     c = checks.counts(findings)
     self.show_status()
 
