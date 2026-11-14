@@ -139,7 +139,7 @@ class FindingsView(Vertical):
     event.stop()
     from ..config import load_config, update_config
     f = event.button.finding
-    muted = sorted(set(load_config().get("checks_muted", [])) | {f.rule.id})
+    muted = sorted(set((load_config().get("checks_muted") or [])) | {f.rule.id})
     update_config(checks_muted=muted)
     self.app.notify(f"{f.rule.id} is muted (to report it again: remove it from \"checks_muted\" in the config)", timeout=6)
     recheck = getattr(self.screen, "recheck", None)

@@ -744,7 +744,7 @@ class Context:
 def make_context(script_text=None, path="", job=None, facts=None, **kw):
   from .config import load_config
   script = Script(script_text, path) if script_text else None
-  muted = set(load_config().get("checks_muted", []))
+  muted = set((load_config().get("checks_muted") or []))
   if facts and facts.site:
     muted |= set(facts.site.get("muted", []))
   ctx = Context(script=script, job=job, facts=facts, muted=muted, **kw)
