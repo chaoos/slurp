@@ -92,7 +92,8 @@ class MainScreen(SplitScreen):
   def compose_left(self):
     with Horizontal(id="toolbar"):
       yield Button("Reload", id="reload", variant="primary")
-      yield Button("Shell", id="cluster-shell", tooltip="shell on the cluster of this tab, in the pane on the right (t)")
+      yield Button("Shell", id="cluster-shell", tooltip="shell on the cluster of this tab: in slurp, or from your own terminal (t)")
+      yield Button("Drive", id="cluster-drive", tooltip="your login directory as a drive on your own machine: sshfs, SSHFS-Win, … (F)")
       yield Button("Interactive job", id="interactive-job", tooltip="submit a job that holds nodes for shells (i)")
       yield Button("Cluster info", id="cluster-info", tooltip="health and occupancy of the cluster (C)")
       yield Button("Quota", id="quota", tooltip="your quotas on the filesystems (Q)")

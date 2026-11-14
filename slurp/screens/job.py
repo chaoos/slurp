@@ -57,6 +57,7 @@ from ..terminal import *
 from ..screens.dialogs import *
 from ..screens.base import *
 from ..screens.files import *
+from .links import ShellChoiceScreen
 
 def node_hours_text(job):
   """The node hours a job used (nodes × elapsed time): bold, with how they come about; for a running job so far and
@@ -613,7 +614,14 @@ class JobScreen(SplitScreen):
       return
     args = ["srun", f"--jobid={self.job.rec['JobIDRaw']}", "--overlap", "--pty", "--nodes=1", "--ntasks=1", "-w", node,
             f"--job-name={STEP_NAME}", "bash", "-l"]
-    self.app.open_shell(args, f"shell on {node} · job {self.job.jid}")
+    title = f"shell on {node} · job {self.job.jid}"
+    def chosen(where): # (a node: only a shell from the own terminal, never a drive)
+      if where == "slurp":
+        self.app.open_shell(args, title)
+      elif where == "own":
+        cluster = self.app.cluster
+        self.app.open_link_setup("shell", title, cluster, self.app.link_argv(cluster, args))
+    self.app.push_screen(ShellChoiceScreen(f"Shell on {node} (job {self.job.jid})"), chosen)
 
   def action_reload(self):
     self.load(refresh_job=True)

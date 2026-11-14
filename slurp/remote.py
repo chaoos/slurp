@@ -551,6 +551,10 @@ class RemoteSSH:
     return ["ssh", "-S", self.control_path, "-tt" if interactive else "-T", self.destination,
             *(["; ".join(remote)] if remote else [])]
 
+  def subsystem_argv(self, name):
+    """ssh command line for a new channel of the connection that runs a subsystem of the cluster's sshd (sftp)"""
+    return ["ssh", "-S", self.control_path, "-T", "-s", self.destination, name]
+
   def path_info(self, path):
     source = ("p=$1; [ -e \"$p\" ] || [ -L \"$p\" ] || exit 0; "
               "f=0; d=0; [ ! -f \"$p\" ] || f=1; [ ! -d \"$p\" ] || d=1; "

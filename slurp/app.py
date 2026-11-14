@@ -69,6 +69,8 @@ from .storage import *
 from .screens.storage import *
 from . import remote, state
 from .config import load_config, update_config
+from .share import ShareManager, SFTP_SERVERS, MAX_FAILURES
+from .screens.links import ShellChoiceScreen, LinkSetupScreen, LinkScreen
 
 class Slurp(App):
   TITLE = "slurp"
@@ -181,6 +183,7 @@ class Slurp(App):
     Binding("r", "reload", "Reload"),
     Binding("t", "cluster_shell", "Shell"),
     Binding("d", "login_dir", "Home dir"),
+    Binding("F", "cluster_drive", "Drive"),
     Binding("i", "interactive_job", "Interactive job"),
     Binding("C", "cluster_info", "Cluster info"),
     Binding("Q", "quota", "Quota"),
@@ -195,6 +198,7 @@ class Slurp(App):
 
   def __init__(self):
     super().__init__()
+    self.link_manager = ShareManager(self.link_event) # shells and drives for the user's own terminal
     # the tabs of the last run (from the config; a local tab the first time), and the destinations given with --ssh
     saved = load_config()
     self.clusters = []
@@ -555,6 +559,7 @@ class Slurp(App):
     """Every 0.25 s (only reads state, never waits): notice logins and broken sessions, reconnect, update the status"""
     self.spinner_frame += 1
     now = time.monotonic()
+    self.link_manager.tick()
     if self.screen is self.main and any(not job.annotated for job in self.cluster.jobs.values()):
       table = self.main.query_one("#jobs") # (turn the spinners of the cells still coming)
       clear = getattr(table, "_clear_caches", None)
@@ -703,6 +708,9 @@ class Slurp(App):
         self.refresh_view_tabs(screen)
     cluster = self.cluster
     loading, connection = self.load_text(cluster), self.connection_text(cluster)
+    links = self.links_text()
+    if links is not None:
+      connection = Text.assemble(connection, links)
     for screen in dict.fromkeys([self.main, *self.screen_stack]):
       if not isinstance(screen, SplitScreen) or not screen.is_mounted:
         continue
@@ -778,11 +786,101 @@ class Slurp(App):
     self.open_view(title, lambda: TerminalScreen(session), kind="shell", session=session)
 
   def action_cluster_shell(self):
+    """A shell on the cluster of the tab: in slurp, or from the user's own terminal (asked every time)"""
     cluster = self.cluster
-    if cluster.destination:
-      self.open_shell([], f"shell on {cluster.connection.identity if cluster.connection else cluster.destination}", focus=True)
-    else:
-      self.open_shell([os.environ.get("SHELL") or "bash", "-l"], "local shell", focus=True)
+    name = cluster.connection.identity if cluster.destination and cluster.connection else cluster.destination or "this machine"
+    def chosen(where):
+      if where == "slurp":
+        if cluster.destination:
+          self.open_shell([], f"shell on {name}", focus=True)
+        else:
+          self.open_shell([os.environ.get("SHELL") or "bash", "-l"], "local shell", focus=True)
+      elif where == "own":
+        self.open_link_setup("shell", f"shell on {name}", cluster, self.link_argv(cluster))
+    self.push_screen(ShellChoiceScreen(f"Shell on {name}"), chosen)
+
+  # ---- links: shells and drives for the user's own terminal (slurp/share.py)
+  def link_argv(self, cluster, args=None, interactive=True):
+    """() -> the argv a session of a link runs on the cluster of the tab (over its session at that time)"""
+    def argv():
+      if not cluster.destination:
+        return list(args) if args else [os.environ.get("SHELL") or "bash", "-l"]
+      c = cluster.connection
+      if c is None or not c.ready:
+        raise RuntimeError(f"the connection to {cluster.name} is not ready")
+      return c.command_argv(list(args or []), interactive=interactive)
+    return argv
+
+  def open_link_setup(self, kind, title, cluster, argv, path="", read_only_argv=None):
+    if cluster.destination and (cluster.connection is None or not cluster.connection.ready):
+      self.notify(f"{cluster.name}: log in first", severity="warning")
+      return
+    def created(link):
+      if link is not None:
+        self.push_screen(LinkScreen(link))
+        self.refresh_status()
+    self.push_screen(LinkSetupScreen(kind, title, cluster.name, argv, path=path, read_only_argv=read_only_argv), created)
+
+  def action_cluster_drive(self):
+    """The login directory of the tab as a drive for the user's own machine (SFTP)"""
+    cluster = self.cluster
+    if cluster.destination and (cluster.connection is None or not cluster.connection.ready):
+      self.notify(f"{cluster.name}: log in first", severity="warning")
+      return
+    home = cluster.connection.home if cluster.destination else os.path.expanduser("~")
+    probe = "for p; do [ -x \"$p\" ] && echo \"$p\" && exit 0; done; exit 0"
+    def found(out):
+      path = (out or "").strip().splitlines()[0] if (out or "").strip() else ""
+      if not path and not cluster.destination:
+        self.notify("no sftp-server on this machine: a drive is not possible", severity="error")
+        return
+      def make(read_only):
+        if path:
+          return self.link_argv(cluster, [path, *(["-R"] if read_only else []), "-d", home], interactive=False)
+        def subsystem(): # (the cluster's standard SFTP: no read only, no start directory)
+          c = cluster.connection
+          if c is None or not c.ready:
+            raise RuntimeError(f"the connection to {cluster.name} is not ready")
+          return c.subsystem_argv("sftp")
+        return subsystem
+      self.open_link_setup("drive", f"{cluster.name} {home}", cluster, make(False), path=home,
+                           read_only_argv=make(True) if path else None)
+    in_background(self, lambda: run(["sh", "-c", probe, "sh", *SFTP_SERVERS]), found, group="sftp-server",
+                  connection=cluster.connection)
+
+  def link_event(self, kind, link, session, message):
+    """Logins, wrong passwords and the state of the links, as notifications (they must not go unnoticed)"""
+    what = f"link {link.id} ({link.title})"
+    if kind == "login":
+      self.notify(f"{session.kind} opened through {what}" + (f", key {session.key}" if session.key else ""),
+                  title=link.tab, timeout=8)
+    elif kind == "failure":
+      self.notify(f"{what}: {message}", title=link.tab, severity="warning", timeout=8)
+    elif kind == "locked":
+      self.notify(f"{what} locked after {MAX_FAILURES} wrong passwords", title=link.tab, severity="error", timeout=15)
+    elif kind == "ended" and session is not None and session.kind:
+      self.notify(f"{session.kind} through {what} ended", title=link.tab, timeout=4)
+    elif kind == "relay":
+      if link.relay_state == "broken" and not getattr(link, "warned", False):
+        link.warned = True
+        self.notify(f"{what}: relay lost: {message}", title=link.tab, severity="warning", timeout=10)
+      elif link.relay_state == "ready":
+        link.warned = False
+    elif kind == "closed" and message != "revoked":
+      self.notify(f"{what} takes no more logins: {message}", title=link.tab, timeout=5)
+    self.refresh_status()
+
+  def links_text(self):
+    """For the footer: open links and sessions (they must stay visible)"""
+    active, live = self.link_manager.active(), self.link_manager.live_sessions()
+    if not active:
+      return None
+    return Text(f" · ⇄ {len(active)} link{'s' if len(active) != 1 else ''}" + (f", {len(live)} session{'s' if len(live) != 1 else ''} open" if live else ""),
+                style="bold magenta")
+
+  @on(Button.Pressed, "#cluster-drive")
+  def cluster_drive_pressed(self, event):
+    self.action_cluster_drive()
 
   def action_login_dir(self):
     """Browse the login directory of the active cluster."""
@@ -859,6 +957,20 @@ class Slurp(App):
       self.focus_terminal()
 
   async def action_quit(self):
+    live = self.link_manager.live_sessions()
+    if live and not getattr(self, "quit_confirmed", False):
+      def done(yes):
+        if yes:
+          self.quit_confirmed = True
+          self.run_action("quit")
+      self.push_screen(ConfirmScreen("Quit slurp", f"{len(live)} session{'s' if len(live) != 1 else ''} through links "
+                                     "(shells and drives on your own machine) are open. They end when slurp quits; "
+                                     "a mounted drive then fails until it is unmounted.", "Quit"), done)
+      return
+    self.link_manager.shutdown()
+    await self.real_quit()
+
+  async def real_quit(self):
     # Stop mouse and focus reports right away, and clear the screen while still on the alternate screen:
     # terminals that switch back to the previous content are not affected, in terminals (or GNU screen / tmux
     # setups) without an alternate screen the last frame of the app would otherwise stay on the screen.
