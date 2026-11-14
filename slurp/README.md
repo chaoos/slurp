@@ -392,8 +392,13 @@ writes, and the end of its logs. Its buttons:
 opens in the **script view**: the script with its findings below, each with
 *Go to line*. **Explain** (`x`) annotates every `#SBATCH` line with what
 Slurm makes of it (units, per node, the paths of the logs, IGNORED after the
-first command). **Edit** (`e`) opens it in `$VISUAL`/`$EDITOR`; it is checked
-again when saved. **Test** runs `sbatch --test-only` (accepted? when would it
+first command). **Edit** (`e`) makes it editable right there, with Textual's
+editor: the findings follow as you type, `Ctrl+S` saves (and checks the files
+on the cluster too), `Ctrl+Z` undoes, **Revert** goes back to the file, `Esc`
+stops editing; unsaved changes are asked about when you stop, close the subtab
+or quit, and Save asks before it overwrites a file changed meanwhile. Bash is
+highlighted with Textual's syntax extra (`pip install "textual[syntax]"`).
+**Edit outside** opens your `$VISUAL`/`$EDITOR` instead. **Test** runs `sbatch --test-only` (accepted? when would it
 start?). **Submit…** submits it after naming the errors found.
 
 **New job script** (`n` in the job list) writes a commented script for the
@@ -526,7 +531,7 @@ top-left `←` button to go back.
 |---|---|
 | Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `!` only jobs with problems; `n` new job script; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
 | Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (in slurp or your own terminal); Checks: `Check again`, `Check environment`, `Placement`, `Fixed copy…`, `What changed`, `Rule catalogue` |
-| Script view | `r` check again; `x` explain the `#SBATCH` lines; `e` edit; buttons `Check environment`, `Test`, `Fixed copy…`, `Submit…` |
+| Script view | `r` check again; `x` explain the `#SBATCH` lines; `e` edit in place (`Ctrl+S` save, `Esc` stop editing); buttons `Check environment`, `Test`, `Fixed copy…`, `Submit…` |
 | Everywhere | `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue |
 | Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
