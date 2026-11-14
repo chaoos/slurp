@@ -1186,13 +1186,13 @@ def site_environment(ctx):
 @rule("G01", WARNING, "The script sets up its own environment",
       "A job that depends on the shell it was submitted from: modules, a uenv, a Python environment, PATH entries or "
       "variables that were active when sbatch ran, but that the script does not set up itself. Checked from the "
-      "environment Slurm kept of the submission (sacct --env-vars), and by Check environment, which replays the "
+      "environment Slurm kept of the submission (sacct --env-vars), and by replaying the "
       "script's setup after a fresh login.",
       "By default (--export=ALL) a job inherits the submitting shell. It works today, but not after a fresh login, from "
       "another terminal, a cron job, a colleague, or Restart: then programs or libraries are missing (command not "
       "found, error while loading shared libraries) or other versions are used, and nobody can tell from the script.",
       "Set up everything in the script: module purge, then the module loads (or the uenv, or source .../activate), the "
-      "exports it needs. Test it as it will run: log in fresh and call sbatch, or use Check environment. To enforce "
+      "exports it needs. Test it as it will run: log in fresh and call sbatch (the checks do that for you). To enforce "
       "it: #SBATCH --export=NONE, and after the setup export SLURM_EXPORT_ENV=ALL (else srun steps get an empty "
       "environment).",
       "#SBATCH --export=NONE\nmodule purge\nmodule load gcc/12.3.0 cray-mpich/8.1.29\nsource $HOME/venvs/sim/bin/activate\n"

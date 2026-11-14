@@ -111,10 +111,9 @@ class JobScreen(SplitScreen):
       yield Static(id="info")
       with Horizontal(id="checks-bar"):
         yield Label("Checks", classes="section")
-        yield Button("Check again", id="checks-run", compact=True, tooltip="run the checks of the script and the job again")
-        yield Button("Check environment", id="checks-env", compact=True,
-                     tooltip="replay the script's module loads and exports on the login node and check the programs' "
-                             "shared libraries (ldd); runs only setup lines, never the job's commands")
+        yield Button("Check", id="checks-run", compact=True,
+                     tooltip="all checks of the script and the job: the record, paths, quota and logs, then the script's "
+                             "environment (its setup replayed after a fresh login, the programs' libraries)")
         yield Button("Placement", id="checks-placement", compact=True,
                      tooltip="where the tasks and threads of the running job are: cores, NUMA domains, GPUs")
         yield Button("Fixed copy…", id="checks-fix", compact=True,
@@ -390,21 +389,31 @@ class JobScreen(SplitScreen):
 
   # ---- checks
   check_context = None
-  replay = None   # the result of Check environment
   live = None     # the result of Placement
 
   def run_checks(self):
     view = self.query_one("#job-checks", FindingsView)
     view.show_text(Text("checking the script and the job …", style="dim"))
-    self.check_worker(self.job, self.replay, self.live)
+    self.check_worker(self.job, self.live)
 
   @cluster_work("checks")
-  def check_worker(self, job, replay, live):
-    findings, ctx = checks.check_job(job, full=True, replay=replay, live=live)
-    if not get_current_worker().is_cancelled:
+  def check_worker(self, job, live):
+    """All checks: the job, its script, paths, quota and logs (shown at once), then the script's environment replayed
+    on the login node (seconds), added when done"""
+    findings, ctx = checks.check_job(job, full=True, live=live)
+    worker = get_current_worker()
+    if worker.is_cancelled:
+      return
+    self.app.call_from_thread(self.checks_done, findings, ctx, ctx.script is not None)
+    if ctx.script is None:
+      return
+    from ..environment import replay_environment
+    ctx.replay = replay_environment(ctx)
+    findings = checks.run_rules(ctx)
+    if not worker.is_cancelled:
       self.app.call_from_thread(self.checks_done, findings, ctx)
 
-  def checks_done(self, findings, ctx):
+  def checks_done(self, findings, ctx, environment_follows=False):
     self.check_context = ctx
     self.job.checks = findings
     source = ""
@@ -414,7 +423,9 @@ class JobScreen(SplitScreen):
       source = "(the script as submitted)"
     elif ctx.on_disk:
       source = "(the script file as it is now)"
-    self.query_one("#job-checks", FindingsView).show(findings, source)
+    if environment_follows:
+      source += " (checking the environment on the login node …)"
+    self.query_one("#job-checks", FindingsView).show(findings, source.strip())
 
   @on(Button.Pressed, "#checks-run")
   def checks_run_pressed(self, event):
@@ -425,27 +436,6 @@ class JobScreen(SplitScreen):
   def checks_catalogue_pressed(self, event):
     event.stop()
     self.app.action_rule_catalogue("")
-
-  @on(Button.Pressed, "#checks-env")
-  def checks_env_pressed(self, event):
-    event.stop()
-    ctx = self.check_context
-    if ctx is None or ctx.script is None:
-      self.notify("no batch script to check", severity="warning")
-      return
-    self.query_one("#job-checks", FindingsView).show_text(Text("replaying the environment on the login node …", style="dim"))
-    self.env_worker(ctx)
-
-  @cluster_work("checks")
-  def env_worker(self, ctx):
-    from ..environment import replay_environment
-    replay = replay_environment(ctx)
-    if not get_current_worker().is_cancelled:
-      self.app.call_from_thread(self.env_done, replay)
-
-  def env_done(self, replay):
-    self.replay = replay
-    self.run_checks()
 
   def recheck(self):
     self.run_checks()

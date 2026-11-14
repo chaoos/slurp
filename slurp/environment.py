@@ -1,4 +1,4 @@
-"""Check environment: replay the setup lines of a batch script on the login node (module loads, exports, sources, cd,
+"""The environment check: replay the setup lines of a batch script on the login node (module loads, exports, sources, cd,
 plain assignments) and look at the programs it runs: their shared libraries (ldd), their GPU code (cuobjdump).
 
 Only setup lines run, never the job's commands; lines with command substitutions ($(...), backticks) are skipped, so

@@ -37,8 +37,9 @@ Everything about one job.
   environment and script it was submitted with, if the cluster kept them), Run array, Array (the window of its array).
 - **Info:** state (with the pending reason or exit code), account, partition, nodes, times, node hours, the command.
 - **Checks:** what is wrong or could be better with the script and the job, most severe first; open an entry for why
-  it matters and how to fix it, and its rule in the catalogue. **Check environment** replays the script's module
-  loads on the login node and checks the programs' libraries; **Placement** (running jobs) shows where tasks and
+  it matters and how to fix it, and its rule in the catalogue. **Check** runs all checks again: first the record,
+  paths, quota and logs, then (a few seconds later) the script's environment: its setup replayed on the login node
+  after a fresh login, the programs found and their libraries. **Placement** (running jobs) shows where tasks and
   threads run; **Fixed copy…** writes a copy of the script with the safe fixes; **What changed** (failed jobs)
   compares with the last run that worked.
 - **Memory** (running jobs): Query current memory (CPU and GPU), and repeated queries with plots.
@@ -95,8 +96,10 @@ A batch script with the findings of the checks below it.
   **Go to line**, and Mute (everywhere, or in this script with a `# slurp: ignore` comment).
 - **Explain** (`x`) writes after every `#SBATCH` line what Slurm makes of it: units, per node, the paths of the logs,
   IGNORED after the first command.
-- **Check environment** replays the module loads and exports on the login node and checks the programs' shared
-  libraries (`ldd`); only setup lines run, never the job's commands.
+- **Check** (`r`) runs all checks: the script, its paths, programs and quota on the cluster at once, then its
+  environment a few seconds later: the setup lines (module loads, sources, exports; never the job's commands) replayed
+  on the login node after a fresh login, the programs found and their shared libraries (`ldd`). Opening and saving the
+  script run it too.
 - **Edit** (`e`) makes the script editable right here: the checks follow as you type (the script, and its
   paths and programs on the cluster), Go to line jumps into it, `Ctrl+S` saves, `Ctrl+Z` undoes, **Revert** goes back
   to the file, `Esc` or **Done** stops editing (asking about unsaved changes, as do closing the subtab and quitting).

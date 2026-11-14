@@ -1,4 +1,4 @@
-"""The script view: a batch script with the findings of the checks, Explain, Check environment, Edit (in place, checked
+"""The script view: a batch script with the findings of the checks, Explain, Edit (in place, checked
 as you type), Test, Submit"""
 
 import os
@@ -38,7 +38,7 @@ class ScriptScreen(SplitScreen):
   SHOW_BACK = True
   BINDINGS = [
     Binding("escape", "back", "Back", priority=True), # (also from the editor, which would keep Esc)
-    Binding("r", "recheck", "Check again"),
+    Binding("r", "recheck", "Check"),
     Binding("x", "explain", "Explain"),
     Binding("e", "edit", "Edit"),
     Binding("ctrl+s", "save", "Save", priority=True),
@@ -63,7 +63,6 @@ class ScriptScreen(SplitScreen):
     self.ctx = None
     self.findings = []
     self.explaining = False
-    self.replay = None
     self.mtime = None
     self.editing = False
     self.saved_text = ""   # the text as it is in the file (while editing)
@@ -71,11 +70,10 @@ class ScriptScreen(SplitScreen):
 
   def compose_left(self):
     with Horizontal(id="script-bar"):
-      yield Button("Check again", id="sc-check", compact=True)
+      yield Button("Check", id="sc-check", compact=True,
+                   tooltip="all checks: the script, its paths, programs and quota on the cluster, then its environment "
+                           "(its module loads and sources replayed after a fresh login, the programs' libraries) (r)")
       yield Button("Explain", id="sc-explain", compact=True, tooltip="what Slurm makes of each #SBATCH line (x)")
-      yield Button("Check environment", id="sc-env", compact=True,
-                   tooltip="replay the module loads and exports on the login node and check the programs' shared "
-                           "libraries (ldd); runs only setup lines, never the job's commands")
       yield Button("Edit", id="sc-edit", compact=True, tooltip="edit it here, checked as you type; Ctrl+S saves (e)")
       yield Button("Save", id="sc-save", compact=True, variant="success", tooltip="write it to the file and check it fully (Ctrl+S)")
       yield Button("Revert", id="sc-revert", compact=True, tooltip="back to the file as it is saved")
@@ -99,23 +97,38 @@ class ScriptScreen(SplitScreen):
 
   # ---- checking
   def check(self):
+    """All checks: first those of the script, its paths and the quota (shown at once), then its environment (the setup
+    replayed on the login node after a fresh login: seconds), added when done"""
     self.query_one("#sc-findings", FindingsView).show_text(Text("checking the script …", style="dim"))
-    self.check_worker(self.replay)
+    self.check_worker()
 
   @cluster_work("check")
-  def check_worker(self, replay):
+  def check_worker(self):
     try:
       mtime = fs_stat(self.path).st_mtime
     except OSError:
       mtime = None
     findings, ctx = checks.check_file(self.path)
-    if replay is not None:
-      ctx.replay = replay
-      findings = checks.run_rules(ctx)
-    if not get_current_worker().is_cancelled:
-      self.app.call_from_thread(self.checked, findings, ctx, mtime)
+    worker = get_current_worker()
+    if worker.is_cancelled:
+      return
+    self.app.call_from_thread(self.checked, findings, ctx, mtime, ctx.script is not None)
+    if ctx.script is None:
+      return
+    from ..environment import replay_environment
+    ctx.replay = replay_environment(ctx)
+    findings = checks.run_rules(ctx)
+    if not worker.is_cancelled:
+      self.app.call_from_thread(self.environment_checked, findings, ctx)
 
-  def checked(self, findings, ctx, mtime):
+  def environment_checked(self, findings, ctx):
+    if ctx is not self.ctx or (self.editing and self.current_text() != ctx.script.text):
+      return # (a newer check, or typed on meanwhile)
+    self.findings = findings
+    self.query_one("#sc-findings", FindingsView).show(findings)
+    self.show_status()
+
+  def checked(self, findings, ctx, mtime, environment_follows=False):
     self.findings, self.ctx, self.mtime = findings, ctx, mtime
     self.text = ctx.script.text if ctx.script else ""
     if self.editing:
@@ -123,7 +136,7 @@ class ScriptScreen(SplitScreen):
     else:
       self.show_text()
     view = self.query_one("#sc-findings", FindingsView)
-    view.show(findings, "" if self.replay is None else "(with the environment check)")
+    view.show(findings, "(checking the environment on the login node …)" if environment_follows else "")
     c = checks.counts(findings)
     self.show_status()
 
@@ -201,24 +214,6 @@ class ScriptScreen(SplitScreen):
   def catalogue_pressed(self, event):
     event.stop()
     self.app.action_rule_catalogue("")
-
-  @on(Button.Pressed, "#sc-env")
-  def env_pressed(self, event):
-    event.stop()
-    if self.ctx is None or self.ctx.script is None:
-      return
-    self.query_one("#sc-findings", FindingsView).show_text(Text("replaying the environment on the login node …", style="dim"))
-    self.env_worker(self.ctx)
-
-  @cluster_work("check")
-  def env_worker(self, ctx):
-    from ..environment import replay_environment
-    replay = replay_environment(ctx)
-    self.app.call_from_thread(self.env_done, replay)
-
-  def env_done(self, replay):
-    self.replay = replay
-    self.check()
 
   # ---- edit: in place, checked as you type
   @on(Button.Pressed, "#sc-edit")

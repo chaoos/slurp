@@ -81,8 +81,8 @@ A job script should run the same for anyone, any time: log in, `sbatch job.sh`, 
 - **It needs a prepared shell** ([G01](rule:G01)): modules, a uenv or a Python environment loaded before `sbatch`,
   which the job inherits. After a fresh login it fails. Put the setup in the script; `#SBATCH --export=NONE`
   enforces it (then `export SLURM_EXPORT_ENV=ALL` after the setup, for the srun steps). slurp compares the
-  environment the job was submitted with against what the script sets up, and **Check environment** replays the
-  setup after a fresh login.
+  environment the job was submitted with against what the script sets up, and its checks replay the setup after
+  a fresh login.
 - **It only works from one directory** ([G18](rule:G18)): `./sim`, `input.dat`, `logs/…` are relative to wherever
   `sbatch` runs. Name the directory once: `#SBATCH --chdir=/path/to/run` (logs are opened before the script runs,
   so a `cd` inside does not move them). `$0` does not help: it is Slurm's copy of the script ([G19](rule:G19)).
@@ -111,8 +111,8 @@ A job script should run the same for anyone, any time: log in, `sbatch job.sh`, 
   software; use them before building your own.
 - **Python**: create environments once, not in the job ([E02](rule:E02)); on parallel filesystems many small files make
   every start slow ([P07](rule:P07)): containers or squashfs images are faster.
-- **Check environment** in the job window or the script view loads the script's modules on the login node and checks
-  that every program finds its shared libraries.
+- The checks of the job window and the script view load the script's modules on the login node (as after a fresh
+  login) and check that every program is found and finds its shared libraries.
 
 ## Filesystems and quotas
 

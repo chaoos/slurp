@@ -1165,7 +1165,7 @@ def rules_markdown():
   return "\n".join(out)
 
 NEEDS_TEXT = {"script": "the script", "job": "the job record", "probe": "files on the cluster",
-              "quota": "the quota", "logs": "the job's output", "replay": "the job's environment (Check environment)",
+              "quota": "the quota", "logs": "the job's output", "replay": "the job's environment (replayed after a fresh login)",
               "live": "the running job (Placement)", "list": "the job list", "login": "your processes on the login node",
               "facts": "your login files"}
 
