@@ -106,15 +106,16 @@ class ArrayScreen(SplitScreen):
       with TabPane("Tasks", id="arr-tab-tasks"):
         yield ClickTable(id="arr-tasks", cursor_type="row", zebra_stripes=True)
 
-  TASK_COLUMNS = [("task", "Task"), ("state", "State"), ("exit", "Exit"), ("submit", "Submit"), ("wait", "Queue wait"),
+  TASK_COLUMNS = [("task", "Task"), ("state", "State"), ("progress", "Progress"), ("exit", "Exit"), ("submit", "Submit"), ("wait", "Queue wait"),
                   ("start", "Start"), ("end", "End"), ("elapsed", "Run time"), ("node", "Node")]
 
   def on_mount(self):
     self.sub_title = f"array {self.array_id}"
     table = self.query_one("#arr-tasks", ClickTable)
     for key, label in self.TASK_COLUMNS:
-      table.add_column(label, key=key)
+      table.add_column(label, key=key, **({"width": 10} if key == "progress" else {}))
     self.action_reload()
+    self.set_interval(5, self.refresh_task_progress) # (the job list reads the progress of running tasks)
     self.set_interval(1, lambda: self.show_info() if self.loading else None) # the seconds asked so far
 
   def action_back(self):
@@ -220,12 +221,29 @@ class ArrayScreen(SplitScreen):
       start, submit = epoch(t.get("start")), epoch(t.get("submit"))
       wait = duration_text(start - submit) if start and submit and t["state"] != "PENDING" else ""
       state = t["state"] + (f" ({t['reason']})" if t.get("reason") and t["reason"] != "None" else "")
-      table.add_row(f"{self.array_id}_{i}", state_text(state), t.get("exit", ""), fmt_time(t.get("submit", "")), wait,
+      table.add_row(f"{self.array_id}_{i}", state_text(state), self.task_progress(i, t), t.get("exit", ""), fmt_time(t.get("submit", "")), wait,
                     ("~" if t["state"] == "PENDING" else "") + fmt_time(t.get("start", "")), fmt_time(t.get("end", "")),
                     t.get("elapsed", "") if is_time(t.get("start", "")) and t["state"] != "PENDING" else "", t.get("node", ""),
                     key=str(i))
     if tasks and 0 <= cursor < table.row_count:
       table.move_cursor(row=cursor)
+
+  def task_progress(self, index, task):
+    """The progress bar of a task, as in the job list: from its job there if it is listed (a running task: its n/N
+    line), else from its state (completed: full, failed: empty)"""
+    job = self.app.jobs.get(f"{self.array_id}_{index}")
+    if job is not None:
+      progress = progress_for_job(job)
+    else:
+      progress = progress_for_job(Job(dict(State=task["state"])))
+    return RichProgressBar(total=max(progress.total, 1), completed=progress.current, width=8) if progress else ""
+
+  def refresh_task_progress(self):
+    """The bars of the running tasks again (their progress changes)"""
+    table = self.query_one("#arr-tasks", ClickTable)
+    for i, t in (self.overview or {}).get("tasks", {}).items():
+      if t["state"] == "RUNNING" and str(i) in table.rows:
+        table.update_cell(str(i), "progress", self.task_progress(i, t))
 
   @on(DataTable.RowSelected, "#arr-tasks")
   def task_selected(self, event):
