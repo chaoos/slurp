@@ -133,6 +133,8 @@ class Slurp(App):
   #cluster-tabs Button.cluster-close { width: 3; min-width: 3; padding: 0; margin-right: 2; color: $text-muted; }
   #cluster-tabs Button.cluster-close:hover { color: $error; }
   #topbar Header { dock: none; width: 1fr; height: 1; }
+  #view-help { width: 3; min-width: 3; height: 1; text-style: bold; }
+  .help-corner { dock: right; width: 3; min-width: 3; height: 1; text-style: bold; }
   #bottombar { dock: bottom; height: 1; }
   #bottombar Footer { dock: none; width: 1fr; }
   #loadstatus { width: auto; height: 1; padding: 0 1; background: $footer-background; color: $warning; }
@@ -217,6 +219,7 @@ class Slurp(App):
     Binding("ctrl+w", "close_view", "Close subtab"),
     Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
     Binding("ctrl+x", "close_shell", "Close shell"),
+    Binding("question_mark", "view_help", "Help", key_display="?"),
     Binding("f1", "guides", "Guides"),
     Binding("f2", "rule_catalogue", "Rules", show=False),
   ]
@@ -598,7 +601,7 @@ class Slurp(App):
             self.refresh_status()
     if self.spinner_frame % (4 * LOGIN_CHECK_EVERY) == 4 * 30: # (every 5 minutes, first after 30 s) B09
       self.check_login_nodes()
-    if self.screen is self.main and any(not job.annotated for job in self.cluster.jobs.values()):
+    if self.screen is self.main and (getattr(self.cluster, "checking", False) or any(not job.annotated for job in self.cluster.jobs.values())):
       table = self.main.query_one("#jobs") # (turn the spinners of the cells still coming)
       clear = getattr(table, "_clear_caches", None)
       if clear is not None:
@@ -1097,7 +1100,7 @@ class Slurp(App):
     await super().on_event(event)
 
   def check_action(self, action, parameters):
-    if not self.clusters and action not in ("quit", "command_palette", "help_quit"):
+    if not self.clusters and action not in ("quit", "command_palette", "help_quit", "view_help", "guides", "rule_catalogue"):
       return False # no tab: only + (and quit)
     if action == "reload": # a key of the job table, not of the other windows
       return self.screen is self.main
@@ -1165,12 +1168,6 @@ class Slurp(App):
           job.annotated = False
       self.call_from_thread(self.jobs_listed, cluster, worker, jobs, since, accounts)
       annotate(jobs)
-      try:
-        check_jobs(jobs) # (the light checks: scripts of queued jobs, records, one probe)
-      except Cancelled:
-        raise
-      except Exception:
-        log.exception("checking the jobs failed")
     finally:
       self.call_from_thread(self.jobs_loaded, cluster, worker, jobs, since, accounts)
 
@@ -1205,6 +1202,7 @@ class Slurp(App):
       cluster.since, cluster.loaded, cluster.updated = since, True, datetime.now()
       if cluster is self.cluster:
         self.populate()
+      self.check_jobs_later(cluster, jobs)
     self.show_warnings()
     self.refresh_status()
 
@@ -1252,6 +1250,46 @@ class Slurp(App):
       if path:
         open_path(self, ["Jobs"], path)
     self.push_screen(NewScriptScreen(home or "."), created)
+
+  def action_view_help(self):
+    """? : the help of the window shown (a shell: its terminal help)"""
+    from .screens.help import ViewHelpScreen, help_markdown
+    screen = self.screen
+    if isinstance(screen, ViewHelpScreen):
+      return
+    if isinstance(screen, TerminalScreen):
+      self.push_screen(TerminalHelpScreen(screen.session), lambda _: screen.query_one(TerminalView).focus())
+      return
+    self.push_screen(ViewHelpScreen(help_markdown(screen)))
+
+  def push_screen(self, screen, *args, **kwargs):
+    """Dialogs get a ? in their top right corner (the windows have theirs in the top bar)"""
+    result = super().push_screen(screen, *args, **kwargs)
+    if isinstance(screen, ModalScreen):
+      from .screens.help import add_help_button
+      self.call_after_refresh(add_help_button, screen)
+    return result
+
+  @on(Button.Pressed, ".help-corner")
+  def help_corner_pressed(self, event):
+    event.stop()
+    self.action_view_help()
+
+  def check_jobs_later(self, cluster, jobs):
+    """The light checks of the listed jobs, after the load (their first facts about the cluster cost a round trip that
+    must not hold up the list): the Checks column fills in when they are done"""
+    def work():
+      try:
+        check_jobs(jobs)
+      finally:
+        cluster.checking = False
+      return True
+    def done(ok):
+      if cluster is self.cluster and cluster.loader is None and self.screen is self.main:
+        self.populate() # (also when the checks failed: no spinners left)
+    cluster.checking = True
+    in_background(self, work, done, group=f"checks-{cluster.name}", name="checking the jobs",
+                  connection=cluster.connection if cluster.destination else None)
 
   def action_toggle_problems(self):
     self.problems_only = not self.problems_only
@@ -1407,7 +1445,7 @@ class Slurp(App):
                              else "-" if going else "", style="" if not eta or eta > time.time() else "yellow"))
       values.extend((rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
                      ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]),
-                     checks_cell(job.checks) if job.annotated or job.checks is not None else SPINNING,
+                     checks_cell(job.checks) if job.checks is not None else SPINNING if getattr(cluster, "checking", False) else "",
                      err_text(job.err) if job.annotated else SPINNING, job.command[:150] if job.annotated else SPINNING))
       table.add_row(*values, key=job.jid)
     if current is not None:

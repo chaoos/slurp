@@ -72,6 +72,7 @@ class SplitScreen(Screen):
       if self.SHOW_BACK:
         yield Button("←", id="back", compact=True, tooltip="Back")
       yield Header()
+      yield Button("?", id="view-help", compact=True, tooltip="about this window: what it shows, what it can do, its keys (?)")
     if self.SHOW_NOTABS:
       yield Static("No tabs. The + button above adds a connection (blank for this machine, or an SSH destination).", id="notabs")
     with Horizontal(classes="split"):
@@ -100,6 +101,10 @@ class SplitScreen(Screen):
     if event.button.id and event.button.id.startswith("cluster-close-"):
       event.stop()
       self.app.confirm_close_cluster(int(event.button.id.rsplit("-", 1)[1]))
+      return
+    if event.button.id == "view-help":
+      event.stop()
+      self.app.action_view_help()
       return
     if event.button.id == "view-jobs":
       event.stop()
