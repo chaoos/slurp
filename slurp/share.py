@@ -238,14 +238,22 @@ def client_commands(link):
                      *([f"port={port}"] if port != 22 else [])])
     out.append(("Linux, macOS (sshfs): one command", f"mkdir -p {mount} && sshfs -o {jump} {user}@{host}:{shlex.quote(link.path)} {mount}",
                 f"asks for the password, then the drive is {mount}; unmount: fusermount -u {mount} (Linux), umount {mount} (macOS)"))
+    if link.auth == "password":
+      from . import windrive
+      helper = windrive.command(link)
+      where = "PowerShell or cmd" if len(helper) <= windrive.CMD_LIMIT else "PowerShell (too long for cmd)"
+      out.append((f"Windows: map the drive with a small window (paste into {where})", helper,
+                  "opens a window: pick the drive letter, paste the password, Map drive; it shows each step (relay, "
+                  "host key check, login, mapped), reconnects, and unmaps when closed. Needs SSHFS-Win and WinFsp (it "
+                  "offers to install them). Too long for the Run dialog (Win+R): paste it into a terminal window"))
     local = 2222
     forward = (["-L", f"{local}:{host}:{port}", link.jump().split("@")[0] + "@" + link.relay_host] if link.relay_type == "ssh-j"
                else ["-L", f"{local}:localhost:{port}", link.relay_host])
-    out.append(("Windows (SSHFS-Win), step 1: the tunnel, in a terminal (it asks nothing and stays open)",
+    out.append(("Windows by hand (SSHFS-Win), step 1: the tunnel, in a terminal (it asks nothing and stays open)",
                 shlex.join(["ssh", "-N", *forward]),
                 f"it connects to the relay and then only waits, carrying port {local} of your computer to slurp: no "
                 "password here, no output; leave it open while the drive is used, close it (Ctrl-C) after unmapping"))
-    out.append(("Windows (SSHFS-Win), step 2: map the drive, while step 1 runs",
+    out.append(("Windows by hand (SSHFS-Win), step 2: map the drive, while step 1 runs",
                 f"net use X: \\\\sshfs\\{user}@localhost!{local}",
                 "or in Explorer: Map network drive, folder \\\\sshfs\\" + f"{user}@localhost!{local}; "
                 f"Windows asks for the user ({user}) and the password of this link; the drive is your login directory"))

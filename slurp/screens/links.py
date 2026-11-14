@@ -296,8 +296,9 @@ class LinkScreen(ModalScreen):
                                          Button("Copy", classes="lv-copy", name="password")),
                               classes="lv-command"))
     for i, (title, text, note) in enumerate(share.client_commands(link)):
+      shown = text if len(text) <= 400 else f"{text[:90]} … ({len(text)} characters: use Copy)"
       widgets.append(Vertical(Static(title, classes="lv-command-title", markup=False),
-                              Horizontal(Static(text, classes="lv-command-text", markup=False),
+                              Horizontal(Static(shown, classes="lv-command-text", markup=False),
                                          Button("Copy", classes="lv-copy", name=str(i))),
                               Static(note, classes="lv-command-note", markup=False), classes="lv-command"))
     box.mount_all(widgets)
