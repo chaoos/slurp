@@ -743,6 +743,8 @@ def output_progress(path, tail=None):
     return None
   return JobProgress(*latest, points=points[-50:], path=path)
 
+STAT_CHUNK = 200 # paths per stat command
+
 def annotate(jobs):
   """Command, error file and progress of the jobs. On a remote cluster the sizes of the error files, the tails of
   the output files and the batch scripts are fetched together, in one round trip."""
@@ -754,17 +756,23 @@ def annotate(jobs):
       job.err = err_status(job)
       job.progress = record_progress(job, output_progress(progress_path(job))) if job.running else None
     return jobs
+  sizes = {}
   err_paths = sorted({p for job in jobs if err_status(job, {})[0] == "missing" and (p := job.stderr_path())})
   out_paths = sorted({p for job in jobs if job.running and (p := progress_path(job))})
   scripts = sorted({job.jid.split("_")[0]: job.jid for job in jobs if job.queued and not step_commands(job)}.items())
-  cmds = ([["stat", "-L", "-c", "%s", "--", p] for p in err_paths] +
+  chunks = [err_paths[i:i + STAT_CHUNK] for i in range(0, len(err_paths), STAT_CHUNK)]
+  cmds = ([["stat", "-L", "-c", "%s|%n", "--", *chunk] for chunk in chunks] +
           [["tail", "-c", str(PROGRESS_TAIL_BYTES), "--", p] for p in out_paths] +
           [["scontrol", "write", "batch_script", jid, "-"] for _, jid in scripts])
-  results = run_many(cmds) if cmds else []
-  sizes = {}
-  for p, res in zip(err_paths, results):
-    sizes[p] = int(res.stdout) if res.returncode == 0 and res.stdout.strip().isdigit() else None
-  results = results[len(err_paths):]
+  results = run_many(cmds) if cmds else [] # (all in one round trip)
+  for p in err_paths:
+    sizes[p] = None
+  for res in results[:len(chunks)]: # (stat says on stderr what it cannot read, and reports the others)
+    for line in res.stdout.splitlines():
+      size, _, path = line.partition("|")
+      if path in sizes and size.isdigit():
+        sizes[path] = int(size)
+  results = results[len(chunks):]
   tails = {p: res.stdout if res.returncode == 0 else None for p, res in zip(out_paths, results)}
   cache = {key: res.stdout for (key, _), res in zip(scripts, results[len(out_paths):])}
   for job in jobs:
