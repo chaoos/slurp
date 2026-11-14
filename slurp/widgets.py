@@ -62,6 +62,16 @@ STATE_STYLES = {"RUNNING": "green", "COMPLETED": "green", "COMPLETING": "green",
 def state_text(state):
   return Text(state, style=STATE_STYLES.get(state.split(" ")[0], "red"))
 
+class Spinning:
+  """A cell whose value is still coming: a spinner that turns when the table is redrawn"""
+  def __rich_console__(self, console, options):
+    yield Text("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[int(time.monotonic() * 8) % 10], style="dim")
+  def __rich_measure__(self, console, options):
+    from rich.measure import Measurement
+    return Measurement(1, 1)
+
+SPINNING = Spinning()
+
 def err_text(err):
   kind, size = err
   if kind == "file":

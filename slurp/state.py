@@ -96,6 +96,7 @@ class ClusterSession:
   since: object | None = None          # finished-since time of the loaded list
   summary: str = ""                    # status line of the loaded list
   loaded: bool = False
+  listed: bool = False                 # the list of the current load is shown, the files of its jobs are being read
   loader: object | None = None         # worker loading the job list
   accounts: list | None = None         # Slurm accounts of the user (sacctmgr), None: not asked yet
   since_value: str = "1d"              # finished jobs listed: within this time (as slurm.py -c), "off": none

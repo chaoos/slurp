@@ -311,6 +311,7 @@ class Job:
   command: str = ""                      # what the job executes (filled by annotate)
   err: tuple = (None, 0)                 # ("file"|"merged"|"missing"|None, size)
   progress: JobProgress | None = None      # latest n/N progress entry from a running job's output
+  annotated: bool = True                 # False while command, error file and progress are still being read
 
   @property
   def jid(self):
@@ -756,6 +757,7 @@ def annotate(jobs):
       job.command = command_of(job, cache)
       job.err = err_status(job)
       job.progress = record_progress(job, output_progress(progress_path(job))) if job.running else None
+      job.annotated = True
     return jobs
   tab = tab_name()
   ended = {p for job in jobs if not job.queued and (p := job.stderr_path())} # (not one a queued job writes too)
@@ -787,4 +789,5 @@ def annotate(jobs):
     job.err = err_status(job, sizes)
     path = progress_path(job)
     job.progress = record_progress(job, output_progress(path, tails.get(path))) if job.running and tails.get(path) is not None else None
+    job.annotated = True
   return jobs

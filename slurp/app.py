@@ -555,6 +555,12 @@ class Slurp(App):
     """Every 0.25 s (only reads state, never waits): notice logins and broken sessions, reconnect, update the status"""
     self.spinner_frame += 1
     now = time.monotonic()
+    if self.screen is self.main and any(not job.annotated for job in self.cluster.jobs.values()):
+      table = self.main.query_one("#jobs") # (turn the spinners of the cells still coming)
+      clear = getattr(table, "_clear_caches", None)
+      if clear is not None:
+        clear()
+        table.refresh()
     for cluster in self.clusters:
       c = cluster.connection
       if c is None or not cluster.destination:
@@ -645,7 +651,8 @@ class Slurp(App):
     if cluster.loader is None:
       return Text("")
     waiting = " (waiting for the connection)" if cluster.connection and not cluster.connection.ready else ""
-    return Text(f"{self.spinner()} loading jobs {time.monotonic() - cluster.load_started:.0f} s{waiting} · a: abort",
+    what = "reading the files of the jobs" if cluster.listed else "loading jobs"
+    return Text(f"{self.spinner()} {what} {time.monotonic() - cluster.load_started:.0f} s{waiting} · a: abort",
                 style="yellow")
 
   def tab_label(self, cluster):
@@ -733,7 +740,7 @@ class Slurp(App):
     table = self.query_one("#jobs", ClickTable)
     all_accounts = self.cluster.scope != "me"
     if show_progress is None:
-      show_progress = any(progress_for_job(job) is not None for job in self.jobs.values())
+      show_progress = any(progress_for_job(job) is not None or job.running and not job.annotated for job in self.jobs.values())
     visible_columns = [(key, label) for key, label in COLUMNS
                        if (key != "user" or all_accounts) and (key not in ("progress", "eta", "eta_now") or show_progress)]
     column_keys = [key for key, _ in visible_columns]
@@ -922,9 +929,36 @@ class Slurp(App):
     try:
       if accounts is None:
         accounts = slurm_accounts()
-      jobs = annotate(load_jobs(since, scope, accounts))
+      jobs = load_jobs(since, scope, accounts)
+      # the list is shown now; the command, error file and progress of each job (files on the cluster) follow. Until
+      # then a job keeps what the last load found, and a new one shows spinners
+      known = cluster.jobs
+      for job in jobs:
+        old = known.get(job.jid)
+        if old is not None and old.annotated: # (not one of a load replaced before its files were read)
+          job.command, job.err = old.command, old.err
+          job.progress = old.progress if job.running else None
+        else:
+          job.annotated = False
+      self.call_from_thread(self.jobs_listed, cluster, worker, jobs, since, accounts)
+      annotate(jobs)
     finally:
       self.call_from_thread(self.jobs_loaded, cluster, worker, jobs, since, accounts)
+
+  def jobs_listed(self, cluster, worker, jobs, since, accounts):
+    """The jobs from Slurm, before their files are read"""
+    if accounts is not None and cluster.accounts is None:
+      cluster.accounts = accounts
+      if cluster is self.cluster:
+        self.update_scope_select()
+    if cluster.loader is not worker:
+      return
+    cluster.jobs = {job.jid: job for job in jobs}
+    cluster.since, cluster.loaded, cluster.updated = since, True, datetime.now()
+    cluster.listed = True
+    if cluster is self.cluster:
+      self.populate()
+    self.refresh_status()
 
   def jobs_loaded(self, cluster, worker, jobs, since, accounts=None):
     if accounts is not None and cluster.accounts is None:
@@ -934,7 +968,10 @@ class Slurp(App):
     if cluster.loader is not worker: # aborted or replaced by a newer reload
       return
     cluster.loader = None
+    cluster.listed = False
     if jobs is not None:
+      for job in jobs:
+        job.annotated = True # (also when reading the files failed: what is known stays)
       cluster.jobs = {job.jid: job for job in jobs}
       cluster.since, cluster.loaded, cluster.updated = since, True, datetime.now()
       if cluster is self.cluster:
@@ -949,7 +986,14 @@ class Slurp(App):
     cluster.loader.abort.set()
     cluster.loader.cancel()
     cluster.loader = None
-    self.notify("loading aborted: the list is the one loaded before", timeout=4)
+    if cluster.listed: # the new list is shown, only its files were not read: no spinners turning for ever
+      cluster.listed = False
+      for job in cluster.jobs.values():
+        job.annotated = True
+      self.populate()
+      self.notify("reading the files of the jobs aborted: commands, error files and progress of the new jobs are missing", timeout=5)
+    else:
+      self.notify("loading aborted: the list is the one loaded before", timeout=4)
     self.refresh_status()
 
   COLLAPSE_MIN = 10 # tasks of one array in one state from which they are shown as one row
@@ -1063,15 +1107,19 @@ class Slurp(App):
       values.append(state_text(state))
       if "progress" in self.job_column_keys:
         progress = progress_for_job(job)
-        values.append(RichProgressBar(total=max(progress.total, 1), completed=progress.current, width=8) if progress else "")
+        values.append(RichProgressBar(total=max(progress.total, 1), completed=progress.current, width=8) if progress
+                      else SPINNING if job.running and not job.annotated else "")
         going = job.running and job.progress and job.progress.current < job.progress.total
         for pace in ("same", "current"):
+          if job.running and not job.annotated:
+            values.append(SPINNING)
+            continue
           eta = pace_eta(job.progress, pace) if going else None
           values.append(Text(duration_text(eta - time.time()) if eta and eta > time.time() else "overdue" if eta
                              else "-" if going else "", style="" if not eta or eta > time.time() else "yellow"))
       values.extend((rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
-                     ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]), err_text(job.err),
-                     job.command[:150]))
+                     ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]),
+                     err_text(job.err) if job.annotated else SPINNING, job.command[:150] if job.annotated else SPINNING))
       table.add_row(*values, key=job.jid)
     if current is not None:
       try:
