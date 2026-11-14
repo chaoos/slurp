@@ -211,13 +211,63 @@ class ArrayScreen(SplitScreen):
     self.info_table = grid
     self.query_one("#arr-info", Static).update(grid)
 
+  sort_column, sort_reverse = "task", False
+
+  def task_sort_key(self, column):
+    """(index, task) -> what the task list is sorted by: times and durations by their value, not their text"""
+    def wait(t):
+      start, submit = epoch(t.get("start")), epoch(t.get("submit"))
+      return start - submit if start and submit and t["state"] != "PENDING" else -1
+    def progress(i, t):
+      bar = self.task_progress(i, t)
+      return bar.completed / bar.total if bar else -1
+    keys = {
+      "task": lambda i, t: i,
+      "state": lambda i, t: (t["state"], t.get("reason") or ""),
+      "progress": progress,
+      "exit": lambda i, t: t.get("exit") or "",
+      "submit": lambda i, t: epoch(t.get("submit")) or 0,
+      "wait": lambda i, t: wait(t),
+      "start": lambda i, t: epoch(t.get("start")) or 0,
+      "end": lambda i, t: epoch(t.get("end")) or 0,
+      "elapsed": lambda i, t: seconds(t.get("elapsed")) or -1 if is_time(t.get("start", "")) and t["state"] != "PENDING" else -1,
+      "node": lambda i, t: t.get("node") or "",
+    }
+    key = keys.get(column, keys["task"])
+    return lambda item: (key(*item), item[0]) # (equal values: by task)
+
+  @on(DataTable.HeaderSelected, "#arr-tasks")
+  def sort_tasks(self, event):
+    event.stop()
+    column = event.column_key.value
+    if column == self.sort_column:
+      self.sort_reverse = not self.sort_reverse
+    else:
+      self.sort_column, self.sort_reverse = column, column in ("submit", "wait", "start", "end", "elapsed")
+    self.show_tasks()
+
+  def mark_sort_column(self, table):
+    """▲ (ascending) or ▼ (descending) after the label of the column the tasks are sorted by"""
+    labels = dict(self.TASK_COLUMNS)
+    for key, column in table.columns.items():
+      label = labels.get(key.value, str(column.label)) + ((" ▼" if self.sort_reverse else " ▲") if key.value == self.sort_column else "")
+      if str(column.label) != label:
+        column.label = Text(label)
+      if key.value != "progress":
+        column.content_width = len(label) # (the rows added next widen it again as needed)
+    table.refresh()
+
   def show_tasks(self):
-    """Every task in a table, like the job list: a click opens its job window"""
+    """Every task in a table, like the job list (sorted by the column clicked last): a click opens its job window"""
     table = self.query_one("#arr-tasks", ClickTable)
     tasks = (self.overview or {}).get("tasks", {})
     cursor = table.cursor_row
+    current = None
+    if table.row_count and 0 <= cursor < table.row_count:
+      current = table.coordinate_to_cell_key(Coordinate(cursor, 0)).row_key.value
     table.clear()
-    for i, t in sorted(tasks.items()):
+    self.mark_sort_column(table)
+    for i, t in sorted(tasks.items(), key=self.task_sort_key(self.sort_column), reverse=self.sort_reverse):
       start, submit = epoch(t.get("start")), epoch(t.get("submit"))
       wait = duration_text(start - submit) if start and submit and t["state"] != "PENDING" else ""
       state = t["state"] + (f" ({t['reason']})" if t.get("reason") and t["reason"] != "None" else "")
@@ -225,7 +275,9 @@ class ArrayScreen(SplitScreen):
                     ("~" if t["state"] == "PENDING" else "") + fmt_time(t.get("start", "")), fmt_time(t.get("end", "")),
                     t.get("elapsed", "") if is_time(t.get("start", "")) and t["state"] != "PENDING" else "", t.get("node", ""),
                     key=str(i))
-    if tasks and 0 <= cursor < table.row_count:
+    if current is not None and current in table.rows: # (the same task, wherever it is now)
+      table.move_cursor(row=table.get_row_index(current))
+    elif tasks and 0 <= cursor < table.row_count:
       table.move_cursor(row=cursor)
 
   def task_progress(self, index, task):
@@ -249,7 +301,11 @@ class ArrayScreen(SplitScreen):
   def task_selected(self, event):
     event.stop()
     self.query_one("#arr-tasks", ClickTable).take_clicked_column()
-    jid = f"{self.array_id}_{event.row_key.value}"
+    self.action_open_task(event.row_key.value)
+
+  def action_open_task(self, index):
+    """The job window of a task (loaded from Slurm first if it is not in the job list)"""
+    jid = f"{self.array_id}_{index}"
     job = self.app.jobs.get(jid)
     if job is not None:
       self.app.push_screen(JobScreen(job))
