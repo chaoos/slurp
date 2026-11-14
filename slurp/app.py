@@ -1023,6 +1023,7 @@ class Slurp(App):
 
   # ---- remote web access: this slurp in a browser, through a web link (see holder.py)
   web_port = None # the web view of the session holder, while one runs
+  web_setup_open = False # the Web dialog is open: its web view must not stop before the link exists
 
   def action_web_access(self):
     from . import holder
@@ -1043,11 +1044,13 @@ class Slurp(App):
       self.web_port = reply["port"]
       host = os.uname().nodename
       def created(link):
+        self.web_setup_open = False
         if link is not None:
           self.push_screen(LinkScreen(link))
           self.refresh_status()
         else:
           self.stop_web_if_unused()
+      self.web_setup_open = True
       self.push_screen(LinkSetupScreen("web", f"this slurp on {host}", self.cluster.name, lambda: [],
                                        web=(reply["port"], reply["token"])), created)
     in_background(self, start, started, group="web")
@@ -1058,7 +1061,7 @@ class Slurp(App):
   def stop_web_if_unused(self):
     """No web link takes logins or has a session any more: the web view stops (the port closes)"""
     from . import holder
-    if self.web_port is None or any(l.open() or l.live_sessions for l in self.web_links()):
+    if self.web_port is None or self.web_setup_open or any(l.open() or l.live_sessions for l in self.web_links()):
       return
     self.web_port = None
     in_background(self, lambda: holder.control("web_stop"), lambda _: None, group="web")
