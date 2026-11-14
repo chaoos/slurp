@@ -562,8 +562,14 @@ class _Channel(asyncssh.SSHServerSession if asyncssh else object):
   # a drive
   async def run_drive(self, argv):
     session = self.session
-    self.proc = session.proc = await asyncio.create_subprocess_exec(*argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                                                    stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+      self.proc = session.proc = await asyncio.create_subprocess_exec(*argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                                                      stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as e: # (the client gets an error at once instead of waiting for its timeout)
+      log.warning(f"session {session.id} of link {self.link.id} could not start: {e}")
+      self.manager._ended(session)
+      self.finish(127)
+      return
     self.manager._started(session)
     for data in self.early: # (the client does not wait: its first packets came while the server started)
       self.proc.stdin.write(data)
