@@ -69,7 +69,7 @@ from .storage import *
 from .screens.storage import *
 from . import remote, state
 from .config import load_config, update_config
-from .share import ShareManager, SFTP_SERVERS, MAX_FAILURES
+from .share import ShareManager, SFTP_SERVERS, MAX_FAILURES, available as share_available
 from .screens.links import ShellChoiceScreen, LinkSetupScreen, LinkScreen, DriveScreen
 from .screens.script import ScriptScreen # (registers the view of batch scripts)
 from . import mounts
@@ -215,6 +215,7 @@ class Slurp(App):
     Binding("t", "cluster_shell", "Shell"),
     Binding("d", "login_dir", "Home dir"),
     Binding("F", "cluster_drive", "Drive"),
+    Binding("W", "web_access", "Web", show=False),
     Binding("i", "interactive_job", "Interactive job"),
     Binding("C", "cluster_info", "Cluster info"),
     Binding("Q", "quota", "Quota"),
@@ -626,6 +627,9 @@ class Slurp(App):
             self.refresh_status()
     if self.spinner_frame % (4 * LOGIN_CHECK_EVERY) == 4 * 30: # (every 5 minutes, first after 30 s) B09
       self.check_login_nodes()
+    if self.spinner_frame % 8 == 0 and (self.web_port is not None or self.web_links()): # (every 2 s) the web view
+      self.stop_web_if_unused()
+      self.report_web_links()
     if self.screen is self.main and (getattr(self.cluster, "checking", False) or any(not job.annotated for job in self.cluster.jobs.values())):
       table = self.main.query_one("#jobs") # (turn the spinners of the cells still coming)
       clear = getattr(table, "_clear_caches", None)
@@ -1012,6 +1016,68 @@ class Slurp(App):
   def cluster_drive_pressed(self, event):
     self.action_cluster_drive()
 
+  @on(Button.Pressed, "#web-access")
+  def web_access_pressed(self, event):
+    event.stop()
+    self.action_web_access()
+
+  # ---- remote web access: this slurp in a browser, through a web link (see holder.py)
+  web_port = None # the web view of the session holder, while one runs
+
+  def action_web_access(self):
+    from . import holder
+    if not holder.under_holder():
+      self.notify("remote web access needs slurp started as usual (python3 slurp): this one runs without the session "
+                  "holder (--no-holder, --serve, or not in a terminal)", severity="warning", timeout=10)
+      return
+    if share_available() is not None:
+      self.notify(f"remote web access {share_available()}", severity="warning", timeout=10)
+      return
+    def start():
+      return holder.control("web_start")
+    def started(reply):
+      if not reply or not reply.get("port"):
+        self.notify(f"the web view did not start: {(reply or {}).get('error', 'no answer from the session holder')}",
+                    severity="error")
+        return
+      self.web_port = reply["port"]
+      host = os.uname().nodename
+      def created(link):
+        if link is not None:
+          self.push_screen(LinkScreen(link))
+          self.refresh_status()
+        else:
+          self.stop_web_if_unused()
+      self.push_screen(LinkSetupScreen("web", f"this slurp on {host}", self.cluster.name, lambda: [],
+                                       web=(reply["port"], reply["token"])), created)
+    in_background(self, start, started, group="web")
+
+  def web_links(self):
+    return [l for l in self.link_manager.links if l.kind == "web"]
+
+  def stop_web_if_unused(self):
+    """No web link takes logins or has a session any more: the web view stops (the port closes)"""
+    from . import holder
+    if self.web_port is None or any(l.open() or l.live_sessions for l in self.web_links()):
+      return
+    self.web_port = None
+    in_background(self, lambda: holder.control("web_stop"), lambda _: None, group="web")
+
+  def report_web_links(self):
+    """What the lock screens of the other views say about the web links (sent when it changes)"""
+    from . import holder
+    if not holder.under_holder():
+      return
+    lines = []
+    for l in self.web_links():
+      if l.open() or l.live_sessions:
+        lines.append(f"web link {l.id} via {l.relay_host}: {l.logins} logins, {len(l.live_sessions)} open"
+                     + (f", until {datetime.fromtimestamp(l.expires):%H:%M}" if l.expires else ""))
+    text = "\n".join(lines)
+    if text != getattr(self, "web_info_sent", ""):
+      self.web_info_sent = text
+      in_background(self, lambda: holder.control("info", text=text), lambda _: None, group="web-info")
+
   def action_login_dir(self):
     """Browse the login directory of the active cluster."""
     cluster = self.cluster
@@ -1090,7 +1156,10 @@ class Slurp(App):
     live = self.link_manager.live_sessions()
     drives = [c.drive for c in self.clusters if c.drive is not None and (c.drive.proc is not None or c.drive.state == "reconnecting")]
     unsaved = self.unsaved_scripts()
-    if (live or drives or unsaved) and not getattr(self, "quit_confirmed", False):
+    from . import holder
+    status = holder.control("status", timeout=1) if holder.under_holder() and not getattr(self, "quit_confirmed", False) else None
+    views = (status or {}).get("views", [])
+    if (live or drives or unsaved or len(views) > 1) and not getattr(self, "quit_confirmed", False):
       def done(yes):
         if yes:
           self.quit_confirmed = True
@@ -1103,6 +1172,8 @@ class Slurp(App):
         parts.append(f"The drive at {d.path} is unmounted.")
       if unsaved:
         parts.append(f"Unsaved changes in {', '.join(os.path.basename(s.path) for s in unsaved)} are lost.")
+      if len(views) > 1:
+        parts.append(f"{len(views)} views show this slurp ({', '.join(v['label'] for v in views)}): they all close.")
       self.push_screen(ConfirmScreen("Quit slurp", " ".join(parts), "Quit"), done)
       return
     self.link_manager.shutdown()
@@ -1804,6 +1875,9 @@ def check_main(argv):
 def main():
   if sys.argv[1:2] == ["check"]:
     sys.exit(check_main(sys.argv[2:]))
+  if sys.argv[1:2] == ["--holder"]: # (the session holder process, started by slurp itself)
+    from . import holder
+    sys.exit(holder.run_holder(sys.argv[2], sys.argv[3:]))
   parser = argparse.ArgumentParser(prog="slurp", description="Interactive terminal UI for Slurm jobs, locally or on "
                                    "clusters over SSH (one tab per cluster, given with --ssh or added with +). "
                                    "'slurp check FILE...' checks batch scripts without the UI.")
@@ -1812,6 +1886,10 @@ def main():
   parser.add_argument("--serve", action="store_true", help="serve the app in a browser with textual-serve")
   parser.add_argument("--host", default="127.0.0.1", help="web server bind address for --serve (default: 127.0.0.1)")
   parser.add_argument("--port", type=int, default=8000, help="web server port for --serve (default: 8000)")
+  parser.add_argument("--new", action="store_true", help="start a new, separate slurp instead of attaching to the "
+                      "running one")
+  parser.add_argument("--no-holder", action="store_true", help="run directly in this terminal, without the session "
+                      "holder (no remote web access, ends with the terminal)")
   args = parser.parse_args()
 
   if args.serve:
@@ -1826,6 +1904,22 @@ def main():
       command += ["--ssh", *args.ssh]
     Server(shlex.join(command), host=args.host, port=args.port, title="slurp").serve()
     return
+
+  if not os.environ.get("SLURP_INNER") and not args.no_holder and sys.stdin.isatty() and sys.stdout.isatty():
+    # the session holder runs the app; this terminal is a view of it (see holder.py)
+    from . import holder
+    app_args = [a for a in sys.argv[1:] if a not in ("--new", "--no-holder")]
+    path = holder.socket_path(f"s{os.getpid()}" if args.new else "default")
+    if holder.alive(path):
+      if app_args:
+        print("slurp is running already: attaching to it (its options stay as they were; + adds a tab, "
+              "--new starts a separate one)", file=sys.stderr)
+        time.sleep(1.5)
+      sys.exit(holder.attach(path))
+    if holder.start_holder(path, app_args):
+      sys.exit(holder.attach(path))
+    print("slurp: the session holder did not start (see ~/.local/state/slurp/holder.err); running directly",
+          file=sys.stderr)
 
   setup_logging(args.log)
   state.initial_ssh_destinations = args.ssh
