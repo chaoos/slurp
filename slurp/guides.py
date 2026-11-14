@@ -59,6 +59,8 @@ Your accounts here: {accounts}. Every job is charged to one (`--account`, [R06](
 5. Set up the environment in the script: `module purge`, then exact versions ([E01](rule:E01)).
 6. Stop on errors: `set -eo pipefail`, and `cd dir || exit 1` ([S07](rule:S07)).
 7. Ask for realistic time: short jobs start sooner, because the scheduler fits them into gaps (backfill, [U01](rule:U01)).
+8. Make it work on its own: set up the whole environment in the script ([G01](rule:G01)) and name its directory once
+   at the top ([G18](rule:G18)), so that it runs the same after a fresh login, from any directory.
 
 **New job script** (`n` in the job list) writes such a script for the usual kinds of jobs, with this cluster's numbers.
 Opening a script in the file browser shows its problems; **Explain** shows what Slurm makes of every line, **Test**
@@ -71,6 +73,26 @@ asks Slurm whether it accepts it and when it would start.
 And the ones about the requests:
 
 {rule_list("R")}
+
+## Reproducible, portable jobs
+
+A job script should run the same for anyone, any time: log in, `sbatch job.sh`, done. The usual ways it does not:
+
+- **It needs a prepared shell** ([G01](rule:G01)): modules, a uenv or a Python environment loaded before `sbatch`,
+  which the job inherits. After a fresh login it fails. Put the setup in the script; `#SBATCH --export=NONE`
+  enforces it (then `export SLURM_EXPORT_ENV=ALL` after the setup, for the srun steps). slurp compares the
+  environment the job was submitted with against what the script sets up, and **Check environment** replays the
+  setup after a fresh login.
+- **It only works from one directory** ([G18](rule:G18)): `./sim`, `input.dat`, `logs/…` are relative to wherever
+  `sbatch` runs. Name the directory once: `#SBATCH --chdir=/path/to/run` (logs are opened before the script runs,
+  so a `cd` inside does not move them). `$0` does not help: it is Slurm's copy of the script ([G19](rule:G19)).
+- **Failures look like successes** ([G02](rule:G02)): `echo done` after `srun` makes a crashed run COMPLETED.
+  Use `set -eo pipefail`.
+- **Hard-coded counts** ([G04](rule:G04)): `srun -n 128` breaks when the request changes; let srun take the
+  allocation, or use `$SLURM_NTASKS` and `$SLURM_CPUS_PER_TASK`.
+- **Runs that overwrite each other** ([G05](rule:G05)): one directory per run, or the job id in the file names.
+- **No record** ([G06](rule:G06)): print `module list`, the code's git commit, the node and the date into the log.
+- **Submitted from inside a job** ([G03](rule:G03)) or **interactive commands** in the script ([G09](rule:G09)).
 
 ## Arrays and dependencies
 

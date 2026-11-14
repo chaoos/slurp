@@ -140,7 +140,8 @@ class NewScriptScreen(ModalScreen):
       self.query_one("#ns-kind", Select).value, self.query_one("#ns-name", Input).value or "myjob",
       account if isinstance(account, str) else "", partition if isinstance(partition, str) else "",
       num("#ns-nodes", 1), num("#ns-tpn", 1), num("#ns-cpt", 1), num("#ns-gpn", 0),
-      self.query_one("#ns-time", Input).value or "01:00:00", site=self.facts.site if self.facts else {})
+      self.query_one("#ns-time", Input).value or "01:00:00", site=self.facts.site if self.facts else {},
+      directory=os.path.dirname(self.query_one("#ns-path", Input).value) or self.directory)
 
   def refresh_preview(self):
     try:

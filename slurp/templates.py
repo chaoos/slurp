@@ -35,7 +35,7 @@ def defaults(kind, partition, numa_domains=0):
   return d
 
 def make_script(kind, name, account, partition_name, nodes, ntasks_per_node, cpus_per_task, gpus_per_node, time,
-                program="./my_program", site=None):
+                program="./my_program", site=None, directory=""):
   site = site or {}
   lines = ["#!/bin/bash -l",
            f"# {dict(KINDS)[kind]}",
@@ -48,6 +48,8 @@ def make_script(kind, name, account, partition_name, nodes, ntasks_per_node, cpu
   if partition_name:
     lines.append(f"#SBATCH --partition={partition_name}")
   lines.append(f"#SBATCH --time={time}              # realistic, not the maximum: short jobs start sooner (backfill)")
+  if directory:
+    lines.append(f"#SBATCH --chdir={directory}   # the job runs here, wherever you submit it from (G18)")
   if kind in ("serial", "array", "chain"):
     lines += ["#SBATCH --ntasks=1", "#SBATCH --cpus-per-task=1"]
   else:
@@ -70,7 +72,9 @@ def make_script(kind, name, account, partition_name, nodes, ntasks_per_node, cpu
   lines += ["", "set -eo pipefail                       # stop at the first error", ""]
   if site.get("software_hint"):
     lines.append(f"# {site['software_hint']}")
-  lines += ["module purge                           # a clean, reproducible environment",
+  lines += ["# everything the job needs is set up here, not in the shell you submit from (G01); to enforce that:",
+            "# #SBATCH --export=NONE above, and export SLURM_EXPORT_ENV=ALL after the setup (for the srun steps)",
+            "module purge                           # a clean, reproducible environment",
             "# module load gcc/12.3.0 openmpi/4.1.6  # what your program was built with, with versions (module spider)", ""]
   threads = kind in ("openmp", "hybrid", "gpu", "checkpoint") or (cpus_per_task or 1) > 1
   if threads:
@@ -78,7 +82,9 @@ def make_script(kind, name, account, partition_name, nodes, ntasks_per_node, cpu
               "export OMP_PLACES=cores                          # one thread per core ...",
               "export OMP_PROC_BIND=close                       # ... next to each other",
               "export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK   # srun does not inherit --cpus-per-task (Slurm 22.05+)", ""]
-  lines += ["cd \"$SLURM_SUBMIT_DIR\"                 # or: cd \"$SCRATCH/my_run\" (fast storage, not $HOME)", ""]
+  lines += ["# the job's own record: what ran where (G06)",
+            'echo "job $SLURM_JOB_ID ($SLURM_JOB_NAME) on $(hostname), $(date)"',
+            "module list 2>&1", ""]
   srun = "srun --cpu-bind=cores" if kind not in ("serial", "array", "chain") else "srun"
   if kind == "array":
     lines += ["# every task works on its own input: $SLURM_ARRAY_TASK_ID is 1, 2, ... 10",
@@ -99,7 +105,7 @@ def make_script(kind, name, account, partition_name, nodes, ntasks_per_node, cpu
               "wait            # (the program finishes its checkpoint)",
               "",
               "# not done yet? submit the next part (a chain of parts until the work is finished)",
-              "# [ -f finished ] || sbatch \"$0\""]
+              "# [ -f finished ] || sbatch --export=NONE /path/to/this/script.sh   # (not \"$0\": Slurm runs a copy, G19)"]
   else:
     lines.append(f"{srun} {program}")
   return "\n".join(lines) + "\n"
