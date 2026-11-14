@@ -334,7 +334,9 @@ class ArrayScreen(SplitScreen):
                                classes="arr-title"),
                         Button("Copy ids", classes="arr-copy", compact=True, tooltip="copy the ids of these tasks"),
                         classes="arr-head")
-      body = Static(Text.assemble(", ".join(map(str, ids)), (f"\n= {compress_array_ids(ids)}", "dim")), classes="arr-ids")
+      # each id a link to the job window of its task
+      links = ", ".join(f"[@click=screen.open_task({i})]{i}[/]" for i in ids)
+      body = Static(f"{links}\n[dim]= {compress_array_ids(ids)}[/]", classes="arr-ids")
       widgets.append(Vertical(head, body, classes="arr-group"))
       head.group = group
     if not widgets:
