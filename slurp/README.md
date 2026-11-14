@@ -396,7 +396,7 @@ Slurm makes of it (units, per node, the paths of the logs, IGNORED after the
 first command). **Edit** (`e`) makes it editable right there, with Textual's
 editor: the findings follow as you type (also the paths, directories and
 programs on the cluster, a moment after you pause), `Ctrl+S` saves, `Ctrl+Z` undoes, **Revert** goes back to the file, `Esc`
-stops editing; unsaved changes are asked about when you stop, close the subtab
+stops editing; **Check** checks the edited text, saved or not; unsaved changes are asked about when you stop, close the subtab
 or quit, and Save asks before it overwrites a file changed meanwhile. Bash is
 highlighted with Textual's syntax extra (`pip install "textual[syntax]"`).
 **Edit outside** opens your `$VISUAL`/`$EDITOR` instead. **Test** runs `sbatch --test-only` (accepted? when would it
