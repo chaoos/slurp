@@ -73,15 +73,21 @@ def screen_text(session):
   return "\n".join(line.rstrip() for line in vt.display).rstrip("\n")
 
 TERMINAL_HELP_COMMON = """
+## Scrolling back
+
+The mouse wheel scrolls through the lines that went off the top of the screen (the history), `Shift+PgUp` and
+`Shift+PgDn` by a page. A bar in the top row says how far back you are; typing goes back to the bottom. The history
+keeps the last 10000 lines (`"terminal_scrollback"` in slurp's config.json, 0: none); `clear` empties it. In
+full-screen programs (less, vim, htop) the wheel sends arrow keys to them instead.
+
 ## Copying out of the terminal
 
-slurp gets the mouse, so a plain drag selects nothing here. Use one of these:
-
-- **Copy the screen** below: everything visible in this terminal, as text, to your clipboard.
-- **Your terminal's own selection, holding a modifier key** so the drag skips slurp:
-  `Shift`+drag on Linux, Windows Terminal, and in a browser (with `slurp --serve`); `Option`+drag in iTerm2;
-  `Fn`+drag in macOS Terminal. Then copy as your terminal does (`Ctrl+Shift+C`, `Cmd+C`, or selecting already
-  copies). This selects whole screen lines, so with the pane on the right it also takes the window on the left.
+- **Drag with the mouse** to select (also in the history: drag past the top or bottom edge to scroll); when you let
+  go, the selection is copied to your clipboard. A click without dragging, or typing, removes the selection.
+- **Copy the screen** below: everything visible in this terminal, as text.
+- Your terminal's own selection still works holding a modifier key (`Shift`+drag on Linux, Windows Terminal and in a
+  browser; `Option`+drag in iTerm2; `Fn`+drag in macOS Terminal); it selects whole screen lines, also the window on
+  the left.
 - `Ctrl+C` does **not** copy: it goes to the shell and interrupts the running command.
 
 ## Pasting into the terminal
@@ -98,6 +104,7 @@ slurp gets the mouse, so a plain drag selects nothing here. Use one of these:
 |---|---|
 | All keys | go to the program in the terminal, including `Ctrl+C`, `Ctrl+D`, `Ctrl+Z`, `Ctrl+Q`, `Ctrl+P`, `Ctrl+W`, `Esc` |
 | `Ctrl+]` | the one key slurp keeps: {switch} |{extra}
+| `Shift+PgUp` / `Shift+PgDn` | scroll the history (not sent to the program) |
 | `Ctrl+D` or `exit` | ends the shell; then `Enter` starts a new one (the old one's state is gone) |
 """
 
@@ -148,13 +155,13 @@ is lost.
 ## Good to know
 
 - **It keeps running in the background**: switching subtabs, windows or tabs does not stop it.
-- **No scrollback**: only the visible screen is kept, and the mouse wheel does nothing here. For long output use
-  `less` (`command | less`), write it to a file, or run `tmux` / `screen` in the shell.
+- **The history is limited** (see Scrolling back) and lost when the shell ends: for long output use `less`
+  (`command | less`), write it to a file, or run `tmux` / `screen` in the shell.
 - **For work that must survive** slurp, a lost connection or closing: start it in `tmux` / `screen` on the
   cluster (and attach again later) or submit it as a job with `sbatch`.
 - The terminal is emulated by slurp: bash, vim, less, htop and the like work, with colors; its size follows the
   window. For long or heavy interactive work, a shell **From your own terminal** (`t` in the job list, `s` in the
-  job window) gives your terminal's scrollback, selection and fonts.
+  job window) gives your terminal's own scrollback, selection and fonts.
 """
 
 class TerminalHelpScreen(ModalScreen):

@@ -86,12 +86,38 @@ def vt_style(fg, bg, bold, italics, underscore, strikethrough, reverse):
   return Style(color=vt_color(fg), bgcolor=vt_color(bg), bold=bold, italic=italics, underline=underscore,
                strike=strikethrough, reverse=reverse)
 
+SCROLLBACK = 10000 # lines kept above the screen ("terminal_scrollback" in the config)
+
+def scrollback_lines():
+  from .config import load_config
+  try:
+    return max(int(load_config().get("terminal_scrollback", SCROLLBACK)), 0)
+  except (TypeError, ValueError):
+    return SCROLLBACK
+
 def make_vt_screen(cols, rows, reply):
-  """pyte screen that answers terminal queries through reply and supports the alternate screen of vim, less, htop"""
+  """pyte screen that answers terminal queries through reply, supports the alternate screen of vim, less, htop, and
+  keeps the lines that scroll off its top (the history; not those of the alternate screen)"""
+  import collections
   import pyte
 
   class VTScreen(pyte.Screen):
     saved = None
+    history = None
+    added = 0 # lines ever added to the history (the history keeps the last ones)
+
+    def index(self):
+      top, bottom = self.margins or (0, self.lines - 1)
+      if self.cursor.y == bottom and top == 0 and self.saved is None and self.history is not None and self.history.maxlen:
+        line = self.buffer[0]
+        self.history.append([line[x] for x in range(self.columns)])
+        self.added += 1
+      super().index()
+
+    def erase_in_display(self, how=0, *args, **kwargs):
+      if how == 3 and self.history is not None: # clear: also the scrollback
+        self.history.clear()
+      super().erase_in_display(how, *args, **kwargs)
 
     def write_process_input(self, data):
       reply(data.encode())
@@ -121,7 +147,9 @@ def make_vt_screen(cols, rows, reply):
           return
       super().reset_mode(*modes, **kwargs)
 
-  return VTScreen(cols, rows), pyte
+  screen = VTScreen(cols, rows)
+  screen.history = collections.deque(maxlen=scrollback_lines())
+  return screen, pyte
 
 SWITCH_KEY = "ctrl+right_square_bracket" # Ctrl-]: the one key that does not go to the shell
 
@@ -242,12 +270,154 @@ class TerminalSession:
 
 class TerminalView(Widget, can_focus=True):
   """Shows a shell (its own, in a shell subtab, else the login of the pane); while it has the focus all keys go to
-  the shell (in the pane all but Ctrl-] and Ctrl-X)"""
+  the shell (in the pane all but Ctrl-] and Ctrl-X). The mouse wheel (and Shift+PgUp/PgDn) scrolls through the
+  history, dragging selects text, which is copied when the button is released."""
   DEFAULT_CSS = "TerminalView { height: 1fr; }"
+  ALLOW_SELECT = False # (its own selection, over the history too)
+  WHEEL_LINES = 3
 
   def __init__(self, session=None):
     super().__init__()
     self.own_session = session
+    self.scroll = 0          # lines scrolled back from the bottom
+    self.seen_added = 0      # vt.added when the view was last drawn (to keep a scrolled view in place)
+    self.selection = None    # ((row, col), (row, col)) in absolute rows (see row_at), anchor first
+    self.selecting = False
+
+  # ---- history and selection
+  def vt(self):
+    s = self.session
+    return s.vt if s else None
+
+  def history(self):
+    vt = self.vt()
+    return vt.history if vt is not None and vt.history is not None else ()
+
+  def row_at(self, y):
+    """The absolute row shown at screen row y (stays with its text when it scrolls into the history)"""
+    vt = self.vt()
+    return vt.added - len(self.history()) + len(self.history()) + y - self.scroll
+
+  def line_of(self, row):
+    """The cells of an absolute row: a history line, a screen line, or None"""
+    vt = self.vt()
+    hist = self.history()
+    i = row - (vt.added - len(hist))
+    if i < 0:
+      return None
+    if i < len(hist):
+      return hist[i]
+    y = i - len(hist)
+    if y >= vt.lines:
+      return None
+    line = vt.buffer[y]
+    return [line[x] for x in range(vt.columns)]
+
+  def follow_output(self):
+    """Keep a scrolled view on the same lines while new ones arrive"""
+    vt = self.vt()
+    if vt is None:
+      return
+    if self.scroll and vt.added > self.seen_added:
+      self.scroll = min(self.scroll + vt.added - self.seen_added, len(self.history()))
+    self.seen_added = vt.added
+
+  def scroll_by(self, lines):
+    vt = self.vt()
+    if vt is None:
+      return
+    self.follow_output()
+    self.scroll = max(0, min(self.scroll + lines, len(self.history())))
+    self.refresh()
+
+  def selected_text(self):
+    if not self.selection:
+      return ""
+    (r1, c1), (r2, c2) = sorted(self.selection)
+    out = []
+    for row in range(r1, r2 + 1):
+      cells = self.line_of(row)
+      if cells is None:
+        continue
+      start = c1 if row == r1 else 0
+      end = c2 + 1 if row == r2 else len(cells)
+      out.append("".join(ch.data for ch in cells[start:end]).rstrip())
+    return "\n".join(out)
+
+  def in_selection(self, row, col):
+    if not self.selection:
+      return False
+    a, b = sorted(self.selection)
+    return a <= (row, col) <= b
+
+  def cell_at(self, event):
+    offset = event.get_content_offset(self)
+    if offset is None:
+      return None
+    vt = self.vt()
+    y = max(0, min(offset.y, self.size.height - 1))
+    x = max(0, min(offset.x, (vt.columns if vt else self.size.width) - 1))
+    return self.row_at(y), x
+
+  def on_mouse_scroll_up(self, event):
+    event.stop()
+    self.wheel(-1)
+
+  def on_mouse_scroll_down(self, event):
+    event.stop()
+    self.wheel(1)
+
+  def wheel(self, direction):
+    vt = self.vt()
+    if vt is None:
+      return
+    if vt.saved is not None: # a full-screen program (less, vim): the wheel sends arrow keys, like other terminals
+      s = self.session
+      if s and not s.done:
+        arrow = ("\x1bO" if DECCKM in vt.mode else "\x1b[") + ("A" if direction < 0 else "B")
+        s.write((arrow * self.WHEEL_LINES).encode())
+      return
+    self.scroll_by(-direction * self.WHEEL_LINES)
+
+  def on_mouse_down(self, event):
+    if event.button != 1 or self.vt() is None:
+      return
+    self.focus()
+    self.follow_output()
+    cell = self.cell_at(event)
+    if cell is None:
+      return
+    self.selection = (cell, cell)
+    self.selecting = True
+    self.capture_mouse()
+    self.refresh()
+
+  def on_mouse_move(self, event):
+    if not self.selecting:
+      return
+    offset = event.get_content_offset(self)
+    if offset is not None and offset.y < 0:
+      self.scroll_by(1)
+    elif offset is not None and offset.y >= self.size.height:
+      self.scroll_by(-1)
+    cell = self.cell_at(event)
+    if cell is not None:
+      self.selection = (self.selection[0], cell)
+      self.refresh()
+
+  def on_mouse_up(self, event):
+    if not self.selecting:
+      return
+    self.selecting = False
+    self.release_mouse()
+    if self.selection and self.selection[0] != self.selection[1]:
+      text = self.selected_text()
+      if text:
+        from .screens.dialogs import copy_text
+        copy_text(self.app, text, "the selection")
+    else:
+      self.selection = None
+    self.refresh()
 
   @property
   def session(self):
@@ -255,6 +425,9 @@ class TerminalView(Widget, can_focus=True):
 
   def attach(self):
     """The pane was shown or got a new session: start/resize the session with the size of this view"""
+    vt = self.vt()
+    if vt is None or vt.added < self.seen_added: # (a new session)
+      self.scroll, self.selection, self.seen_added = 0, None, vt.added if vt is not None else 0
     if self.session and self.size.width > 0 and self.size.height > 0:
       self.session.ensure(self.size.width, self.size.height)
     self.refresh()
@@ -274,6 +447,12 @@ class TerminalView(Widget, can_focus=True):
     event.stop()
     event.prevent_default()
     key = event.key
+    if key in ("shift+pageup", "shift+pagedown"): # scroll the history (not sent to the shell)
+      self.scroll_by((self.size.height - 1) * (1 if key == "shift+pageup" else -1))
+      return
+    if self.scroll or self.selection: # typing goes back to the bottom and ends the selection
+      self.scroll, self.selection = 0, None
+      self.refresh()
     if self.own_session is None and key == "ctrl+x":
       self.app.close_shell()
       return
@@ -328,14 +507,24 @@ class TerminalView(Widget, can_focus=True):
       if s and s.error and y == 0:
         return Strip([Segment(s.error, base + Style(color="red"))]).adjust_cell_length(width, base)
       return Strip.blank(width, base)
-    line = vt.buffer[y]
-    cursor_x = vt.cursor.x if (y == vt.cursor.y and self.has_focus and not vt.cursor.hidden and not s.done) else -1
+    if y == 0:
+      self.follow_output()
+    row = self.row_at(y)
+    if self.scroll:
+      cells = self.line_of(row) or []
+      line = {x: c for x, c in enumerate(cells)}
+      line = collections.defaultdict(lambda: vt.default_char, line)
+    else:
+      line = vt.buffer[y]
+    cursor_x = vt.cursor.x if (not self.scroll and y == vt.cursor.y and self.has_focus and not vt.cursor.hidden and not s.done) else -1
+    selected = self.selection is not None and self.selection[0] != self.selection[1]
     segments, text, style = [], "", None
     for x in range(min(vt.columns, width)):
       ch = line[x]
       if ch.data == "": # second cell of a wide character
         continue
-      st = base + vt_style(ch.fg, ch.bg, ch.bold, ch.italics, ch.underscore, ch.strikethrough, ch.reverse != (x == cursor_x))
+      st = base + vt_style(ch.fg, ch.bg, ch.bold, ch.italics, ch.underscore, ch.strikethrough,
+                           bool(ch.reverse) ^ (x == cursor_x) ^ bool(selected and self.in_selection(row, x)))
       if st != style:
         if text:
           segments.append(Segment(text, style))
@@ -343,7 +532,12 @@ class TerminalView(Widget, can_focus=True):
       text += ch.data
     if text:
       segments.append(Segment(text, style))
-    return Strip(segments).adjust_cell_length(width, base)
+    strip = Strip(segments).adjust_cell_length(width, base)
+    if y == 0 and self.scroll:
+      mark = f" ↑ {self.scroll} of {len(self.history())} lines back · wheel, Shift+PgUp/PgDn · typing returns "
+      if len(mark) < width:
+        strip = Strip([*strip.crop(0, width - len(mark)), Segment(mark, base + Style(reverse=True, bold=True))])
+    return strip
 
 class TerminalPane(Vertical):
   """Right side of every window: title bar with a close button and the shell"""
