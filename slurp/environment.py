@@ -53,21 +53,26 @@ def replay_script(ctx):
       lines.append(f"{t} 2>/dev/null || printf '@@ERR {line}\\t%s\\n' {shlex.quote(t[:120])}")
   for prog in programs(ctx):
     q = shlex.quote(prog)
-    lines.append(f"p={q}; case \"$p\" in */*) ;; *) p=$(command -v \"$p\" 2>/dev/null || echo \"$p\") ;; esac; "
+    lines.append(f"p={q}; case \"$p\" in */*) ;; *) p=$(command -v \"$p\" 2>/dev/null) || printf '@@NOTFOUND %s\\n' {q} ;; esac; "
                  f"printf '@@PROG %s\\t%s\\n' {q} \"$p\"; "
                  f"if [ -f \"$p\" ]; then ldd \"$p\" 2>&1 | head -200; "
                  f"command -v cuobjdump >/dev/null 2>&1 && cuobjdump --list-elf \"$p\" 2>/dev/null | head -50 | sed 's/^/@@CUDA /'; fi")
   return "\n".join(lines) + "\n"
 
 def parse_replay(text):
-  out = {"libs": {}, "missing": {}, "cuda": {}, "errors": [], "module_errors": [], "resolved": {}}
+  out = {"libs": {}, "missing": {}, "cuda": {}, "errors": [], "module_errors": [], "resolved": {}, "notfound": [],
+         "fresh": False}
   prog = None
   for line in text.splitlines():
+    if line.startswith("@@NOTFOUND "):
+      out["notfound"].append(line[11:].strip())
+      prog = None
+      continue
     if line.startswith("@@PROG "):
       name, _, path = line[7:].partition("\t")
       prog = name
       out["resolved"][name] = path
-      out["libs"][name] = []
+      out["libs"][name] = [] if path else None # (not found: nothing known of it)
       out["missing"][name] = []
     elif line.startswith("@@MODERR "):
       where, _, msg = line[9:].partition("\t")
@@ -95,8 +100,14 @@ def replay_environment(ctx):
   from .remote import run_cmd
   if ctx.script is None:
     return None
-  res = run_cmd(["bash", "-lc", replay_script(ctx)], timeout=120)
+  # as after a fresh login (G01): a clean environment, a login shell, then only what the script sets up itself
+  env = ctx.facts.env if ctx.facts else {}
+  home, user = env.get("HOME", ""), env.get("USER") or env.get("LOGNAME") or (ctx.facts.user if ctx.facts else "")
+  fresh = ["env", "-i", *[f"{k}={v}" for k, v in (("HOME", home), ("USER", user), ("LOGNAME", user)) if v],
+           "PATH=/usr/local/bin:/usr/bin:/bin", "TERM=dumb", "LANG=C.UTF-8"]
+  res = run_cmd([*fresh, "bash", "-lc", replay_script(ctx)], timeout=120)
   out = parse_replay(res.stdout or "")
+  out["fresh"] = True
   if res.returncode not in (0, 1) and not out["libs"] and res.stderr:
     out["errors"].append(res.stderr.strip()[:200])
   return out

@@ -31,6 +31,7 @@ CATEGORIES = {
   "E": "Environment and software stack",
   "N": "NUMA placement and binding",
   "U": "Usage and outcome",
+  "G": "Good practice",
 }
 
 # ---------------------------------------------------------------------------
@@ -624,6 +625,8 @@ class Context:
   submit_line: str = ""
   count_files: bool = False                   # probe the number of files in the working directory (Q06)
   uncertain: set = field(default_factory=set) # paths resolved from a guessed directory (no job, relative)
+  submit_env: dict | None = None              # the environment the job was submitted with (sacct --env-vars)
+  script_dir: str = ""                        # the directory of the script file (a job: from its submit line)
   env: dict = field(default_factory=dict)     # for $VARS in paths
   muted: set = field(default_factory=set)
 
@@ -779,6 +782,13 @@ def interesting_paths(ctx):
       out.append(("x", interp[0]))
   for kind, path, _line in referenced_paths(ctx):
     out.append((kind, path))
+  submit, other = alternative_bases(ctx)
+  if other and not ctx.opt("chdir"): # (G18: does it exist from the script's directory instead?)
+    uses, anchored, _ = relative_uses(ctx)
+    for _line, word, _kind in uses[:20]:
+      out.append(("f", os.path.normpath(os.path.join(other, word))))
+      if submit:
+        out.append(("f", os.path.normpath(os.path.join(submit, word))))
   return list(dict.fromkeys(out))
 
 def output_pattern(value, ctx):
@@ -897,6 +907,66 @@ def referenced_paths(ctx):
   return out
 
 # ---------------------------------------------------------------------------
+# relative paths not anchored to a directory (G18)
+
+DATA_EXT = (".dat", ".h5", ".hdf5", ".txt", ".csv", ".json", ".yaml", ".yml", ".in", ".inp", ".cfg", ".conf", ".xml",
+            ".nc", ".py", ".sh", ".npy", ".npz", ".bin", ".out", ".log", ".toml", ".ini", ".par", ".input")
+ANCHOR_VARS = {"HOME", "SCRATCH", "STORE", "PROJECT", "WORK", "TMPDIR", "1", "2"}
+
+def is_relative_path(word):
+  if not word or word.startswith(("-", "/", "$", "~", "%", "http:", "https:")) or "://" in word or "=" in word:
+    return False
+  return "/" in word or word.lower().endswith(DATA_EXT)
+
+def relative_uses(ctx):
+  """[(line, word, kind)] of relative paths the script uses before it anchors itself to a directory (--chdir, or cd to
+  an absolute path or a variable like $SCRATCH), and whether it has a cd at all: (uses, anchored_at, has_cd).
+  kind: x (program), f (file)."""
+  s = ctx.script
+  if s is None:
+    return [], None, False
+  uses, anchored, has_cd = [], ("chdir" if ctx.opt("chdir") else None), False
+  for line, t in s.code_lines():
+    for part in re.split(r"\s*(?:&&|\|\||;|\|)\s*", t):
+      try:
+        words = shlex.split(part, posix=True)
+      except ValueError:
+        continue
+      while words and re.fullmatch(r"[A-Za-z_]\w*=.*", words[0]):
+        words = words[1:]
+      if not words:
+        continue
+      if words[0] == "cd" and len(words) > 1:
+        has_cd = True
+        target = words[1]
+        m = re.match(r"\$\{?(\w+)\}?", target)
+        if target.startswith("/") or (m and m.group(1) in ANCHOR_VARS) or target.startswith("~"):
+          anchored = anchored or line
+        elif m and m.group(1) not in ("SLURM_SUBMIT_DIR", "PWD", "OLDPWD"):
+          value = ctx.expand(target)
+          if value and value.startswith("/"):
+            anchored = anchored or line
+        continue
+      if anchored or words[0] in ("mkdir", "echo", "printf", "rm", "touch", "export", "module", "ml", "set"):
+        continue
+      if words[0] in LAUNCHERS:
+        prog, args = launched_program(words)
+        words = [prog, *args] if prog else []
+      for i, w in enumerate(words):
+        value = w.split("=", 1)[1] if w.startswith("--") and "=" in w else w
+        if is_relative_path(value):
+          uses.append((line, value, "x" if i == 0 else "f"))
+      for m in re.finditer(r"[<>]{1,2}\s*([^\s<>&|;]+)", part):
+        if is_relative_path(m.group(1)) and m.group(1) not in [u[1] for u in uses]:
+          uses.append((line, m.group(1), "f"))
+  return uses, anchored, has_cd
+
+def alternative_bases(ctx):
+  """The directory relative paths resolve from (where it was submitted) and the other plausible one (the script's)"""
+  submit = ctx.job.rec.get("WorkDir") if ctx.job is not None else ""
+  return submit or "", ctx.script_dir if ctx.script_dir and ctx.script_dir != submit else ""
+
+# ---------------------------------------------------------------------------
 # running the rules
 
 def run_rules(ctx, only=None):
@@ -943,6 +1013,7 @@ def check_file(path, with_probe=True):
   text = read_text(path)
   facts = gather_facts()
   ctx = make_context(text, path, facts=facts)
+  ctx.script_dir = os.path.dirname(path)
   ctx.count_files = True
   if with_probe:
     ctx.probes = run_probe([f"{k}:{p}" for k, p in interesting_paths(ctx)])
@@ -988,6 +1059,14 @@ def finished_script(job):
     return text if text.strip() and not text.startswith("NONE") else ""
   return ""
 
+def submit_environment(job):
+  """The environment the job was submitted with (if the accounting keeps it: AccountingStoreFlags=job_env), or None"""
+  from .remote import run
+  from .jobs import sacct_dump, parse_env
+  out = run(["sacct", "-j", job.jid, "--env-vars"], quiet=True)
+  env = parse_env(sacct_dump(out)) if out.strip() else {}
+  return env or None
+
 def check_job(job, full=True, replay=None, live=None):
   """Findings of a job (worker). full: also its log tails and the quota; the script as submitted (queued) or as the
   accounting stored it (finished), else the file it was submitted with."""
@@ -1007,6 +1086,11 @@ def check_job(job, full=True, replay=None, live=None):
   text = submitted or on_disk or ""
   ctx = make_context(text or None, "", job=job, facts=facts, on_disk=on_disk, submitted=submitted or None,
                      replay=replay, live=live)
+  if script_arg:
+    workdir = job.rec.get("WorkDir") or ""
+    ctx.script_dir = os.path.dirname(os.path.normpath(script_arg if os.path.isabs(script_arg) else os.path.join(workdir, script_arg)))
+  if full and ctx.script is not None:
+    ctx.submit_env = submit_environment(job)
   ctx.count_files = full
   ctx.probes = run_probe([f"{k}:{p}" for k, p in interesting_paths(ctx)]) if ctx.script else None
   if full:
@@ -1030,6 +1114,10 @@ def check_jobs(jobs):
     text = getattr(job, "script", None) or None
     ctx = make_context(text, "", job=job, facts=facts)
     ctx.others = jobs
+    _, script_arg = submit_options(job.rec.get("SubmitLine") or "")
+    if script_arg:
+      wd = job.rec.get("WorkDir") or ""
+      ctx.script_dir = os.path.dirname(os.path.normpath(script_arg if os.path.isabs(script_arg) else os.path.join(wd, script_arg)))
     contexts.append(ctx)
   requests = [f"{k}:{p}" for ctx in contexts if ctx.script and ctx.job.queued for k, p in interesting_paths(ctx)]
   probes = run_probe(requests) if requests else {}

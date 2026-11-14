@@ -438,19 +438,6 @@ def b05(ctx):
     if v and not re.search(r"%[jJA]", v) and v != "/dev/null" and "--open-mode" not in (ctx.script.text if ctx.script else ""):
       yield F("B05", f"--{name}={v}: every run overwrites it", ctx.directive_line(name), INFO if ctx.opt("open-mode") else "")
 
-@rule("B06", INFO, "Paths relative to where you submit",
-      "Relative --output/--error/--input paths, or relative paths in the script, without --chdir.",
-      "Relative paths are relative to the directory sbatch was run in. Submitted from another directory, the job "
-      "reads and writes elsewhere (or fails because the paths do not exist there).",
-      "Set the directory with #SBATCH --chdir=/path, or cd \"$SLURM_SUBMIT_DIR\" on purpose, or use absolute paths.",
-      "#SBATCH --chdir=/scratch/me/project\n#SBATCH --output=logs/%j.out")
-def b06(ctx):
-  if ctx.opt("chdir") is not None or ctx.job is not None:
-    return
-  rel = [n for n in ("output", "error", "input") if ctx.opt(n) and not ctx.opt(n).startswith("/") and not is_placeholder(ctx.opt(n))]
-  if rel:
-    yield F("B06", f"--{rel[0]}={ctx.opt(rel[0])} is relative to the directory you run sbatch in", ctx.directive_line(rel[0]))
-
 @rule("B07", WARNING, "Results left on the node's local disk",
       "Results written to /tmp (or $TMPDIR) of the compute node and not copied back.",
       "The node's local disk is wiped when the job ends: whatever is not copied back is lost.",
@@ -1144,7 +1131,7 @@ LOG_PATTERNS = [
   (r"Segmentation fault|SIGSEGV|segfault", ERROR, "the program crashed (segmentation fault): debug it (core dumps, gdb)"),
   (r"Permission denied", WARNING, "a file or program is not accessible: check the permissions"),
   (r"command not found", WARNING, "a command is missing: check the modules and the PATH"),
-  (r"No such file or directory", WARNING, "a path does not exist (P02, P03)"),
+  (r"No such file or directory", WARNING, "a path does not exist (P02, P03; relative paths: G18)"),
   (r"CANCELLED AT .* DUE TO TIME LIMIT", ERROR, "the time limit was reached: more --time, or checkpoints"),
   (r"CANCELLED AT .* DUE TO PREEMPTION", WARNING, "preempted by a higher priority job: resubmit, or --requeue"),
   (r"MPI_ABORT|MPI_Init.*fail|PMI.*error|PMIx.*error|mpi.*init.*error", ERROR, "MPI failed or aborted: use srun with the cluster's MPI"),
@@ -1189,3 +1176,353 @@ def u06(ctx):
   if minutes and minutes >= 24 * 60 and minutes != math.inf and ctx.opt("signal") is None and ctx.opt("requeue") is None \
      and not ctx.script.uses(r"\btrap\b"):
     yield F("U06", f"--time={ctx.opt('time')} without --signal, trap or --requeue", ctx.directive_line("time"))
+
+# ===========================================================================
+# G: good practice
+
+from .checks import relative_uses, alternative_bases, is_relative_path, LAUNCHERS # noqa: E402
+
+SETUP_PATTERN = (r"(^|[;\s])(source|\.)\s+\S*activate|conda\s+activate|mamba\s+activate|uenv\s+(start|run|view)|"
+                 r"spack\s+(env\s+activate|load)|(^|[;\s])(source|\.)\s+\S+")
+
+def module_loads(script):
+  """The modules the script loads (names as written)"""
+  names = []
+  for _, t in script.code_lines():
+    m = re.match(r"\s*(?:module\s+(?:load|add|try-load|swap)|ml)\s+(.*)", t)
+    if m:
+      names += [w for w in m.group(1).split() if not w.startswith("-") and w not in ("purge", "reset", "list", "avail", "spider")]
+  return names
+
+def site_environment(ctx):
+  """The job's software comes from a site option (uenv, container): the script cannot be replayed without it"""
+  return any(ctx.opt(o) is not None for o in ("uenv", "view", "environment", "container-image", "container"))
+
+@rule("G01", WARNING, "The script sets up its own environment",
+      "A job that depends on the shell it was submitted from: modules, a uenv, a Python environment, PATH entries or "
+      "variables that were active when sbatch ran, but that the script does not set up itself. Checked from the "
+      "environment Slurm kept of the submission (sacct --env-vars), and by Check environment, which replays the "
+      "script's setup after a fresh login.",
+      "By default (--export=ALL) a job inherits the submitting shell. It works today, but not after a fresh login, from "
+      "another terminal, a cron job, a colleague, or Restart: then programs or libraries are missing (command not "
+      "found, error while loading shared libraries) or other versions are used, and nobody can tell from the script.",
+      "Set up everything in the script: module purge, then the module loads (or the uenv, or source .../activate), the "
+      "exports it needs. Test it as it will run: log in fresh and call sbatch, or use Check environment. To enforce "
+      "it: #SBATCH --export=NONE, and after the setup export SLURM_EXPORT_ENV=ALL (else srun steps get an empty "
+      "environment).",
+      "#SBATCH --export=NONE\nmodule purge\nmodule load gcc/12.3.0 cray-mpich/8.1.29\nsource $HOME/venvs/sim/bin/activate\n"
+      "export SLURM_EXPORT_ENV=ALL     # srun steps get this environment\nsrun ./sim", needs="any")
+def g01(ctx):
+  s = ctx.script
+  if s is None:
+    return
+  export_none = (ctx.opt("export") or "").upper() == "NONE"
+  loaded = module_loads(s)
+  bases = {m.split("/")[0] for m in loaded}
+  purges = s.uses(r"\b(module|ml)\s+(purge|reset)")
+  sets_up = purges or bool(loaded) or s.uses(SETUP_PATTERN) or site_environment(ctx)
+  evidence = False
+  env = ctx.submit_env
+  login = ctx.facts.env if ctx.facts else {}
+  if env and not export_none:
+    problems, snippet = [], []
+    if not purges:
+      login_mods = set(login.get("LOADEDMODULES", "").split(":"))
+      extra = [m for m in env.get("LOADEDMODULES", "").split(":") if m and m not in login_mods and m.split("/")[0] not in bases]
+      if extra:
+        problems.append("the modules " + ", ".join(extra[:5]) + (" …" if len(extra) > 5 else ""))
+        snippet += ["module purge", "module load " + " ".join(extra)]
+    if env.get("UENV_MOUNT_LIST") and not login.get("UENV_MOUNT_LIST") and not site_environment(ctx) and not s.uses(r"\buenv\s"):
+      image = os.path.basename(env["UENV_MOUNT_LIST"].split(",")[0].split(":")[0])
+      problems.append(f"the uenv {image}")
+      snippet.append(f"#SBATCH --uenv={image.rsplit('.', 1)[0]}")
+    for var in ("VIRTUAL_ENV", "CONDA_PREFIX"):
+      value = env.get(var)
+      if value and value != login.get(var) and not (var == "CONDA_PREFIX" and env.get("CONDA_DEFAULT_ENV") == "base") \
+         and not s.uses(r"activate"):
+        problems.append(f"the Python environment {value}")
+        snippet.append(f"source {value}/bin/activate" if var == "VIRTUAL_ENV" else f'eval "$(conda shell.bash hook)"\nconda activate {value}')
+    text = re.sub(r"'[^']*'", "''", "\n".join(t for _, t in s.code_lines()))
+    used = set(re.findall(r"\$\{?([A-Za-z_]\w*)", text))
+    assigned = set(s.assignments())
+    only = sorted(n for n in used if n in env and n not in login and n not in assigned and n not in KNOWN_VARS
+                  and not n.startswith(("SLURM_", "SBATCH_", "SRUN_", "PMI", "BASH")) and n not in ("PWD", "OLDPWD", "SHLVL", "_"))
+    if only:
+      problems.append("the variables " + ", ".join("$" + n for n in only[:5]))
+      snippet += [f"export {n}={shlex.quote(env[n])}" for n in only[:5]]
+    if not problems:
+      login_path = set(login.get("PATH", "").split(":"))
+      extra_path = [p for p in env.get("PATH", "").split(":") if p and p not in login_path and p not in s.text]
+      if extra_path:
+        problems.append("PATH entries " + ", ".join(extra_path[:3]) + (" …" if len(extra_path) > 3 else ""))
+    if problems:
+      evidence = True
+      yield F("G01", "it depends on the shell it was submitted from: " + "; ".join(problems) +
+              " were active then, and the script does not set them up", s.first_command, WARNING, snippet="\n".join(snippet))
+  replay = ctx.replay or {}
+  if replay.get("fresh") and replay.get("notfound") and not site_environment(ctx):
+    missing = replay["notfound"]
+    evidence = True
+    line = next((l for l, t, _ in s.launcher_lines() if any(m in t for m in missing)), None)
+    yield F("G01", f"after a fresh login and the script's own setup, {', '.join(missing[:4])} "
+                   f"{'is' if len(missing) == 1 else 'are'} not found: it only works from a prepared shell", line, WARNING)
+  if not evidence and not sets_up and not export_none and \
+     (list(s.launcher_lines()) or s.uses(r"(^|[;\s])(python3?|Rscript|julia|matlab|mpirun|mpiexec)\s")):
+    yield F("G01", "the script sets up no environment (no module loads, uenv or activate): it relies on the shell "
+                   "it is submitted from", s.first_command, INFO, snippet="module purge\nmodule load <what the program needs>")
+
+@rule("G02", WARNING, "The job's result shows whether the work failed",
+      "Commands after the last srun (echo done, cleanup, copies) without set -e; or a job that ended COMPLETED although "
+      "one of its steps failed.",
+      "The state of a job is the exit code of its script, which is that of its last command. With echo done at the "
+      "end, a crashed program still gives COMPLETED: failures go unnoticed, dependencies (afterok) start on broken "
+      "results.",
+      "Stop at the first error with set -eo pipefail at the top, or end with the program's status: srun ./sim; "
+      "status=$?; ...; exit $status.",
+      "set -eo pipefail\nsrun ./sim\necho done       # only reached if srun succeeded", needs="any")
+def g02(ctx):
+  job, s = ctx.job, ctx.script
+  if job is not None and (job.rec.get("State") or "").startswith("COMPLETED"):
+    for st in job.steps:
+      step = st["JobID"].partition(".")[2]
+      if step.isdigit() and (not st["State"].startswith("COMPLETED") or st["ExitCode"] not in ("0:0", "")):
+        yield F("G02", f"step {step} ended {st['State']} (exit {st['ExitCode']}), but the job says COMPLETED", None, WARNING)
+        return
+  if s is None or s.uses(r"\bset\s+-[a-zA-Z]*e") or s.uses(r"\bset\s+-o\s+errexit"):
+    return
+  launchers = list(s.launcher_lines())
+  if not launchers:
+    return
+  last = launchers[-1][0]
+  after = [(l, t) for l, t in s.code_lines() if l > last]
+  if after and not re.match(r"\s*(exit|wait)\b", after[-1][1]) and not any("$?" in t or "||" in t for _, t in after):
+    yield F("G02", f"after the last srun (line {last}) come {len(after)} more commands, last {after[-1][1].strip()[:40]}: "
+                   "the job's state is theirs, not the program's", after[0][0], WARNING,
+            snippet="set -eo pipefail      # at the top")
+
+@rule("G03", WARNING, "Not submitted from inside another job",
+      "A job submitted from within an allocation (an salloc or interactive job shell): its submit environment has the "
+      "other job's SLURM_* variables.",
+      "The new job inherits settings of the old one (SLURM_NTASKS, SLURM_CPUS_PER_TASK, SLURM_MEM_PER_NODE, …): srun "
+      "in it may use the old job's numbers and fail or use the wrong resources.",
+      "Submit from a login shell, not from inside a job; a job that submits the next one (a chain) should do it with "
+      "sbatch --export=NONE (the next script sets up its own environment, see G01).", needs="any")
+def g03(ctx):
+  env = ctx.submit_env or {}
+  other = env.get("SLURM_JOB_ID")
+  own = ctx.job.rec.get("JobIDRaw") if ctx.job is not None else None
+  if other and other != own:
+    yield F("G03", f"it was submitted from inside job {other}: it inherited its SLURM_* settings")
+  s = ctx.script
+  if s is None:
+    return
+  for line, t in s.code_lines():
+    if re.search(r"(^|[;\s(`])sbatch\s", t) and "--export=NONE" not in t and "env -i" not in t \
+       and not re.search(r"unset\s+\$?\(?\s*(compgen|env\b)|for\s+\w+\s+in\s+\$\(\s*(compgen\s+-e|env)\b", s.text):
+      yield F("G03", "the job submits another job from inside: it passes on its SLURM_* settings (tasks, CPUs, memory), "
+                     "which the next job then uses", line, INFO,
+              snippet="sbatch --export=NONE next.sh      # the next script sets up its own environment (G01)")
+      return
+
+def literal_counts(words):
+  """{"ntasks": n, "cpus": c} given as numbers on a launcher line"""
+  out, i = {}, 1
+  while i < len(words):
+    w, nxt = words[i], words[i + 1] if i + 1 < len(words) else ""
+    for names, key in ((("-n", "--ntasks", "-np"), "ntasks"), (("-c", "--cpus-per-task"), "cpus")):
+      for name in names:
+        if w == name and nxt.isdigit():
+          out[key] = int(nxt)
+        elif w.startswith(name + "=") and w.split("=", 1)[1].isdigit():
+          out[key] = int(w.split("=", 1)[1])
+        elif name in ("-n", "-c") and re.fullmatch(re.escape(name) + r"\d+", w):
+          out[key] = int(w[2:])
+    i += 1
+  return out
+
+@rule("G04", WARNING, "Task and thread counts come from Slurm",
+      "srun/mpirun lines with literal task or CPU counts (-n 128, -np 64, -c 16) instead of Slurm's variables.",
+      "When the request changes (more nodes, another partition), literal counts silently disagree with the allocation: "
+      "too many tasks fail, too few leave the rest of the allocation idle; mpirun -np does not know about Slurm at all.",
+      "Use the allocation's values: srun without -n (it uses all tasks), or -n $SLURM_NTASKS, "
+      "-c $SLURM_CPUS_PER_TASK.",
+      "#SBATCH --ntasks=256\nsrun -n 128 ./sim              # half of the allocation idle\nsrun ./sim                     # all of it")
+def g04(ctx):
+  nodes, tpn, cpt, _ = ctx.counts()
+  ntasks = to_int(ctx.opt("ntasks"), None) or (nodes * tpn if nodes and tpn else None)
+  for line, t, launcher in ctx.script.launcher_lines():
+    try:
+      words = shlex.split(t)
+    except ValueError:
+      continue
+    c = literal_counts(words)
+    n, cpus = c.get("ntasks"), c.get("cpus")
+    if n is not None and ntasks:
+      if launcher != "srun" and n != ntasks:
+        yield F("G04", f"{launcher} -np {n}, the job has {ntasks} tasks", line, snippet="srun ./program")
+      elif n > ntasks:
+        yield F("G04", f"srun -n {n}, the job has only {ntasks} tasks", line)
+      elif n < ntasks:
+        yield F("G04", f"srun -n {n} uses {n} of the job's {ntasks} tasks", line, INFO)
+      else:
+        yield F("G04", f"-n {n} is written as a number: -n $SLURM_NTASKS keeps it right when the request changes", line, INFO)
+      continue
+    if cpus is not None:
+      if cpus != cpt:
+        yield F("G04", f"-c {cpus}, the job has --cpus-per-task={cpt}", line, snippet="-c $SLURM_CPUS_PER_TASK")
+      else:
+        yield F("G04", f"-c {cpus} is written as a number: -c $SLURM_CPUS_PER_TASK keeps it right", line, INFO)
+
+def fixed_outputs(job):
+  """Files a queued or running job writes under fixed names: its log (without %j/%A/%a) and redirections of its script"""
+  out = set()
+  pattern = job.rec.get("StdOut") or ""
+  if pattern and pattern != "(null)" and not re.search(r"%[jJAa]", pattern) and job.stdout_path():
+    out.add(job.stdout_path())
+  wd = job.rec.get("WorkDir") or ""
+  for m in re.finditer(r">>?\s*([^\s<>&|;$`%{}]+)", getattr(job, "script", None) or ""):
+    target = m.group(1)
+    if target not in ("/dev/null", "&1", "&2") and not target.startswith("&"):
+      out.add(os.path.normpath(target if target.startswith("/") else os.path.join(wd, target)))
+  return out
+
+@rule("G05", WARNING, "Each run in its own directory",
+      "Queued or running jobs in the same directory that write the same files: logs without %j, or results under fixed "
+      "names (> result.txt).",
+      "They overwrite each other's results and logs: what is in the file at the end is a mix, or the last one's.",
+      "Give each run its own directory (mkdir -p run_$SLURM_JOB_ID && cd run_$SLURM_JOB_ID), or put the job id into "
+      "the names (%j in #SBATCH lines, $SLURM_JOB_ID in the script).",
+      "#SBATCH --output=logs/%x_%j.out\nRUN=$SCRATCH/runs/$SLURM_JOB_ID\nmkdir -p $RUN && cd $RUN || exit 1", needs="list")
+def g05(ctx):
+  job = ctx.job
+  if job is None or not job.queued:
+    return
+  mine = fixed_outputs(job)
+  if not mine:
+    return
+  for other in ctx.others:
+    if other is job or not other.queued or (other.rec.get("WorkDir") or "") != (job.rec.get("WorkDir") or ""):
+      continue
+    shared = mine & fixed_outputs(other)
+    if shared:
+      yield F("G05", f"job {other.jid} writes the same {'file' if len(shared) == 1 else 'files'}: "
+                     + ", ".join(sorted(os.path.basename(p) for p in shared)[:3]) + f" (in {job.rec.get('WorkDir')})")
+      return
+
+RECORD_PATTERN = (r"module\s+list|(^|[;\s])ml\s*($|;)|uenv\s+status|\bprintenv\b|(^|[;\s])env\s*($|[>|;])|"
+                  r"git\s+.*(rev-parse|describe|log\s)|scontrol\s+show\s+job|pip3?\s+freeze|conda\s+(list|env\s+export)|"
+                  r"spack\s+find|lscpu|nvidia-smi")
+
+@rule("G06", INFO, "Record what ran",
+      "A job script that runs programs but records nothing about how: no module list, uenv status, environment, code "
+      "version (git), node, date.",
+      "When a result looks wrong weeks later, nobody can tell which versions, modules, inputs and nodes produced it, "
+      "or what changed against a run that worked (What changed can only compare the script).",
+      "Write a short record into the log at the start of the job.",
+      'echo "job $SLURM_JOB_ID ($SLURM_JOB_NAME) on $(hostname), $(date)"\nmodule list 2>&1        # or: uenv status\n'
+      'git -C $HOME/code/sim rev-parse HEAD\nscontrol show job $SLURM_JOB_ID')
+def g06(ctx):
+  s = ctx.script
+  if list(s.launcher_lines()) and not s.uses(RECORD_PATTERN):
+    yield F("G06", "the job records nothing about its environment or code version", s.first_command,
+            snippet='echo "job $SLURM_JOB_ID on $(hostname), $(date)"\nmodule list 2>&1\ngit -C /path/to/code rev-parse HEAD')
+
+INTERACTIVE = [
+  (r"(vim?|nano|emacs|less|more|man|htop|passwd|su)(\s|$)", "needs a terminal; a batch job has none"),
+  (r"top(?!.*\s-b)(\s|$)", "needs a terminal (top -b works in batch)"),
+  (r"sudo\s", "asks for a password nobody can type (and is not allowed on most clusters)"),
+  (r"ssh\s+(.*\s)?-t", "asks for a terminal a batch job does not have"),
+  (r"conda\s+init\b", "edits your ~/.bashrc; it is meant to be run once, interactively"),
+  (r"srun\s.*--pty", "a pseudo terminal without a terminal to attach"),
+  (r"(tmux|screen)(?!.*\s-d)(\s|$)", "needs a terminal (tmux new -d / screen -dm start detached)"),
+  (r"(python3?|ipython|R|julia|matlab)\s*$", "starts an interactive interpreter: in a batch job it reads nothing and ends at once"),
+  (r"read(\s|$)", "waits for input a batch job never gets (it reads nothing)"),
+]
+
+@rule("G09", WARNING, "No interactive commands in batch scripts",
+      "Commands that need a person at a terminal: editors and pagers, top/htop, read prompts, sudo, ssh -t, srun --pty, "
+      "tmux/screen, an interpreter without a script, conda init.",
+      "A batch job has no terminal and nobody to answer: these fail, do nothing, or wait until the time limit and waste "
+      "the allocation.",
+      "Remove them, use their batch forms (top -b, tmux new -d), give interpreters a script, run prompts' answers as "
+      "arguments; interactive work belongs in an interactive job (i in the job list).")
+def g09(ctx):
+  for line, t in ctx.script.code_lines():
+    for part in re.split(r"\s*(?:&&|\|\||;)\s*", t):
+      cmd = part.strip()
+      if not cmd or cmd.startswith(("#", "while ", "if ")) or "<" in cmd:
+        continue
+      if "|" in t and cmd.startswith("read"): # (cmd | while read ...)
+        continue
+      for pattern, why in INTERACTIVE:
+        if re.match(pattern, cmd):
+          yield F("G09", f"{cmd[:50]}: {why}", line)
+          break
+
+@rule("G18", INFO, "The script works from any directory",
+      "Relative paths (programs like ./sim, inputs, sourced files, logs) used before the script sets its directory, so "
+      "they are relative to wherever sbatch was run. Also: relative --output/--error with a cd in the script (the logs "
+      "are opened before the script runs, so the cd does not apply to them).",
+      "The script only works when submitted from one particular directory: from anywhere else programs and inputs are "
+      "not found, or a different input is used, and logs land elsewhere or nowhere (the job fails without a log).",
+      "Name the directory once at the top: #SBATCH --chdir=/path/to/run (a literal path: #SBATCH lines expand no "
+      "variables), or cd /path/to/run || exit 1 (or cd \"$1\" with the directory as an argument); relative paths "
+      "below it are fine. Or use absolute paths.",
+      "#SBATCH --chdir=/scratch/me/project/run1\n#SBATCH --output=logs/%x_%j.out   # relative to --chdir\nsrun ./sim input.dat",
+      needs="any")
+def g18(ctx):
+  s = ctx.script
+  if s is None:
+    return
+  uses, anchored, has_cd = relative_uses(ctx)
+  uses = [u for u in uses if not is_placeholder(u[1])]
+  chdir = ctx.opt("chdir")
+  rel_logs = [n for n in ("output", "error", "input") if ctx.opt(n) and not ctx.opt(n).startswith("/")
+              and not is_placeholder(ctx.opt(n)) and ctx.opt(n) != "/dev/null"]
+  if rel_logs and has_cd and not chdir:
+    n = rel_logs[0]
+    yield F("G18", f"--{n}={ctx.opt(n)} is opened before the script runs, relative to the directory sbatch runs in: "
+                   "the cd in the script does not apply to it", ctx.directive_line(n), WARNING,
+            fix="#SBATCH --chdir=/path/to/run (then the log path is relative to it), or an absolute log path")
+  evidence = False
+  submit, other = alternative_bases(ctx)
+  if other and submit and uses and ctx.probes is not None and not chdir:
+    only = []
+    for _line, word, _kind in uses:
+      here, there = ctx.probe("f", os.path.normpath(os.path.join(submit, word))), ctx.probe("f", os.path.normpath(os.path.join(other, word)))
+      if there is not None and there.exists and not (here is not None and here.exists):
+        only.append(word)
+    if only:
+      evidence = True
+      yield F("G18", f"{', '.join(only[:3])} {'exists' if len(only) == 1 else 'exist'} only next to the script ({other}), "
+                     f"but it was submitted from {submit}", uses[0][0], WARNING)
+  if ctx.others and ctx.job is not None and not evidence:
+    name, wd = ctx.job.rec.get("JobName"), ctx.job.rec.get("WorkDir")
+    same = [j for j in ctx.others if j.rec.get("JobName") == name and j.rec.get("WorkDir") != wd and not j.queued]
+    failed_here = (ctx.job.rec.get("State") or "").startswith(("FAILED",)) and uses
+    worked = [j for j in same if (j.rec.get("State") or "").startswith("COMPLETED")]
+    if failed_here and worked:
+      evidence = True
+      yield F("G18", f"this run (from {wd}) failed, job {worked[0].jid} of the same script from {worked[0].rec.get('WorkDir')} "
+                     "completed: it depends on where it is submitted from", None, WARNING)
+  if uses and not evidence:
+    words = list(dict.fromkeys(w for _, w, _ in uses))
+    yield F("G18", f"relative paths before the script sets its directory ({', '.join(words[:4])}{' …' if len(words) > 4 else ''}): "
+                   "it only works when submitted from the right directory", uses[0][0],
+            snippet="#SBATCH --chdir=/path/to/run       # or: cd /path/to/run || exit 1")
+  elif rel_logs and not chdir and not has_cd and not uses and ctx.job is None:
+    n = rel_logs[0]
+    yield F("G18", f"--{n}={ctx.opt(n)} is relative to the directory you run sbatch in", ctx.directive_line(n))
+
+@rule("G19", WARNING, "The script does not look for itself",
+      "$0, ${BASH_SOURCE[0]} or dirname \"$0\" used to find the script's own directory.",
+      "Slurm runs a copy of the script from its spool directory (e.g. /var/spool/slurmd/job123/slurm_script): $0 points "
+      "there, not to your file, so files next to the script are not found.",
+      "Name the directory explicitly (#SBATCH --chdir, cd /path || exit 1, see G18), or use $SLURM_SUBMIT_DIR if "
+      "submitting from the script's own directory is intended.",
+      'cd "$(dirname "$0")"          # Slurm\'s spool directory, not yours\ncd /scratch/me/project || exit 1')
+def g19(ctx):
+  for line, t in ctx.script.code_lines():
+    if re.search(r"\$\{?0\}?(?!\d)|BASH_SOURCE", t) and re.search(r"dirname|realpath|readlink|\bcd\b|\$\(", t):
+      yield F("G19", f"{t.strip()[:60]}: in a batch job this is Slurm's copy of the script, in its spool directory", line)
+      return
