@@ -18,8 +18,9 @@ chosen from a list (only queued, 1 hour … 1 month) or typed (custom …, same
 duration syntax as `slurm.py -c`, e.g. `3d12h`); each tab keeps its own. The dropdown next to it selects
 whose jobs are listed: yours, those of one of your Slurm accounts, or those of
 all of them (the accounts come from `sacctmgr`). Progress appears when the
-output contains a line such as `65/100`; the **Done in** column estimates when
-a running job gets to the end. An array with ten or more tasks in the list is
+output contains a line such as `65/100`; two columns estimate when a running job
+gets to the end: **Done: same pace** (at the average rate since the job started)
+and **Done: current pace** (at the rate of the last few `n/N` lines; `-` until there are two). An array with ten or more tasks in the list is
 one row (`9600_[1-150] ▸ 150 tasks`) whose state is the mix of its tasks' states
 in Slurm's short codes, coloured: `30R 10PD 100CD 10F` (running, pending,
 completed, failed; CA cancelled, TO timeout, …); clicking ▸ (or Space) lists
@@ -52,8 +53,8 @@ stop, step) and warns when the range covers tasks that are running, queued or
 completed.
 
 The progress shows the latest `n/N` line, and estimates when the job reaches
-`N`: from the average rate since the job started and from the rate of the
-last few `n/N` lines, each with the remaining time and the time of day. The
+`N`: **on same pace** (the average rate since the job started) and **on current
+pace** (the rate of the last few `n/N` lines), each with the remaining time and the time of day. The
 times are the timestamps of the lines if they have one, else the times slurp
 saw a new `n`. **Progress file…** picks another (log) file for this job, in
 the directory browser; **Use stdout** goes back. For a task of an array, the

@@ -54,7 +54,8 @@ from ..jobs import *
 from ..widgets import *
 from ..screens.base import *
 
-COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("user", "User"), ("state", "State"), ("progress", "Progress"), ("eta", "Done in"),
+COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("user", "User"), ("state", "State"), ("progress", "Progress"),
+           ("eta", "Done: same pace"), ("eta_now", "Done: current pace"),
            ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
            ("start", "Start"), ("end", "End"), ("err", "Err"), ("cmd", "Command")]
 
@@ -68,7 +69,8 @@ SORT_KEYS = {
   "user":  lambda j: j.rec["User"].casefold(),
   "state": lambda j: j.state,
   "progress": lambda j: (p.current / p.total if (p := progress_for_job(j)) and p.total else 0),
-  "eta": lambda j: best_eta(j.progress) or float("inf"),
+  "eta": lambda j: pace_eta(j.progress, "same") or float("inf"),
+  "eta_now": lambda j: pace_eta(j.progress, "current") or float("inf"),
   "nodes": lambda j: int(j.rec["NNodes"] or 0),
   "time":  lambda j: j.node_hours() / max(int(j.rec["NNodes"] or 1), 1),
   "start": lambda j: j.rec["Start"] if is_time(j.rec["Start"]) else "",

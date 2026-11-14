@@ -735,13 +735,13 @@ class Slurp(App):
     if show_progress is None:
       show_progress = any(progress_for_job(job) is not None for job in self.jobs.values())
     visible_columns = [(key, label) for key, label in COLUMNS
-                       if (key != "user" or all_accounts) and (key not in ("progress", "eta") or show_progress)]
+                       if (key != "user" or all_accounts) and (key not in ("progress", "eta", "eta_now") or show_progress)]
     column_keys = [key for key, _ in visible_columns]
     if column_keys == self.job_column_keys:
       return
     if not all_accounts and self.sort_column == "user":
       self.sort_column, self.sort_reverse = "jobid", True
-    if not show_progress and self.sort_column in ("progress", "eta"):
+    if not show_progress and self.sort_column in ("progress", "eta", "eta_now"):
       self.sort_column, self.sort_reverse = "jobid", True
     table.clear(columns=True)
     for key, label in visible_columns:
@@ -1012,7 +1012,7 @@ class Slurp(App):
       progress = [p for j in tasks if (p := progress_for_job(j))]
       total, done = sum(p.total for p in progress), sum(p.current for p in progress)
       values.append(RichProgressBar(total=max(total, 1), completed=done, width=8) if progress else "")
-      values.append("")
+      values.extend(("", ""))
     starts = [j.rec["Start"] for j in tasks if is_time(j.rec["Start"])]
     ends = [j.rec["End"] for j in tasks if is_time(j.rec["End"])]
     errors = sum(j.err[0] == "file" and j.err[1] > 0 for j in tasks)
@@ -1064,9 +1064,11 @@ class Slurp(App):
       if "progress" in self.job_column_keys:
         progress = progress_for_job(job)
         values.append(RichProgressBar(total=max(progress.total, 1), completed=progress.current, width=8) if progress else "")
-        eta = best_eta(job.progress) if job.running and job.progress and job.progress.current < job.progress.total else None
-        values.append(Text(duration_text(eta - time.time()) if eta and eta > time.time() else "overdue" if eta else "",
-                           style="" if not eta or eta > time.time() else "yellow"))
+        going = job.running and job.progress and job.progress.current < job.progress.total
+        for pace in ("same", "current"):
+          eta = pace_eta(job.progress, pace) if going else None
+          values.append(Text(duration_text(eta - time.time()) if eta and eta > time.time() else "overdue" if eta
+                             else "-" if going else "", style="" if not eta or eta > time.time() else "yellow"))
       values.extend((rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
                      ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]), err_text(job.err),
                      job.command[:150]))

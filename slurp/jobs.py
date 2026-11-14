@@ -296,10 +296,11 @@ def eta_text(eta):
 def rate_text(rate):
   return f"{rate * 3600:.3g}/h" if rate * 60 < 1 else f"{rate * 60:.3g}/min" if rate < 1 else f"{rate:.3g}/s"
 
-def best_eta(progress):
-  """The estimate shown in the job list: the recent rate if known, else the average since the start"""
+def pace_eta(progress, pace):
+  """When the job gets to N/N, as a time stamp (None if unknown): pace "same" at the average rate since the start of
+  the job, "current" at the rate of the last few progress points"""
   est = progress.estimate if progress else {}
-  return (est.get("recent") or est.get("overall") or (None, None))[1]
+  return (est.get("overall" if pace == "same" else "recent") or (None, None))[1]
 
 @dataclass
 class Job:

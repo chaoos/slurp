@@ -265,10 +265,10 @@ class JobScreen(SplitScreen):
     if job.running and progress.current < progress.total:
       if "overall" in est:
         rate, eta = est["overall"]
-        lines.append(f"since the start: {rate_text(rate)}, done in {eta_text(eta)}")
+        lines.append(f"on same pace (since the start): {rate_text(rate)}, done in {eta_text(eta)}")
       if "recent" in est:
         rate, eta, count = est["recent"]
-        lines.append(f"last {count} updates: {rate_text(rate)}, done in {eta_text(eta)}")
+        lines.append(f"on current pace (last {count} updates): {rate_text(rate)}, done in {eta_text(eta)}")
       if not ("overall" in est or "recent" in est):
         lines.append("no estimate yet")
       else:
