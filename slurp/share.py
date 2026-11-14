@@ -236,17 +236,19 @@ def client_commands(link):
     mount = "~/" + re.sub(r"[^\w.-]", "_", link.tab or "cluster")
     jump = ",".join([f"ProxyJump={link.jump()}", f"HostKeyAlias={alias}", "reconnect", "ServerAliveInterval=15",
                      *([f"port={port}"] if port != 22 else [])])
-    out.append(("Linux, macOS (sshfs)", f"mkdir -p {mount} && sshfs -o {jump} {user}@{host}:{shlex.quote(link.path)} {mount}",
-                f"unmount: fusermount -u {mount} (Linux), umount {mount} (macOS)"))
+    out.append(("Linux, macOS (sshfs): one command", f"mkdir -p {mount} && sshfs -o {jump} {user}@{host}:{shlex.quote(link.path)} {mount}",
+                f"asks for the password, then the drive is {mount}; unmount: fusermount -u {mount} (Linux), umount {mount} (macOS)"))
     local = 2222
     forward = (["-L", f"{local}:{host}:{port}", link.jump().split("@")[0] + "@" + link.relay_host] if link.relay_type == "ssh-j"
                else ["-L", f"{local}:localhost:{port}", link.relay_host])
-    out.append(("Windows (SSHFS-Win), step 1: keep this running in a terminal",
-                shlex.join(["ssh", "-N", *forward]), "it carries the drive; close it after unmapping"))
-    out.append(("Windows (SSHFS-Win), step 2: map the drive",
+    out.append(("Windows (SSHFS-Win), step 1: the tunnel, in a terminal (it asks nothing and stays open)",
+                shlex.join(["ssh", "-N", *forward]),
+                f"it connects to the relay and then only waits, carrying port {local} of your computer to slurp: no "
+                "password here, no output; leave it open while the drive is used, close it (Ctrl-C) after unmapping"))
+    out.append(("Windows (SSHFS-Win), step 2: map the drive, while step 1 runs",
                 f"net use X: \\\\sshfs\\{user}@localhost!{local}",
                 "or in Explorer: Map network drive, folder \\\\sshfs\\" + f"{user}@localhost!{local}; "
-                "the password is asked by Windows; the drive is your login directory"))
+                f"Windows asks for the user ({user}) and the password of this link; the drive is your login directory"))
   if link.relay_type == "ssh-j":
     putty = (f"Session: host {host}, port {port}; Connection > Proxy: type SSH, proxy host {link.relay_host}, port 22, "
              f"user {link.name}; Connection > Data: auto-login user {user}")
