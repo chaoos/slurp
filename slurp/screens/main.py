@@ -129,6 +129,13 @@ class MainScreen(SplitScreen):
       self.app.populate()
       self.query_one("#jobs", ClickTable).focus()
 
+  def on_screen_resume(self):
+    """Back to the job list: draw it again if results came while another window was shown (the checks)"""
+    cluster = self.app.cluster if self.app.clusters else None
+    if cluster is not None and getattr(cluster, "stale_list", False) and cluster.loader is None:
+      cluster.stale_list = False
+      self.call_after_refresh(self.app.populate)
+
   def on_mount(self):
     self.app.main = self
     # the job list is the default mode; Textual does not register that one, so it could not be switched back to

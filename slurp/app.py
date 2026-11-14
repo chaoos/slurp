@@ -1284,14 +1284,14 @@ class Slurp(App):
     """The light checks of the listed jobs, after the load (their first facts about the cluster cost a round trip that
     must not hold up the list): the Checks column fills in when they are done"""
     def work():
-      try:
-        check_jobs(jobs)
-      finally:
-        cluster.checking = False
+      check_jobs(jobs)
       return True
     def done(ok):
+      cluster.checking = False # (on the UI thread, with the redraw: no moment with results but without them shown)
       if cluster is self.cluster and cluster.loader is None and self.screen is self.main:
         self.populate() # (also when the checks failed: no spinners left)
+      else:
+        cluster.stale_list = True # (drawn again when the job list is shown)
     cluster.checking = True
     in_background(self, work, done, group=f"checks-{cluster.name}", name="checking the jobs",
                   connection=cluster.connection if cluster.destination else None)
