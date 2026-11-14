@@ -131,11 +131,11 @@ back through the lines that went off the top (10000 by default,
 `"terminal_scrollback"` in the config; `clear` empties it), with a bar saying
 how far back; typing returns to the bottom. In full-screen programs (less,
 vim) the wheel sends arrow keys to them. Dragging with the mouse selects text,
-also in the history, and copies it when the button is released.
+also in the history; a right-click on the selection copies it.
 
 **ⓘ Help** in the bar of a shell (and `ⓘ` in the title bar of the login pane)
 explains that terminal: scrolling back, how to copy out of it (drag to
-select; `Ctrl+C` interrupts and does not copy) and paste into it (your terminal's paste, not a
+select, right-click to copy; `Ctrl+C` interrupts and does not copy) and paste into it (your terminal's paste, not a
 plain `Ctrl+V`), which keys go where, how to close it and that closing ends
 everything running in it, and how to treat it: a limited history (use `less`
 or `tmux` for long output), `tmux` or `sbatch` for work that must survive, and login nodes are
@@ -530,7 +530,7 @@ top-left `←` button to go back.
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |
 | Markdown | `r` reload; use the viewer's table of contents and link navigation |
-| Shell (subtab) | mouse wheel or `Shift+PgUp`/`Shift+PgDn` scroll back; drag to select and copy; `Ctrl-]` back to the job list; `Ctrl-D` exits the shell, Enter starts it again; `✕` of the subtab closes it; **ⓘ Help** copy, paste, keys, closing |
+| Shell (subtab) | mouse wheel or `Shift+PgUp`/`Shift+PgDn` scroll back; drag to select, right-click on it to copy; `Ctrl-]` back to the job list; `Ctrl-D` exits the shell, Enter starts it again; `✕` of the subtab closes it; **ⓘ Help** copy, paste, keys, closing |
 | Subtabs | `Ctrl-W` close the subtab shown (outside a shell) |
 | Login pane | `Ctrl-]` switch between the window and the login; `Ctrl-X` gives up the login; `ⓘ` copy, paste, keys, closing |
 

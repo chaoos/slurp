@@ -82,8 +82,8 @@ full-screen programs (less, vim, htop) the wheel sends arrow keys to them instea
 
 ## Copying out of the terminal
 
-- **Drag with the mouse** to select (also in the history: drag past the top or bottom edge to scroll); when you let
-  go, the selection is copied to your clipboard. A click without dragging, or typing, removes the selection.
+- **Drag with the mouse** to select (also in the history: drag past the top or bottom edge to scroll), then
+  **right-click on the selection** to copy it to your clipboard. A click elsewhere, or typing, removes the selection.
 - **Copy the screen** below: everything visible in this terminal, as text.
 - Your terminal's own selection still works holding a modifier key (`Shift`+drag on Linux, Windows Terminal and in a
   browser; `Option`+drag in iTerm2; `Fn`+drag in macOS Terminal); it selects whole screen lines, also the window on

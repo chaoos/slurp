@@ -271,7 +271,7 @@ class TerminalSession:
 class TerminalView(Widget, can_focus=True):
   """Shows a shell (its own, in a shell subtab, else the login of the pane); while it has the focus all keys go to
   the shell (in the pane all but Ctrl-] and Ctrl-X). The mouse wheel (and Shift+PgUp/PgDn) scrolls through the
-  history, dragging selects text, which is copied when the button is released."""
+  history, dragging selects text, a right-click on the selection copies it."""
   DEFAULT_CSS = "TerminalView { height: 1fr; }"
   ALLOW_SELECT = False # (its own selection, over the history too)
   WHEEL_LINES = 3
@@ -380,6 +380,17 @@ class TerminalView(Widget, can_focus=True):
     self.scroll_by(-direction * self.WHEEL_LINES)
 
   def on_mouse_down(self, event):
+    if event.button == 3: # right-click: copy the selection (when it is on it)
+      event.stop()
+      cell = self.cell_at(event)
+      if self.selection and self.selection[0] != self.selection[1] and cell is not None and self.in_selection(*cell):
+        text = self.selected_text()
+        if text:
+          from .screens.dialogs import copy_text
+          copy_text(self.app, text, "the selection")
+      self.selection = None
+      self.refresh()
+      return
     if event.button != 1 or self.vt() is None:
       return
     self.focus()
@@ -410,14 +421,9 @@ class TerminalView(Widget, can_focus=True):
       return
     self.selecting = False
     self.release_mouse()
-    if self.selection and self.selection[0] != self.selection[1]:
-      text = self.selected_text()
-      if text:
-        from .screens.dialogs import copy_text
-        copy_text(self.app, text, "the selection")
-    else:
-      self.selection = None
-    self.refresh()
+    if not (self.selection and self.selection[0] != self.selection[1]):
+      self.selection = None # (a click without dragging)
+    self.refresh() # (a selection stays until it is copied with a right-click, or typing)
 
   @property
   def session(self):
@@ -533,8 +539,12 @@ class TerminalView(Widget, can_focus=True):
     if text:
       segments.append(Segment(text, style))
     strip = Strip(segments).adjust_cell_length(width, base)
-    if y == 0 and self.scroll:
+    mark = ""
+    if y == 0 and self.selection and self.selection[0] != self.selection[1] and not self.selecting:
+      mark = " selected · right-click on it copies · click elsewhere: none "
+    elif y == 0 and self.scroll:
       mark = f" ↑ {self.scroll} of {len(self.history())} lines back · wheel, Shift+PgUp/PgDn · typing returns "
+    if mark:
       if len(mark) < width:
         strip = Strip([*strip.crop(0, width - len(mark)), Segment(mark, base + Style(reverse=True, bold=True))])
     return strip
