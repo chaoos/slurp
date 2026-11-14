@@ -68,6 +68,7 @@ class ScriptScreen(SplitScreen):
                            "libraries (ldd); runs only setup lines, never the job's commands")
       yield Button("Edit", id="sc-edit", compact=True, tooltip="open it in your editor ($VISUAL / $EDITOR); checked again when saved (e)")
       yield Button("Test", id="sc-test", compact=True, tooltip="sbatch --test-only: would Slurm accept it, and when would it start?")
+      yield Button("Fixed copy…", id="sc-fix", compact=True, tooltip="the fixes that are safe to make, in a copy of the script")
       yield Button("Submit…", id="sc-submit", compact=True, variant="primary")
       yield Button("Rule catalogue", id="sc-catalogue", compact=True)
     yield Static(Text("checking …", style="dim"), id="script-status")
@@ -237,7 +238,62 @@ class ScriptScreen(SplitScreen):
         self.app.reload_cluster(cluster)
     in_background(self, run, done, group="submit")
 
+  def recheck(self):
+    self.check()
+
+  def mute_in_script(self, rule_id):
+    """# slurp: ignore <id> after the #! line (or added to an existing ignore comment)"""
+    lines = self.text.split("\n")
+    for i, l in enumerate(lines):
+      m = re.match(r"(\s*#\s*slurp:\s*ignore\s+)(.*)", l)
+      if m:
+        lines[i] = l.rstrip() + f" {rule_id}"
+        break
+    else:
+      lines.insert(1 if lines and lines[0].startswith("#!") else 0, f"# slurp: ignore {rule_id}")
+    text = "\n".join(lines)
+    def write():
+      from ..remote import fs_write
+      fs_write(self.path, text)
+      return True
+    in_background(self, write, lambda ok: self.check() if ok else None, group="write")
+
+  @on(Button.Pressed, "#sc-fix")
+  def fix_pressed(self, event):
+    event.stop()
+    if self.ctx is None or self.ctx.script is None:
+      return
+    from ..fixes import apply_fixes, fixed_name
+    from .checks import FixPreviewScreen
+    new, done = apply_fixes(self.text, self.findings)
+    if not done:
+      self.notify("none of the findings can be fixed automatically: see How to fix in each", timeout=6)
+      return
+    target = fixed_name(self.path)
+    def answer(ok):
+      if ok:
+        write_fixed_copy(self, target, new)
+    self.app.push_screen(FixPreviewScreen(self.path, target, self.text, new, done), answer)
+
   def action_back(self):
     self.pop_back()
+
+def write_fixed_copy(screen, target, text):
+  """Write the copy (target, or target with a number if it exists) and open it in the script view"""
+  from ..remote import fs_write, fs_exists
+  def write():
+    path, n = target, 1
+    while fs_exists(path):
+      n += 1
+      stem, ext = os.path.splitext(target)
+      path = f"{stem}{n}{ext}"
+    fs_write(path, text, exclusive=True)
+    return path
+  def written(path):
+    if path:
+      screen.notify(f"wrote {path}", timeout=5)
+      from ..screens.files import open_path
+      open_path(screen.app, ["Jobs"], path)
+  in_background(screen, write, written, group="write")
 
 register_file_view("Job script", is_job_script, open_job_script)

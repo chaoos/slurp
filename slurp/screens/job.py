@@ -117,6 +117,10 @@ class JobScreen(SplitScreen):
                              "shared libraries (ldd); runs only setup lines, never the job's commands")
         yield Button("Placement", id="checks-placement", compact=True,
                      tooltip="where the tasks and threads of the running job are: cores, NUMA domains, GPUs")
+        yield Button("Fixed copy…", id="checks-fix", compact=True,
+                     tooltip="the fixes that are safe to make, in a copy of the script next to the job (then Submit there)")
+        yield Button("What changed", id="checks-changed", compact=True,
+                     tooltip="the script and the command line, compared with the last run of this job that worked")
         yield Button("Rule catalogue", id="checks-catalogue", compact=True)
       yield FindingsView(id="job-checks")
       with Horizontal(id="memory-controls"):
@@ -222,6 +226,8 @@ class JobScreen(SplitScreen):
     self.show_progress()
     self.query_one("#nodes").display = job.running
     self.query_one("#checks-placement", Button).display = job.running
+    state = job.state.split()[0].rstrip("+") if job.state else ""
+    self.query_one("#checks-changed", Button).display = not job.queued and state in FAILED_JOB_STATES
     self.show_steps()
 
   PROGRESS_EVERY = 10 # seconds between reads of the progress of a running job
@@ -440,6 +446,42 @@ class JobScreen(SplitScreen):
   def env_done(self, replay):
     self.replay = replay
     self.run_checks()
+
+  def recheck(self):
+    self.run_checks()
+
+  @on(Button.Pressed, "#checks-fix")
+  def checks_fix_pressed(self, event):
+    event.stop()
+    ctx = self.check_context
+    if ctx is None or ctx.script is None:
+      self.notify("no batch script known for this job", severity="warning")
+      return
+    from ..fixes import apply_fixes, fixed_name
+    from .checks import FixPreviewScreen
+    from .script import write_fixed_copy
+    new, done = apply_fixes(ctx.script.text, self.job.checks or [])
+    if not done:
+      self.notify("none of the findings can be fixed automatically: see How to fix in each", timeout=6)
+      return
+    _, script_arg = checks.submit_options(self.job.rec.get("SubmitLine") or "")
+    workdir = self.job.rec.get("WorkDir") or ""
+    base = os.path.join(workdir, script_arg) if script_arg and not os.path.isabs(script_arg) else script_arg or \
+           os.path.join(workdir, f"{self.job.rec.get('JobName') or 'job'}.sh")
+    target = fixed_name(base)
+    self.app.push_screen(FixPreviewScreen(base, target, ctx.script.text, new, done),
+                         lambda ok: write_fixed_copy(self, target, new) if ok else None)
+
+  @on(Button.Pressed, "#checks-changed")
+  def checks_changed_pressed(self, event):
+    event.stop()
+    job = self.job
+    def work():
+      return checks.what_changed(job)
+    def show(text):
+      if text:
+        self.app.push_screen(FileScreen([f"job {job.jid}", "what changed"], text=text))
+    in_background(self, work, show, group="changed")
 
   @on(Button.Pressed, "#checks-placement")
   def checks_placement_pressed(self, event):

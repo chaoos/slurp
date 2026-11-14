@@ -752,6 +752,18 @@ def fs_read(path, offset=0, size=None):
 
 def fs_realpath(path): return conn().realpath(path) if conn() else os.path.realpath(path)
 
+def fs_write(path, text, exclusive=False):
+  """Write a (small) text file; exclusive: fail if it exists. Raises OSError."""
+  if conn() is None:
+    with open(path, "x" if exclusive else "w") as f:
+      f.write(text)
+    return
+  import base64
+  script = ('set -C; ' if exclusive else '') + 'printf "%s" "$2" | base64 -d > "$1"'
+  res = conn().run(["sh", "-c", script, "sh", path, base64.b64encode(text.encode()).decode()], quiet=True, retry=False)
+  if res.returncode:
+    raise OSError((res.stderr or "").strip() or f"cannot write {path}")
+
 def fs_expanduser(path):
   if conn() and str(path).startswith("~"):
     return conn().expanduser(path)

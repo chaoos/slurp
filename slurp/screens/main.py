@@ -90,6 +90,7 @@ class MainScreen(SplitScreen):
     Binding("space", "app.toggle_group", "Open/close array", show=False),
     Binding("g", "app.toggle_collapse", "Group arrays"),
     Binding("exclamation_mark", "app.toggle_problems", "Only problems"),
+    Binding("n", "app.new_script", "New job script"),
   ]
 
   def compose_left(self):

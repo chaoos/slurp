@@ -55,6 +55,8 @@ from ..widgets import *
 NODE_FLAGS = {"*": "not responding", "~": "powered off", "#": "powering up", "!": "powering down", "%": "powering down",
               "$": "maintenance", "@": "pending reboot", "^": "rebooting", "-": "planned"}
 
+from ..checks import mem_text
+
 def cluster_info():
   """Nodes, partitions, reasons, reservations and the queue of the cluster (one round trip on a remote cluster)"""
   cmds = [["sinfo", "-h", "-N", "-o", "%N|%T"],
@@ -63,7 +65,13 @@ def cluster_info():
           ["squeue", "-h", "-a", "-r", "--format=%T|%D|%r"],
           ["scontrol", "show", "reservation", "-o"]]
   res = run_many(cmds)
-  info = {"errors": [f"{shlex.join(c[:3])}: {(r.stderr or '').strip()[:200]}" for c, r in zip(cmds, res) if r.returncode
+  try:
+    from ..checks import gather_facts
+    facts = gather_facts()
+  except Exception as e:
+    log.debug(f"facts for the node topology: {e!r}")
+    facts = None
+  info = {"facts": facts, "errors": [f"{shlex.join(c[:3])}: {(r.stderr or '').strip()[:200]}" for c, r in zip(cmds, res) if r.returncode
                      and "No reservations" not in (r.stdout + r.stderr)],
           "time": datetime.now(), "failed": all(r.returncode for r in res[:4])}
   nodes = {}
@@ -281,6 +289,19 @@ class ClusterInfoScreen(ModalScreen):
         table.add_row(p["name"], Text(p["avail"], style="" if p["avail"] == "up" else "red"), p["alloc"], p["idle"],
                       p["other"], p["total"], p["limit"])
       grid.add_row("", table)
+    facts = info.get("facts")
+    if facts is not None and facts.partitions:
+      section("Node topology")
+      table = Table(box=None, padding=(0, 1), header_style="bold")
+      for col in ("partition", "CPUs", "sockets × cores × threads", "NUMA domains", "GPUs", "memory", "whole nodes"):
+        table.add_column(col, justify="left" if col == "partition" else "right")
+      domains = facts.site.get("numa_domains")
+      for p in sorted(facts.partitions.values(), key=lambda p: (not p.default, p.name)):
+        table.add_row(p.name, str(p.cpus), f"{p.sockets or '?'} × {p.cores or '?'} × {p.threads}",
+                      str(domains or p.sockets or "?"), str(p.gpus or "-"), mem_text(p.mem_mb) if p.mem_mb else "?",
+                      "yes" if p.exclusive else "no")
+      grid.add_row("", table)
+      grid.add_row("", Text("NUMA placement: the guides (F1)", style="dim"))
     for err in info["errors"]:
       grid.add_row(Text("error", style="red"), err)
     self.query_one("#ci-info", Static).update(grid)

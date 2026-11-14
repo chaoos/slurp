@@ -4,7 +4,8 @@ from rich.text import Text
 from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Collapsible, Label, MarkdownViewer, Static
+from textual.screen import ModalScreen
+from textual.widgets import Button, Collapsible, Label, MarkdownViewer, Static, TextArea
 
 from .. import checks
 from ..screens.base import SplitScreen, crumb_title
@@ -78,8 +79,15 @@ class FindingsView(Vertical):
       if f.snippet:
         body.append(Horizontal(Static(f.snippet, classes="fv-snippet", markup=False),
                                Button("Copy", classes="fv-copy", name=str(i), compact=True), classes="fv-row"))
+      buttons = []
       if self.line_buttons and f.line:
-        body.append(Horizontal(Button(f"Go to line {f.line}", classes="fv-line", name=str(i), compact=True), classes="fv-row"))
+        buttons.append(Button(f"Go to line {f.line}", classes="fv-line", name=str(i), compact=True))
+      buttons.append(Button(f"Mute {f.rule.id} everywhere", classes="fv-mute", name=str(i), compact=True,
+                            tooltip="never report this rule again (\"checks_muted\" in the config)"))
+      if hasattr(self.screen, "mute_in_script"):
+        buttons.append(Button(f"Mute {f.rule.id} in this script", classes="fv-mute-script", name=str(i), compact=True,
+                              tooltip="adds # slurp: ignore to the script"))
+      body.append(Horizontal(*buttons, classes="fv-row"))
       widgets.append(Collapsible(*body, title=finding_title(f), collapsed=True, classes=f"-{f.severity}"))
     if widgets:
       self.mount_all(widgets)
@@ -96,6 +104,24 @@ class FindingsView(Vertical):
     f = self.findings[int(event.button.name)]
     copy_text(self.app, f.snippet, f"the fix for {f.rule.id}")
 
+  @on(Button.Pressed, ".fv-mute")
+  def mute(self, event):
+    event.stop()
+    from ..config import load_config, update_config
+    f = self.findings[int(event.button.name)]
+    muted = sorted(set(load_config().get("checks_muted", [])) | {f.rule.id})
+    update_config(checks_muted=muted)
+    self.app.notify(f"{f.rule.id} is muted (to report it again: remove it from \"checks_muted\" in the config)", timeout=6)
+    recheck = getattr(self.screen, "recheck", None)
+    if recheck:
+      recheck()
+
+  @on(Button.Pressed, ".fv-mute-script")
+  def mute_script(self, event):
+    event.stop()
+    f = self.findings[int(event.button.name)]
+    self.screen.mute_in_script(f.rule.id)
+
   @on(Button.Pressed, ".fv-line")
   def go_to_line(self, event):
     event.stop()
@@ -104,39 +130,111 @@ class FindingsView(Vertical):
     if handler:
       handler(f.line)
 
-class RuleCatalogueScreen(SplitScreen):
-  """All rules with what they find, why it matters and how to fix it; opened at one rule"""
+class DocViewer(MarkdownViewer):
+  """A MarkdownViewer that leaves link clicks to its screen (the viewer would load them as files)"""
+  async def _on_markdown_link_clicked(self, message):
+    message.prevent_default() # (not the viewer's own handler; the message still bubbles to the screen)
+
+class DocScreen(SplitScreen):
+  """A Markdown document with a table of contents; links: rule:R01 (the rule catalogue), #anchor (here), http(s)"""
   SHOW_BACK = True
   BINDINGS = [Binding("escape", "back", "Back")]
+  title_word = ""
 
-  def __init__(self, rule_id=""):
+  def __init__(self, markdown, anchor=""):
     super().__init__()
-    self.rule_id = rule_id
-    self.crumbs = ["Rule catalogue"] + ([rule_id] if rule_id else [])
+    self.markdown, self.anchor = markdown, anchor
+    self.crumbs = [self.title_word]
     self.tries = 0
 
   def compose_left(self):
-    yield MarkdownViewer(checks.rules_markdown(), id="catalogue", show_table_of_contents=True)
+    yield DocViewer(self.markdown, id="doc", show_table_of_contents=True, open_links=False)
 
   def on_mount(self):
     self.sub_title = crumb_title(self.crumbs)
-    self.query_one("#catalogue", MarkdownViewer).focus()
-    if self.rule_id in checks.RULES:
-      self.set_timer(0.2, self.go_to_rule)
+    self.query_one("#doc", MarkdownViewer).focus()
+    if self.anchor:
+      self.set_timer(0.2, self.go_to_anchor)
 
-  def go_to_rule(self):
+  def go_to_anchor(self):
     """The document is built after mounting: try until the heading is there"""
-    viewer = self.query_one("#catalogue", MarkdownViewer)
-    if not viewer.document.goto_anchor(checks.RULES[self.rule_id].anchor) and self.tries < 20:
+    viewer = self.query_one("#doc", MarkdownViewer)
+    if not viewer.document.goto_anchor(self.anchor) and self.tries < 20:
       self.tries += 1
-      self.set_timer(0.15, self.go_to_rule)
+      self.set_timer(0.15, self.go_to_anchor)
 
-  def show_rule(self, rule_id):
-    self.rule_id, self.tries = rule_id, 0
-    self.crumbs = ["Rule catalogue"] + ([rule_id] if rule_id else [])
-    self.sub_title = crumb_title(self.crumbs)
-    if rule_id in checks.RULES:
-      self.go_to_rule()
+  def jump(self, anchor):
+    self.anchor, self.tries = anchor, 0
+    self.go_to_anchor()
+
+  def on_markdown_link_clicked(self, event):
+    event.stop()
+    href = event.href
+    if href.startswith("rule:"):
+      self.app.action_rule_catalogue(href[5:])
+    elif href.startswith("#"):
+      self.jump(href[1:])
+    elif href.startswith(("http://", "https://")):
+      self.app.open_url(href)
 
   def action_back(self):
     self.pop_back()
+
+class RuleCatalogueScreen(DocScreen):
+  """All rules with what they find, why it matters and how to fix it; opened at one rule"""
+  title_word = "Rule catalogue"
+
+  def __init__(self, rule_id=""):
+    super().__init__(checks.rules_markdown(), checks.RULES[rule_id].anchor if rule_id in checks.RULES else "")
+    self.rule_id = rule_id
+    self.crumbs = ["Rule catalogue"] + ([rule_id] if rule_id else [])
+
+  def show_rule(self, rule_id):
+    self.rule_id = rule_id
+    self.crumbs = ["Rule catalogue"] + ([rule_id] if rule_id else [])
+    self.sub_title = crumb_title(self.crumbs)
+    if rule_id in checks.RULES:
+      self.jump(checks.RULES[rule_id].anchor)
+
+class GuidesScreen(DocScreen):
+  title_word = "Guides"
+
+
+class FixPreviewScreen(ModalScreen):
+  """The fixes that can be made automatically, as a diff; dismisses with True to write the fixed copy"""
+  DEFAULT_CSS = """
+  FixPreviewScreen { align: center middle; }
+  #fx-dialog { width: 120; max-width: 98%; height: 90%; border: thick $accent; background: $surface; padding: 0 1; }
+  #fx-title { text-style: bold; margin: 1 0 0 0; }
+  #fx-done { height: auto; margin: 1 0; }
+  #fx-diff { height: 1fr; }
+  #fx-buttons { height: auto; align-horizontal: right; margin: 1 0; }
+  #fx-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+  def __init__(self, path, target, old, new, done):
+    super().__init__()
+    self.path, self.target, self.old, self.new, self.done = path, target, old, new, done
+
+  def compose(self):
+    import difflib
+    diff = "".join(difflib.unified_diff(self.old.replace("\r", "").splitlines(True), self.new.splitlines(True),
+                                        self.path, self.target))
+    with Vertical(id="fx-dialog"):
+      yield Static(f"Fixed copy of {self.path}", id="fx-title")
+      yield Static(Text("\n".join(f"• {d}" for d in self.done) + "\n\nThe original stays as it is. Fixes that need your "
+                        "decision (memory units, time limits, paths) are not made: see the findings.", style=""), id="fx-done")
+      yield TextArea(diff, id="fx-diff", read_only=True, language=None)
+      with Horizontal(id="fx-buttons"):
+        yield Button("Cancel", id="fx-cancel")
+        yield Button(f"Write {self.target.rsplit('/', 1)[-1]}", id="fx-write", variant="primary")
+
+  @on(Button.Pressed, "#fx-write")
+  def write(self, event):
+    event.stop()
+    self.dismiss(True)
+
+  @on(Button.Pressed, "#fx-cancel")
+  def action_cancel(self):
+    self.dismiss(False)

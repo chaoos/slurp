@@ -75,6 +75,8 @@ from .screens.script import ScriptScreen # (registers the view of batch scripts)
 from . import mounts
 from .checks import check_jobs, counts as checks_counts, SEVERITY_ICON, SEVERITY_STYLE, ERROR, WARNING, INFO
 
+LOGIN_CHECK_EVERY = 300 # seconds between the checks of your processes on the login nodes (B09)
+
 def job_has_problems(job):
   c = checks_counts(job.checks)
   return bool(c[ERROR] or c[WARNING])
@@ -215,6 +217,7 @@ class Slurp(App):
     Binding("ctrl+w", "close_view", "Close subtab"),
     Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
     Binding("ctrl+x", "close_shell", "Close shell"),
+    Binding("f1", "guides", "Guides"),
     Binding("f2", "rule_catalogue", "Rules", show=False),
   ]
   shell_version = reactive(0) # bumped when the shell is opened, closed or ends: the panes update
@@ -593,6 +596,8 @@ class Slurp(App):
           old = c.drive.state
           if c.drive.poll() != old:
             self.refresh_status()
+    if self.spinner_frame % (4 * LOGIN_CHECK_EVERY) == 4 * 30: # (every 5 minutes, first after 30 s) B09
+      self.check_login_nodes()
     if self.screen is self.main and any(not job.annotated for job in self.cluster.jobs.values()):
       table = self.main.query_one("#jobs") # (turn the spinners of the cells still coming)
       clear = getattr(table, "_clear_caches", None)
@@ -1203,6 +1208,51 @@ class Slurp(App):
     self.show_warnings()
     self.refresh_status()
 
+  def check_login_nodes(self):
+    """B09: your processes on the login nodes that use a lot of CPU for long (said once per process)"""
+    from .checks import login_hogs, RULES
+    if "B09" in set(load_config().get("checks_muted", [])):
+      return
+    for cluster in self.clusters:
+      if cluster.destination and cluster.connection is not None and cluster.connection.ready:
+        def done(hogs, cluster=cluster):
+          told = cluster.__dict__.setdefault("told_hogs", set())
+          for pid, cpu, minutes, comm in hogs or []:
+            if pid not in told:
+              told.add(pid)
+              self.notify(f"B09: {comm} (pid {pid}) uses {cpu:.0f}% CPU for {minutes} min on the login node: "
+                          "run heavy work as a job (i: interactive job). F2: the rule catalogue",
+                          title=cluster.name, severity="warning", timeout=15)
+        in_background(self, login_hogs, done, group=f"login-{cluster.name}", connection=cluster.connection)
+
+  def action_guides(self, anchor=""):
+    """The guides, with the numbers of the active tab's cluster"""
+    from .screens.checks import GuidesScreen
+    from .checks import gather_facts
+    from .guides import guides_markdown
+    cluster = self.cluster
+    def facts():
+      try:
+        return gather_facts()
+      except Exception as e:
+        log.debug(f"facts for the guides: {e!r}")
+        return None
+    in_background(self, facts, lambda f: self.open_window(GuidesScreen(guides_markdown(f, cluster.name), anchor), "Guides"),
+                  group="guides")
+
+  def action_new_script(self):
+    """New job script: a template with the cluster's numbers, written to a file and opened in the script view"""
+    from .screens.wizard import NewScriptScreen
+    cluster = self.cluster
+    if cluster.destination and not (cluster.connection and cluster.connection.ready):
+      self.notify("log in first", severity="warning")
+      return
+    home = cluster.connection.home if cluster.connection else os.path.expanduser("~")
+    def created(path):
+      if path:
+        open_path(self, ["Jobs"], path)
+    self.push_screen(NewScriptScreen(home or "."), created)
+
   def action_toggle_problems(self):
     self.problems_only = not self.problems_only
     self.populate()
@@ -1628,9 +1678,53 @@ class Slurp(App):
 
 REPORTS_OFF = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1015l\x1b[?1006l\x1b[?1004l" # mouse and focus reporting off
 
+def check_main(argv):
+  """slurp check FILE...: the checks of batch scripts as text, on the machine it runs on (e.g. a login node).
+  Exit code 1 if a script has errors, 2 if a file cannot be read."""
+  parser = argparse.ArgumentParser(prog="slurp check", description="Check Slurm batch scripts (the rules of slurp's "
+                                   "rule catalogue: slurp check --rules lists them).")
+  parser.add_argument("files", nargs="*", metavar="FILE")
+  parser.add_argument("--no-probe", action="store_true", help="only the script itself: no paths, programs or quota")
+  parser.add_argument("--rules", action="store_true", help="print the rule catalogue (Markdown) and exit")
+  parser.add_argument("--all", action="store_true", help="also the hints (ℹ), not only errors and warnings")
+  args = parser.parse_args(argv)
+  from . import checks as ch
+  if args.rules:
+    print(ch.rules_markdown())
+    return 0
+  if not args.files:
+    parser.error("give one or more batch scripts")
+  color = sys.stdout.isatty()
+  paint = {"error": "\x1b[1;31m", "warning": "\x1b[33m", "info": "\x1b[36m"}
+  worst = 0
+  for path in args.files:
+    path = os.path.abspath(path)
+    if not os.path.isfile(path):
+      print(f"{path}: cannot read it", file=sys.stderr)
+      worst = max(worst, 2)
+      continue
+    findings, ctx = ch.check_file(path, with_probe=not args.no_probe)
+    shown = [f for f in findings if args.all or f.severity != "info"]
+    c = ch.counts(findings)
+    print(f"{path}: {c['error']} errors, {c['warning']} warnings, {c['info']} hints" + ("" if args.all else " (--all shows the hints)"))
+    for f in shown:
+      where = f"{path}:{f.line}" if f.line else path
+      icon = f"{paint[f.severity]}{f.icon} {f.rule.id}\x1b[0m" if color else f"{f.icon} {f.rule.id}"
+      print(f"  {where}: {icon} {f.evidence}")
+      print(f"      fix: {f.fix or f.rule.fix}")
+      if f.snippet:
+        for line in f.snippet.splitlines():
+          print(f"      | {line}")
+    if c["error"]:
+      worst = max(worst, 1)
+  return worst
+
 def main():
+  if sys.argv[1:2] == ["check"]:
+    sys.exit(check_main(sys.argv[2:]))
   parser = argparse.ArgumentParser(prog="slurp", description="Interactive terminal UI for Slurm jobs, locally or on "
-                                   "clusters over SSH (one tab per cluster, given with --ssh or added with +).")
+                                   "clusters over SSH (one tab per cluster, given with --ssh or added with +). "
+                                   "'slurp check FILE...' checks batch scripts without the UI.")
   parser.add_argument("--log", metavar="FILE", help="write a debug log (all slurm commands that are run) to FILE")
   parser.add_argument("--ssh", metavar="HOST", nargs="*", default=[], help="add SSH cluster destinations (user@host or ~/.ssh/config aliases)")
   parser.add_argument("--serve", action="store_true", help="serve the app in a browser with textual-serve")
