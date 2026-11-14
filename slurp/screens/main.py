@@ -53,11 +53,12 @@ from ..remote import *
 from ..jobs import *
 from ..widgets import *
 from ..screens.base import *
+from ..checks import counts as checks_counts, summary as checks_summary, SEVERITY_STYLE, ERROR, WARNING
 
 COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("user", "User"), ("state", "State"), ("progress", "Progress"),
            ("eta", "Done: same pace"), ("eta_now", "Done: current pace"),
            ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
-           ("start", "Start"), ("end", "End"), ("err", "Err"), ("cmd", "Command")]
+           ("start", "Start"), ("end", "End"), ("checks", "Checks"), ("err", "Err"), ("cmd", "Command")]
 
 SINCE_CHOICES = [("only queued", "off"), ("1 hour", "1h"), ("6 hours", "6h"), ("12 hours", "12h"), ("1 day", "1d"),
                  ("2 days", "2d"), ("1 week", "1w"), ("2 weeks", "2w"), ("1 month", "1mo"), ("custom …", "custom")]
@@ -72,6 +73,7 @@ SORT_KEYS = {
   "eta": lambda j: pace_eta(j.progress, "same") or float("inf"),
   "eta_now": lambda j: pace_eta(j.progress, "current") or float("inf"),
   "nodes": lambda j: int(j.rec["NNodes"] or 0),
+  "checks": lambda j: tuple(-v for v in checks_counts(j.checks).values()),
   "time":  lambda j: j.node_hours() / max(int(j.rec["NNodes"] or 1), 1),
   "start": lambda j: j.rec["Start"] if is_time(j.rec["Start"]) else "",
   "end":   lambda j: j.rec["End"] if is_time(j.rec["End"]) else "",
@@ -87,6 +89,7 @@ class MainScreen(SplitScreen):
     Binding("escape", "clear_filter", "Clear filter", show=False),
     Binding("space", "app.toggle_group", "Open/close array", show=False),
     Binding("g", "app.toggle_collapse", "Group arrays"),
+    Binding("exclamation_mark", "app.toggle_problems", "Only problems"),
   ]
 
   def compose_left(self):

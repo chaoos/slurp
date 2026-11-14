@@ -72,6 +72,22 @@ from .config import load_config, update_config
 from .share import ShareManager, SFTP_SERVERS, MAX_FAILURES
 from .screens.links import ShellChoiceScreen, LinkSetupScreen, LinkScreen, DriveScreen
 from . import mounts
+from .checks import check_jobs, counts as checks_counts, SEVERITY_ICON, SEVERITY_STYLE, ERROR, WARNING, INFO
+
+def job_has_problems(job):
+  c = checks_counts(job.checks)
+  return bool(c[ERROR] or c[WARNING])
+
+def checks_cell(findings):
+  """✖1 ⚠2 in the colours of the severities ('' without errors and warnings)"""
+  c = checks_counts(findings)
+  parts = []
+  for sev in (ERROR, WARNING):
+    if c[sev]:
+      if parts:
+        parts.append(" ")
+      parts.append((f"{SEVERITY_ICON[sev]}{c[sev]}", SEVERITY_STYLE[sev]))
+  return Text.assemble(*parts) if parts else Text("")
 
 class Slurp(App):
   TITLE = "slurp"
@@ -126,6 +142,9 @@ class Slurp(App):
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
   #details { height: 1fr; padding: 0 1; }
+  #checks-bar { height: auto; margin-top: 1; }
+  #checks-bar Label { margin-right: 2; }
+  #checks-bar Button { margin-right: 1; }
   #memory-controls { height: auto; margin: 1 0; }
   #memory-controls > * { margin-right: 1; }
   #memory-controls Label { width: auto; height: 1; content-align: center middle; padding: 0; }
@@ -195,6 +214,7 @@ class Slurp(App):
     Binding("ctrl+w", "close_view", "Close subtab"),
     Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
     Binding("ctrl+x", "close_shell", "Close shell"),
+    Binding("f2", "rule_catalogue", "Rules", show=False),
   ]
   shell_version = reactive(0) # bumped when the shell is opened, closed or ends: the panes update
   pane_width = reactive(0)    # width of the terminal pane in columns, 0: half of the window
@@ -225,6 +245,7 @@ class Slurp(App):
     self.shell = None # TerminalSession shown on the right of every window
     self.sort_column, self.sort_reverse = "jobid", True
     self.job_filter = ""
+    self.problems_only = False # the job list shows only jobs with errors or warnings of the checks
     self.job_column_keys = None
     self.spinner_frame = 0
 
@@ -1133,10 +1154,17 @@ class Slurp(App):
         if old is not None and old.annotated: # (not one of a load replaced before its files were read)
           job.command, job.err = old.command, old.err
           job.progress = old.progress if job.running else None
+          job.checks = old.checks
         else:
           job.annotated = False
       self.call_from_thread(self.jobs_listed, cluster, worker, jobs, since, accounts)
       annotate(jobs)
+      try:
+        check_jobs(jobs) # (the light checks: scripts of queued jobs, records, one probe)
+      except Cancelled:
+        raise
+      except Exception:
+        log.exception("checking the jobs failed")
     finally:
       self.call_from_thread(self.jobs_loaded, cluster, worker, jobs, since, accounts)
 
@@ -1173,6 +1201,19 @@ class Slurp(App):
         self.populate()
     self.show_warnings()
     self.refresh_status()
+
+  def action_toggle_problems(self):
+    self.problems_only = not self.problems_only
+    self.populate()
+    self.refresh_status()
+
+  def action_rule_catalogue(self, rule_id=""):
+    """The rule catalogue, at a rule (shown in the catalogue window if one is open)"""
+    from .screens.checks import RuleCatalogueScreen
+    if isinstance(self.screen, RuleCatalogueScreen):
+      self.screen.show_rule(rule_id)
+      return
+    self.open_window(RuleCatalogueScreen(rule_id), "Rule catalogue")
 
   def action_abort_load(self):
     cluster = self.cluster
@@ -1257,6 +1298,7 @@ class Slurp(App):
     errors = sum(j.err[0] == "file" and j.err[1] > 0 for j in tasks)
     values.extend((str(sum(int(j.rec["NNodes"] or 0) for j in tasks)), "",
                    fmt_time(min(starts)) if starts else "", fmt_time(max(ends)) if ends else "",
+                   checks_cell([f for j in tasks for f in (j.checks or [])]),
                    Text(f"! {errors}", style="bold red") if errors else "", tasks[0].command[:150]))
     return values
 
@@ -1272,11 +1314,11 @@ class Slurp(App):
     all_jobs = list(cluster.jobs.values())
     self.setup_job_columns()
     pattern = self.job_filter.casefold()
-    visible_jobs = [job for job in all_jobs if not pattern or pattern in " ".join(str(value or "") for value in (
+    visible_jobs = [job for job in all_jobs if (not self.problems_only or job_has_problems(job)) and (not pattern or pattern in " ".join(str(value or "") for value in (
       job.jid, job.rec.get("JobName"), job.state, job.rec.get("User"), job.rec.get("Account"),
       job.rec.get("Partition"), job.rec.get("NodeList"), job.rec.get("WorkDir"), job.command,
       job.rec.get("SubmitLine"), job.rec.get("ExitCode"),
-    )).casefold()]
+    )).casefold())]
     table.clear()
     self.mark_sort_column(table)
     ordered = sorted(visible_jobs, key=SORT_KEYS[self.sort_column], reverse=self.sort_reverse)
@@ -1314,6 +1356,7 @@ class Slurp(App):
                              else "-" if going else "", style="" if not eta or eta > time.time() else "yellow"))
       values.extend((rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
                      ("~" + start) if start and job.state == "PENDING" else start, fmt_time(rec["End"]),
+                     checks_cell(job.checks) if job.annotated or job.checks is not None else SPINNING,
                      err_text(job.err) if job.annotated else SPINNING, job.command[:150] if job.annotated else SPINNING))
       table.add_row(*values, key=job.jid)
     if current is not None:
@@ -1337,6 +1380,8 @@ class Slurp(App):
       status += f" · {len(finished)} finished since {cluster.since:%m-%d %H:%M}, {sum(j.node_hours() for j in finished):.1f} node hours"
     if pattern:
       status += f" · {len(visible_jobs)} of {len(all_jobs)} jobs match '{self.job_filter}'"
+    if self.problems_only:
+      status += f" · only the {len(visible_jobs)} jobs with problems (!: all)"
     if errors:
       status += f" · {errors} with output in their error file"
     cluster.summary = status + f" · updated {cluster.updated:%H:%M:%S}"

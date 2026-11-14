@@ -58,6 +58,8 @@ from ..screens.dialogs import *
 from ..screens.base import *
 from ..screens.files import *
 from .links import ShellChoiceScreen
+from .checks import FindingsView
+from .. import checks
 
 def node_hours_text(job):
   """The node hours a job used (nodes × elapsed time): bold, with how they come about; for a running job so far and
@@ -107,6 +109,16 @@ class JobScreen(SplitScreen):
       yield Button("Array", id="array-window", tooltip="all tasks of the array by state, to copy or cancel")
     with VerticalScroll(id="details"):
       yield Static(id="info")
+      with Horizontal(id="checks-bar"):
+        yield Label("Checks", classes="section")
+        yield Button("Check again", id="checks-run", compact=True, tooltip="run the checks of the script and the job again")
+        yield Button("Check environment", id="checks-env", compact=True,
+                     tooltip="replay the script's module loads and exports on the login node and check the programs' "
+                             "shared libraries (ldd); runs only setup lines, never the job's commands")
+        yield Button("Placement", id="checks-placement", compact=True,
+                     tooltip="where the tasks and threads of the running job are: cores, NUMA domains, GPUs")
+        yield Button("Rule catalogue", id="checks-catalogue", compact=True)
+      yield FindingsView(id="job-checks")
       with Horizontal(id="memory-controls"):
         yield Button("Query current memory", id="memory-query", variant="primary")
         yield Label("CPU:")
@@ -159,6 +171,7 @@ class JobScreen(SplitScreen):
     self.show_job()
     self.query_one("#files").focus()
     self.load()
+    self.run_checks()
     self.set_interval(self.PROGRESS_EVERY, self.refresh_progress)
     self.memory = memory_watch(self.job.jid, self.job)
     self.query_one("#memory-every", Select).value = self.memory["every"]
@@ -208,6 +221,7 @@ class JobScreen(SplitScreen):
     self.query_one("#memory-query", Button).disabled = not job.running
     self.show_progress()
     self.query_one("#nodes").display = job.running
+    self.query_one("#checks-placement", Button).display = job.running
     self.show_steps()
 
   PROGRESS_EVERY = 10 # seconds between reads of the progress of a running job
@@ -367,6 +381,79 @@ class JobScreen(SplitScreen):
     self.show_job()
     self.show_files()
     self.app.show_warnings()
+
+  # ---- checks
+  check_context = None
+  replay = None   # the result of Check environment
+  live = None     # the result of Placement
+
+  def run_checks(self):
+    view = self.query_one("#job-checks", FindingsView)
+    view.show_text(Text("checking the script and the job …", style="dim"))
+    self.check_worker(self.job, self.replay, self.live)
+
+  @cluster_work("checks")
+  def check_worker(self, job, replay, live):
+    findings, ctx = checks.check_job(job, full=True, replay=replay, live=live)
+    if not get_current_worker().is_cancelled:
+      self.app.call_from_thread(self.checks_done, findings, ctx)
+
+  def checks_done(self, findings, ctx):
+    self.check_context = ctx
+    self.job.checks = findings
+    source = ""
+    if ctx.script is None:
+      source = "(no batch script known: only the job record is checked)"
+    elif ctx.submitted:
+      source = "(the script as submitted)"
+    elif ctx.on_disk:
+      source = "(the script file as it is now)"
+    self.query_one("#job-checks", FindingsView).show(findings, source)
+
+  @on(Button.Pressed, "#checks-run")
+  def checks_run_pressed(self, event):
+    event.stop()
+    self.run_checks()
+
+  @on(Button.Pressed, "#checks-catalogue")
+  def checks_catalogue_pressed(self, event):
+    event.stop()
+    self.app.action_rule_catalogue("")
+
+  @on(Button.Pressed, "#checks-env")
+  def checks_env_pressed(self, event):
+    event.stop()
+    ctx = self.check_context
+    if ctx is None or ctx.script is None:
+      self.notify("no batch script to check", severity="warning")
+      return
+    self.query_one("#job-checks", FindingsView).show_text(Text("replaying the environment on the login node …", style="dim"))
+    self.env_worker(ctx)
+
+  @cluster_work("checks")
+  def env_worker(self, ctx):
+    from ..environment import replay_environment
+    replay = replay_environment(ctx)
+    if not get_current_worker().is_cancelled:
+      self.app.call_from_thread(self.env_done, replay)
+
+  def env_done(self, replay):
+    self.replay = replay
+    self.run_checks()
+
+  @on(Button.Pressed, "#checks-placement")
+  def checks_placement_pressed(self, event):
+    event.stop()
+    if not self.job.running:
+      self.notify("the job is not running", severity="warning")
+      return
+    from .placement import PlacementScreen
+    self.app.push_screen(PlacementScreen(self.job), self.placement_done)
+
+  def placement_done(self, live):
+    if live:
+      self.live = live
+      self.run_checks()
 
   @on(Button.Pressed, "#memory-query")
   def memory_query_pressed(self, event):
