@@ -1094,7 +1094,7 @@ class Slurp(App):
       def done(yes):
         if yes:
           self.quit_confirmed = True
-          self.run_action("quit")
+          self.call_later(self.action_quit) # (run_action is async: called without await, it did nothing)
       parts = []
       if live:
         parts.append(f"{len(live)} session{'s' if len(live) != 1 else ''} through links (shells and drives on your own "
