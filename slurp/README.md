@@ -179,6 +179,10 @@ Start the terminal UI from the repository:
 python3 slurp          # or: python3 -m slurp
 ```
 
+Running it again attaches to the slurp that runs already (see "One slurp,
+several views"); `--new` starts a separate one, `--no-holder` runs it directly
+in the terminal.
+
 Use `--log FILE` to log Slurm commands and debug events. The app has no
 required configuration file; job and file selection happens inside the UI.
 
@@ -431,6 +435,43 @@ scripts (on the machine it runs on, e.g. a login node): exit code 1 if a script
 has errors; `--all` adds the hints, `--no-probe` checks only the text,
 `--rules` prints the catalogue.
 
+## One slurp, several views: remote web access
+
+`python3 slurp` does not run slurp in the terminal itself: it starts a small
+*session holder* that runs slurp in the background (like tmux), and this
+terminal shows it. Running `slurp` again (in another terminal, or after the
+first one was closed or its SSH connection dropped) attaches to the same
+slurp instead of starting another one; slurp keeps running until you quit it
+(`q`). `--new` starts a separate one, `--no-holder` runs directly in the
+terminal as before (ending with it).
+
+**Web** (`W` in the job list) shows this same slurp in a browser, from
+anywhere: it starts a web view on `127.0.0.1` (a random port and an access
+token; nothing listens before you ask) and makes a *web link* through the
+relay, like the links for shells and drives (relay, password or key, logins,
+expiry, Revoke, listed in the connection window). The link only forwards to
+the web view: no shell, no files. On your machine:
+
+```bash
+ssh -N -L 8000:127.0.0.1:<port> -J <name>@ssh-j.com slurp@slurp   # (the link window has the exact command)
+# then open http://localhost:8000/?token=…
+```
+
+The browser is another view of the same slurp (textual-serve's page, a
+terminal). **One view is active at a time**: its keys and mouse go to slurp,
+and the screen takes its size. The others show a lock screen: who is active
+(the terminal on which host, or which browser), since when, idle for how
+long, its size, whether it is still connected, and the web links. **Take
+over** (Enter, or a click) asks "are you sure?" and makes this view the
+active one; the other one gets the lock screen, saying who took over.
+**Watch** (`w`) shows the screen live and read only instead of the lock
+screen, **Detach** (`d`) closes the view (slurp goes on). When the active view
+goes away (a browser tab closed, a terminal gone), another one becomes active
+by itself. Quitting asks when other views are attached, and closes them all.
+When no web link is left (revoked, expired), the web view stops listening.
+
+`--serve` (below) is different: every browser tab gets its own new slurp.
+
 ## Settings
 
 slurp keeps a few settings in `~/.config/slurp/config.json` (or under
@@ -530,7 +571,7 @@ top-left `←` button to go back.
 
 | Screen | Main controls |
 |---|---|
-| Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `!` only jobs with problems; `n` new job script; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
+| Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `!` only jobs with problems; `n` new job script; `W` remote web access; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
 | Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (in slurp or your own terminal); Checks: `Check`, `Placement`, `Fixed copy…`, `What changed`, `Rule catalogue` |
 | Script view | `r` check (all checks, the environment too); `x` explain the `#SBATCH` lines; `e` edit in place (`Ctrl+S` save, `Esc` stop editing); buttons `Test`, `Fixed copy…`, `Submit…` |
 | Everywhere | `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue |
