@@ -126,13 +126,19 @@ bindings, so they are always current), with the keys that work everywhere and
 buttons to the guides and the rule catalogue. In a shell it opens the
 terminal help below.
 
+Shells keep a history: the mouse wheel (or `Shift+PgUp`/`Shift+PgDn`) scrolls
+back through the lines that went off the top (10000 by default,
+`"terminal_scrollback"` in the config; `clear` empties it), with a bar saying
+how far back; typing returns to the bottom. In full-screen programs (less,
+vim) the wheel sends arrow keys to them. Dragging with the mouse selects text,
+also in the history, and copies it when the button is released.
+
 **ⓘ Help** in the bar of a shell (and `ⓘ` in the title bar of the login pane)
-explains that terminal: how to copy out of it (slurp has the mouse, so hold
-`Shift` while dragging, `Option` in iTerm2, `Fn` in macOS Terminal; `Ctrl+C`
-interrupts and does not copy) and paste into it (your terminal's paste, not a
+explains that terminal: scrolling back, how to copy out of it (drag to
+select; `Ctrl+C` interrupts and does not copy) and paste into it (your terminal's paste, not a
 plain `Ctrl+V`), which keys go where, how to close it and that closing ends
-everything running in it, and how to treat it: no scrollback (use `less` or
-`tmux`), `tmux` or `sbatch` for work that must survive, and login nodes are
+everything running in it, and how to treat it: a limited history (use `less`
+or `tmux` for long output), `tmux` or `sbatch` for work that must survive, and login nodes are
 shared. Its **Copy the screen** button copies the visible screen as text.
 
 ![Illustrative Markdown, HDF5, and right-side shell views](docs/files.svg)
@@ -427,6 +433,10 @@ start the tabs are back, and the tab shown connects; the others connect when
 they are selected. The dot of an SSH tab is coloured by the health of its
 session (green, yellow, red; grey when not connected yet).
 
+Settings you may edit by hand: `"terminal_scrollback"` (lines a shell keeps
+above its screen, default 10000, 0 for none), `"checks_muted"` (rule ids the
+checks do not report), `"link_relay"` (the relay of links), `"copy"`.
+
 ## Storage: quota and old files in scratch
 
 **Quota** (or `Q`, a subtab that loads in the background) lists your quotas, and those of your groups where they
@@ -518,7 +528,7 @@ top-left `←` button to go back.
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |
 | Markdown | `r` reload; use the viewer's table of contents and link navigation |
-| Shell (subtab) | `Ctrl-]` back to the job list; `Ctrl-D` exits the shell, Enter starts it again; `✕` of the subtab closes it; **ⓘ Help** copy, paste, keys, closing |
+| Shell (subtab) | mouse wheel or `Shift+PgUp`/`Shift+PgDn` scroll back; drag to select and copy; `Ctrl-]` back to the job list; `Ctrl-D` exits the shell, Enter starts it again; `✕` of the subtab closes it; **ⓘ Help** copy, paste, keys, closing |
 | Subtabs | `Ctrl-W` close the subtab shown (outside a shell) |
 | Login pane | `Ctrl-]` switch between the window and the login; `Ctrl-X` gives up the login; `ⓘ` copy, paste, keys, closing |
 
