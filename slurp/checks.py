@@ -176,11 +176,13 @@ class Script:
         self.add_directive(i, stripped, ignored=self.first_command is not None)
         continue
       if stripped.startswith("#"):
-        word = stripped[1:].strip().split()[0] if stripped[1:].strip() else ""
-        if re.match(r"#\s+SBATCH\b", stripped) or word.lower() == "sbatch" and not stripped.startswith("#SBATCH") or \
-           (word and word.upper() != "SBATCH" and len(word) >= 5 and
-            difflib.SequenceMatcher(None, word.upper(), "SBATCH").ratio() >= 0.75 and word.startswith(("S", "s", "B", "b"))):
-          self.near_directives.append((i, stripped))
+        # a directive gone wrong: "# SBATCH -", "#sbatch -", "#SBTACH -" (followed by an option, unlike a comment)
+        m = re.match(r"#(\s*)([A-Za-z]{4,8})\s+-", stripped)
+        if m:
+          space, word = m.groups()
+          if (word == "SBATCH" and space) or (word.lower() == "sbatch" and word != "SBATCH" and not space) or \
+             (word.upper() != "SBATCH" and not space and difflib.SequenceMatcher(None, word.upper(), "SBATCH").ratio() >= 0.75):
+            self.near_directives.append((i, stripped))
         continue
       if not stripped:
         continue
@@ -334,6 +336,12 @@ def submit_options(submit_line):
 # ---------------------------------------------------------------------------
 # values
 
+PLACEHOLDER = re.compile(r"\{\{.*?\}\}|\{%|<[A-Za-z_][\w -]*>|@[A-Za-z_]+@|__[A-Z][A-Z_]+__|\$\{\{")
+
+def is_placeholder(value):
+  """A value of a script template ({{account}}, <time>, @NODES@): filled in later, not checked"""
+  return bool(value and PLACEHOLDER.search(str(value)))
+
 def parse_time(value):
   """Minutes of a Slurm time ("60", "1:00" (mm:ss), "1:00:00", "1-12", "1-12:00", "1-12:00:00"), None if unknown"""
   if not value:
@@ -433,6 +441,7 @@ class Facts:
   partitions: dict = field(default_factory=dict)
   accounts: list = field(default_factory=list)
   qos: set = field(default_factory=set)
+  default_account: str = ""
   sbatch_options: set = field(default_factory=set)   # from sbatch --help (includes site plugins)
   slurm_version: tuple = ()
   arch: str = ""
@@ -489,7 +498,8 @@ def gather_facts(force=False):
           ["uname", "-m"],
           ["bash", "-lc", "env"],
           ["sh", "-c", "grep -nE '^[^#]*(module +(load|add|swap)|^ *ml +[A-Za-z]|conda +activate|source +activate|uenv +start)' "
-                       "\"$HOME/.bashrc\" \"$HOME/.bash_profile\" 2>/dev/null | head -10"]]
+                       "\"$HOME/.bashrc\" \"$HOME/.bash_profile\" 2>/dev/null | head -10"],
+          ["sacctmgr", "-nP", "show", "user", user, "format=defaultaccount"]]
   res = run_many(cmds, timeout=60)
   f = Facts(time=time.time(), user=user)
   f.partitions = parse_sinfo(res[0].stdout)
@@ -510,13 +520,33 @@ def gather_facts(force=False):
     if eq and re.fullmatch(r"[A-Za-z_]\w*", name):
       f.env[name] = value
   for line in res[6].stdout.splitlines():
-    path_line, _, text = line.partition(":")
     f.bashrc.append(line.strip())
+  f.default_account = res[7].stdout.strip().splitlines()[0].strip() if res[7].stdout.strip() else ""
   from . import rulepacks
   f.site = rulepacks.pack_for(key, getattr(conn(), "destination", "") or "", f)
   with _facts_lock:
     _facts[key] = f
   return f
+
+LOGIN_IGNORE = {"ssh", "sshd", "bash", "zsh", "sh", "tmux", "screen", "sftp-server", "sleep", "ps", "less", "vim",
+                "vi", "nano", "emacs", "top", "htop", "git", "systemd", "dbus-daemon", "(sd-pam)", "mosh-server"}
+
+def login_hogs(min_cpu=50, min_seconds=600):
+  """Your processes on the login node that use a lot of CPU for a while: [(pid, cpu %, minutes, command)] (worker)"""
+  from .remote import run
+  out = run(["sh", "-c", 'ps -u "$(id -un)" -o pid=,pcpu=,etimes=,comm='], quiet=True)
+  hogs = []
+  for line in out.splitlines():
+    f = line.split(None, 3)
+    if len(f) < 4:
+      continue
+    try:
+      pid, cpu, secs, comm = int(f[0]), float(f[1]), int(f[2]), f[3].strip()
+    except ValueError:
+      continue
+    if cpu >= min_cpu and secs >= min_seconds and comm not in LOGIN_IGNORE:
+      hogs.append((pid, cpu, secs // 60, comm))
+  return hogs
 
 def known_options(facts):
   extra = facts.sbatch_options if facts else set()
@@ -536,6 +566,7 @@ for a in "$@"; do
     s=$(stat -L -c '%s|%Y' -- "$p" 2>/dev/null)
     info=""
     if [ "$k" = x ] && [ "$t" = f ]; then info=$(file -L -b -- "$p" 2>/dev/null | head -c 160); fi
+    if [ "$k" = n ] && [ "$t" = d ]; then info=$(find "$p" -maxdepth 1 2>/dev/null | head -100001 | wc -l); fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$a" "$t" "$x" "$w" "$s" "$info"
   else
     printf '%s\t-\n' "$a"
@@ -588,8 +619,11 @@ class Context:
   submitted: str | None = None   # the script as Slurm stored it
   replay: dict | None = None     # result of the environment replay (ldd)
   live: dict | None = None       # placement of a running job
+  login: list | None = None      # heavy processes on the login node (B09)
   others: list = field(default_factory=list) # the other jobs in the list (duplicates)
   submit_line: str = ""
+  count_files: bool = False                   # probe the number of files in the working directory (Q06)
+  uncertain: set = field(default_factory=set) # paths resolved from a guessed directory (no job, relative)
   env: dict = field(default_factory=dict)     # for $VARS in paths
   muted: set = field(default_factory=set)
 
@@ -658,6 +692,8 @@ class Context:
     return None if "\0" in out or "$" in out or "`" in out else out
 
   def abspath(self, path):
+    if is_placeholder(path):
+      return None
     p = self.expand(path)
     if p is None:
       return None
@@ -735,6 +771,8 @@ def interesting_paths(ctx):
   wd = ctx.workdir()
   if wd:
     out.append(("d", wd))
+    if ctx.count_files:
+      out.append(("n", wd))
   if s.shebang:
     interp = s.shebang[2:].strip().split()
     if interp and interp[0].startswith("/"):
@@ -790,6 +828,10 @@ def referenced_paths(ctx):
   s = ctx.script
   out = []
   made = set()
+  # without a job, relative paths are relative to where it will be submitted (unknown): the script's directory is a
+  # guess until the script changes to an absolute directory
+  guessing = ctx.job is None and not ctx.opt("chdir")
+  ctx.uncertain = set()
   for line, t in s.code_lines():
     for part in re.split(r"\s*(?:&&|\|\||;|\|)\s*", t):
       try:
@@ -814,6 +856,11 @@ def referenced_paths(ctx):
         p = ctx.abspath(words[1])
         if p and p not in made and not any(p.startswith(m + "/") for m in made):
           out.append(("d", p, line))
+          if guessing and not os.path.isabs(ctx.expand(words[1]) or words[1]):
+            ctx.uncertain.add(p)
+        expanded = ctx.expand(words[1])
+        if expanded and os.path.isabs(expanded) or words[1].startswith(("$SLURM_SUBMIT_DIR", '"$SLURM_SUBMIT_DIR')):
+          guessing = guessing and words[1].startswith(("$SLURM_SUBMIT_DIR", '"$SLURM_SUBMIT_DIR'))
         continue
       if cmd in ("source", ".") and len(words) > 1:
         p = ctx.abspath(words[1])
@@ -832,15 +879,21 @@ def referenced_paths(ctx):
           p = ctx.abspath(script)
           if p:
             out.append(("f", p, line))
+            if guessing and not os.path.isabs(ctx.expand(script) or script):
+              ctx.uncertain.add(p)
         continue
       if "/" in prog and prog not in SKIP_PROGRAMS:
         p = ctx.abspath(prog)
         if p:
           out.append(("x", p, line))
+          if guessing and not os.path.isabs(ctx.expand(prog) or prog):
+            ctx.uncertain.add(p)
       for m in re.finditer(r"(?<![<>])<\s*([^\s<>&|;]+)", part): # input redirections
         p = ctx.abspath(m.group(1))
         if p:
           out.append(("f", p, line))
+          if guessing and not os.path.isabs(ctx.expand(m.group(1)) or m.group(1)):
+            ctx.uncertain.add(p)
   return out
 
 # ---------------------------------------------------------------------------
@@ -869,6 +922,8 @@ def run_rules(ctx, only=None):
       continue
     if r.needs == "list" and not ctx.others:
       continue
+    if r.needs == "login" and not ctx.login:
+      continue
     try:
       for f in r.check(ctx) or ():
         findings.append(f)
@@ -888,6 +943,7 @@ def check_file(path, with_probe=True):
   text = read_text(path)
   facts = gather_facts()
   ctx = make_context(text, path, facts=facts)
+  ctx.count_files = True
   if with_probe:
     ctx.probes = run_probe([f"{k}:{p}" for k, p in interesting_paths(ctx)])
     ctx.quota = cached_quota()
@@ -951,6 +1007,7 @@ def check_job(job, full=True, replay=None, live=None):
   text = submitted or on_disk or ""
   ctx = make_context(text or None, "", job=job, facts=facts, on_disk=on_disk, submitted=submitted or None,
                      replay=replay, live=live)
+  ctx.count_files = full
   ctx.probes = run_probe([f"{k}:{p}" for k, p in interesting_paths(ctx)]) if ctx.script else None
   if full:
     ctx.logs = tail_logs(job) if (job.started or not job.queued) else {}
@@ -993,7 +1050,10 @@ def rules_markdown():
          "**Severity:** ✖ the job fails or wastes a lot · ⚠ probably wrong or wasteful · ℹ a better practice.",
          "",
          "**Muting:** a comment in the script mutes rules for that script: `# slurp: ignore R08 S07`. "
-         "To mute a rule everywhere, add its id to `\"checks_muted\"` in slurp's config.json.",
+         "To mute a rule everywhere, use *Mute* in a finding, or add its id to `\"checks_muted\"` in slurp's config.json.",
+         "",
+         "The guides (F1) explain the background: job scripts, arrays, software, filesystems, NUMA placement, GPUs, "
+         "failed jobs.",
          ""]
   for cat, name in CATEGORIES.items():
     rules = [r for r in RULES.values() if r.category == cat]
@@ -1001,18 +1061,21 @@ def rules_markdown():
       continue
     out += [f"## {cat} · {name}", ""]
     for r in rules:
+      link = lambda text: re.sub(r"\b([SRBPQENU]\d\d)\b", lambda m: f"[{m.group(1)}](rule:{m.group(1)})"
+                                 if m.group(1) in RULES else m.group(1), text)
       out += [f"### {r.heading}", "",
               f"{SEVERITY_ICON[r.severity]} {r.severity} · checks: {NEEDS_TEXT.get(r.needs, r.needs)}", "",
-              f"**What:** {r.what}", "",
-              f"**Why it matters:** {r.implies}", "",
-              f"**How to fix:** {r.fix}", ""]
+              f"**What:** {link(r.what)}", "",
+              f"**Why it matters:** {link(r.implies)}", "",
+              f"**How to fix:** {link(r.fix)}", ""]
       if r.example:
         out += ["```bash", r.example.strip("\n"), "```", ""]
   return "\n".join(out)
 
 NEEDS_TEXT = {"script": "the script", "job": "the job record", "probe": "files on the cluster",
               "quota": "the quota", "logs": "the job's output", "replay": "the job's environment (Check environment)",
-              "live": "the running job (Placement)", "list": "the job list"}
+              "live": "the running job (Placement)", "list": "the job list", "login": "your processes on the login node",
+              "facts": "your login files"}
 
 from . import rules # noqa: E402 (registers the rules)
 
@@ -1097,3 +1160,51 @@ def explained_text(ctx):
 
 def looks_like_job_script(text):
   return bool(re.search(r"^#SBATCH", text, re.M)) or (text.startswith("#!") and bool(re.search(r"^\s*srun\s", text, re.M)))
+
+
+# ---------------------------------------------------------------------------
+# What changed: a failed job against the last run of the same job that worked
+
+def what_changed(job, days=30):
+  """A text: the differences of script, command line and request to the last completed job of the same name (worker)"""
+  import difflib
+  from datetime import datetime, timedelta
+  from .jobs import sacct, current_user
+  name = job.rec.get("JobName") or ""
+  try:
+    submitted = datetime.fromisoformat(job.rec.get("Submit"))
+  except (TypeError, ValueError):
+    submitted = datetime.now()
+  rows = sacct(["-X", "-u", current_user(), "--name", name, "-s", "CD", "-S", (submitted - timedelta(days=days)).isoformat(timespec="seconds"),
+                "-E", submitted.isoformat(timespec="seconds")])
+  rows = [r for r in rows if r.get("JobName") == name and r.get("State", "").startswith("COMPLETED")
+          and r.get("End", "") < (job.rec.get("Submit") or "9999") and r.get("JobID") != job.jid]
+  out = [f"What changed: job {job.jid} ({name}, {job.state}) against the last run that worked", ""]
+  if not rows:
+    return "\n".join(out + [f"No completed job named {name} in the {days} days before this one."]) + "\n"
+  prev = max(rows, key=lambda r: r.get("End", ""))
+  out.append(f"Last success: job {prev['JobID']}, ended {prev.get('End', '?').replace('T', ' ')}")
+  out.append("")
+  fields = [("SubmitLine", "command line"), ("WorkDir", "directory"), ("Partition", "partition"), ("NNodes", "nodes"),
+            ("Timelimit", "time limit"), ("ReqMem", "memory"), ("AllocCPUS", "CPUs"), ("Account", "account")]
+  diffs = [(label, prev.get(k, ""), job.rec.get(k, "")) for k, label in fields if prev.get(k, "") != job.rec.get(k, "")]
+  out.append("Request and command line:")
+  out += [f"  {label}: {a or '-'}  →  {b or '-'}" for label, a, b in diffs] or ["  the same"]
+  out.append("")
+  class Prev:
+    jid = prev["JobID"]
+  old = finished_script(Prev)
+  new = finished_script(job) if not job.queued else (getattr(job, "script", "") or "")
+  if not new:
+    new = getattr(job, "script", "") or ""
+  if old and new:
+    diff = list(difflib.unified_diff(old.splitlines(), new.splitlines(), f"job {prev['JobID']}", f"job {job.jid}", lineterm=""))
+    out.append("Batch script:")
+    out += [f"  {l}" for l in diff] or ["  the same"]
+  else:
+    out.append("Batch script: not stored by the accounting (sacct --batch-script) for "
+               + " and ".join(x for x, s in ((f"job {prev['JobID']}", old), (f"job {job.jid}", new)) if not s))
+  out.append("")
+  out.append("Unchanged script and request, but it failed now? Then look at the inputs, the program (rebuilt?), the "
+             "modules (changed defaults, E01) and the end of the logs (U05).")
+  return "\n".join(out) + "\n"

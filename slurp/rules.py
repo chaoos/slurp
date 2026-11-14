@@ -9,7 +9,7 @@ import shlex
 
 from .checks import (rule, Finding, ERROR, WARNING, INFO, RULES, parse_time, time_text, parse_mem, mem_text, to_int,
                      gres_gpus, known_options, output_pattern, referenced_paths, strip_comment, LONG_OPTIONS,
-                     submit_options)
+                     submit_options, is_placeholder)
 
 def F(rule_id, evidence, line=None, severity="", fix="", snippet=""):
   return Finding(RULES[rule_id], evidence, line, severity, fix, snippet)
@@ -211,7 +211,7 @@ def s09(ctx):
 def r01(ctx):
   for name in ("mem", "mem-per-cpu", "mem-per-gpu"):
     v = ctx.opt(name)
-    if v is None:
+    if v is None or is_placeholder(v):
       continue
     parsed = parse_mem(v)
     line = ctx.directive_line(name)
@@ -229,7 +229,7 @@ def r01(ctx):
       "#SBATCH --time=2:00     # 2 minutes!\n#SBATCH --time=02:00:00  # 2 hours")
 def r02(ctx):
   v = ctx.opt("time")
-  if v is None:
+  if v is None or is_placeholder(v):
     return
   line = ctx.directive_line("time")
   minutes = parse_time(v)
@@ -307,20 +307,22 @@ def r06(ctx):
   if not f:
     return
   part = ctx.opt("partition")
-  if part and f.partitions:
+  if part and f.partitions and not is_placeholder(part):
     for name in part.split(","):
       if name not in f.partitions:
         close = difflib.get_close_matches(name, sorted(f.partitions), 1, 0.6)
         yield F("R06", f"there is no partition {name}" + (f" (did you mean {close[0]}?)" if close else
                 f"; there are {', '.join(sorted(f.partitions))}"), ctx.directive_line("partition"))
   account = ctx.opt("account")
-  if account and f.accounts and account not in f.accounts:
+  if account and f.accounts and account not in f.accounts and not is_placeholder(account):
     yield F("R06", f"you have no association with the account {account}; yours: {', '.join(f.accounts)}", ctx.directive_line("account"))
-  elif account is None and len(f.accounts) > 1 and (ctx.job is None or ctx.job.queued):
-    yield F("R06", f"no --account, and you have {len(f.accounts)} ({', '.join(f.accounts)}): the default one is charged",
-            None, INFO, snippet=f"#SBATCH --account={f.accounts[0]}")
+  elif account is None and len([a for a in f.accounts if a != "root"]) > 1 and (ctx.job is None or ctx.job.queued):
+    mine = [a for a in f.accounts if a != "root"]
+    yield F("R06", f"no --account, and you have {len(mine)} ({', '.join(mine)}): "
+                   + (f"your default, {f.default_account}, is charged" if f.default_account else "the default one is charged"),
+            None, INFO, snippet=f"#SBATCH --account={mine[0]}")
   qos = ctx.opt("qos")
-  if qos and f.qos and qos not in f.qos:
+  if qos and f.qos and qos not in f.qos and not is_placeholder(qos):
     yield F("R06", f"--qos={qos} is not one of your QOS ({', '.join(sorted(f.qos))})", ctx.directive_line("qos"), WARNING)
 
 @rule("R07", WARNING, "GPUs and the partition do not match",
@@ -445,7 +447,7 @@ def b05(ctx):
 def b06(ctx):
   if ctx.opt("chdir") is not None or ctx.job is not None:
     return
-  rel = [n for n in ("output", "error", "input") if ctx.opt(n) and not ctx.opt(n).startswith("/")]
+  rel = [n for n in ("output", "error", "input") if ctx.opt(n) and not ctx.opt(n).startswith("/") and not is_placeholder(ctx.opt(n))]
   if rel:
     yield F("B06", f"--{rel[0]}={ctx.opt(rel[0])} is relative to the directory you run sbatch in", ctx.directive_line(rel[0]))
 
@@ -570,8 +572,11 @@ def p01(ctx):
       continue
     d = os.path.dirname(p)
     info = ctx.probe("d", d)
+    guessed = ctx.job is None and not v.startswith("/") and not ctx.opt("chdir")
     if info is not None and not info.exists:
-      yield F("P01", f"--{name}: the directory {d} does not exist", ctx.directive_line(name), snippet=f"mkdir -p {shlex.quote(d)}")
+      yield F("P01", f"--{name}: the directory {d} does not exist" + (" (relative: checked from the script's directory, "
+              "Slurm uses the directory you submit from)" if guessed else ""), ctx.directive_line(name), WARNING if guessed else "",
+              fix=f"create it before submitting: mkdir -p {shlex.quote(d)}", snippet=f"mkdir -p {shlex.quote(d)}")
     elif info is not None and info.exists and not info.writable:
       yield F("P01", f"--{name}: the directory {d} is not writable for you", ctx.directive_line(name))
 
@@ -592,7 +597,9 @@ def p02(ctx):
       info = ctx.probe(kind, path)
       if info is not None and not info.exists:
         what = "directory" if kind == "d" else "file"
-        yield F("P02", f"the {what} {path} does not exist", line, WARNING if kind == "f" else ERROR)
+        guessed = path in ctx.uncertain
+        yield F("P02", f"the {what} {path} does not exist" + (" (relative: checked from the script's directory)" if guessed else ""),
+                line, WARNING if kind == "f" or guessed else ERROR)
 
 @rule("P03", ERROR, "Programs that cannot run",
       "Programs run by path (./sim, /path/bin/app, via srun) that do not exist or are not executable.",
@@ -607,7 +614,9 @@ def p03(ctx):
     if info is None:
       continue
     if not info.exists:
-      yield F("P03", f"{path} does not exist", line)
+      guessed = path in ctx.uncertain
+      yield F("P03", f"{path} does not exist" + (" (relative: checked from the script's directory; Slurm runs it from the "
+                     "directory you submit from)" if guessed else ""), line, WARNING if guessed else "")
     elif info.isdir:
       yield F("P03", f"{path} is a directory", line)
     elif not info.executable:
@@ -761,6 +770,26 @@ def q01(ctx):
         yield F("Q01", f"{e['path']}: {who} {what} quota is {frac:.0%} full ({used} of {limit}"
                        f"{' kB' if what == 'space' else ' files'})", line, ERROR if frac >= 0.98 or e.get("over") else WARNING)
 
+@rule("Q02", WARNING, "Little room left for the output",
+      "The filesystem the job writes to has little of your quota left in absolute terms (less than 1 GB, or less "
+      "than 1000 files), although it is not yet 90% full.",
+      "A job that writes more than what is left fails in the middle (Disk quota exceeded), possibly after hours.",
+      "Free space before submitting, or write to a filesystem with room.", needs="quota")
+def q02(ctx):
+  if ctx.job is not None and not ctx.job.queued:
+    return
+  wd = ctx.workdir()
+  for e in quota_for(ctx, wd)[:1]:
+    st = quota_state(e)
+    if st and st[0] >= 0.9:
+      return # (Q01)
+    for used, soft, hard, what, small in ((e["kb"], e["kb_soft"], e["kb_hard"], "space", 1024 * 1024),
+                                          (e["files"], e["files_soft"], e["files_hard"], "files", 1000)):
+      limit = soft or hard
+      if limit and limit - used < small:
+        left = f"{(limit - used) / 1024:.0f} MB" if what == "space" else f"{limit - used} files"
+        yield F("Q02", f"{e['path']}: only {left} of your quota left")
+
 @rule("Q03", INFO, "Heavy output in $HOME",
       "Logs or the working directory in your home directory although there is a scratch filesystem.",
       "Home quotas are small and home filesystems slow for job output: the quota fills up (and then even logging "
@@ -773,6 +802,8 @@ def q03(ctx):
   home, scratch = ctx.facts.env.get("HOME"), ctx.facts.env.get("SCRATCH")
   if not home or not scratch or scratch.startswith(home):
     return
+  if ctx.job is None and not ctx.opt("chdir"):
+    return # (a script alone: where it runs is decided when it is submitted)
   wd = ctx.workdir()
   if wd and (wd == home or wd.startswith(home.rstrip("/") + "/")) and ctx.script and \
      not ctx.script.uses(r"\bcd\s+[\"']?(\$SCRATCH|\$\{SCRATCH\}|" + re.escape(scratch) + ")"):
@@ -807,6 +838,29 @@ def q05(ctx):
   job = ctx.job
   if days and scratch and job.rec.get("State", "").startswith("COMPLETED") and (job.rec.get("WorkDir") or "").startswith(scratch):
     yield F("Q05", f"the results are in {job.rec['WorkDir']} (scratch, deleted after {days} days without use)")
+
+@rule("Q06", WARNING, "Very many files in one directory",
+      "The job's working directory holds tens of thousands of files.",
+      "Parallel filesystems handle many small files badly: listing, opening and creating them is slow for the job "
+      "and for everybody (the metadata server), and the file quota runs out.",
+      "Write fewer, bigger files (one HDF5 file, tar archives of small outputs), or spread them over subdirectories; "
+      "delete what is no longer needed.", needs="probe")
+def q06(ctx):
+  wd = ctx.workdir()
+  info = ctx.probe("n", wd)
+  if info and info.exists and info.file.strip().isdigit() and int(info.file) >= 50000:
+    n = int(info.file)
+    yield F("Q06", f"{wd} holds {'more than 100000' if n > 100000 else n} entries")
+
+@rule("B09", WARNING, "Heavy work on the login node",
+      "Your processes on the login node that keep CPUs busy for a long time.",
+      "Login nodes are shared by everybody: heavy work there slows down everybody's editing, compiling and "
+      "submitting, and is often killed by the site.",
+      "Run it as a job: an interactive job (i in the job list) for interactive work, sbatch for the rest.",
+      needs="login")
+def b09(ctx):
+  for pid, cpu, minutes, comm in (ctx.login or []):
+    yield F("B09", f"{comm} (pid {pid}) uses {cpu:.0f}% CPU for {minutes} minutes on the login node")
 
 # ===========================================================================
 # E: environment and software stack
