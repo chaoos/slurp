@@ -265,14 +265,19 @@ class Slurp(App):
 
   def on_mount(self):
     self.set_interval(0.25, self.tick)
-    theme = load_config().get("theme")
-    if theme and theme in self.available_themes:
+    config = load_config()
+    theme = config.get(self.theme_key()) or (config.get("theme") if self.is_web else None) # (the browser: the terminal's
+    if theme and theme in self.available_themes:                                          # until one is chosen there)
       self.theme = theme
     self.watch(self, "theme", self.theme_changed, init=False)
 
+  def theme_key(self):
+    """The config key of the theme: "theme" in a terminal, "theme_web" in the browser (slurp --serve)"""
+    return "theme_web" if self.is_web else "theme"
+
   def theme_changed(self, theme):
-    """A theme chosen (e.g. with the command palette) is the default from now on"""
-    update_config(theme=theme)
+    """A theme chosen (e.g. with the command palette) is the default from now on, in the terminal or in the browser"""
+    update_config(**{self.theme_key(): theme})
 
   def on_unmount(self):
     self.shutdown()

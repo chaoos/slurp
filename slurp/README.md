@@ -426,7 +426,9 @@ has errors; `--all` adds the hints, `--no-probe` checks only the text,
 ## Settings
 
 slurp keeps a few settings in `~/.config/slurp/config.json` (or under
-`$XDG_CONFIG_HOME`): the theme (chosen with the command palette, `Ctrl-P`), the
+`$XDG_CONFIG_HOME`): the theme (chosen with the command palette, `Ctrl-P`;
+`"theme"` in the terminal, `"theme_web"` in the browser with `--serve`, which
+starts with the terminal's until one is chosen there), the
 open tabs with the one shown and their choices (finished since, accounts),
 the progress files chosen for jobs and the patterns for arrays. At the next
 start the tabs are back, and the tab shown connects; the others connect when
