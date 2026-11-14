@@ -743,6 +743,7 @@ def output_progress(path, tail=None):
     return None
   return JobProgress(*latest, points=points[-50:], path=path)
 
+ERR_SIZES = {} # (tab, path) -> size of the error file of an ended job: it no longer changes, it is not asked again
 STAT_CHUNK = 200 # paths per stat command
 
 def annotate(jobs):
@@ -756,8 +757,11 @@ def annotate(jobs):
       job.err = err_status(job)
       job.progress = record_progress(job, output_progress(progress_path(job))) if job.running else None
     return jobs
-  sizes = {}
-  err_paths = sorted({p for job in jobs if err_status(job, {})[0] == "missing" and (p := job.stderr_path())})
+  tab = tab_name()
+  ended = {p for job in jobs if not job.queued and (p := job.stderr_path())} # (not one a queued job writes too)
+  ended -= {p for job in jobs if job.queued and (p := job.stderr_path())}
+  sizes = {p: ERR_SIZES[(tab, p)] for p in ended if (tab, p) in ERR_SIZES}
+  err_paths = sorted({p for job in jobs if err_status(job, {})[0] == "missing" and (p := job.stderr_path())} - set(sizes))
   out_paths = sorted({p for job in jobs if job.running and (p := progress_path(job))})
   scripts = sorted({job.jid.split("_")[0]: job.jid for job in jobs if job.queued and not step_commands(job)}.items())
   chunks = [err_paths[i:i + STAT_CHUNK] for i in range(0, len(err_paths), STAT_CHUNK)]
@@ -772,6 +776,9 @@ def annotate(jobs):
       size, _, path = line.partition("|")
       if path in sizes and size.isdigit():
         sizes[path] = int(size)
+  for p in ended & set(err_paths):
+    if sizes[p] is not None:
+      ERR_SIZES[(tab, p)] = sizes[p]
   results = results[len(chunks):]
   tails = {p: res.stdout if res.returncode == 0 else None for p, res in zip(out_paths, results)}
   cache = {key: res.stdout for (key, _), res in zip(scripts, results[len(out_paths):])}
