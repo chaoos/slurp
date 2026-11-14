@@ -51,6 +51,9 @@ import slurm as sl
 from ..state import *
 from ..remote import *
 from ..widgets import *
+from .. import share
+from .links import LinkScreen, link_state
+from .dialogs import ConfirmScreen
 
 def process_tree(pid):
   """pid and its descendants (e.g. the ssh -W of a ProxyJump, which holds the TCP connection)"""
@@ -129,6 +132,8 @@ class ConnectionScreen(ModalScreen):
   #conn-dialog.-warn { border: thick $warning; }
   #conn-dialog.-bad { border: thick $error; }
   #conn-body { height: 1fr; }
+  #conn-links-title { text-style: bold underline; height: auto; }
+  #conn-links { height: auto; max-height: 14; margin-bottom: 1; }
   #conn-buttons { height: auto; align-horizontal: right; margin-top: 1; }
   #conn-buttons Button { margin-left: 1; }
   """
@@ -143,6 +148,8 @@ class ConnectionScreen(ModalScreen):
     with Vertical(id="conn-dialog"):
       yield Static(id="conn-title")
       with VerticalScroll(id="conn-body"):
+        yield Static(id="conn-links-title")
+        yield ClickTable(id="conn-links", cursor_type="row", zebra_stripes=True)
         yield Static(id="conn-info")
       with Horizontal(id="conn-buttons"):
         if self.cluster.destination:
@@ -158,6 +165,71 @@ class ConnectionScreen(ModalScreen):
     dialog = self.query_one("#conn-dialog")
     for other in HEALTH_STYLES:
       dialog.set_class(other == level, f"-{other}")
+
+  links_shown = None
+
+  def show_links(self):
+    """The links of this tab (shells and drives for the user's own terminal) and their sessions: a click on a link
+    shows it (commands, password, Revoke), on a session offers to disconnect it"""
+    links = [l for l in self.app.link_manager.links if l.tab == self.cluster.name and not (l.finished and l.relay_state == "closed"
+                                                                                          and time.time() - l.created > 3600)]
+    title = self.query_one("#conn-links-title", Static)
+    table = self.query_one("#conn-links", ClickTable)
+    table.display = bool(links)
+    title.update(Text("Links: shells and drives from your own terminal (click one)", style="bold underline") if links else
+                 Text("Links: none. Shell → From your own terminal, or Drive, makes one.", style="dim"))
+    if not links:
+      return
+    now = time.time()
+    rows = []
+    for link in links:
+      relay, logins = link_state(link, now)
+      rows.append((f"link|{link.id}", (link.id, f"{link.kind}{' (read only)' if link.read_only else ''}: {link.title}", relay, logins,
+                                       f"{len(link.live_sessions)} open, {link.logins} logins" + (f", {link.failures} wrong" if link.failures else ""))))
+      for s in link.sessions:
+        if not s.kind:
+          continue
+        duration = int((s.ended or now) - s.started)
+        rows.append((f"session|{link.id}|{s.id}", (
+          f"  └ {s.id}", f"{s.kind} {'open' if s.ended is None else 'ended'} · {duration // 60}:{duration % 60:02d}",
+          Text(f"{s.client or 'client ?'}" + (f", key {s.key[:20]}…" if s.key else ""), style="" if s.ended is None else "dim"),
+          Text(f"{humanize.naturalsize(s.bytes_in)} in, {humanize.naturalsize(s.bytes_out)} out" + (f", {s.term} {s.size[0]}×{s.size[1]}" if s.term else ""),
+               style="" if s.ended is None else "dim"),
+          Text("click: disconnect", style="red") if s.ended is None else "")))
+    signature = [(k, tuple(str(v) for v in values)) for k, values in rows]
+    if signature == self.links_shown:
+      return
+    self.links_shown = signature
+    if not table.columns:
+      for label in ("Link", "What", "Relay / client", "Logins / traffic", "Sessions"):
+        table.add_column(label)
+    cursor = table.cursor_row
+    table.clear()
+    for key, values in rows:
+      table.add_row(*values, key=key)
+    if 0 <= cursor < table.row_count:
+      table.move_cursor(row=cursor)
+
+  @on(DataTable.RowSelected, "#conn-links")
+  def link_selected(self, event):
+    event.stop()
+    kind, link_id, *rest = event.row_key.value.split("|")
+    link = next((l for l in self.app.link_manager.links if l.id == link_id), None)
+    if link is None:
+      return
+    if kind == "link":
+      self.app.push_screen(LinkScreen(link))
+      return
+    session = next((s for s in link.sessions if s.id == rest[0]), None)
+    if session is None or session.ended is not None:
+      return
+    def done(yes):
+      if yes:
+        self.app.link_manager.disconnect(session)
+    self.app.push_screen(ConfirmScreen(f"Disconnect session {session.id}", f"End the {session.kind} of link {link.id} "
+                                       f"({link.title}) from {session.client or 'a client'}?"
+                                       + (" A mounted drive fails until it is unmounted." if session.kind == "drive" else ""),
+                                       "Disconnect"), done)
 
   def on_mount(self):
     self.show_title()
@@ -218,6 +290,7 @@ class ConnectionScreen(ModalScreen):
     if not self.is_mounted:
       return
     self.show_title()
+    self.show_links()
     cluster, c = self.cluster, self.cluster.connection
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold", no_wrap=True)
