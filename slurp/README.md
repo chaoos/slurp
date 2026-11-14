@@ -254,6 +254,55 @@ selection works; Enter comes back), **Save to a file** (`~/.cache/slurp/copied.t
 and **It arrived, don't ask again** (stored as `"copy": "terminal"` in the
 settings; remove it to get the window again).
 
+## Shells and drives from your own terminal
+
+**Shell** (`t`, and `s` in the job window of a running job for its node) asks
+every time: **In slurp** (a subtab, as before) or **From your own terminal**.
+The latter makes a *link*: an `ssh` command and a password for the terminal or
+SSH client on your own machine (OpenSSH in any terminal, cmd or PowerShell,
+PuTTY, …). **Drive** (`F`) makes a link to your login directory as a drive (SFTP):
+`sshfs` on Linux and macOS, SSHFS-Win on Windows, or WinSCP, Cyberduck and file
+managers. The node of a job only gets shells, never a drive.
+
+It works wherever your machine is, also when slurp runs behind several hops:
+slurp runs a small SSH server for each link (on `127.0.0.1` only) and connects
+out to a **relay**; your `ssh` connects out to the same relay and jumps through
+it to slurp. The session stays SSH encrypted from your terminal to slurp; the
+relay only passes bytes along. On the first connect your ssh shows slurp's host
+key, whose fingerprint the link window shows (remembered under one name, so
+it asks only once).
+
+- **ssh-j.com** (the default) is a public relay run by a third party: each link
+  gets a random name there. The setup panel warns about what that means
+  (anyone with the command and the password gets in as you; the relay sees
+  that connections happen; your site's rules may not allow it).
+- **Your own relay**: any SSH server you can log in to with a key, e.g.
+  `me@relay.example.org`; slurp asks it for a free port. Set it in the setup
+  panel or as `"link_relay"` in the settings.
+
+The **setup panel** of a link: the relay (with its warning), **Logins** (once,
+the default for shells; any number until it expires, the default for drives,
+since mounts reconnect), **Expires after** (15 minutes, 1 hour (default),
+8 hours, until slurp quits), login with **a password** made by slurp (default)
+or **your public key**, and for a drive **Read only**. A link stops taking
+logins when it is used, expires, is revoked, or after 5 wrong passwords; open
+sessions go on. The **link window** shows the commands for each kind of
+client with copy buttons (and a `~/.ssh/config` entry), the password, the host
+key and the state; **New password**, **Extend 1 h**, **Revoke**.
+
+The **connection window** (click the status of the tab) lists the links of the
+tab and their sessions (shell or drive, since when, client, traffic, terminal
+size); a click on a link opens its window, on a session disconnects it.
+Logins, wrong passwords and lost relays are notified, the footer shows open
+links and sessions, and quitting with open sessions asks first. Every link and
+session is written to `~/.local/state/slurp/links.log` (never a password);
+slurp's host key is `~/.config/slurp/link_host_key`.
+
+Links need the Python package `asyncssh` (`python -m pip install asyncssh`);
+without it slurp says so in the Shell dialog and works as before. A drive uses
+the cluster's `sftp-server` (read only needs it; otherwise the cluster's
+standard SFTP).
+
 ## Settings
 
 slurp keeps a few settings in `~/.config/slurp/config.json` (or under
@@ -347,8 +396,8 @@ top-left `←` button to go back.
 
 | Screen | Main controls |
 |---|---|
-| Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `r` reload; `a` abort loading; `t` shell on the cluster; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
-| Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (subtab) |
+| Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
+| Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (in slurp or your own terminal) |
 | Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |
