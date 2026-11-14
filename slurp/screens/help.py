@@ -97,8 +97,8 @@ A batch script with the findings of the checks below it.
   IGNORED after the first command.
 - **Check environment** replays the module loads and exports on the login node and checks the programs' shared
   libraries (`ldd`); only setup lines run, never the job's commands.
-- **Edit** (`e`) makes the script editable right here: the checks follow as you type (the script itself; Save also
-  checks the files on the cluster), Go to line jumps into it, `Ctrl+S` saves, `Ctrl+Z` undoes, **Revert** goes back
+- **Edit** (`e`) makes the script editable right here: the checks follow as you type (the script, and its
+  paths and programs on the cluster), Go to line jumps into it, `Ctrl+S` saves, `Ctrl+Z` undoes, **Revert** goes back
   to the file, `Esc` or **Done** stops editing (asking about unsaved changes, as do closing the subtab and quitting).
   Save asks before it overwrites a file that something else changed meanwhile. Bash is highlighted when Textual's
   syntax extra is installed (`pip install "textual[syntax]"`). **Edit outside** opens your own `$VISUAL`/`$EDITOR`.

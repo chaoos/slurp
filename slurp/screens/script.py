@@ -254,10 +254,28 @@ class ScriptScreen(SplitScreen):
     self.live_timer = None
     if not self.editing or self.ctx is None:
       return
-    ctx = checks.make_context(self.current_text(), self.path, facts=self.ctx.facts)
+    text = self.current_text()
+    ctx = checks.make_context(text, self.path, facts=self.ctx.facts)
     ctx.script_dir = os.path.dirname(self.path)
+    ctx.quota = self.ctx.quota # (the quota as last asked)
     self.findings = checks.run_rules(ctx)
-    self.query_one("#sc-findings", FindingsView).show(self.findings, "(as you type: the script itself; Save also checks the files)")
+    self.query_one("#sc-findings", FindingsView).show(self.findings, "(as you type; checking the paths on the cluster …)")
+    self.show_status()
+    self.probe_worker(text, ctx)
+
+  @cluster_work("live-probe")
+  def probe_worker(self, text, ctx):
+    """The paths, directories and programs of the script as typed, on the cluster (one round trip)"""
+    ctx.probes = checks.run_probe([f"{k}:{p}" for k, p in checks.interesting_paths(ctx)])
+    findings = checks.run_rules(ctx)
+    if not get_current_worker().is_cancelled:
+      self.app.call_from_thread(self.probed, text, findings)
+
+  def probed(self, text, findings):
+    if not self.editing or self.current_text() != text: # (typed on meanwhile: a newer check follows)
+      return
+    self.findings = findings
+    self.query_one("#sc-findings", FindingsView).show(findings, "(as you type, with the paths on the cluster)")
     self.show_status()
 
   @on(Button.Pressed, "#sc-save")
