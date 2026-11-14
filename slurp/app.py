@@ -454,7 +454,23 @@ class Slurp(App):
   def action_close_view(self):
     view = next((v for v in self.cluster.views if v.mode == self.current_mode), None)
     if view is not None:
+      self.request_close_view(view)
+
+  def unsaved_scripts(self, mode=None):
+    """Script views with unsaved edits (of one subtab, or of all)"""
+    stacks = getattr(self, "_screen_stacks", {}) or {}
+    screens = [s for m, stack in stacks.items() if mode is None or m == mode for s in stack]
+    return [s for s in screens if isinstance(s, ScriptScreen) and s.unsaved()]
+
+  def request_close_view(self, view):
+    """Close a subtab, asking first if a script in it has unsaved edits"""
+    unsaved = self.unsaved_scripts(view.mode)
+    if not unsaved:
       self.close_view(view)
+      return
+    names = ", ".join(os.path.basename(s.path) for s in unsaved)
+    self.push_screen(ConfirmScreen("Unsaved changes", f"{names} has unsaved changes. Close the subtab and lose them?",
+                                   "Close"), lambda ok: self.close_view(view) if ok else None)
 
   def refresh_view_tabs(self, screen):
     bar = screen.query("#view-tabs").first(Horizontal) if screen.query("#view-tabs") else None
@@ -1073,7 +1089,8 @@ class Slurp(App):
   async def action_quit(self):
     live = self.link_manager.live_sessions()
     drives = [c.drive for c in self.clusters if c.drive is not None and (c.drive.proc is not None or c.drive.state == "reconnecting")]
-    if (live or drives) and not getattr(self, "quit_confirmed", False):
+    unsaved = self.unsaved_scripts()
+    if (live or drives or unsaved) and not getattr(self, "quit_confirmed", False):
       def done(yes):
         if yes:
           self.quit_confirmed = True
@@ -1084,6 +1101,8 @@ class Slurp(App):
                      "machine) are open: they end, a drive mounted through one fails until it is unmounted.")
       for d in drives:
         parts.append(f"The drive at {d.path} is unmounted.")
+      if unsaved:
+        parts.append(f"Unsaved changes in {', '.join(os.path.basename(s.path) for s in unsaved)} are lost.")
       self.push_screen(ConfirmScreen("Quit slurp", " ".join(parts), "Quit"), done)
       return
     self.link_manager.shutdown()
