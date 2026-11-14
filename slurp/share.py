@@ -235,11 +235,13 @@ def client_commands(link):
     local = 8000
     url = f"http://localhost:{local}/?token={link.web_token}"
     out.append(("1. The tunnel: Linux, macOS, Windows (OpenSSH)",
-                shlex.join(["ssh", "-N", "-L", f"{local}:127.0.0.1:{link.web_port}", *ssh_opts, f"{user}@{host}"]),
-                f"in a terminal, cmd or PowerShell; asks for the password, then waits: leave it open while you use the "
-                f"web view (if port {local} is taken on your machine, use another one, here and in the URL)"))
+                shlex.join(["ssh", "-L", f"{local}:127.0.0.1:{link.web_port}", *ssh_opts, f"{user}@{host}"]),
+                f"paste it into a terminal, cmd or PowerShell on your machine. It asks for the password (below), then "
+                f"says that the tunnel is open and shows the URL: keep that window open while you use the web view "
+                f"(Ctrl-C there closes it). If port {local} is taken on your machine, use another one, here and in the URL"))
     out.append(("2. Then open in your browser", url,
-                "the slurp running here, in the browser: a view of the same slurp (who is active can take over)"))
+                "the same slurp as here. One view is active at a time: as long as this one is, the browser shows a lock "
+                "screen with Take over; a click on it (and Yes) makes the browser the active view"))
     out.append(("PuTTY", f"the proxy settings as for a shell link, and Connection > SSH > Tunnels: source port {local}, "
                 f"destination 127.0.0.1:{link.web_port}, Local, Add; Connection > SSH: Don't start a shell", "then the URL"))
     return out
@@ -701,6 +703,51 @@ class _Channel(asyncssh.SSHServerSession if asyncssh else object):
     if self.session is not None:
       self.manager._ended(self.session)
 
+class _WebNotice(asyncssh.SSHServerSession if asyncssh else object):
+  """The session of a web link (ssh -L ... without -N): it runs nothing, it says that the tunnel is open and which URL
+  to open, and keeps the connection (and so the tunnel) until Ctrl-C, q or the end of the connection"""
+  def __init__(self, manager, link, conn):
+    self.manager, self.link, self.conn = manager, link, conn
+    self.chan = None
+
+  def connection_made(self, chan):
+    self.chan = chan
+
+  def pty_requested(self, term_type, term_size, term_modes):
+    return True
+
+  def shell_requested(self):
+    return True
+
+  def exec_requested(self, command):
+    return False # (no commands)
+
+  def subsystem_requested(self, subsystem):
+    return False
+
+  def session_started(self):
+    link = self.link
+    session = next((s for s in link.sessions if s.conn is self.conn and s.ended is None), None)
+    if session is not None and not session.kind:
+      session.kind = "web"
+      self.manager._started(session)
+    url = f"http://localhost:8000/?token={link.web_token}"
+    self.chan.write((f"\r\nslurp: the tunnel to the web view is open.\r\n"
+                     f"  Open in your browser:  {url}\r\n"
+                     f"  (with another local port than 8000 in the ssh command: that port in the URL)\r\n"
+                     f"  Keep this window open while you use it; Ctrl-C (or q) here closes the tunnel.\r\n").encode())
+
+  def data_received(self, data, datatype):
+    if b"\x03" in data or b"\x04" in data or data.strip().lower() == b"q":
+      self.chan.write(b"\r\nslurp: closing the tunnel\r\n")
+      self.chan.exit(0)
+
+  def eof_received(self):
+    self.chan.exit(0)
+
+  def connection_lost(self, exc):
+    pass
+
 class _Server(asyncssh.SSHServer if asyncssh else object):
   """One connection to a link: its login"""
   def __init__(self, manager, link):
@@ -713,7 +760,7 @@ class _Server(asyncssh.SSHServer if asyncssh else object):
   def session_requested(self):
     log.debug(f"link {self.link.id}: session requested")
     if self.link.kind == "web":
-      return False # (a web link only forwards to the web view: ssh -N)
+      return _WebNotice(self.manager, self.link, self.conn) # (it only says that the tunnel is open, and where to go)
     return _Channel(self.manager, self.link, self.conn)
 
   def connection_requested(self, dest_host, dest_port, orig_host, orig_port):

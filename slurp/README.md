@@ -453,9 +453,13 @@ expiry, Revoke, listed in the connection window). The link only forwards to
 the web view: no shell, no files. On your machine:
 
 ```bash
-ssh -N -L 8000:127.0.0.1:<port> -J <name>@ssh-j.com slurp@slurp   # (the link window has the exact command)
-# then open http://localhost:8000/?token=…
+ssh -L 8000:127.0.0.1:<port> -J <name>@ssh-j.com slurp@slurp   # (the link window has the exact command)
 ```
+
+It asks for the link's password, then says that the tunnel is open and
+shows the URL (`http://localhost:8000/?token=…`). Keep that window open while
+you use the browser: it carries the connection (Ctrl-C or `q` there closes
+it).
 
 The browser is another view of the same slurp (textual-serve's page, a
 terminal). **One view is active at a time**: its keys and mouse go to slurp,

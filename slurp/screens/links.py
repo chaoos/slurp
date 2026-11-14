@@ -120,8 +120,13 @@ class LinkSetupScreen(ModalScreen):
       with VerticalScroll(id="setup-body"):
         if self.kind == "web":
           yield Static("This slurp in your browser, from anywhere: an ssh tunnel through the relay (only to the web "
-                       "view, nothing else), then a URL. The browser is another view of this same slurp: one view is "
-                       "active at a time, the others can take over.", markup=False, classes="setup-row")
+                       "view, nothing else), then a URL. How it goes, once the link is made:\n"
+                       "  1. On your machine, paste the ssh command of the link into a terminal (cmd or PowerShell on "
+                       "Windows) and give the link's password.\n"
+                       "  2. It says that the tunnel is open and shows the URL. Keep that window open: it carries the "
+                       "browser's connection (Ctrl-C there ends it).\n"
+                       "  3. Open the URL in your browser. It shows this same slurp: one view is active at a time, so "
+                       "while this one is, the browser shows a lock screen with Take over.", markup=False, classes="setup-row")
         if self.kind == "drive":
           yield Static(f"Your files on the cluster as a drive (SFTP): sshfs on Linux and macOS, SSHFS-Win on Windows, "
                        f"or WinSCP, Cyberduck, file managers. It starts in {self.path}.", markup=False, classes="setup-row")
