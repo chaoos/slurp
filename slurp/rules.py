@@ -409,21 +409,6 @@ def b03(ctx):
   if not re.search(r"SLURM_ARRAY_TASK_ID|SLURM_ARRAY_TASK|%a", ctx.script.text):
     yield F("B03", f"--array={ctx.opt('array')}, but the script never uses $SLURM_ARRAY_TASK_ID", ctx.directive_line("array"))
 
-@rule("B04", WARNING, "Array tasks that write the same log",
-      "A job array with --output/--error that has no %a (task) in it.",
-      "All tasks write into the same file: the logs of the tasks overwrite or mix with each other.",
-      "Use %A (array job id) and %a (task id): --output=logs/%x_%A_%a.out.",
-      "#SBATCH --array=1-50\n#SBATCH --output=run.log          # all 50 in one file\n#SBATCH --output=logs/run_%A_%a.out")
-def b04(ctx):
-  if ctx.opt("array") is None:
-    return
-  for name in ("output", "error"):
-    v = ctx.opt(name)
-    if v and "%a" not in v and v != "/dev/null":
-      stem, ext = os.path.splitext(v)
-      yield F("B04", f"--{name}={v} has no %a: all array tasks write into it", ctx.directive_line(name),
-              snippet=f"#SBATCH --{name}={stem}_%A_%a{ext}")
-
 @rule("B05", WARNING, "A log name without the job id",
       "--output/--error with a fixed name (no %j or %A).",
       "Every run writes the same file: the log of the last run replaces the earlier ones, and two runs at the same "
@@ -432,7 +417,7 @@ def b04(ctx):
       "#SBATCH --output=out.txt\n#SBATCH --output=logs/%x_%j.out")
 def b05(ctx):
   if ctx.opt("array") is not None:
-    return # (B04)
+    return # (G07)
   for name in ("output", "error"):
     v = ctx.opt(name)
     if v and not re.search(r"%[jJA]", v) and v != "/dev/null" and "--open-mode" not in (ctx.script.text if ctx.script else ""):
@@ -1526,3 +1511,48 @@ def g19(ctx):
     if re.search(r"\$\{?0\}?(?!\d)|BASH_SOURCE", t) and re.search(r"dirname|realpath|readlink|\bcd\b|\$\(", t):
       yield F("G19", f"{t.strip()[:60]}: in a batch job this is Slurm's copy of the script, in its spool directory", line)
       return
+
+def array_log_name(value):
+  """The %A_%a form of a log name: %A before an existing %a, else _%A_%a before the extension"""
+  if "%a" in value and "%A" not in value:
+    return value.replace("%a", "%A_%a", 1)
+  stem, ext = os.path.splitext(value)
+  return f"{stem}_%A_%a{ext}"
+
+@rule("G07", WARNING, "Array logs name the array and the task (%A and %a)",
+      "The --output or --error of a job array without both %A (the array's job id) and %a (the task's index) in the "
+      "file name.",
+      "Without %a, the tasks of one array run at the same time and all write into the same file: their lines are mixed "
+      "or overwrite each other (a race), and no log tells about one task. Without %A, the next submission of the array "
+      "writes into the same files as the last one and overwrites its logs (and two arrays running at once race).",
+      "Name both: --output=logs/%x_%A_%a.out (and the same for --error). %j alone is unique too (every task has its "
+      "own job id), but %A_%a says which array and which task a log belongs to.",
+      "#SBATCH --array=1-100\n#SBATCH --output=run_%a.out          # the next run overwrites these\n"
+      "#SBATCH --output=logs/run_%A_%a.out   # one file per array and task", needs="any")
+def g07(ctx):
+  from .jobs import array_task_id
+  array = ctx.opt("array") if ctx.script is not None else None
+  is_task = ctx.job is not None and array_task_id(ctx.job) is not None
+  if array is None and not is_task:
+    return
+  for name in ("output", "error"):
+    v = ctx.opt(name) if ctx.script is not None else None
+    line = ctx.directive_line(name)
+    if v is None and is_task and ctx.script is None:
+      raw = ctx.job.rec.get("StdOut" if name == "output" else "StdErr") or ""
+      v = raw if raw and raw != "(null)" and "%" in raw else None # (the pattern of a task, as the accounting has it)
+      line = None
+    if not v or v == "/dev/null" or is_placeholder(v):
+      continue
+    has_a, has_A, has_j = "%a" in v, "%A" in v, bool(re.search(r"%[jJ]", v))
+    if has_a and has_A:
+      continue
+    if has_j:
+      yield F("G07", f"--{name}={v}: unique per task (%j), but %A_%a would say which array and task", line, INFO,
+              snippet=f"#SBATCH --{name}={array_log_name(v.replace('%j', '').replace('%J', '').replace('__', '_'))}")
+    elif not has_a:
+      yield F("G07", f"--{name}={v} has no %a: the tasks of the array write into the same file at the same time (race)",
+              line, snippet=f"#SBATCH --{name}={array_log_name(v)}")
+    else:
+      yield F("G07", f"--{name}={v} has no %A: the next run of the array overwrites these logs (and two runs at once race)",
+              line, snippet=f"#SBATCH --{name}={array_log_name(v)}")

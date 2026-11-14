@@ -51,7 +51,7 @@ def apply_fixes(text, findings):
         return i
     return None
 
-  if "B04" in ids or "B05" in ids:
+  if "G07" in ids or "B05" in ids:
     array = any(re.match(r"\s*#SBATCH\s+(--array|-a)\b", l) for l in lines)
     for option in ("output", "error"):
       i = directive_index(option)
@@ -62,14 +62,14 @@ def apply_fixes(text, findings):
         continue
       value = m.group(2)
       stem, ext = os.path.splitext(value)
-      if array and "%a" not in value:
-        new = f"{stem}_%A_%a{ext}"
+      if array and not ("%a" in value and "%A" in value) and not re.search(r"%[jJ]", value):
+        new = value.replace("%a", "%A_%a", 1) if "%a" in value else f"{stem}_%A_%a{ext}"
       elif not array and not re.search(r"%[jJA]", value):
         new = f"{stem}_%j{ext}"
       else:
         continue
       lines[i] = lines[i][:m.start(2)] + new + lines[i][m.end(2):]
-      done.append(f"B04/B05: --{option}={new}")
+      done.append(f"{'G07' if array else 'B05'}: --{option}={new}")
   if "B13" in ids:
     for i, l in enumerate(lines):
       if re.match(r"\s*#SBATCH\s+--mail-type", l) and "ARRAY_TASKS" in l:

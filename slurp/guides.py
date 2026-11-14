@@ -98,7 +98,7 @@ A job script should run the same for anyone, any time: log in, `sbatch job.sh`, 
 
 - **Arrays** run one script many times: `#SBATCH --array=1-100%10` (100 tasks, at most 10 at once). Each task has its
   `$SLURM_ARRAY_TASK_ID`: use it to pick the input ([B03](rule:B03)), and give each task its log with `%A_%a`
-  ([B04](rule:B04)). Arrays are much better than thousands of separate jobs or srun in a loop ([B14](rule:B14)).
+  ([G07](rule:G07)). Arrays are much better than thousands of separate jobs or srun in a loop ([B14](rule:B14)).
 - **Dependencies** chain jobs: `sbatch --dependency=afterok:<jobid> next.sh` starts `next.sh` when the first succeeded.
   `afterany` starts it whatever happened. If the first fails, an `afterok` job waits forever; add
   `--kill-on-invalid-dep=yes` ([B12](rule:B12)). `first=$(sbatch --parsable a.sh)` gives the id for the next one.
