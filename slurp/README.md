@@ -119,6 +119,13 @@ shell, except `Ctrl-]`, which goes back to the job list; `Ctrl-W` closes the
 subtab shown (outside a shell). Every tab can be closed, also the last one;
 then only the `+` button remains.
 
+Every window has a **?** at the right end of its top bar (dialogs in their
+top right corner), and the `?` key does the same: a window explains what the
+view shows, what it can do and its keys (taken from the view's own key
+bindings, so they are always current), with the keys that work everywhere and
+buttons to the guides and the rule catalogue. In a shell it opens the
+terminal help below.
+
 **ⓘ Help** in the bar of a shell (and `ⓘ` in the title bar of the login pane)
 explains that terminal: how to copy out of it (slurp has the mouse, so hold
 `Shift` while dragging, `Option` in iTerm2, `Fn` in macOS Terminal; `Ctrl+C`
@@ -503,7 +510,7 @@ top-left `←` button to go back.
 | Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `!` only jobs with problems; `n` new job script; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
 | Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (in slurp or your own terminal); Checks: `Check again`, `Check environment`, `Placement`, `Fixed copy…`, `What changed`, `Rule catalogue` |
 | Script view | `r` check again; `x` explain the `#SBATCH` lines; `e` edit; buttons `Check environment`, `Test`, `Fixed copy…`, `Submit…` |
-| Everywhere | `F1` guides; `F2` rule catalogue |
+| Everywhere | `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue |
 | Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |
