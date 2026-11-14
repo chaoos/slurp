@@ -393,7 +393,7 @@ class JobScreen(SplitScreen):
 
   def run_checks(self):
     view = self.query_one("#job-checks", FindingsView)
-    view.show_text(Text("checking the script and the job …", style="dim"))
+    view.busy(Text("checking the script and the job …", style="dim"))
     self.check_worker(self.job, self.live)
 
   @cluster_work("checks")

@@ -57,14 +57,29 @@ class FindingsView(Vertical):
   def compose(self):
     yield Static("", classes="fv-summary")
 
+  def busy(self, text):
+    """A check is running: say so in the summary line, the entries stay (and opened ones open) until its results"""
+    if not self.findings:
+      self.show_text(text)
+      return
+    self.query_one(".fv-summary", Static).update(text)
+
   def show_text(self, text):
     self.findings = []
     self.remove_children(Collapsible)
     self.query_one(".fv-summary", Static).update(text)
 
+  @staticmethod
+  def key(f):
+    return (f.rule.id, f.line, f.evidence, f.severity)
+
   def show(self, findings, note=""):
-    self.findings = list(findings)
-    self.remove_children(Collapsible)
+    """Show findings. A second phase of a check (the environment, seconds later) shows them again: the entries stay
+    as they are if nothing changed, and opened ones stay open; buttons belong to their finding, not to a position"""
+    findings = list(findings)
+    same = [self.key(f) for f in findings] == [self.key(f) for f in self.findings] and self.query(Collapsible)
+    expanded = {getattr(c, "finding_key", None) for c in self.query(Collapsible) if not c.collapsed}
+    self.findings = findings
     c = checks.counts(findings)
     if not findings:
       summary = Text("✓ no problems found", style="green")
@@ -81,22 +96,29 @@ class FindingsView(Vertical):
     if note:
       summary.append(f"  {note}", style="dim")
     self.query_one(".fv-summary", Static).update(summary)
+    if same:
+      return
+    self.remove_children(Collapsible)
     widgets = []
-    for i, f in enumerate(self.findings):
+    def button(label, cls, f, **kw):
+      b = Button(label, classes=cls, compact=True, **kw)
+      b.finding = f
+      return b
+    for f in self.findings:
       body = [Static(finding_body(f), classes="fv-body")]
       if f.snippet:
-        body.append(Horizontal(Static(code(f.snippet, "bash"), classes="fv-snippet"),
-                               Button("Copy", classes="fv-copy", name=str(i), compact=True), classes="fv-row"))
+        body.append(Horizontal(Static(code(f.snippet, "bash"), classes="fv-snippet"), button("Copy", "fv-copy", f), classes="fv-row"))
       buttons = []
       if self.line_buttons and f.line:
-        buttons.append(Button(f"Go to line {f.line}", classes="fv-line", name=str(i), compact=True))
-      buttons.append(Button(f"Mute {f.rule.id} everywhere", classes="fv-mute", name=str(i), compact=True,
+        buttons.append(button(f"Go to line {f.line}", "fv-line", f))
+      buttons.append(button(f"Mute {f.rule.id} everywhere", "fv-mute", f,
                             tooltip="never report this rule again (\"checks_muted\" in the config)"))
       if hasattr(self.screen, "mute_in_script"):
-        buttons.append(Button(f"Mute {f.rule.id} in this script", classes="fv-mute-script", name=str(i), compact=True,
-                              tooltip="adds # slurp: ignore to the script"))
+        buttons.append(button(f"Mute {f.rule.id} in this script", "fv-mute-script", f, tooltip="adds # slurp: ignore to the script"))
       body.append(Horizontal(*buttons, classes="fv-row"))
-      widgets.append(Collapsible(*body, title=finding_title(f), collapsed=True, classes=f"-{f.severity}"))
+      entry = Collapsible(*body, title=finding_title(f), collapsed=self.key(f) not in expanded, classes=f"-{f.severity}")
+      entry.finding_key = self.key(f)
+      widgets.append(entry)
     if widgets:
       self.mount_all(widgets)
 
@@ -109,14 +131,14 @@ class FindingsView(Vertical):
   def copy_snippet(self, event):
     event.stop()
     from ..screens.dialogs import copy_text
-    f = self.findings[int(event.button.name)]
+    f = event.button.finding
     copy_text(self.app, f.snippet, f"the fix for {f.rule.id}")
 
   @on(Button.Pressed, ".fv-mute")
   def mute(self, event):
     event.stop()
     from ..config import load_config, update_config
-    f = self.findings[int(event.button.name)]
+    f = event.button.finding
     muted = sorted(set(load_config().get("checks_muted", [])) | {f.rule.id})
     update_config(checks_muted=muted)
     self.app.notify(f"{f.rule.id} is muted (to report it again: remove it from \"checks_muted\" in the config)", timeout=6)
@@ -127,13 +149,13 @@ class FindingsView(Vertical):
   @on(Button.Pressed, ".fv-mute-script")
   def mute_script(self, event):
     event.stop()
-    f = self.findings[int(event.button.name)]
+    f = event.button.finding
     self.screen.mute_in_script(f.rule.id)
 
   @on(Button.Pressed, ".fv-line")
   def go_to_line(self, event):
     event.stop()
-    f = self.findings[int(event.button.name)]
+    f = event.button.finding
     handler = getattr(self.screen, "go_to_line", None)
     if handler:
       handler(f.line)

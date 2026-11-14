@@ -99,7 +99,7 @@ class ScriptScreen(SplitScreen):
   def check(self):
     """All checks: first those of the script, its paths and the quota (shown at once), then its environment (the setup
     replayed on the login node after a fresh login: seconds), added when done"""
-    self.query_one("#sc-findings", FindingsView).show_text(Text("checking the script …", style="dim"))
+    self.query_one("#sc-findings", FindingsView).busy(Text("checking the script …", style="dim"))
     if self.live_timer is not None: # (this check covers what the as-you-type one would)
       self.live_timer.stop()
       self.live_timer = None
