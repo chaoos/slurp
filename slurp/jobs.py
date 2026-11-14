@@ -744,6 +744,29 @@ def output_progress(path, tail=None):
     return None
   return JobProgress(*latest, points=points[-50:], path=path)
 
+PROGRESS_CHUNK = 200 # files per command that reads the progress
+PROGRESS_LINES_SCRIPT = (
+  # for each file: a marker, then the last lines of its tail that have an n/N (\r too ends a line, as progress bars
+  # write), so only these come back over the connection, not the whole tails
+  'for f; do printf "\\n%s\\n" "$0"; tail -c {bytes} -- "$f" 2>/dev/null | tr "\\r" "\\n" | tail -n {lines} '
+  '| grep -E "[0-9][[:space:]]*/[[:space:]]*[0-9]" | tail -n 60; done')
+
+def progress_tails(paths):
+  """The progress lines of many files in one round trip and few processes: {path: text with the last n/N lines
+  of its tail (output_progress parses it as the tail) or None (cannot be read)}"""
+  marker = f"==slurp-progress-{os.urandom(6).hex()}=="
+  script = PROGRESS_LINES_SCRIPT.format(bytes=PROGRESS_TAIL_BYTES, lines=PROGRESS_TAIL_LINES * 20)
+  chunks = [paths[i:i + PROGRESS_CHUNK] for i in range(0, len(paths), PROGRESS_CHUNK)]
+  return chunks, [["sh", "-c", script, marker, *chunk] for chunk in chunks], marker
+
+def parse_progress_tails(chunks, results, marker):
+  tails = {}
+  for chunk, res in zip(chunks, results):
+    parts = res.stdout.split("\n" + marker + "\n")[1:] if res.returncode in (0, 1) else []
+    for path, text in zip(chunk, parts):
+      tails[path] = text
+  return tails
+
 ERR_SIZES = {} # (tab, path) -> size of the error file of an ended job: it no longer changes, it is not asked again
 STAT_CHUNK = 200 # paths per stat command
 
@@ -767,8 +790,8 @@ def annotate(jobs):
   out_paths = sorted({p for job in jobs if job.running and (p := progress_path(job))})
   scripts = sorted({job.jid.split("_")[0]: job.jid for job in jobs if job.queued and not step_commands(job)}.items())
   chunks = [err_paths[i:i + STAT_CHUNK] for i in range(0, len(err_paths), STAT_CHUNK)]
-  cmds = ([["stat", "-L", "-c", "%s|%n", "--", *chunk] for chunk in chunks] +
-          [["tail", "-c", str(PROGRESS_TAIL_BYTES), "--", p] for p in out_paths] +
+  out_chunks, progress_cmds, marker = progress_tails(out_paths)
+  cmds = ([["stat", "-L", "-c", "%s|%n", "--", *chunk] for chunk in chunks] + progress_cmds +
           [["scontrol", "write", "batch_script", jid, "-"] for _, jid in scripts])
   results = run_many(cmds) if cmds else [] # (all in one round trip)
   for p in err_paths:
@@ -782,8 +805,8 @@ def annotate(jobs):
     if sizes[p] is not None:
       ERR_SIZES[(tab, p)] = sizes[p]
   results = results[len(chunks):]
-  tails = {p: res.stdout if res.returncode == 0 else None for p, res in zip(out_paths, results)}
-  cache = {key: res.stdout for (key, _), res in zip(scripts, results[len(out_paths):])}
+  tails = parse_progress_tails(out_chunks, results[:len(progress_cmds)], marker)
+  cache = {key: res.stdout for (key, _), res in zip(scripts, results[len(progress_cmds):])}
   for job in jobs:
     job.command = command_of(job, cache)
     job.err = err_status(job, sizes)
