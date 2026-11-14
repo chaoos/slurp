@@ -71,6 +71,7 @@ from . import remote, state
 from .config import load_config, update_config
 from .share import ShareManager, SFTP_SERVERS, MAX_FAILURES
 from .screens.links import ShellChoiceScreen, LinkSetupScreen, LinkScreen, DriveScreen
+from .screens.script import ScriptScreen # (registers the view of batch scripts)
 from . import mounts
 from .checks import check_jobs, counts as checks_counts, SEVERITY_ICON, SEVERITY_STYLE, ERROR, WARNING, INFO
 
