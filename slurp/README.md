@@ -314,8 +314,9 @@ it to slurp (`ssh -J`). A relay is nothing more than an SSH host that both ends
 can reach: it only passes bytes along, the session stays SSH encrypted from
 your terminal to slurp, and slurp's host key is checked end to end (on the
 first connect your ssh shows it; the link window shows its fingerprint,
-remembered under one name, so it asks only once). The relay is a setting (the
-setup panel, or `"link_relay"` in the settings):
+remembered under one name, so it asks only once). The setup panel lists the
+relays to choose from, each with a line on what it is and the details of the
+one chosen; the choice is a setting (`"link_relay"` in the settings):
 
 - **ssh-j.com**, the default and the prime example: a public relay, there for
   exactly this. It needs no account on either end: slurp registers each link
@@ -323,7 +324,22 @@ setup panel, or `"link_relay"` in the settings):
   the setup panel warns about what that means (anyone with the command and the
   password gets in as you; the relay sees that connections happen; your site's
   rules may not allow it). Another relay of that kind: `sshj://host`.
-- **Any OpenSSH server** that both ends reach, e.g. `me@relay.example.org`: a
+- **serveo.net**: public, no account, used the same way as ssh-j.com (a random
+  name there, `ssh -J`); slurp connects anonymously (none of your keys go
+  there).
+- **pinggy.io**: public, no account, but a different kind: it gives slurp's
+  server for the link a TCP port on the internet, and your ssh connects to
+  that host and port itself (no jump). Anyone on the internet can reach the
+  port and try the password (5 wrong ones lock the link, so a scanner may lock
+  it); a free tunnel lasts 60 minutes, then slurp opens a new one at another
+  address (copy the command again); the address names the public IP of slurp's
+  network.
+- **sshreach.me**: a service with an account (a trial, then paid): create a
+  client in its web interface, and give the user, forwarding server and port
+  its "manual control" page shows (`user@fw1.sshreach.me:10248`). slurp logs in
+  there with the key registered for the client and forwards that port; your
+  ssh connects to that server and port (no jump).
+- **custom / own relay**: any OpenSSH server both ends reach, e.g. `me@relay.example.org`: a
   plain jump host, nothing to install. slurp logs in to it with your key and
   asks it for a free port (`ssh -R 0:...`), so it must allow forwarding (the
   default); your ssh then needs a login there too (the same account, or

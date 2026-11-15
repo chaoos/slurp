@@ -216,12 +216,17 @@ function Unmap-Drive {
 
 function Start-Tunnel {
   if (Test-Path $TunnelLog) { Remove-Item $TunnelLog -Force -ErrorAction SilentlyContinue }
+  $batch = 'yes'
   if ($LinkRelayKind -eq 'ssh-j') {
     $known = "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$RelayHosts"
+  } elseif ($LinkRelayKind -eq 'serveo') {
+    # (anonymous at serveo.net: keyboard-interactive without prompts, which BatchMode refuses; no keys of yours there)
+    $known = "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$RelayHosts -o PubkeyAuthentication=no -o PasswordAuthentication=no -o PreferredAuthentications=keyboard-interactive"
+    $batch = 'no'
   } else {
     $known = ''
   }
-  $arguments = "-N -v -E `"$TunnelLog`" -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 " +
+  $arguments = "-N -v -E `"$TunnelLog`" -o BatchMode=$batch -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 " +
                "-o ServerAliveCountMax=3 $known -L 127.0.0.1:$($script:port):$($LinkTargetHost):$LinkTargetPort $LinkJump"
   $script:tunnel = Start-Hidden $Ssh $arguments
 }
@@ -264,12 +269,12 @@ function Begin-Map {
   if (-not $script:password) { $state.Text = 'Enter (or paste) the password of the link first.'; [void]$pw.Focus(); return }
   $script:drive = ''
   $script:target = [string]$letter.SelectedItem
-  if ($LinkRelayKind -eq 'direct') {
-    # (no relay: straight to slurp's machine)
+  if ($LinkRelayKind -eq 'direct' -or $LinkRelayKind -eq 'tcp') {
+    # (no tunnel: straight to slurp's machine, or to the public port of the relay)
     $script:port = $LinkTargetPort
     $script:sshhost = $LinkTargetHost
     $script:unchost = $LinkTargetHost
-    Say "connecting directly to $LinkTargetHost port $LinkTargetPort ..."
+    Say "connecting to $LinkTargetHost port $LinkTargetPort ..."
     $script:tries = 0
     Begin-Verify
     return

@@ -16,6 +16,16 @@ Relays (the setting "link_relay"):
   ssh -J <name>@ssh-j.com <user>@slurp ; <name> is random, links of other names are not reachable
 - "openssh" (any OpenSSH server both ends can log in to, e.g. me@relay.example.org): slurp runs  ssh <relay> -N -R 0:127.0.0.1:<port> , the relay picks a free port P
   and the client runs  ssh -J <relay> -p P <user>@localhost
+- "serveo" (serveo.net, public, no account): the same as ssh-j, the random name is the alias there: slurp runs
+  ssh <name>@serveo.net -N -R <name>:22:127.0.0.1:<port>  (keyboard-interactive without prompts: anonymous) and the
+  client  ssh -J <name>@serveo.net <user>@<name>
+- "pinggy" (free.pinggy.io, public, no account): a public TCP port: slurp runs
+  ssh -p 443 -T -R 0:127.0.0.1:<port> tcp@free.pinggy.io , which prints tcp://<host>:<P> ; the client runs
+  ssh -p P <user>@<host>  (no jump; anyone on the internet reaches the port; a free tunnel lasts 60 minutes, then it
+  comes back at another address)
+- "sshreach" (sshreach.me, an account): sshreach://<client user>@<forwarding server>:<P> from its web interface:
+  slurp runs  ssh <client user>@<server> -N -R P:127.0.0.1:<port>  (with the key registered there) and the client
+  ssh -p P <user>@<server>
 - "direct" (no relay: "direct", or direct://host[:port]): slurp's server listens on every interface of this machine
   (at that port, or a free one) and the client runs  ssh -p <port> <user>@<host> ; for a machine the client reaches
   itself (the same network, a VPN), without a third party; host is this machine's name unless given
@@ -48,7 +58,10 @@ except ImportError: # the feature is then unavailable, slurp works without it
   asyncssh = None
 
 PUBLIC_RELAY = "ssh-j.com"
+SERVEO = "serveo.net"
+PINGGY = "free.pinggy.io"
 DIRECT = "direct" # (a "relay" setting: no relay, the client connects to this machine itself)
+STRAIGHT = ("direct", "pinggy", "sshreach") # (relay types the client connects to without a jump: a host and a port)
 DEFAULT_RELAY = PUBLIC_RELAY
 MAX_FAILURES = 5          # wrong passwords (or keys) until a link is locked
 LINK_USER = "slurp"       # the user name in the commands (any name is accepted)
@@ -101,11 +114,18 @@ def host_alias():
   return "slurp-" + hashlib.sha256(host_fingerprint().encode()).hexdigest()[:8]
 
 def parse_relay(relay):
-  """("ssh-j", host), ("openssh", destination) or ("direct", "host[:port]" or "") for a relay setting ("ssh-j.com",
-  "sshj://host", "user@host", "direct", "direct://host:port" ...)"""
+  """("ssh-j", host), ("serveo", host), ("pinggy", host), ("sshreach", "user@server:port"), ("openssh", destination)
+  or ("direct", "host[:port]" or "") for a relay setting ("ssh-j.com", "sshj://host", "serveo.net", "pinggy",
+  "sshreach://user@server:port", "user@host", "direct", "direct://host:port" ...)"""
   relay = (relay or DEFAULT_RELAY).strip()
   if relay == DIRECT or relay.startswith(DIRECT + "://"):
     return DIRECT, relay.removeprefix(DIRECT).removeprefix("://").strip("/")
+  if relay in ("serveo", SERVEO):
+    return "serveo", SERVEO
+  if relay in ("pinggy", "pinggy.io", PINGGY):
+    return "pinggy", PINGGY
+  if relay.startswith("sshreach://"):
+    return "sshreach", relay.removeprefix("sshreach://").strip("/")
   if relay.startswith("sshj://"):
     return "ssh-j", relay.removeprefix("sshj://")
   if relay == PUBLIC_RELAY or relay.endswith("@" + PUBLIC_RELAY):
@@ -127,6 +147,27 @@ def direct_address(relay):
     host = socket.getfqdn()
   return host, port
 
+def sshreach_address(relay):
+  """(user, server, port) of an sshreach.me relay (what its web interface shows for the client); ValueError if not
+  valid"""
+  rest = parse_relay(relay)[1]
+  m = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9._-]{0,63})@([A-Za-z0-9][A-Za-z0-9.-]{0,252}):(\d{1,5})", rest)
+  if not m or not 1 <= int(m[3]) <= 65535:
+    raise ValueError("sshreach.me: give the client's user, its forwarding server and port, as user@fw1.sshreach.me:10248")
+  return m[1], m[2], int(m[3])
+
+def check_relay(relay):
+  """ValueError if a relay setting cannot work (direct, sshreach and own relays: their form)"""
+  kind, rest = parse_relay(relay)
+  if kind == DIRECT:
+    direct_address(relay)
+  elif kind == "sshreach":
+    sshreach_address(relay)
+  elif kind == "openssh" and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9.-]*)?", rest):
+    raise ValueError(f"{rest}: give the relay as host or user@host (an SSH server you log in to with a key)")
+  elif kind == "ssh-j" and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", rest):
+    raise ValueError(f"sshj://{rest}: not a host name")
+
 def direct_relay(host, port=0):
   """The relay setting of a direct link to host (the name the client knows this machine by) and port (0: a free one);
   ValueError if they are not valid"""
@@ -140,7 +181,9 @@ def direct_relay(host, port=0):
   return relay
 
 def is_public(relay):
-  return parse_relay(relay) == ("ssh-j", PUBLIC_RELAY)
+  """Run by a third party (a public relay, or a service with an account)"""
+  kind, host = parse_relay(relay)
+  return (kind, host) in (("ssh-j", PUBLIC_RELAY), ("serveo", SERVEO), ("pinggy", PINGGY)) or kind == "sshreach"
 
 def die_with_parent():
   """In the child, before exec: the kernel ends it when slurp ends, even when slurp crashes or is killed (Linux;
@@ -209,7 +252,8 @@ class Link:
   revoked: bool = False
   locked: bool = False
   port: int = 0                  # of slurp's server for it, on 127.0.0.1
-  relay_port: int = 0            # openssh relay: the port at the relay
+  relay_port: int = 0            # openssh relay: the port at the relay; pinggy: the public port
+  public_host: str = ""          # pinggy: the public host it gave
   relay_state: str = "starting"  # starting, connecting, ready, broken, closed
   relay_error: str = ""
   sessions: list = field(default_factory=list)
@@ -247,25 +291,49 @@ class Link:
 
   @property
   def relay_host(self):
-    """The relay, or for a direct link the host the client connects to"""
-    return direct_address(self.relay)[0] if self.relay_type == DIRECT else parse_relay(self.relay)[1]
+    """The relay (its host), or for a direct link the host the client connects to"""
+    kind = self.relay_type
+    if kind == DIRECT:
+      return direct_address(self.relay)[0]
+    if kind == "sshreach":
+      return sshreach_address(self.relay)[1]
+    return parse_relay(self.relay)[1]
 
   @property
   def direct(self):
+    """No relay: slurp's server listens on this machine's interfaces"""
     return self.relay_type == DIRECT
 
+  @property
+  def straight(self):
+    """The client connects to a host and port without a jump (direct, or a public TCP port of pinggy, sshreach)"""
+    return self.relay_type in STRAIGHT
+
+  @property
+  def client_kind(self):
+    """What the client does, for the Windows helper and the drive window: "ssh-j", "serveo", "openssh" (a jump to
+    the target), "direct" (to slurp's machine), "tcp" (to a public TCP port of a relay)"""
+    return {"pinggy": "tcp", "sshreach": "tcp"}.get(self.relay_type, self.relay_type)
+
   def jump(self):
-    """The -J argument of the client ("" for a direct link)"""
-    return "" if self.direct else f"{self.name}@{self.relay_host}" if self.relay_type == "ssh-j" else self.relay_host
+    """The -J argument of the client ("" without a jump)"""
+    if self.straight:
+      return ""
+    return f"{self.name}@{self.relay_host}" if self.relay_type in ("ssh-j", "serveo") else self.relay_host
 
   def target(self):
     """(host, port) the client connects to (behind the relay)"""
-    if self.direct:
+    kind = self.relay_type
+    if kind == DIRECT:
       return self.relay_host, self.port
-    return ("slurp", 22) if self.relay_type == "ssh-j" else ("localhost", self.relay_port)
+    if kind == "pinggy":
+      return self.public_host, self.relay_port
+    if kind == "sshreach":
+      return self.relay_host, sshreach_address(self.relay)[2]
+    return ("slurp", 22) if kind == "ssh-j" else (self.name, 22) if kind == "serveo" else ("localhost", self.relay_port)
 
   def ready(self):
-    return self.relay_state == "ready" and (self.relay_type == "ssh-j" or self.direct and self.port or self.relay_port)
+    return self.relay_state == "ready" and bool(self.target()[1]) and bool(self.target()[0])
 
 def client_commands(link):
   """What the user runs on their own machine: [(title, text, note)]. The commands are complete only when the relay
@@ -274,7 +342,7 @@ def client_commands(link):
   user = LINK_USER
   alias = host_alias()
   p = [] if port == 22 else ["-p", str(port)]
-  ssh_opts = [*([] if link.direct else ["-J", link.jump()]), *p, "-o", f"HostKeyAlias={alias}"]
+  ssh_opts = [*([] if link.straight else ["-J", link.jump()]), *p, "-o", f"HostKeyAlias={alias}"]
   out = []
   if link.kind == "web":
     local = 8000
@@ -287,7 +355,7 @@ def client_commands(link):
     out.append(("2. Then open in your browser", url,
                 "the same slurp as here. One view is active at a time: as long as this one is, the browser shows a lock "
                 "screen with Take over; a click on it (and Yes) makes the browser the active view"))
-    out.append(("PuTTY", f"{'host ' + host + ', port ' + str(port) if link.direct else 'the proxy settings as for a shell link'}, and Connection > SSH > Tunnels: source port {local}, "
+    out.append(("PuTTY", f"{'host ' + host + ', port ' + str(port) if link.straight else 'the proxy settings as for a shell link'}, and Connection > SSH > Tunnels: source port {local}, "
                 f"destination 127.0.0.1:{link.web_port}, Local, Add; Connection > SSH: Don't start a shell", "then the URL"))
     return out
   if link.kind == "shell":
@@ -295,7 +363,7 @@ def client_commands(link):
                 "works in a terminal, cmd or PowerShell; asks for the password"))
   else:
     mount = "~/" + re.sub(r"[^\w.-]", "_", link.tab or "cluster")
-    jump = ",".join([*([] if link.direct else [f"ProxyJump={link.jump()}"]), f"HostKeyAlias={alias}", "reconnect", "ServerAliveInterval=15",
+    jump = ",".join([*([] if link.straight else [f"ProxyJump={link.jump()}"]), f"HostKeyAlias={alias}", "reconnect", "ServerAliveInterval=15",
                      *([f"port={port}"] if port != 22 else [])])
     out.append(("Linux, macOS (sshfs): one command", f"mkdir -p {mount} && sshfs -o {jump} {user}@{host}:{shlex.quote(link.path)} {mount}",
                 f"asks for the password, then the drive is {mount}; unmount: fusermount -u {mount} (Linux), umount {mount} (macOS)"))
@@ -308,13 +376,12 @@ def client_commands(link):
                   "host key check, login, mapped), reconnects, and unmaps when closed. Needs SSHFS-Win and WinFsp (it "
                   "offers to install them). Too long for the Run dialog (Win+R): paste it into a terminal window"))
     local = 2222
-    if link.direct: # (no tunnel: SSHFS-Win connects to slurp's machine itself)
+    if link.straight: # (no tunnel: SSHFS-Win connects to that host and port itself)
       out.append(("Windows by hand (SSHFS-Win): map the drive", f"net use X: \\\\sshfs\\{user}@{host}!{port}",
                   "or in Explorer: Map network drive, folder \\\\sshfs\\" + f"{user}@{host}!{port}; "
                   f"Windows asks for the user ({user}) and the password of this link; the drive is your login directory"))
     else:
-      forward = (["-L", f"{local}:{host}:{port}", link.jump().split("@")[0] + "@" + link.relay_host] if link.relay_type == "ssh-j"
-                 else ["-L", f"{local}:localhost:{port}", link.relay_host])
+      forward = ["-L", f"{local}:{host}:{port}", link.jump()]
       out.append(("Windows by hand (SSHFS-Win), step 1: the tunnel, in a terminal (it asks nothing and stays open)",
                   shlex.join(["ssh", "-N", *forward]),
                   f"it connects to the relay and then only waits, carrying port {local} of your computer to slurp: no "
@@ -323,9 +390,9 @@ def client_commands(link):
                   f"net use X: \\\\sshfs\\{user}@localhost!{local}",
                   "or in Explorer: Map network drive, folder \\\\sshfs\\" + f"{user}@localhost!{local}; "
                   f"Windows asks for the user ({user}) and the password of this link; the drive is your login directory"))
-  if link.direct:
+  if link.straight:
     putty = f"Session: host {host}, port {port}; Connection > Data: auto-login user {user}"
-  elif link.relay_type == "ssh-j":
+  elif link.relay_type in ("ssh-j", "serveo"):
     putty = (f"Session: host {host}, port {port}; Connection > Proxy: type SSH, proxy host {link.relay_host}, port 22, "
              f"user {link.name}; Connection > Data: auto-login user {user}")
   else:
@@ -334,7 +401,7 @@ def client_commands(link):
   out.append(("PuTTY / WinSCP (jump host settings)" if link.kind == "drive" else "PuTTY", putty,
               "WinSCP: the same as Advanced > Connection > Tunnel" if link.kind == "drive" else "PuTTY 0.77 or newer"))
   lines = [f"Host {alias}-{link.id}", f"  HostName {host}", f"  User {user}",
-           *([] if link.direct else [f"  ProxyJump {link.jump()}"]), f"  HostKeyAlias {alias}"] + ([f"  Port {port}"] if port != 22 else [])
+           *([] if link.straight else [f"  ProxyJump {link.jump()}"]), f"  HostKeyAlias {alias}"] + ([f"  Port {port}"] if port != 22 else [])
   out.append(("~/.ssh/config entry", "\n".join(lines),
               f"then: ssh {alias}-{link.id}" + (f", sshfs {alias}-{link.id}:{link.path} <dir>, sftp://{alias}-{link.id}/ in a file manager"
                                                  if link.kind == "drive" else "")))
@@ -403,18 +470,31 @@ class ShareManager:
     while not link.finished:
       link.relay_state = "connecting"
       self.events("relay", link, None, "")
-      if link.relay_type == "ssh-j":
-        forward, dest = f"slurp:22:127.0.0.1:{link.port}", f"{link.name}@{link.relay_host}"
-        extra = ["-o", f"UserKnownHostsFile={os.path.join(config_dir(), 'relay_known_hosts')}", "-o", "StrictHostKeyChecking=accept-new"]
+      kind = link.relay_type
+      known = ["-o", f"UserKnownHostsFile={os.path.join(config_dir(), 'relay_known_hosts')}", "-o", "StrictHostKeyChecking=accept-new"]
+      anonymous = ["-o", "PubkeyAuthentication=no", "-o", "PasswordAuthentication=no"] # (no keys of the user to a public relay)
+      session, batch, extra = ["-N"], "yes", []
+      if kind == "ssh-j":
+        forward, dest, extra = f"slurp:22:127.0.0.1:{link.port}", f"{link.name}@{link.relay_host}", known
+      elif kind == "serveo": # (anonymous: keyboard-interactive with no prompts; BatchMode would refuse it)
+        forward, dest, batch = f"{link.name}:22:127.0.0.1:{link.port}", f"{link.name}@{link.relay_host}", "no"
+        extra = [*known, *anonymous, "-o", "PreferredAuthentications=keyboard-interactive"]
+      elif kind == "pinggy": # (it prints the public address in the session: no -N, its input kept open)
+        forward, dest, session = f"0:127.0.0.1:{link.port}", f"tcp@{link.relay_host}", []
+        extra = [*known, *anonymous, "-p", "443"]
+      elif kind == "sshreach":
+        user, server, rport = sshreach_address(link.relay)
+        forward, dest, extra = f"{rport}:127.0.0.1:{link.port}", f"{user}@{server}", known
       else:
-        forward, dest, extra = f"0:127.0.0.1:{link.port}", link.relay_host, []
-      argv = ["ssh", "-v", "-N", "-T", "-R", forward, "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=15",
-              "-o", "ServerAliveCountMax=3", "-o", "BatchMode=yes", "-o", "ControlPath=none", "-o", "ControlMaster=no",
+        forward, dest = f"0:127.0.0.1:{link.port}", link.relay_host
+      argv = ["ssh", "-v", *session, "-T", "-R", forward, "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=15",
+              "-o", "ServerAliveCountMax=3", "-o", f"BatchMode={batch}", "-o", "ControlPath=none", "-o", "ControlMaster=no",
               *extra, dest]
       log.debug(f"relay tunnel of link {link.id}: {shlex.join(argv)}")
       started = time.monotonic()
       try:
-        proc = link.tunnel = await asyncio.create_subprocess_exec(*argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        proc = link.tunnel = await asyncio.create_subprocess_exec(*argv, stdin=subprocess.PIPE if kind == "pinggy" else subprocess.DEVNULL,
+                                                                  stdout=subprocess.PIPE if kind == "pinggy" else subprocess.DEVNULL,
                                                                   stderr=subprocess.PIPE, start_new_session=True,
                                                                   preexec_fn=die_with_parent if sys.platform.startswith("linux") else None)
       except OSError as e:
@@ -422,22 +502,39 @@ class ShareManager:
         self.events("relay", link, None, link.relay_error)
         return
       last = []
+      def became_ready():
+        nonlocal delay
+        link.relay_state, link.relay_error, delay = "ready", "", 2
+        audit(f"link {link.id}: relay ready ({link.relay}" + (f", {link.public_host} port {link.relay_port})" if kind == "pinggy" else ")"))
+        self.events("relay", link, None, "")
+      async def public_address(): # (pinggy: tcp://host:port on its output)
+        while True:
+          line = await proc.stdout.readline()
+          if not line:
+            return
+          m = re.search(r"tcp://([A-Za-z0-9][A-Za-z0-9.-]*):(\d{1,5})\b", line.decode(errors="replace"))
+          if m and link.relay_state != "ready":
+            link.public_host, link.relay_port = m[1], int(m[2])
+            became_ready()
+      reader = asyncio.ensure_future(public_address()) if kind == "pinggy" else None
+      if kind == "pinggy":
+        link.public_host, link.relay_port = "", 0
       while True:
         line = await proc.stderr.readline()
         if not line:
           break
         text = line.decode(errors="replace").strip()
-        m = re.search(r"Allocated port (\d+) for remote forward", text)
+        m = re.search(r"Allocated port (\d+) for remote forward", text) if kind == "openssh" else None
         if m:
           link.relay_port = int(m.group(1))
-        if "remote forward success" in text or m:
-          if link.relay_type == "ssh-j" or link.relay_port:
-            link.relay_state, link.relay_error, delay = "ready", "", 2
-            audit(f"link {link.id}: relay ready ({link.relay})")
-            self.events("relay", link, None, "")
+        if ("remote forward success" in text or m) and kind != "pinggy":
+          if kind != "openssh" or link.relay_port:
+            became_ready()
         if not text.startswith("debug"):
           last = (last + [text])[-3:]
       await proc.wait()
+      if reader is not None:
+        reader.cancel()
       link.tunnel = None
       if link.finished:
         break

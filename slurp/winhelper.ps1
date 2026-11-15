@@ -167,7 +167,7 @@ function Parse-Link([string]$url) {
   $link = @{
     Kind = $kind
     Id = Need 'id' '^[0-9a-f]{8}$'
-    RelayKind = Need 'r' '^(ssh-j|openssh|direct)$'
+    RelayKind = Need 'r' '^(ssh-j|serveo|openssh|direct|tcp)$'
     RelayHost = Need 'rh' '^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$'
     Host = Need 'h' '^(slurp|localhost|[A-Za-z0-9][A-Za-z0-9.-]{0,252})$'
     Port = [int](Need 'p' '^\d{1,5}$')
@@ -182,8 +182,15 @@ function Parse-Link([string]$url) {
     Token = ''
   }
   if ($link.Title.Length -gt 120) { $link.Title = $link.Title.Substring(0, 120) + '...' }
-  if ($link.RelayKind -ne 'direct' -and $link.Host -notmatch '^(slurp|localhost)$') { throw "the link's host is not valid" }
-  if ($link.RelayKind -eq 'direct') { $link.Jump = '' }
+  # (a link names a host only without a jump: direct, or the public port of a relay; serveo: the link's name)
+  $link.Straight = ($link.RelayKind -eq 'direct' -or $link.RelayKind -eq 'tcp')
+  if ($link.RelayKind -eq 'serveo') {
+    $link.Jump = Need 'j' '^[0-9a-f]{24}@[A-Za-z0-9][A-Za-z0-9.-]*$'
+    if ($link.Host -cne $link.Jump.Split('@')[0] -or $link.Port -ne 22) { throw "the link's host is not valid" }
+  }
+  elseif (-not $link.Straight -and $link.Host -notmatch '^(slurp|localhost)$') { throw "the link's host is not valid" }
+  if ($link.Straight) { $link.Jump = '' }
+  elseif ($link.RelayKind -eq 'serveo') { }
   elseif ($link.RelayKind -eq 'ssh-j') { $link.Jump = Need 'j' '^[0-9a-f]{24}@[A-Za-z0-9][A-Za-z0-9.-]*$' }
   else { $link.Jump = Need 'j' '^[A-Za-z0-9][A-Za-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9._-]*)?$' }
   if ($link.Port -lt 1 -or $link.Port -gt 65535) { throw "the link's port is not valid" }
@@ -313,7 +320,7 @@ function New-Connection($link) {
   if ($link.Expires -gt 0) {
     $expires = ' · new logins until ' + [DateTimeOffset]::FromUnixTimeSeconds($link.Expires).LocalDateTime.ToString('ddd HH:mm')
   }
-  $detail = "$($KindWord[$c.Kind]) of $($link.Alias) · " + $(if ($link.RelayKind -eq 'direct') { "directly to $($link.Host):$($link.Port)" } else { "relay $($link.RelayHost)" }) + $(if ($link.ReadOnly) { ' · read only' } else { '' }) + $expires
+  $detail = "$($KindWord[$c.Kind]) of $($link.Alias) · " + $(if ($link.RelayKind -eq 'direct') { "directly to $($link.Host):$($link.Port)" } elseif ($link.RelayKind -eq 'tcp') { "relay $($link.RelayHost), at $($link.Host):$($link.Port)" } else { "relay $($link.RelayHost)" }) + $(if ($link.ReadOnly) { ' · read only' } else { '' }) + $expires
   $info.Text = "$($link.Title)`r`n$detail"
   $null = Add-Control $form $info 12 10 556 36
 
@@ -532,8 +539,14 @@ function Start-Tunnel($c) {
   $link = $c.Link
   Remove-Item (Join-Path $c.Dir 'tunnel.log') -Force -ErrorAction SilentlyContinue
   $known = ''
+  $batch = 'yes'
   if ($link.RelayKind -eq 'ssh-j') { $known = '-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=relay_hosts' }
-  $arguments = "-N -v -E tunnel.log -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 " +
+  if ($link.RelayKind -eq 'serveo') {
+    # (anonymous at serveo.net: keyboard-interactive without prompts, which BatchMode refuses; no keys of yours there)
+    $known = '-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=relay_hosts -o PubkeyAuthentication=no -o PasswordAuthentication=no -o PreferredAuthentications=keyboard-interactive'
+    $batch = 'no'
+  }
+  $arguments = "-N -v -E tunnel.log -o BatchMode=$batch -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 " +
                "-o ServerAliveCountMax=3 $known -L 127.0.0.1:$($c.Port):$($link.Host):$($link.Port) $($link.Jump)"
   $c.Tunnel = Start-Proc $Ssh $arguments $c.Dir
 }
@@ -584,12 +597,12 @@ function Begin-Connect($c) {
   if ($want) { [void]$c.Pending.Add($want) }
   $c.FedAt = $null
   $c.Tries = 0
-  if ($c.Link.RelayKind -eq 'direct') {
-    # (no relay: straight to slurp's machine, which must be reachable from here)
+  if ($c.Link.Straight) {
+    # (no tunnel: straight to slurp's machine, which must be reachable from here, or to the relay's public port)
     $c.Port = $c.Link.Port
     $c.Host = $c.Link.Host
     $c.UncHost = $c.Link.Host
-    Say $c "connecting directly to $($c.Host) port $($c.Port) ..."
+    Say $c "connecting $(if ($c.Link.RelayKind -eq 'direct') { 'directly ' } else { '' })to $($c.Host) port $($c.Port) ..."
     Begin-Verify $c
     return
   }
@@ -742,6 +755,7 @@ function Step($c) {
       if (-not $line) {
         if ($c.Tries -lt 3) { Say $c 'slurp did not answer yet, trying again ...'; Start-Sleep -Milliseconds 700; Begin-Verify $c; return }
         if ($link.RelayKind -eq 'direct') { Fail $c "slurp does not answer at $($c.Host) port $($c.Port): is this computer in a network that reaches it (VPN?), is slurp running, the link still valid?"; return }
+        if ($link.RelayKind -eq 'tcp') { Fail $c "slurp does not answer at $($c.Host) port $($c.Port): is slurp running, the link still valid? (A free pinggy tunnel lasts 60 minutes, then it has a new address: open the link from slurp again.)"; return }
         Fail $c 'slurp does not answer through the relay: is slurp running, and the link still valid (not revoked or expired)?'
         return
       }
@@ -1030,7 +1044,7 @@ function Get-StateWord($c) {
 
 function Get-Row($c) {
   $link = $c.Link
-  $route = $(if ($link.RelayKind -eq 'direct') { "direct $($link.Host):$($link.Port)" } else { "relay $($link.RelayHost)" })
+  $route = $(if ($link.RelayKind -eq 'direct') { "direct $($link.Host):$($link.Port)" } elseif ($link.RelayKind -eq 'tcp') { "$($link.RelayHost): $($link.Host):$($link.Port)" } else { "relay $($link.RelayHost)" })
   $details = switch ($c.Kind) {
     'drive' { $(if ($c.Maps.Count) { Get-DriveList $c } elseif ($c.Pending.Count) { "($($c.Pending[0].Letter) $($c.Pending[0].Path))" } else { '' }) }
     'web' { $(if ($c.Phase -eq 'connected' -and $c.WebLocal) { "http://localhost:$($c.WebLocal)" } else { '' }) }

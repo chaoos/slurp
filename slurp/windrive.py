@@ -23,7 +23,7 @@ def settings(link):
   host, port = link.target()
   values = {
     "LinkTitle": ps_string(link.title),
-    "LinkRelayKind": ps_string(link.relay_type),
+    "LinkRelayKind": ps_string(link.client_kind),
     "LinkRelayHost": ps_string(link.relay_host),
     "LinkJump": ps_string(link.jump()),
     "LinkTargetHost": ps_string(host),

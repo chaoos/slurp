@@ -18,25 +18,66 @@ from .. import share, winhelper
 from ..config import load_config, update_config
 from .dialogs import ConfirmScreen, copy_text
 
-PUBLIC_WARNING = (
-  "This link goes through {relay}, a PUBLIC relay run by a third party.\n"
+# the relay choices of the setup panel: (id, label, what it is in short); the details below when chosen
+RELAYS = [
+  ("direct", "direct", "no relay: your machine reaches this one itself"),
+  ("sshj", "ssh-j.com", "public, no account, the default: ssh jumps through"),
+  ("serveo", "serveo.net", "public, no account: the same way as ssh-j.com"),
+  ("pinggy", "pinggy.io", "public TCP port, no account; 60 minutes an address"),
+  ("sshreach", "sshreach.me", "a service with an account (a trial, then paid)"),
+  ("custom", "custom / own relay", "an SSH server both ends log in to (no third party)"),
+]
+
+PUBLIC_POINTS = (
   "• The relay cannot read the session: it stays SSH encrypted from your terminal to slurp. Check the host key "
   "fingerprint below when your ssh asks on the first connect.\n"
   "• Anyone who has the command and the password gets {what} as you on the cluster: do not share or post them, "
   "prefer one use and a short expiry.\n"
-  "• The relay sees that a connection happens, when, and how much data flows; it may go offline at any time.\n"
+  "• The relay sees that a connection happens, when, from where and how much data flows; it may go offline at any "
+  "time.\n"
   "• Your site's rules may not allow access through third-party relays.\n"
-  "A relay is just an SSH host both ends reach: any OpenSSH server you (and your machine) can log in to does the "
-  "same without a third party (user@host below, or \"link_relay\" in ~/.config/slurp/config.json); or direct, "
-  "if your machine reaches this one itself.")
-OWN_NOTE = ("Relay {relay}: a plain OpenSSH jump host that both ends reach. slurp logs in to it with your keys (no "
-            "prompts) and asks it for a free port; your terminal logs in there too and jumps through it to slurp.")
+  "A relay is just an SSH host both ends reach: your own (custom) does the same without a third party; direct needs "
+  "none, if your machine reaches this one itself.")
+PUBLIC_INTRO = {
+  "ssh-j": ("{relay}: a PUBLIC relay run by a third party, made for exactly this. No account on either end: slurp "
+            "registers this link there under a random name, your ssh jumps through {relay} to that name (ssh -J)."),
+  "serveo": ("serveo.net: a PUBLIC relay run by a third party, used like ssh-j.com: slurp registers this link there "
+             "under a random name (anonymously: no account, none of your keys are sent), your ssh jumps through "
+             "serveo.net to that name (ssh -J)."),
+  "pinggy": ("pinggy.io: a PUBLIC TCP tunnel run by a third party (free, no account). It gives slurp's server for this "
+             "link a port on the internet; your ssh connects to that host and port itself, no jump. Anyone on the "
+             "internet can reach that port and try the password (5 wrong ones lock the link: a scanner may lock it). "
+             "A free tunnel lasts 60 minutes, then slurp opens a new one at another address (copy the command, or "
+             "open the link in the helper, again). The address names the public IP of this machine's network."),
+  "sshreach": ("sshreach.me: a service run by a third party, with an account (a 10-day trial, then paid). Create a "
+               "client in its web interface; its page \"manual control\" shows the client's user, the forwarding "
+               "server and the port: give them as user@fw1.sshreach.me:10248. slurp logs in there with your key (the "
+               "one registered for the client) and forwards that port to itself; your ssh connects to that server "
+               "and port, no jump. Whoever reaches that port can try the password."),
+}
+OWN_NOTE = ("Relay {relay}: a plain OpenSSH jump host that both ends reach, no third party. slurp logs in to it with "
+            "your keys (no prompts) and asks it for a free port (it must allow forwarding, the default); your "
+            "terminal logs in there too and jumps through it to slurp. Or sshj://host: a relay that works like "
+            "ssh-j.com.")
 
 DIRECT_NOTE = ("Direct, no relay: your machine connects to {host} port {port} itself, so it must reach this machine (the "
                "same network, a VPN; no firewall in between). For this link slurp listens on that port on every "
                "interface of this machine (with an address as the host: only on that one); whoever reaches it can "
                "try the password (5 wrong ones lock the link). Host: the name your machine knows this one by (a "
                "fully qualified name, an alias, an address); slurp remembers it, and the port, for this machine.")
+
+def relay_choice(relay):
+  """The radio button of a relay setting: (id, the text of its field)"""
+  kind, rest = share.parse_relay(relay)
+  if kind == share.DIRECT:
+    return "direct", ""
+  if kind == "ssh-j":
+    return ("sshj", "") if rest == share.PUBLIC_RELAY else ("custom", f"sshj://{rest}")
+  if kind == "sshreach":
+    return "sshreach", rest
+  if kind in ("serveo", "pinggy"):
+    return kind, ""
+  return "custom", rest
 
 def relay_setting():
   return load_config().get("link_relay") or share.DEFAULT_RELAY
@@ -60,15 +101,17 @@ def direct_setting():
 def warning_text(relay, kind):
   what = ("a shell" if kind == "shell" else "this slurp itself, with all its tabs, shells and drives" if kind == "web"
           else "your files (read and write, unless read only)")
+  try:
+    share.check_relay(relay)
+  except ValueError as e:
+    return Text(str(e), style="red")
+  rtype, rest = share.parse_relay(relay)
   if share.is_public(relay):
-    return Text(PUBLIC_WARNING.format(relay=share.parse_relay(relay)[1], what=what), style="yellow")
-  if share.parse_relay(relay)[0] == share.DIRECT:
-    try:
-      host, port = share.direct_address(relay)
-    except ValueError as e:
-      return Text(str(e), style="red")
+    return Text(PUBLIC_INTRO[rtype].format(relay=rest) + "\n" + PUBLIC_POINTS.format(what=what), style="yellow")
+  if rtype == share.DIRECT:
+    host, port = share.direct_address(relay)
     return Text(DIRECT_NOTE.format(host=host, port=port or "(a free one)"), style="yellow")
-  return Text(OWN_NOTE.format(relay=relay), style="dim")
+  return Text(OWN_NOTE.format(relay=f"sshj://{rest}" if rtype == "ssh-j" else relay), style="dim")
 
 class ShellChoiceScreen(ModalScreen):
   """Where a shell opens: in slurp, or in the user's own terminal (a link). Asked every time."""
@@ -125,10 +168,12 @@ class LinkSetupScreen(ModalScreen):
   LinkSetupScreen { align: center middle; }
   #setup-dialog { width: 100; max-width: 98%; height: auto; max-height: 95%; border: thick $accent; background: $surface; padding: 0 1; }
   #setup-title { text-style: bold; margin: 1 0; }
-  #setup-body { height: auto; max-height: 1fr; }
+  #setup-body { height: auto; max-height: 70vh; } /* (the buttons stay in view; the rest scrolls) */
   .setup-row { height: auto; margin-bottom: 1; }
   .setup-row Label { width: 14; padding-top: 1; }
   .setup-row Input, .setup-row Select { width: 1fr; }
+  #setup-relays { width: 1fr; height: auto; border: none; padding: 0; }
+  #setup-relays RadioButton { width: 1fr; }
   #setup-warning { height: auto; margin-bottom: 1; padding: 0 1; border: round $warning; }
   #setup-key { height: 5; display: none; }
   #setup-buttons { height: auto; align-horizontal: right; margin: 1 0; }
@@ -164,18 +209,30 @@ class LinkSetupScreen(ModalScreen):
             yield Label("Read only")
             yield Switch(value=False, id="setup-ro", disabled=self.read_only_argv is None,
                          tooltip=None if self.read_only_argv else "the cluster's sftp-server was not found: not possible")
+        chosen, text = relay_choice(relay_setting())
+        stored = load_config()
         with Horizontal(classes="setup-row"):
           yield Label("Relay")
-          relay = relay_setting()
-          yield Input(share.DIRECT if share.parse_relay(relay)[0] == share.DIRECT else relay, id="setup-relay",
-                      tooltip="ssh-j.com (public), your own SSH jump host (user@host), or direct (no relay: your machine reaches this one itself)")
+          with RadioSet(id="setup-relays"):
+            for rid, label, short in RELAYS:
+              yield RadioButton(Text.assemble((label.ljust(19), "bold"), (short, "dim")), value=rid == chosen, id=f"setup-relay-{rid}")
+        with Horizontal(classes="setup-row setup-for-custom"):
+          yield Label("Relay host")
+          yield Input(text if chosen == "custom" else str(stored.get("link_relay_custom") or ""), id="setup-relay",
+                      placeholder="user@relay.example.org, or sshj://host",
+                      tooltip="an SSH server you (and your machine) log in to with a key: host or user@host")
+        with Horizontal(classes="setup-row setup-for-sshreach"):
+          yield Label("sshreach.me")
+          yield Input(text if chosen == "sshreach" else str(stored.get("link_sshreach") or ""), id="setup-sshreach",
+                      placeholder="user@fw1.sshreach.me:10248 (from its page: manual control)",
+                      tooltip="the client's user, the forwarding server and the port, as sshreach.me shows them")
         host, port = direct_setting()
-        with Horizontal(classes="setup-row setup-direct"):
+        with Horizontal(classes="setup-row setup-for-direct"):
           yield Label("Host")
           yield Input(host, id="setup-direct-host", placeholder=socket.getfqdn(),
                       tooltip="the name or address your machine connects to: this machine's fully qualified name, "
                               "or the one it has on your network or VPN")
-        with Horizontal(classes="setup-row setup-direct"):
+        with Horizontal(classes="setup-row setup-for-direct"):
           yield Label("Port")
           yield Input(port, id="setup-direct-port", type="integer", placeholder="a free one",
                       tooltip="a fixed port (e.g. one the firewall lets through), or empty for a free one")
@@ -202,36 +259,61 @@ class LinkSetupScreen(ModalScreen):
     self.show_warning()
     self.query_one("#setup-create", Button).focus()
 
-  def relay(self):
-    """The relay of the link to make (direct: with the host and port of the fields); ValueError if not valid"""
-    relay = self.query_one("#setup-relay", Input).value.strip() or share.DEFAULT_RELAY
-    if share.parse_relay(relay)[0] != share.DIRECT:
-      return relay
-    kind, rest = share.parse_relay(relay)
-    if rest: # (direct://host:port typed in the relay field: into the fields)
-      host, _, port = rest.partition(":")
-      self.query_one("#setup-relay", Input).value = share.DIRECT
-      self.query_one("#setup-direct-host", Input).value = host
-      self.query_one("#setup-direct-port", Input).value = port
-    return share.direct_relay(self.query_one("#setup-direct-host", Input).value or socket.getfqdn(),
-                              self.query_one("#setup-direct-port", Input).value)
+  def chosen(self):
+    """The id of the relay chosen (direct, sshj, serveo, pinggy, sshreach, custom)"""
+    pressed = self.query_one("#setup-relays", RadioSet).pressed_button
+    return pressed.id.removeprefix("setup-relay-") if pressed is not None else "sshj"
 
+  def relay(self):
+    """The relay setting of the link to make (direct: with the host and port of the fields); ValueError if not valid"""
+    chosen = self.chosen()
+    if chosen == "direct":
+      return share.direct_relay(self.query_one("#setup-direct-host", Input).value or socket.getfqdn(),
+                                self.query_one("#setup-direct-port", Input).value)
+    if chosen == "sshreach":
+      relay = "sshreach://" + self.query_one("#setup-sshreach", Input).value.strip().removeprefix("sshreach://")
+    elif chosen == "custom":
+      relay = self.query_one("#setup-relay", Input).value.strip()
+      if not relay:
+        raise ValueError("give the relay: user@host of an SSH server both ends log in to (or sshj://host)")
+      if share.parse_relay(relay)[0] != "openssh" and not relay.startswith("sshj://"):
+        raise ValueError(f"{relay}: that is one of the choices above, pick it there")
+    else:
+      relay = {"sshj": share.PUBLIC_RELAY, "serveo": share.SERVEO, "pinggy": "pinggy"}[chosen]
+    share.check_relay(relay)
+    return relay
+
+  @on(RadioSet.Changed, "#setup-relays")
   @on(Input.Changed, "#setup-relay")
+  @on(Input.Changed, "#setup-sshreach")
   @on(Input.Changed, "#setup-direct-host")
   @on(Input.Changed, "#setup-direct-port")
   def show_warning(self, event=None):
-    typed = self.query_one("#setup-relay", Input).value.strip() or share.DEFAULT_RELAY
-    direct = share.parse_relay(typed)[0] == share.DIRECT
-    for row in self.query(".setup-direct"):
-      row.display = direct
+    if isinstance(event, Input.Changed) and event.input.id == "setup-relay" and event.input.has_focus and event.value.strip():
+      # (typing ssh-j.com, direct://host:port ... into the custom field: that choice)
+      kind, rest = share.parse_relay(event.value)
+      target = relay_choice(event.value)[0] if kind != "openssh" else "custom"
+      if target == "direct" and rest:
+        host, _, port = rest.partition(":")
+        self.query_one("#setup-direct-host", Input).value, self.query_one("#setup-direct-port", Input).value = host, port
+      button = self.query_one(f"#setup-relay-{target}", RadioButton)
+      if not button.value:
+        button.value = True
+    chosen = self.chosen()
+    for rid in ("direct", "sshreach", "custom"):
+      for row in self.query(f".setup-for-{rid}"):
+        row.display = chosen == rid
     widget = self.query_one("#setup-warning", Static)
     try:
       relay = self.relay()
-    except ValueError as e:
-      widget.update(Text(str(e), style="red"))
+    except ValueError as e: # (what the choice is, then what is wrong)
+      about = {"sshreach": PUBLIC_INTRO["sshreach"], "custom": OWN_NOTE.format(relay="(user@host)"),
+               "direct": DIRECT_NOTE.format(host="(the host)", port="(the port)")}.get(chosen, "")
+      widget.update(Text.assemble((about + "\n", "dim") if about else "", (str(e), "red")))
+      relay = ""
     else:
       widget.update(warning_text(relay, self.kind))
-    widget.styles.border = ("round", "yellow" if share.is_public(typed) else "gray")
+    widget.styles.border = ("round", "yellow" if relay and share.is_public(relay) else "gray")
 
   @on(RadioSet.Changed, "#setup-auth")
   def auth_changed(self, event):
@@ -260,13 +342,19 @@ class LinkSetupScreen(ModalScreen):
                       uses=uses or None, expiry=None if expiry == -1 else expiry, auth="key" if by_key else "password",
                       public_key=key if by_key else "", path=self.path, read_only=read_only,
                       web_port=self.web[0] if self.web else 0, web_token=self.web[1] if self.web else "")
-    if share.parse_relay(relay)[0] == share.DIRECT: # (the relay "direct"; the host and port for this machine)
+    # (the relay is a setting: the next link uses it too; what the fields of the others say is kept as well)
+    rtype = share.parse_relay(relay)[0]
+    if rtype == share.DIRECT: # (the relay "direct"; the host and port for this machine)
       host, port = share.direct_address(relay)
       stored = dict(load_config().get("link_direct") or {})
       stored[machine()] = {"host": host, **({"port": port} if port else {})}
       update_config(link_relay=share.DIRECT, link_direct=stored)
+    elif rtype == "sshreach":
+      update_config(link_relay=relay, link_sshreach=share.parse_relay(relay)[1])
+    elif self.chosen() == "custom":
+      update_config(link_relay=relay, link_relay_custom=relay)
     elif relay != relay_setting():
-      update_config(link_relay=relay) # (the relay is a setting: the next link uses it too)
+      update_config(link_relay=relay)
     try:
       self.app.link_manager.create(link)
     except Exception as e:
@@ -285,6 +373,7 @@ def link_state(link, now=None):
   now = now or time.time()
   relay = {"starting": ("starting", "yellow"), "connecting": (f"connecting to the relay {link.relay_host}", "yellow"),
            "ready": (f"ready, directly at {link.relay_host} port {link.port}" if link.direct else
+                     f"ready, at {link.target()[0]} port {link.target()[1]} ({share.parse_relay(link.relay)[1].split('@')[-1].split(':')[0]})" if link.straight else
                      f"ready, via {link.relay_host}" + (f" port {link.relay_port}" if link.relay_port else ""), "green"),
            "broken": (f"relay lost: {link.relay_error} (trying again)", "red"), "closed": ("closed", "dim")}[link.relay_state]
   if link.open(now):
