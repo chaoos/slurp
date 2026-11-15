@@ -24,6 +24,7 @@ version may need the helper of the same version).
   shell, reconnect, disconnect, logs, copy the details, remove. The
   "Helper ..." button is gone (the tray's menu has the helper's settings).
 
+- Closed links say which way they went: "closed, was via ssh-j.com".
 
 ## 0.8.0 (beta), 2026-11-15
 

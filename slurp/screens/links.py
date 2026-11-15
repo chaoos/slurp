@@ -410,14 +410,18 @@ class LinkSetupScreen(ModalScreen):
 def link_state(link, now=None):
   """The state of a link in words, for its view and the connection window"""
   now = now or time.time()
+  # (the way it went: "ready, via ssh-j.com" while it is up, "closed, was via ssh-j.com" after)
+  route = (f"at https://{link.public_host} (Cloudflare)" if link.cloudflare and link.public_host else
+           "through Cloudflare" if link.cloudflare else
+           f"directly at {link.relay_host} port {link.port}" if link.direct else
+           f"at {link.target()[0]} port {link.target()[1]} ({share.parse_relay(link.relay)[1].split('@')[-1].split(':')[0]})" if link.straight and link.target()[0] else
+           f"via {share.parse_relay(link.relay)[1].split('@')[-1].split(':')[0]}" if link.straight else
+           f"via {link.relay_host}" + (f" port {link.relay_port}" if link.relay_port else ""))
   relay = {"starting": ("starting", "yellow"),
            "connecting": (f"connecting to Cloudflare{': ' + link.relay_note if link.relay_note else ''}" if link.cloudflare else
                           f"connecting to the relay {link.relay_host}", "yellow"),
-           "ready": (f"ready, at https://{link.public_host} (Cloudflare)" if link.cloudflare else
-                     f"ready, directly at {link.relay_host} port {link.port}" if link.direct else
-                     f"ready, at {link.target()[0]} port {link.target()[1]} ({share.parse_relay(link.relay)[1].split('@')[-1].split(':')[0]})" if link.straight else
-                     f"ready, via {link.relay_host}" + (f" port {link.relay_port}" if link.relay_port else ""), "green"),
-           "broken": (f"relay lost: {link.relay_error} (trying again)", "red"), "closed": ("closed", "dim")}[link.relay_state]
+           "ready": (f"ready, {route}", "green"),
+           "broken": (f"relay lost: {link.relay_error} (trying again)", "red"), "closed": (f"closed, was {route}", "dim")}[link.relay_state]
   if link.cloudflare: # (no logins to count)
     if not link.open(now):
       return Text(relay[0], style=relay[1]), Text(f"opens no more: {link.why_closed()}", style="dim")
