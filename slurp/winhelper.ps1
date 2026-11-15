@@ -4,10 +4,12 @@
 # the browser starts slurp-open.exe, which hands the link to this tray (a file in its inbox) and starts it if needed.
 #
 # A link is a shell, a drive or the web view of one slurp. For each one the tray shows a window:
-#   the password of the link (and the drive letter) -> the tunnel to the relay (ssh -N -L, no password) -> the
-#   host key of slurp through it (ssh-keyscan, against the fingerprint in the link, and the slurps known here) ->
-#   drive: net use (SSHFS-Win) and Explorer; web view: ssh -N -L (the password typed into its console by
-#   slurp-open.exe --feed) and the browser; shell: ssh in a terminal window (the same way)
+#   the password of the link (drive and web view; and the drive letter) -> the tunnel to the relay (ssh -N -L, no
+#   password) -> the host key of slurp through it (ssh-keyscan, against the fingerprint in the link, and the slurps
+#   known here) -> drive: net use (SSHFS-Win) and Explorer; web view: ssh -N -L (the password typed into its
+#   console by slurp-open.exe --feed) and the browser; shell: at once (nothing to ask) ssh in a terminal window,
+#   which asks for the password itself (the user types it there; the helper does not ask for it); the window hides
+#   when the shell's prompt shows (slurp-open.exe --watch, or ssh's log)
 # Windows of links that are open hide in the tray (its menu: open, show, disconnect); quitting closes them all.
 #
 # Kept simple on purpose: no line in this file starts with '@ (the setup embeds it in a here-string), no
@@ -219,7 +221,7 @@ function New-Connection($link) {
     Link = $link; Kind = $link.Kind; Phase = 'input'; Since = (Get-Date); LastTry = (Get-Date)
     Tunnel = $null; Keyscan = $null; NetUse = $null; Client = $null
     Port = 0; WebLocal = 0; Drive = ''; Target = ''; Password = ''; Tries = 0
-    Remap = $false; Verifying = $false; Mapping = $false; Feeder = $null; FedAt = $null; Typing = $false; LogNoted = $false; KeyLine = ''; Visible = $false; Ended = $false
+    Remap = $false; Verifying = $false; Mapping = $false; Feeder = $null; Watcher = $null; FedAt = $null; Typing = $false; LogNoted = $false; KeyLine = ''; Visible = $false; Ended = $false
   }
   $c.Dir = Join-Path $ConnDir ("$($link.Kind)-$($link.Id)-" + (Get-Date).ToString('HHmmss'))
   New-Item -ItemType Directory -Force -Path $c.Dir | Out-Null
@@ -258,25 +260,32 @@ function New-Connection($link) {
     $c.Letter = Add-Control $form $letter 170 $y 80 24
     $y += 34
   }
+  # (a shell has no password field: ssh asks for the password in the terminal window)
+  $askPw = ($c.Kind -ne 'shell')
   $lblPw = New-Object Windows.Forms.Label
   $lblPw.Text = 'Password of the link:'
+  $lblPw.Visible = $askPw
   $null = Add-Control $form $lblPw 12 ($y + 3) 150 20
   $pw = New-Object Windows.Forms.TextBox
   $pw.UseSystemPasswordChar = $true
+  $pw.Visible = $askPw
   $c.Pw = Add-Control $form $pw 170 $y 220 24
   $paste = New-Object Windows.Forms.Button
   $paste.Text = 'Paste'
   $paste.Tag = $c
+  $paste.Visible = $askPw
   $c.Paste = Add-Control $form $paste 398 ($y - 1) 70 26
   $show = New-Object Windows.Forms.CheckBox
   $show.Text = 'Show'
   $show.Tag = $c
+  $show.Visible = $askPw
   $c.Show = Add-Control $form $show 476 ($y + 2) 80 22
-  $y += 36
+  if ($askPw) { $y += 36 }
 
   $state = New-Object Windows.Forms.Label
   $state.Font = $UiBold
-  $state.Text = 'Paste the password of the link (slurp shows it), then ' + $GoText[$c.Kind] + '.'
+  if ($askPw) { $state.Text = 'Paste the password of the link (slurp shows it), then ' + $GoText[$c.Kind] + '.' }
+  else { $state.Text = 'Opening the terminal: it asks for the password of the link (slurp shows it).' }
   $c.State = Add-Control $form $state 12 $y 556 22
   $y += 26
   $steps = New-Object Windows.Forms.TextBox
@@ -326,7 +335,9 @@ function New-Connection($link) {
   $close.Add_Click({ param($s, $e) On-CloseButton $s.Tag })
   $form.Add_FormClosing({ param($s, $e) On-Closing $s.Tag $e })
   $form.Add_FormClosed({ param($s, $e) Remove-Connection $s.Tag })
-  $form.Add_Shown({ param($s, $e) $c = $s.Tag; Bring-Window $c; [void]$c.Pw.Focus() })
+  # (a shell has nothing to ask here: its terminal opens at once)
+  $form.Add_Shown({ param($s, $e) $c = $s.Tag; Bring-Window $c; if ($c.Pw.Visible) { [void]$c.Pw.Focus() } else { [void]$c.Go.Focus() }
+    if ($c.Kind -eq 'shell' -and $c.Phase -eq 'input') { Begin-Connect $c } })
 
   [void]$script:Conns.Add($c)
   Say $c "link $($link.Id) of $($link.Alias) (host key $($link.Fingerprint))"
@@ -388,6 +399,7 @@ function Set-Phase($c, $phase, $text) {
 
 function Stop-All($c) {
   Stop-Proc $c.Keyscan
+  Stop-Proc $c.Watcher
   Stop-Proc $c.NetUse
   Stop-Proc $c.Client
   Stop-Proc $c.Tunnel
@@ -457,7 +469,7 @@ function Begin-Connect($c) {
   }
   if ($c.Kind -eq 'drive' -and $c.Letter.SelectedIndex -lt 0) { Fail $c 'no free drive letter'; return }
   $c.Password = $c.Pw.Text.Trim()
-  if (-not $c.Password) { $c.State.Text = 'Paste (or type) the password of the link first.'; [void]$c.Pw.Focus(); return }
+  if (-not $c.Password -and $c.Kind -ne 'shell') { $c.State.Text = 'Paste (or type) the password of the link first.'; [void]$c.Pw.Focus(); return }
   if ($c.Kind -eq 'drive') { $c.Target = [string]$c.Letter.SelectedItem }
   $c.Drive = ''
   $c.FedAt = $null
@@ -489,16 +501,20 @@ function Begin-NetUse($c) {
 }
 
 # web view and shell: ssh to slurp through the tunnel; the host key is the one just checked (known_hosts of this
-# connection). slurp-open.exe --feed starts with ssh: it watches ssh's console for the password prompt and types the
-# password then. Whether the login worked does not rely on ssh's log (Windows may not let it be read while ssh runs):
-# the web view's local port answers (ssh opens it only after the login), a shell's ssh still runs a few seconds after
-# the password (a wrong one ends it: NumberOfPasswordPrompts=1).
+# connection). Web view: slurp-open.exe --feed starts with ssh: it watches ssh's console for the password prompt and
+# types the password then; whether the login worked does not rely on ssh's log (Windows may not let it be read while
+# ssh runs): the web view's local port answers (ssh opens it only after the login); a wrong password ends ssh
+# (NumberOfPasswordPrompts=1). Shell: ssh in its terminal window asks for the password itself, the user types it
+# there (3 tries, as ssh's default; 5 wrong passwords lock the link); the terminal is the user's from the start (it is
+# never ended for a timeout). slurp-open.exe --watch sees the shell's prompt after the password one (or ssh's log
+# says so): then this window hides.
 function Begin-Login($c, [switch]$Visible) {
   $link = $c.Link
   Remove-Item (Join-Path $c.Dir 'client.log') -Force -ErrorAction SilentlyContinue
+  $prompts = $(if ($c.Kind -eq 'shell') { 3 } else { 1 })
   $common = "-p $($c.Port) -E client.log -o LogLevel=DEBUG1 -o HostKeyAlias=$($link.Alias) -o UserKnownHostsFile=known_hosts " +
             "-o GlobalKnownHostsFile=known_hosts -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o PubkeyAuthentication=no " +
-            "-o PreferredAuthentications=password -o NumberOfPasswordPrompts=1 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
+            "-o PreferredAuthentications=password -o NumberOfPasswordPrompts=$prompts -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
   $c.FedAt = $null
   $c.Typing = $false
   $c.LogNoted = $false
@@ -510,7 +526,12 @@ function Begin-Login($c, [switch]$Visible) {
   } else {
     $arguments = "-o RequestTTY=yes $common $($link.User)@127.0.0.1"
     $c.Client = Start-Proc $Ssh $arguments $c.Dir -Visible
-    Say $c 'logging in, in a terminal window ...'
+    $c.Feeder = $null
+    $c.Typing = $true
+    Start-Watch $c
+    Say $c 'the terminal window is open: ssh asks for the password there'
+    Set-Phase $c 'login' 'Give the password in the terminal (right-click pastes). This window hides when you are in.'
+    return
   }
   if ($Visible) { $c.Feeder = $null; $c.Typing = $true }
   else { Start-Feed $c }
@@ -528,6 +549,23 @@ function Start-Feed($c) {
   } catch { Say $c "the password cannot be typed in for you: $($_.Exception.Message)" }
 }
 
+function Start-Watch($c) {
+  $c.Watcher = $null
+  if (-not $Native) { return }
+  try { $c.Watcher = Start-Proc $OpenExe "--watch $($c.Client.Id) 300" $c.Dir }
+  catch { Say $c "the login cannot be watched: $($_.Exception.Message)" }
+}
+
+# (the terminal is the user's: whatever the helper cannot see, it stays open, and so does this window)
+function Shell-In($c, $how) {
+  Stop-Proc $c.Watcher
+  $c.Watcher = $null
+  Say $c "logged in ($how)"
+  Connected $c 'The terminal is open, logged in (closing it ends the shell).' "Shell open: $($c.Link.Title)"
+  if ($c.Visible) { Hide-Window $c }
+}
+
+$WatchErrors = @{ 2 = "no console of ssh"; 5 = "no login within 5 minutes"; 6 = "its screen cannot be read" }
 $FeedErrors = @{ 2 = "no console of ssh"; 3 = "its input cannot be opened"; 4 = "the keys were not taken"; 5 = "no password prompt within 45 s"; 6 = "its screen cannot be read" }
 
 function Open-Result($c) {
@@ -617,12 +655,7 @@ function Step($c) {
         $code = $c.Feeder.ExitCode
         $c.Feeder = $null
         if ($code -eq 0) { Say $c 'password given'; $c.FedAt = Get-Date }
-        elseif ($c.Kind -eq 'shell') {
-          Say $c "the password could not be typed in for you ($($FeedErrors[[int]$code]), code $code): type or paste it in the terminal window"
-          $c.Typing = $true
-          Connected $c 'The terminal is open: give the password there (right-click pastes). Closing it ends the shell.' "Shell: give the password in its terminal"
-          return
-        } else {
+        else {
           Say $c "the password could not be typed in for you ($($FeedErrors[[int]$code]), code $code): a window opens where ssh asks for it"
           Stop-Proc $c.Client
           Begin-Login $c -Visible
@@ -630,21 +663,25 @@ function Step($c) {
         }
       }
       $authed = ($log -match 'Authenticated to|Authentication succeeded')
-      if (-not $authed -and $c.Kind -eq 'web' -and $c.WebLocal -and (Test-Port $c.WebLocal)) { $authed = $true }
-      if (-not $authed -and $c.Kind -eq 'shell' -and $c.FedAt -and ((Get-Date) - $c.FedAt).TotalSeconds -gt 4) { $authed = $true }
-      if ($authed) {
-        Say $c 'logged in'
-        if ($c.Kind -eq 'shell') {
-          Connected $c 'The terminal is open (closing it ends the shell).' "Shell open: $($link.Title)"
-          if ($c.Visible) { Hide-Window $c }
-        } else {
-          Set-Phase $c 'opening' 'Waiting for the web view ...'
+      if ($c.Kind -eq 'shell') {
+        if ($authed) { Shell-In $c "ssh's log"; return }
+        if ($c.Watcher -and $c.Watcher.HasExited) {
+          $code = $c.Watcher.ExitCode
+          $c.Watcher = $null
+          if ($code -eq 0) { Shell-In $c 'its prompt shows'; return }
+          Say $c "the helper cannot see the login in the terminal ($($WatchErrors[[int]$code]), code $code)"
+          Connected $c 'The terminal is open: give the password there (closing it ends the shell).' "Shell: $($link.Title)"
+          return
+        }
+        if ($age -gt 300 -or (-not $c.Watcher -and $age -gt 20)) {
+          Connected $c 'The terminal is open (the helper could not see the login; closing it ends the shell).' "Shell: $($link.Title)"
         }
         return
       }
-      if ($c.Kind -eq 'shell' -and $age -gt 60) {
-        # (never end a terminal the user may be working in: it is theirs from now on)
-        Connected $c 'The terminal is open (the helper could not see the login; closing it ends the shell).' "Shell: $($link.Title)"
+      if (-not $authed -and $c.Kind -eq 'web' -and $c.WebLocal -and (Test-Port $c.WebLocal)) { $authed = $true }
+      if ($authed) {
+        Say $c 'logged in'
+        Set-Phase $c 'opening' 'Waiting for the web view ...'
         return
       }
       if ($age -gt $(if ($c.Typing) { 180 } else { 60 })) { Fail $c 'the login took too long' }
@@ -708,6 +745,12 @@ function Step($c) {
         }
       } elseif ($c.Client.HasExited) {
         if ($c.Kind -eq 'shell') {
+          # (a failed login ends ssh and its terminal window: keep this window, with why, to try again)
+          $log = Read-Text (Join-Path $c.Dir 'client.log')
+          if ($log -match 'Permission denied|Too many authentication failures' -and $log -notmatch 'Authenticated to|Authentication succeeded') {
+            Fail $c "the login ended: $(Get-LogError (Join-Path $c.Dir 'client.log')) (wrong password, or the link takes no more logins: used, expired or revoked; 5 wrong passwords lock it). $($GoText[$c.Kind]) tries again."
+            return
+          }
           Say $c 'the shell ended'
           Log "shell $($link.Id): ended"
           Notify "Shell ended: $($link.Title)"

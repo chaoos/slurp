@@ -349,17 +349,21 @@ password link has **Open on my computer**. With slurp open in your browser
 the helper (the first time, it asks whether to: *always allow* saves the
 question). From a terminal, **Copy helper link**, then Win+R, paste, Enter.
 The helper shows a small window: the link's password (Paste) and, for a drive,
-the letter (the first free one). Then it connects through the relay, checks
-slurp's host key against the one in the link, and:
+the letter (the first free one); a shell asks for no password there. Then it
+connects through the relay, checks slurp's host key against the one in the
+link, and:
 
 - **drive**: maps it (SSHFS-Win, `net use`) and opens Explorer; it reconnects
   when the connection drops;
 - **web view**: an SSH tunnel to the web view (no window to keep open) and the
   browser at it;
-- **shell**: a terminal window with the shell.
+- **shell**: at once (nothing to ask), a terminal window with the shell,
+  where ssh asks for the password (you type or paste it there, once; 3
+  tries); the helper's window hides by itself as soon as the shell's prompt
+  shows.
 
-The password is not part of the link and not stored: the helper types it into
-ssh's prompt for you (or gives it to `net use`). What is open stays in the
+The password is not part of the link and not stored: for a web view the helper
+types it into ssh's prompt for you, for a drive it gives it to `net use`. What is open stays in the
 tray icon (^ next to the clock): its menu opens, shows and disconnects each
 one, and has *Start with Windows*, *Known slurps*, the folder with the logs,
 *Uninstall* and *Quit*. Closing a window asks whether to disconnect or keep it

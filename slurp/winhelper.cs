@@ -5,6 +5,8 @@
 //   slurp-open.exe [--tray]      starts the tray if it does not run (else: the tray shows its window)
 //   slurp-open.exe --feed PID    waits until the console of process PID shows a password prompt (ssh asks there:
 //                                it reads the console, not stdin), then types the line on its stdin and Enter
+//   slurp-open.exe --watch PID   waits until the console of process PID showed a password prompt and then something
+//                                else (the shell's prompt): the user logged in there (exit 0)
 // The tray (slurp-helper.ps1) runs in a PowerShell started without a console window (CREATE_NO_WINDOW). Not
 // "hidden": Windows would apply that state to the first window the tray shows.
 using System;
@@ -69,6 +71,8 @@ public static class SlurpOpen
   {
     try
     {
+      if (args.Length >= 2 && args[0] == "--watch")
+        return Watch(uint.Parse(args[1]), args.Length >= 3 ? int.Parse(args[2]) : 300);
       if (args.Length >= 2 && args[0] == "--feed")
         return Feed(uint.Parse(args[1]), Console.In.ReadLine() ?? "", args.Length >= 3 ? int.Parse(args[2]) : 60);
       try { AllowSetForegroundWindow(-1); } catch { }
@@ -140,11 +144,11 @@ public static class SlurpOpen
   }
 
   /// <summary>The line of the cursor and the one above it (a prompt may wrap); null if the screen cannot be read</summary>
-  static string CursorLines(IntPtr output)
+  static string CursorLines(IntPtr output, int above = 1)
   {
     SCREEN_INFO info;
     if (!GetConsoleScreenBufferInfo(output, out info) || info.SizeX <= 0) return null;
-    int top = Math.Max(0, info.CursorY - 1);
+    int top = Math.Max(0, info.CursorY - above);
     int count = info.SizeX * (info.CursorY - top + 1);
     char[] buffer = new char[count];
     uint read;
@@ -196,6 +200,58 @@ public static class SlurpOpen
         return 0;
       }
       finally { CloseHandle(input); }
+    }
+    finally { FreeConsole(); }
+  }
+
+  /// <summary>Waits (up to wait seconds) until the user logged in in the console of process pid: it showed a password
+  /// prompt, then a line at the cursor that is not one (nor "Permission denied") for a second, or nothing for 5 s
+  /// (a full screen program). 0: logged in; 2: no such console; 5: not in time; 6: screen unreadable</summary>
+  public static int Watch(uint pid, int wait)
+  {
+    FreeConsole();
+    if (!AttachConsole(pid)) return 2;
+    try
+    {
+      IntPtr output = CreateFileW("CONOUT$", 0xC0000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+      if (output == IntPtr.Zero || output == new IntPtr(-1)) return 6;
+      try
+      {
+        DateTime end = DateTime.UtcNow.AddSeconds(wait);
+        bool readable = false, prompted = false;
+        DateTime? other = null, blank = null;
+        string last = null;
+        while (DateTime.UtcNow < end)
+        {
+          string lines = CursorLines(output);
+          string line = CursorLines(output, 0);
+          if (lines != null && line != null)
+          {
+            readable = true;
+            line = line.Trim();
+            bool asks = line.IndexOf("password:", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool denied = lines.IndexOf("Permission denied", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (asks) { prompted = true; other = null; blank = null; }
+            else if (prompted && line != "" && !denied)
+            {
+              if (line != last || other == null) other = DateTime.UtcNow;
+              blank = null;
+              if (DateTime.UtcNow - other.Value > TimeSpan.FromSeconds(1)) return 0;
+            }
+            else if (prompted && line == "" && !denied)
+            {
+              other = null;
+              if (blank == null) blank = DateTime.UtcNow;
+              if (DateTime.UtcNow - blank.Value > TimeSpan.FromSeconds(5)) return 0;
+            }
+            else { other = null; blank = null; }
+            last = line;
+          }
+          Thread.Sleep(200);
+        }
+        return readable ? 5 : 6;
+      }
+      finally { CloseHandle(output); }
     }
     finally { FreeConsole(); }
   }

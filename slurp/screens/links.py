@@ -389,7 +389,7 @@ class LinkScreen(ModalScreen):
     self.dismiss()
 
 HELPER_DOES = {"drive": "maps the drive (pick its letter) and opens it in Explorer",
-               "shell": "opens a terminal window with the shell",
+               "shell": "opens a terminal window with the shell at once (it asks for the password there)",
                "web": "opens this slurp in your browser (the tunnel runs in the helper, no window to keep open)"}
 
 HELPER_TEXT = """\
@@ -416,8 +416,9 @@ updates it. **Remove it:** tray menu → *Uninstall*.
 Optional features*). A drive also needs WinFsp and SSHFS-Win: the helper offers to install them (winget).
 
 **How it connects** (as the commands of the link window do): a tunnel to the relay (no password), then it checks
-slurp's host key through it against the one in the link, then logs in with the password you give it. The password is
-not in the link and not stored: the helper types it into ssh's prompt for you (or into `net use` for a drive).
+slurp's host key through it against the one in the link, then logs in with the password you give it: in its window for
+a drive or the web view, in the terminal for a shell (ssh asks there). The password is not in the link and not stored:
+the helper types it into ssh's prompt for you for the web view, or gives it to `net use` for a drive.
 """
 
 class HelperSetupScreen(ModalScreen):

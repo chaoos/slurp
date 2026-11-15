@@ -3,8 +3,9 @@
 slurp makes a link (shell, drive, web view) as before; its link window then also offers it as a slurp:// URL. In
 slurp's web view, "Open on my computer" hands that URL to the browser, which starts the helper (it asks once whether
 to); elsewhere it can be copied (Win+R, paste, Enter). The helper (winhelper.ps1) asks for the password (and the
-drive letter), connects through the relay, checks slurp's host key and then maps the drive and opens Explorer,
-opens the browser at the web view, or opens a terminal with the shell. What it has open stays in the tray.
+drive letter; not for a shell, whose terminal asks for it), connects through the relay, checks slurp's host key and
+then maps the drive and opens Explorer, opens the browser at the web view, or opens a terminal with the shell. What it
+has open stays in the tray.
 
 The setup is one PowerShell script (a command to paste, or a .cmd file to download from the web view). It writes
 the helper into %LOCALAPPDATA%\\slurp-helper, compiles its small launcher (winhelper.cs) on the user's machine (no
