@@ -3,8 +3,8 @@
 // It is a window program (no console window, no Windows Terminal tab) and does three things:
 //   slurp-open.exe slurp://...   puts the link into the inbox of the tray (a file), starts the tray if it does not run
 //   slurp-open.exe [--tray]      starts the tray if it does not run (else: the tray shows its window)
-//   slurp-open.exe --feed PID    types the line on its stdin (a password) into the console of process PID (ssh
-//                                asks for the password there: it reads the console, not stdin)
+//   slurp-open.exe --feed PID    waits until the console of process PID shows a password prompt (ssh asks there:
+//                                it reads the console, not stdin), then types the line on its stdin and Enter
 // The tray (slurp-helper.ps1) runs in a PowerShell started without a console window (CREATE_NO_WINDOW). Not
 // "hidden": Windows would apply that state to the first window the tray shows.
 using System;
@@ -24,6 +24,9 @@ public static class SlurpOpen
   [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
   static extern bool WriteConsoleInputW(IntPtr handle, INPUT_RECORD[] records, uint count, out uint written);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern short VkKeyScanW(char ch);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetConsoleScreenBufferInfo(IntPtr handle, out SCREEN_INFO info);
+  [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+  static extern bool ReadConsoleOutputCharacterW(IntPtr handle, [Out] char[] buffer, uint length, uint coord, out uint read);
   [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int pid);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
@@ -46,6 +49,14 @@ public static class SlurpOpen
     [FieldOffset(4)] public KEY_EVENT_RECORD KeyEvent;
   }
 
+  [StructLayout(LayoutKind.Sequential)]
+  struct SCREEN_INFO // CONSOLE_SCREEN_BUFFER_INFO
+  {
+    public short SizeX, SizeY, CursorX, CursorY;
+    public ushort Attributes;
+    public short Left, Top, Right, Bottom, MaxX, MaxY;
+  }
+
   const string TrayMutex = "Local\\slurp-helper-tray";
 
   public static string Folder()
@@ -59,7 +70,7 @@ public static class SlurpOpen
     try
     {
       if (args.Length >= 2 && args[0] == "--feed")
-        return Feed(uint.Parse(args[1]), Console.In.ReadLine() ?? "");
+        return Feed(uint.Parse(args[1]), Console.In.ReadLine() ?? "", args.Length >= 3 ? int.Parse(args[2]) : 60);
       try { AllowSetForegroundWindow(-1); } catch { }
       string message = "show";
       if (args.Length > 0 && args[0].StartsWith("slurp:", StringComparison.OrdinalIgnoreCase))
@@ -128,13 +139,44 @@ public static class SlurpOpen
     return r;
   }
 
-  /// <summary>Types text and Enter into the console of process pid. 0: done; 2: no such console; 3: no input; 4: not written</summary>
-  public static int Feed(uint pid, string text)
+  /// <summary>The line of the cursor and the one above it (a prompt may wrap); null if the screen cannot be read</summary>
+  static string CursorLines(IntPtr output)
+  {
+    SCREEN_INFO info;
+    if (!GetConsoleScreenBufferInfo(output, out info) || info.SizeX <= 0) return null;
+    int top = Math.Max(0, info.CursorY - 1);
+    int count = info.SizeX * (info.CursorY - top + 1);
+    char[] buffer = new char[count];
+    uint read;
+    if (!ReadConsoleOutputCharacterW(output, buffer, (uint)count, (uint)(top << 16), out read)) return null;
+    return new string(buffer, 0, (int)read);
+  }
+
+  /// <summary>Waits (up to wait seconds) until the console of process pid shows "password:" at its cursor, then types
+  /// text and Enter. 0: done; 2: no such console; 3: no input; 4: not written; 5: no prompt in time; 6: screen unreadable</summary>
+  public static int Feed(uint pid, string text, int wait)
   {
     FreeConsole();
     if (!AttachConsole(pid)) return 2;
     try
     {
+      IntPtr output = CreateFileW("CONOUT$", 0xC0000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+      if (output == IntPtr.Zero || output == new IntPtr(-1)) return 6;
+      try
+      {
+        DateTime end = DateTime.UtcNow.AddSeconds(wait);
+        bool readable = false;
+        while (true)
+        {
+          string lines = CursorLines(output);
+          if (lines != null) readable = true;
+          if (lines != null && lines.IndexOf("password:", StringComparison.OrdinalIgnoreCase) >= 0) break;
+          if (DateTime.UtcNow > end) return readable ? 5 : 6;
+          Thread.Sleep(150);
+        }
+      }
+      finally { CloseHandle(output); }
+      Thread.Sleep(100);
       IntPtr input = CreateFileW("CONIN$", 0xC0000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero); // read|write, share r|w, open existing
       if (input == IntPtr.Zero || input == new IntPtr(-1)) return 3;
       try

@@ -233,7 +233,7 @@ function New-Connection($link) {
     Link = $link; Kind = $link.Kind; Phase = 'input'; Since = (Get-Date); LastTry = (Get-Date)
     Tunnel = $null; Keyscan = $null; NetUse = $null; Client = $null
     Port = 0; WebLocal = 0; Drive = ''; Target = ''; Password = ''; Tries = 0
-    Remap = $false; Verifying = $false; Mapping = $false; Fed = $false; KeyLine = ''; Visible = $false; Ended = $false
+    Remap = $false; Verifying = $false; Mapping = $false; Feeder = $null; FedAt = $null; Typing = $false; LogNoted = $false; KeyLine = ''; Visible = $false; Ended = $false
   }
   $c.Dir = Join-Path $ConnDir ("$($link.Kind)-$($link.Id)-" + (Get-Date).ToString('HHmmss'))
   New-Item -ItemType Directory -Force -Path $c.Dir | Out-Null
@@ -474,7 +474,7 @@ function Begin-Connect($c) {
   if (-not $c.Password) { $c.State.Text = 'Paste (or type) the password of the link first.'; [void]$c.Pw.Focus(); return }
   if ($c.Kind -eq 'drive') { $c.Target = [string]$c.Letter.SelectedItem }
   $c.Drive = ''
-  $c.Fed = $false
+  $c.FedAt = $null
   $c.Tries = 0
   $c.Port = Get-FreePort
   Say $c "connecting to the relay $($c.Link.RelayHost) (local port $($c.Port)) ..."
@@ -503,14 +503,19 @@ function Begin-NetUse($c) {
 }
 
 # web view and shell: ssh to slurp through the tunnel; the host key is the one just checked (known_hosts of this
-# connection), the password is typed into ssh's console when ssh asks for it (its log says so)
+# connection). slurp-open.exe --feed starts with ssh: it watches ssh's console for the password prompt and types the
+# password then. Whether the login worked does not rely on ssh's log (Windows may not let it be read while ssh runs):
+# the web view's local port answers (ssh opens it only after the login), a shell's ssh still runs a few seconds after
+# the password (a wrong one ends it: NumberOfPasswordPrompts=1).
 function Begin-Login($c, [switch]$Visible) {
   $link = $c.Link
   Remove-Item (Join-Path $c.Dir 'client.log') -Force -ErrorAction SilentlyContinue
   $common = "-p $($c.Port) -E client.log -o LogLevel=DEBUG1 -o HostKeyAlias=$($link.Alias) -o UserKnownHostsFile=known_hosts " +
             "-o GlobalKnownHostsFile=known_hosts -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o PubkeyAuthentication=no " +
             "-o PreferredAuthentications=password -o NumberOfPasswordPrompts=1 -o ServerAliveInterval=15 -o ServerAliveCountMax=3"
-  $c.Fed = $false
+  $c.FedAt = $null
+  $c.Typing = $false
+  $c.LogNoted = $false
   if ($c.Kind -eq 'web') {
     $c.WebLocal = Get-FreePort
     $arguments = "-N -o ExitOnForwardFailure=yes -L 127.0.0.1:$($c.WebLocal):127.0.0.1:$($link.WebPort) $common $($link.User)@127.0.0.1"
@@ -521,19 +526,23 @@ function Begin-Login($c, [switch]$Visible) {
     $c.Client = Start-Proc $Ssh $arguments $c.Dir -Visible
     Say $c 'logging in, in a terminal window ...'
   }
+  if ($Visible) { $c.Feeder = $null; $c.Typing = $true }
+  else { Start-Feed $c }
   Set-Phase $c 'login' 'Logging in (password) ...'
 }
 
-function Send-Password($c) {
-  if (-not $Native) { return 9 }
+function Start-Feed($c) {
+  $c.Feeder = $null
+  if (-not $Native) { Say $c 'slurp-open.exe is missing: the password cannot be typed in for you'; return }
   try {
-    $f = Start-Proc $OpenExe "--feed $($c.Client.Id)" $c.Dir -Stdin
+    $f = Start-Proc $OpenExe "--feed $($c.Client.Id) 45" $c.Dir -Stdin
     $f.StandardInput.WriteLine($c.Password)
     $f.StandardInput.Close()
-    if (-not $f.WaitForExit(5000)) { Stop-Proc $f; return 8 }
-    return $f.ExitCode
-  } catch { return 7 }
+    $c.Feeder = $f
+  } catch { Say $c "the password cannot be typed in for you: $($_.Exception.Message)" }
 }
+
+$FeedErrors = @{ 2 = "no console of ssh"; 3 = "its input cannot be opened"; 4 = "the keys were not taken"; 5 = "no password prompt within 45 s"; 6 = "its screen cannot be read" }
 
 function Open-Result($c) {
   if ($c.Kind -eq 'drive' -and $c.Drive) { Start-Process explorer.exe "$($c.Drive)\" }
@@ -601,33 +610,43 @@ function Step($c) {
       break
     }
     'login' {
-      $log = Read-Text (Join-Path $c.Dir 'client.log')
+      $logFile = Join-Path $c.Dir 'client.log'
+      $log = Read-Text $logFile
+      if (-not $c.LogNoted -and $age -gt 3) {
+        $c.LogNoted = $true
+        $size = 0
+        try { $size = (Get-Item $logFile -ErrorAction Stop).Length } catch { }
+        Log "$($c.Kind) $($link.Id): ssh's log: $size bytes, $($log.Length) readable"
+      }
       if ($c.Client.HasExited) {
         $hint = ''
-        if ($log -match 'Permission denied|Too many authentication failures') {
+        if ($log -match 'Permission denied|Too many authentication failures' -or ($c.FedAt -and -not $log)) {
           $hint = ' (wrong password, or the link takes no more logins: used, expired or revoked; 5 wrong passwords lock it)'
           $c.Pw.Text = ''
         }
-        Fail $c "the login ended: $(Get-LogError (Join-Path $c.Dir 'client.log'))$hint"
+        Fail $c "the login ended: $(Get-LogError $logFile)$hint"
         return
       }
-      if (-not $c.Fed -and $log -match 'Next authentication method: password') {
-        $c.Fed = $true
-        Start-Sleep -Milliseconds 250
-        $code = Send-Password $c
-        if ($code -eq 0) { Say $c 'password given' }
+      if ($c.Feeder -and $c.Feeder.HasExited) {
+        $code = $c.Feeder.ExitCode
+        $c.Feeder = $null
+        if ($code -eq 0) { Say $c 'password given'; $c.FedAt = Get-Date }
         elseif ($c.Kind -eq 'shell') {
-          Say $c "the password could not be typed in for you (code $code): type or paste it in the terminal window"
-          $c.State.Text = 'Type the password in the terminal window (right-click pastes) ...'
+          Say $c "the password could not be typed in for you ($($FeedErrors[[int]$code]), code $code): type or paste it in the terminal window"
+          $c.Typing = $true
+          Connected $c 'The terminal is open: give the password there (right-click pastes). Closing it ends the shell.' "Shell: give the password in its terminal"
+          return
         } else {
-          Say $c "the password could not be typed in for you (code $code): a window opens where ssh asks for it"
+          Say $c "the password could not be typed in for you ($($FeedErrors[[int]$code]), code $code): a window opens where ssh asks for it"
           Stop-Proc $c.Client
           Begin-Login $c -Visible
-          $c.Fed = $true
+          return
         }
-        return
       }
-      if ($log -match 'Authenticated to|Authentication succeeded') {
+      $authed = ($log -match 'Authenticated to|Authentication succeeded')
+      if (-not $authed -and $c.Kind -eq 'web' -and $c.WebLocal -and (Test-Port $c.WebLocal)) { $authed = $true }
+      if (-not $authed -and $c.Kind -eq 'shell' -and $c.FedAt -and ((Get-Date) - $c.FedAt).TotalSeconds -gt 4) { $authed = $true }
+      if ($authed) {
         Say $c 'logged in'
         if ($c.Kind -eq 'shell') {
           Connected $c 'The terminal is open (closing it ends the shell).' "Shell open: $($link.Title)"
@@ -637,7 +656,12 @@ function Step($c) {
         }
         return
       }
-      if ($age -gt 60) { Fail $c 'the login took longer than 60 s' }
+      if ($c.Kind -eq 'shell' -and $age -gt 60) {
+        # (never end a terminal the user may be working in: it is theirs from now on)
+        Connected $c 'The terminal is open (the helper could not see the login; closing it ends the shell).' "Shell: $($link.Title)"
+        return
+      }
+      if ($age -gt $(if ($c.Typing) { 180 } else { 60 })) { Fail $c 'the login took too long' }
       break
     }
     'opening' {
