@@ -588,8 +588,9 @@ link when done. Cloudflare ends the HTTPS, so unlike an SSH relay it can read
 what passes. A quick tunnel has no uptime guarantee; when it is lost slurp
 opens a new one, at a new address. slurp shows the address once it is in
 DNS (a browser that asks too early would keep "no such name" for minutes).
-The first time, slurp downloads `cloudflared` (about 40 MB, from Cloudflare's
-releases on GitHub) into `~/.local/share/slurp/bin`, unless one is on `PATH`
+The first time, slurp asks, then downloads `cloudflared` (about 40 MB, from
+Cloudflare's releases on GitHub) into `~/.local/share/slurp/bin` (the link
+window shows *downloading cloudflared* and *installing cloudflared*), unless one is on `PATH`
 or the config names one (`"cloudflared": "/path/to/cloudflared"`). It uses
 HTTP/2 over TCP (port 7844), as QUIC (UDP) is often blocked: on Alps
 (daint) it is. The web links remember their relay apart from shells and

@@ -63,9 +63,11 @@ def version(path):
   m = re.search(r"version (\S+)", out)
   return m[1] if m else ""
 
-def download(progress=lambda done, total: None):
+SIZE = "about 40 MB" # (what the download is, for the question before it)
+
+def download(progress=lambda done, total: None, installing=lambda: None):
   """Downloads cloudflared into the data directory (blocking: run it in a thread); returns its path. It is kept only
-  if it runs (cloudflared --version)."""
+  if it runs (cloudflared --version): installing() is called before that check."""
   name = asset()
   if name is None:
     raise RuntimeError(available() or "no cloudflared to download here")
@@ -83,6 +85,7 @@ def download(progress=lambda done, total: None):
         out.write(chunk)
         done += len(chunk)
         progress(done, total)
+    installing()
     os.chmod(part, 0o755)
     if not version(part):
       raise RuntimeError("the downloaded cloudflared does not run here")

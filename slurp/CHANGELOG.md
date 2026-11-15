@@ -6,8 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
-- Web links through Cloudflare: a quick tunnel (cloudflared, downloaded once,
-  no account) gives the web view a public https address that opens in any
+- Web links through Cloudflare: a quick tunnel (cloudflared, no account; slurp
+  asks, then downloads it once, and the link window shows downloading and
+  installing it) gives the web view a public https address that opens in any
   browser, with nothing to install on your side and no password.
 - The web view needs the token in the URL every time; no cookie from an
   earlier visit opens it (each page load gets a one-use ticket).

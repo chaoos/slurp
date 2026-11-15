@@ -70,7 +70,7 @@ CLOUDFLARE_NOTE = (
   "• Cloudflare ends the HTTPS: unlike an SSH relay it can read everything that passes (the screen, your keys).\n"
   "• A quick tunnel is meant for testing: no uptime guarantee. When it is lost slurp opens a new one, at a new "
   "address.\n"
-  "• The first time slurp downloads cloudflared (about 40 MB, from Cloudflare's releases on GitHub) into "
+  "• The first time slurp asks, then downloads cloudflared (about 40 MB, from Cloudflare's releases on GitHub) into "
   "~/.local/share/slurp/bin, unless one is on PATH or set in the config (\"cloudflared\").\n"
   "• Your site's rules may not allow access through third-party services.")
 
@@ -365,6 +365,24 @@ class LinkSetupScreen(ModalScreen):
     except ValueError as e:
       self.notify(str(e), severity="error")
       return
+    if relay == share.CLOUDFLARE:
+      from .. import cloudflare
+      if cloudflare.binary() is None: # (nothing is downloaded without asking)
+        def answered(yes):
+          if yes:
+            self.make_link(relay)
+        self.app.push_screen(ConfirmScreen(
+          "Download cloudflared?",
+          f"A web link through Cloudflare needs cloudflared, Cloudflare's tunnel client (one program, {cloudflare.SIZE}). "
+          f"It is not on this machine yet. slurp downloads it from Cloudflare's releases on GitHub "
+          f"({cloudflare.RELEASES}{cloudflare.asset()}) into {cloudflare.data_dir()}, checks that it runs, and uses it "
+          "from there for every Cloudflare link (nothing is installed system-wide; delete the file to remove it). "
+          "The link window shows the download.\n\nOr put cloudflared on PATH, or name it in the config "
+          "(\"cloudflared\": \"/path/to/cloudflared\").", "Download", variant="primary"), answered)
+        return
+    self.make_link(relay)
+
+  def make_link(self, relay):
     uses = self.query_one("#setup-uses", Select).value
     expiry = self.query_one("#setup-expiry", Select).value
     by_key = self.query_one("#setup-auth-key", RadioButton).value and relay != share.CLOUDFLARE
@@ -418,6 +436,8 @@ def link_state(link, now=None):
            f"via {share.parse_relay(link.relay)[1].split('@')[-1].split(':')[0]}" if link.straight else
            f"via {link.relay_host}" + (f" port {link.relay_port}" if link.relay_port else ""))
   relay = {"starting": ("starting", "yellow"),
+           "downloading": ("downloading cloudflared" + (f": {link.relay_note}" if link.relay_note else " …"), "yellow"),
+           "installing": ("installing cloudflared (checking that it runs here) …", "yellow"),
            "connecting": (f"connecting to Cloudflare{': ' + link.relay_note if link.relay_note else ''}" if link.cloudflare else
                           f"connecting to the relay {link.relay_host}", "yellow"),
            "ready": (f"ready, {route}", "green"),

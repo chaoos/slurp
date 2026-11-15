@@ -271,7 +271,7 @@ class Link:
   relay_port: int = 0            # openssh relay: the port at the relay; pinggy: the public port
   public_host: str = ""          # pinggy, cloudflare: the public host it gave
   relay_note: str = ""           # what happens while it starts (cloudflare: downloading cloudflared)
-  relay_state: str = "starting"  # starting, connecting, ready, broken, closed
+  relay_state: str = "starting"  # starting, (cloudflare: downloading, installing,) connecting, ready, broken, closed
   relay_losses: list = field(default_factory=list) # (monotonic) when the relay tunnel was lost (then it reconnects)
   relay_error: str = ""
   sessions: list = field(default_factory=list)
@@ -387,6 +387,8 @@ def link_health(link):
     return None, "closed"
   if state == "broken":
     return "bad", "relay lost"
+  if state in ("downloading", "installing"):
+    return "warn", f"{state} cloudflared"
   if state in ("starting", "connecting"):
     return ("bad", "relay lost, reconnecting") if recent else ("warn", "connecting")
   if recent:
@@ -648,18 +650,22 @@ class ShareManager:
       link.relay_state, link.public_host, link.relay_port = "connecting", "", 0
       self.events("relay", link, None, "")
       path = cloudflare.binary()
-      if path is None:
-        def progress(done, total):
-          link.relay_note = f"downloading cloudflared: {done >> 20} of {total >> 20 or '?'} MB"
-        link.relay_note = "downloading cloudflared"
+      if path is None: # (the setup panel asked first: Download)
+        def progress(done, total): # (in the download's thread: plain values, shown by the link's window)
+          link.relay_note = f"{done >> 20} of {total >> 20 or '?'} MB"
+        def installing():
+          link.relay_state, link.relay_note = "installing", ""
+        link.relay_state, link.relay_note = "downloading", ""
+        self.events("relay", link, None, "")
         try:
-          path = await asyncio.to_thread(cloudflare.download, progress)
+          path = await asyncio.to_thread(cloudflare.download, progress, installing)
         except Exception as e:
           link.relay_state, link.relay_error, link.relay_note = "broken", f"cannot get cloudflared: {e}", ""
           self.events("relay", link, None, link.relay_error)
           return
         audit(f"link {link.id}: downloaded cloudflared {cloudflare.version(path)} to {path}")
-        link.relay_note = ""
+        link.relay_state, link.relay_note = "connecting", ""
+        self.events("relay", link, None, "")
       argv = cloudflare.argv(path, link.web_port)
       log.debug(f"cloudflare tunnel of link {link.id}: {shlex.join(argv)}")
       started = time.monotonic()
