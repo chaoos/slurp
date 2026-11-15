@@ -339,6 +339,43 @@ links and sessions, and quitting with open sessions asks first. Every link and
 session is written to `~/.local/state/slurp/links.log` (never a password);
 slurp's host key is `~/.config/slurp/link_host_key`.
 
+### The slurp helper on Windows: one click and the password
+
+A tray program for Windows 10 and 11 that opens links: the link window of a
+password link has **Open on my computer**. With slurp open in your browser
+(remote web access), that hands a `slurp://` link to the browser, which starts
+the helper (the first time, it asks whether to: *always allow* saves the
+question). From a terminal, **Copy helper link**, then Win+R, paste, Enter.
+The helper shows a small window: the link's password (Paste) and, for a drive,
+the letter (the first free one). Then it connects through the relay, checks
+slurp's host key against the one in the link, and:
+
+- **drive**: maps it (SSHFS-Win, `net use`) and opens Explorer; it reconnects
+  when the connection drops;
+- **web view**: an SSH tunnel to the web view (no window to keep open) and the
+  browser at it;
+- **shell**: a terminal window with the shell.
+
+The password is not part of the link and not stored: the helper types it into
+ssh's prompt for you (or gives it to `net use`). What is open stays in the
+tray icon (^ next to the clock): its menu opens, shows and disconnects each
+one, and has *Start with Windows*, *Known slurps*, the folder with the logs,
+*Uninstall* and *Quit*. Closing a window asks whether to disconnect or keep it
+in the tray.
+
+**Set it up once** (no admin rights): **Set up the helper…** in a link
+window. **Download the setup** (with slurp in your browser) gives
+`slurp-helper-setup.cmd` to run (Windows may warn about a file from the
+internet: *More info → Run anyway*); **Copy the setup command** is the same as
+a command to paste into PowerShell. It puts the helper into
+`%LOCALAPPDATA%\slurp-helper`, compiles its small launcher `slurp-open.exe`
+there from the source code in the setup (no program is downloaded), registers
+`slurp://` for your Windows user, starts it with Windows, adds a start menu
+entry, and remembers this slurp's host key: a link of another slurp asks
+before it is used. Setting it up again updates it. It needs the OpenSSH Client
+of Windows (an optional feature, there by default on Windows 11); a drive also
+needs WinFsp and SSHFS-Win, which it offers to install with winget.
+
 Links need the Python package `asyncssh` (`python -m pip install asyncssh`);
 without it slurp says so in the Shell dialog and works as before. A drive uses
 the cluster's `sftp-server` (read only needs it; otherwise the cluster's
