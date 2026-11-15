@@ -159,6 +159,7 @@ class Link:
   auth: str = "password"         # or "key"
   public_key: str = ""           # the authorized key (auth "key")
   path: str = ""                 # a drive: its directory (the login directory)
+  dirs: list = field(default_factory=list) # a drive: [(name, path)] of $HOME, $SCRATCH, ...: the helper offers them
   read_only: bool = False
   web_port: int = 0              # a web link: the port of the web view on 127.0.0.1 (the only place it forwards to)
   web_token: str = ""            # a web link: the token of the web view's URL

@@ -353,8 +353,12 @@ the letter (the first free one); a shell asks for no password there. Then it
 connects through the relay, checks slurp's host key against the one in the
 link, and:
 
-- **drive**: maps it (SSHFS-Win, `net use`) and opens Explorer; it reconnects
-  when the connection drops;
+- **drive**: maps a folder of the cluster (SSHFS-Win, `net use`) and opens
+  Explorer. Its list has `$HOME`, `$SCRATCH`, `$PROJECT`, `$STORE` and `$WORK`
+  (those that are set, with their paths) and `/`; or type a path (absolute,
+  `$SCRATCH/run1`, or relative to `$HOME`). **Map another** maps more folders,
+  on other letters, through the same connection. It reconnects them all when
+  the connection drops;
 - **web view**: an SSH tunnel to the web view (no window to keep open) and the
   browser at it;
 - **shell**: at once (nothing to ask), a terminal window with the shell,

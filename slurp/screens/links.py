@@ -388,7 +388,7 @@ class LinkScreen(ModalScreen):
       event.stop()
     self.dismiss()
 
-HELPER_DOES = {"drive": "maps the drive (pick its letter) and opens it in Explorer",
+HELPER_DOES = {"drive": "maps a folder ($HOME, $SCRATCH, $PROJECT, … or one you type; more on other letters) and opens it in Explorer",
                "shell": "opens a terminal window with the shell at once (it asks for the password there)",
                "web": "opens this slurp in your browser (the tunnel runs in the helper, no window to keep open)"}
 

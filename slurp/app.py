@@ -907,12 +907,14 @@ class Slurp(App):
       return c.command_argv(list(args or []), interactive=interactive)
     return argv
 
-  def open_link_setup(self, kind, title, cluster, argv, path="", read_only_argv=None):
+  def open_link_setup(self, kind, title, cluster, argv, path="", read_only_argv=None, dirs=None):
     if cluster.destination and (cluster.connection is None or not cluster.connection.ready):
       self.notify(f"{cluster.name}: log in first", severity="warning")
       return
     def created(link):
       if link is not None:
+        if dirs:
+          link.dirs = list(dirs)
         self.push_screen(LinkScreen(link))
         self.refresh_status()
     self.push_screen(LinkSetupScreen(kind, title, cluster.name, argv, path=path, read_only_argv=read_only_argv), created)
@@ -925,15 +927,16 @@ class Slurp(App):
       return
     home = cluster.connection.home if cluster.destination else os.path.expanduser("~")
     probe = "for p; do [ -x \"$p\" ] && echo \"$p\" && exit 0; done; exit 0"
-    def found(out):
+    def found(result):
+      out, dirs = result or ("", [])
       path = (out or "").strip().splitlines()[0] if (out or "").strip() else ""
       cluster.sftp_server = path
       local_reason = ("this is the local tab: its files are already here" if not cluster.destination else mounts.available())
       def chosen(where):
         if where == "link":
-          link_setup(path)
+          link_setup(path, dirs)
       self.push_screen(DriveScreen(cluster, home, local_reason), chosen)
-    def link_setup(path):
+    def link_setup(path, dirs):
       if not path and not cluster.destination:
         self.notify("no sftp-server on this machine: a drive is not possible", severity="error")
         return
@@ -947,9 +950,16 @@ class Slurp(App):
           return c.subsystem_argv("sftp")
         return subsystem
       self.open_link_setup("drive", f"{cluster.name} {home}", cluster, make(False), path=home,
-                           read_only_argv=make(True) if path else None)
-    in_background(self, lambda: run(["sh", "-c", probe, "sh", *SFTP_SERVERS]), found, group="sftp-server",
-                  connection=cluster.connection)
+                           read_only_argv=make(True) if path else None, dirs=dirs)
+    def probe_all(): # the sftp-server, and the folders the helper offers ($HOME, $SCRATCH, ...)
+      from .storage import drive_dirs
+      out = run(["sh", "-c", probe, "sh", *SFTP_SERVERS])
+      try:
+        dirs = drive_dirs(home)
+      except Exception:
+        dirs = [("HOME", home)] if home else []
+      return out, dirs
+    in_background(self, probe_all, found, group="sftp-server", connection=cluster.connection)
 
   def link_event(self, kind, link, session, message):
     """Logins, wrong passwords and the state of the links, as notifications (they must not go unnoticed)"""

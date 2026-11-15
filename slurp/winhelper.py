@@ -43,6 +43,8 @@ def link_url(link):
     query["ro"] = "1"
   if link.kind == "drive" and link.path:
     query["path"] = link.path
+  if link.kind == "drive" and link.dirs: # (the folders the helper offers: NAME=/path, one per line)
+    query["dirs"] = "\n".join(f"{name}={path}" for name, path in link.dirs if "\n" not in path)
   if link.kind == "web":
     query["wp"] = str(link.web_port)
     query["tok"] = link.web_token

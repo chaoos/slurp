@@ -12,6 +12,26 @@ from .jobs import current_user
 
 STORAGE_VARS = ("SCRATCH", "HOME", "PROJECT", "STORE", "WORK")
 
+DRIVE_VARS = ("HOME", "SCRATCH", "PROJECT", "STORE", "WORK") # the folders a drive offers, in this order
+
+def drive_dirs(home=""):
+  """The folders a drive link offers (the Windows helper's list): [(name, path)] of $HOME, $SCRATCH, $PROJECT, $STORE
+  and $WORK that are set on the cluster (also in a login shell, where clusters often set them)"""
+  script = "for v in " + " ".join(DRIVE_VARS) + '; do eval "p=\\${$v:-}"; [ -n "$p" ] && printf "SLURP-DIR %s=%s\\n" "$v" "$p"; done; true'
+  def parse(out):
+    found = {}
+    for line in (out or "").splitlines(): # (a login shell may print more: only the marked lines)
+      key, _, value = line.removeprefix("SLURP-DIR ").partition("=")
+      if line.startswith("SLURP-DIR ") and key in DRIVE_VARS and value.startswith("/") and "\n" not in value:
+        found[key] = value.rstrip("/") or "/"
+    return found
+  found = parse(run(["sh", "-c", script], quiet=True))
+  if "SCRATCH" not in found or "PROJECT" not in found:
+    found = parse(run(["bash", "-lc", script], quiet=True, timeout=30)) | found
+  if home:
+    found["HOME"] = home
+  return [(v, found[v]) for v in DRIVE_VARS if v in found]
+
 def storage_dirs():
   """The directories of the usual storage variables ({name: path}) and the Lustre mounts, on the cluster"""
   script = "for v in " + " ".join(STORAGE_VARS) + '; do eval "p=\\${$v:-}"; [ -n "$p" ] && printf "%s=%s\\n" "$v" "$p"; done; ' \

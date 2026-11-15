@@ -6,7 +6,8 @@
 # A link is a shell, a drive or the web view of one slurp. For each one the tray shows a window:
 #   the password of the link (drive and web view; and the drive letter) -> the tunnel to the relay (ssh -N -L, no
 #   password) -> the host key of slurp through it (ssh-keyscan, against the fingerprint in the link, and the slurps
-#   known here) -> drive: net use (SSHFS-Win) and Explorer; web view: ssh -N -L (the password typed into its
+#   known here) -> drive: net use (SSHFS-Win) of the folder picked ($HOME, $SCRATCH, ... or typed in; more
+#   folders later, on other letters, through the same tunnel) and Explorer; web view: ssh -N -L (the password typed into its
 #   console by slurp-open.exe --feed) and the browser; shell: at once (nothing to ask) ssh in a terminal window,
 #   which asks for the password itself (the user types it there; the helper does not ask for it); the window hides
 #   when the shell's prompt shows (slurp-open.exe --watch, or ssh's log)
@@ -66,7 +67,7 @@ function Get-FreeLetters {
   $used = @()
   try { $used += @([IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1).ToUpper() }) } catch { }
   $used += @(Get-ChildItem 'HKCU:\Network' -ErrorAction SilentlyContinue | ForEach-Object { $_.PSChildName.ToUpper() })
-  foreach ($c in $script:Conns) { if ($c.Drive) { $used += $c.Drive.Substring(0, 1) } }
+  foreach ($c in $script:Conns) { foreach ($m in @($c.Maps) + @($c.Pending)) { if ($m) { $used += $m.Letter.Substring(0, 1) } } }
   $free = @()
   foreach ($code in 68..90) { $l = [string][char]$code; if ($used -notcontains $l) { $free += $l } }
   return $free
@@ -183,6 +184,17 @@ function Parse-Link([string]$url) {
   else { $link.Jump = Need 'j' '^[A-Za-z0-9][A-Za-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9._-]*)?$' }
   if ($link.Port -lt 1 -or $link.Port -gt 65535) { throw "the link's port is not valid" }
   if ((Get-AliasOf $link.Fingerprint) -ne $link.Alias) { throw "the link's host key and its name do not match" }
+  $link.Dirs = @()
+  if ($kind -eq 'drive') {
+    foreach ($entry in ([string]$q['dirs']).Split("`n")) {
+      if ($entry -cmatch '^([A-Z][A-Z0-9_]{0,31})=(/[^\x00-\x1f\x7f<>:"|?*\\]{0,1000})$' -and $link.Dirs.Count -lt 16) {
+        $link.Dirs += @{ Name = $Matches[1]; Path = $Matches[2] }
+      }
+    }
+    if ($link.Path -cmatch '^/' -and -not @($link.Dirs | Where-Object { $_.Name -eq 'HOME' }).Count) {
+      $link.Dirs = @(@{ Name = 'HOME'; Path = $link.Path }) + $link.Dirs
+    }
+  }
   if ($kind -eq 'web') {
     $link.WebPort = [int](Need 'wp' '^\d{1,5}$')
     $link.Token = Need 'tok' '^[A-Za-z0-9_-]{8,64}$'
@@ -209,6 +221,60 @@ $OpenText = @{ drive = 'Open in Explorer'; shell = ''; web = 'Open in browser' }
 $UiFont = New-Object Drawing.Font('Segoe UI', 9)
 $UiBold = New-Object Drawing.Font('Segoe UI', 10, [Drawing.FontStyle]::Bold)
 
+# ---- the folders a drive can map: the ones slurp sent ($HOME, $SCRATCH, $PROJECT, ...) and the root; or typed in
+function Get-FolderChoices($link) {
+  $out = @()
+  foreach ($d in $link.Dirs) { $out += @{ Label = "`$$($d.Name)   $($d.Path)"; Path = $d.Path } }
+  $out += @{ Label = '/   (the whole file system)'; Path = '/' }
+  return $out
+}
+
+# the absolute path of what the folder box says, or $null (and why, in $script:FolderError)
+function Resolve-Folder($link, [string]$text) {
+  $script:FolderError = ''
+  $t = $text.Trim()
+  foreach ($d in (Get-FolderChoices $link)) { if ($t -ceq $d.Label) { return $d.Path } }
+  $homeDir = ''
+  foreach ($d in $link.Dirs) { if ($d.Name -eq 'HOME') { $homeDir = $d.Path } }
+  if ($t -cmatch '^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?(.*)$') {
+    $name = $Matches[1]
+    $rest = $Matches[2]
+    $base = $null
+    foreach ($d in $link.Dirs) { if ($d.Name -eq $name.ToUpper()) { $base = $d.Path } }
+    if (-not $base) { $script:FolderError = "slurp did not send `$$name (it sent: $((@($link.Dirs | ForEach-Object { '$' + $_.Name })) -join ', '))"; return $null }
+    $t = $base + $rest
+  } elseif ($t -match '^~(.*)$') { $t = $homeDir + $Matches[1] }
+  elseif ($t -notmatch '^[/\\]') {
+    if (-not $homeDir) { $script:FolderError = 'type an absolute path (/...)'; return $null }
+    $t = $homeDir + '/' + $t
+  }
+  $t = ($t -replace '\\', '/') -replace '/{2,}', '/'
+  if ($t.Length -gt 1) { $t = $t.TrimEnd('/') }
+  if (-not $t) { $t = '/' }
+  if ($t -match '[\x00-\x1f\x7f<>:"|?*]') { $script:FolderError = 'a Windows drive cannot have < > : " | ? * in its path'; return $null }
+  if ($t -match '(^|/)\.\.?(/|$)') { $script:FolderError = 'no . or .. in the path'; return $null }
+  if ($t.Length -gt 1000) { $script:FolderError = 'the path is too long'; return $null }
+  return $t
+}
+
+# SSHFS-Win: \\sshfs.r\user@host!port\path is the absolute path (\\sshfs\... would be relative to the login directory)
+function Get-Unc($c, $path) {
+  $unc = "\\sshfs.r\$($c.Link.User)@localhost!$($c.Port)"
+  if ($path -ne '/') { $unc += $path.Replace('/', '\') }
+  return $unc
+}
+
+function Get-DriveList($c) {
+  return ((@($c.Maps) | ForEach-Object { "$($_.Letter) $($_.Path)" }) -join ', ')
+}
+
+function Fill-Letters($c) {
+  if (-not $c.Letter) { return }
+  $c.Letter.Items.Clear()
+  foreach ($l in (Get-FreeLetters)) { $null = $c.Letter.Items.Add("$($l):") }
+  if ($c.Letter.Items.Count -gt 0) { $c.Letter.SelectedIndex = 0 }
+}
+
 function Add-Control($form, $c, $x, $y, $w, $h) {
   $c.Location = New-Object Drawing.Point($x, $y)
   $c.Size = New-Object Drawing.Size($w, $h)
@@ -220,7 +286,7 @@ function New-Connection($link) {
   $c = @{
     Link = $link; Kind = $link.Kind; Phase = 'input'; Since = (Get-Date); LastTry = (Get-Date)
     Tunnel = $null; Keyscan = $null; NetUse = $null; Client = $null
-    Port = 0; WebLocal = 0; Drive = ''; Target = ''; Password = ''; Tries = 0
+    Port = 0; WebLocal = 0; Maps = (New-Object Collections.ArrayList); Pending = (New-Object Collections.ArrayList); Password = ''; Tries = 0
     Remap = $false; Verifying = $false; Mapping = $false; Feeder = $null; Watcher = $null; FedAt = $null; Typing = $false; LogNoted = $false; KeyLine = ''; Visible = $false; Ended = $false
   }
   $c.Dir = Join-Path $ConnDir ("$($link.Kind)-$($link.Id)-" + (Get-Date).ToString('HHmmss'))
@@ -249,7 +315,23 @@ function New-Connection($link) {
 
   $y = 56
   $c.Letter = $null
+  $c.Folder = $null
   if ($c.Kind -eq 'drive') {
+    $lblF = New-Object Windows.Forms.Label
+    $lblF.Text = 'Folder on the cluster:'
+    $null = Add-Control $form $lblF 12 ($y + 3) 150 20
+    $folder = New-Object Windows.Forms.ComboBox
+    $folder.DropDownStyle = 'DropDown'
+    $folder.MaxDropDownItems = 12
+    foreach ($d in (Get-FolderChoices $link)) { $null = $folder.Items.Add($d.Label) }
+    $folder.SelectedIndex = 0
+    $c.Folder = Add-Control $form $folder 170 $y 398 24
+    $y += 22
+    $hint = New-Object Windows.Forms.Label
+    $hint.Text = 'Pick one, or type a path: /abs/path, $SCRATCH/run1, or relative to $HOME. Map more later, on other letters.'
+    $hint.ForeColor = [Drawing.SystemColors]::GrayText
+    $null = Add-Control $form $hint 170 ($y + 2) 398 18
+    $y += 26
     $lbl = New-Object Windows.Forms.Label
     $lbl.Text = 'Drive letter:'
     $null = Add-Control $form $lbl 12 ($y + 3) 150 20
@@ -389,7 +471,12 @@ function Set-Phase($c, $phase, $text) {
   $c.Go.Enabled = $editable
   $c.Pw.Enabled = $editable
   $c.Paste.Enabled = $editable
-  if ($c.Letter) { $c.Letter.Enabled = $editable }
+  $more = ($editable -or ($phase -eq 'connected' -and $c.Kind -eq 'drive'))
+  if ($c.Letter) { $c.Letter.Enabled = $more; $c.Folder.Enabled = $more }
+  if ($c.Kind -eq 'drive') {
+    $c.Go.Enabled = $more
+    $c.Go.Text = $(if ($phase -eq 'connected') { 'Map another' } else { $GoText['drive'] })
+  }
   $c.Open.Enabled = ($phase -eq 'connected')
   if ($phase -eq 'connected') { $c.Close.Text = $(if ($c.Kind -eq 'drive') { 'Unmap and close' } else { 'Disconnect' }) }
   elseif ($busy) { $c.Close.Text = 'Stop' }
@@ -410,24 +497,27 @@ function Stop-All($c) {
 function Fail($c, $text) {
   Say $c "failed: $text"
   Log "$($c.Kind) $($c.Link.Id): failed: $text"
-  if ($c.Drive) { Unmap-Drive $c }
+  Unmap-Drive $c
+  $c.Pending.Clear()
   Stop-All $c
   Set-Phase $c 'input' "Failed: $text"
   if (-not $c.Visible -and -not $script:Quitting) { Show-Window $c }
 }
 
 function Unmap-Drive($c) {
-  if (-not $c.Drive) { return }
-  try {
-    $p = Start-Proc 'net.exe' "use $($c.Drive) /delete /y" $null -Capture
-    $null = $p.WaitForExit(10000)
-  } catch { }
-  Say $c "unmapped $($c.Drive)"
-  $c.Drive = ''
+  if (-not $c.Maps) { return }
+  foreach ($m in @($c.Maps)) {
+    try {
+      $p = Start-Proc 'net.exe' "use $($m.Letter) /delete /y" $null -Capture
+      $null = $p.WaitForExit(10000)
+    } catch { }
+    Say $c "unmapped $($m.Letter)"
+  }
+  $c.Maps.Clear()
 }
 
 function Disconnect($c) {
-  if ($c.Drive) { Unmap-Drive $c }
+  Unmap-Drive $c
   Stop-All $c
 }
 
@@ -467,11 +557,25 @@ function Begin-Connect($c) {
     }
     return
   }
-  if ($c.Kind -eq 'drive' -and $c.Letter.SelectedIndex -lt 0) { Fail $c 'no free drive letter'; return }
+  $want = $null
+  if ($c.Kind -eq 'drive') {
+    if ($c.Letter.SelectedIndex -lt 0) { $c.State.Text = 'No free drive letter.'; return }
+    $path = Resolve-Folder $c.Link $c.Folder.Text
+    if (-not $path) { $c.State.Text = "Folder: $script:FolderError"; [void]$c.Folder.Focus(); return }
+    $same = @($c.Maps | Where-Object { $_.Path -ceq $path })
+    if ($same.Count) { $c.State.Text = "$path is mapped already, as $($same[0].Letter)"; return }
+    $want = @{ Letter = [string]$c.Letter.SelectedItem; Path = $path; Unc = '' }
+    if ($c.Phase -eq 'connected') {
+      # (another folder through the same tunnel, with the same password)
+      [void]$c.Pending.Add($want)
+      Begin-NetUse $c
+      return
+    }
+  }
   $c.Password = $c.Pw.Text.Trim()
   if (-not $c.Password -and $c.Kind -ne 'shell') { $c.State.Text = 'Paste (or type) the password of the link first.'; [void]$c.Pw.Focus(); return }
-  if ($c.Kind -eq 'drive') { $c.Target = [string]$c.Letter.SelectedItem }
-  $c.Drive = ''
+  $c.Pending.Clear()
+  if ($want) { [void]$c.Pending.Add($want) }
   $c.FedAt = $null
   $c.Tries = 0
   $c.Port = Get-FreePort
@@ -493,9 +597,10 @@ function Begin-Verify($c) {
 }
 
 function Begin-NetUse($c) {
-  $unc = "\\sshfs\$($c.Link.User)@localhost!$($c.Port)"
-  Say $c "mapping $($c.Target) to $unc ..."
-  $c.NetUse = Start-Proc 'net.exe' "use $($c.Target) $unc `"$($c.Password)`" /user:$($c.Link.User) /persistent:no" $null -Capture
+  $m = $c.Pending[0]
+  $m.Unc = Get-Unc $c $m.Path
+  Say $c "mapping $($m.Letter) to $($m.Path) ($($m.Unc)) ..."
+  $c.NetUse = Start-Proc 'net.exe' "use $($m.Letter) `"$($m.Unc)`" `"$($c.Password)`" /user:$($c.Link.User) /persistent:no" $null -Capture
   Set-Phase $c $(if ($c.Remap) { 'reconnecting' } else { 'mapping' }) $(if ($c.Remap) { 'Reconnecting: mapping again ...' } else { 'Logging in and mapping (password) ...' })
   $c.Mapping = $true
 }
@@ -568,8 +673,8 @@ function Shell-In($c, $how) {
 $WatchErrors = @{ 2 = "no console of ssh"; 5 = "no login within 5 minutes"; 6 = "its screen cannot be read" }
 $FeedErrors = @{ 2 = "no console of ssh"; 3 = "its input cannot be opened"; 4 = "the keys were not taken"; 5 = "no password prompt within 45 s"; 6 = "its screen cannot be read" }
 
-function Open-Result($c) {
-  if ($c.Kind -eq 'drive' -and $c.Drive) { Start-Process explorer.exe "$($c.Drive)\" }
+function Open-Result($c, $only) {
+  if ($c.Kind -eq 'drive') { foreach ($m in $(if ($only) { @($only) } else { @($c.Maps) })) { Start-Process explorer.exe "$($m.Letter)\" } }
   elseif ($c.Kind -eq 'web' -and $c.WebLocal) { Start-Process "http://localhost:$($c.WebLocal)/?token=$($c.Link.Token)" }
 }
 
@@ -697,8 +802,15 @@ function Step($c) {
       break
     }
     { $_ -eq 'mapping' -or ($_ -eq 'reconnecting' -and $c.Mapping) } {
+      $extra = ($c.Maps.Count -gt 0 -and -not $c.Remap) # (a further folder: what is mapped stays, whatever happens)
       if (-not $c.NetUse.HasExited) {
-        if ($age -gt 60) { Fail $c 'mapping took longer than 60 s' }
+        if ($age -gt 60 -and $extra) {
+          Stop-Proc $c.NetUse
+          $c.Mapping = $false
+          Say $c "failed: mapping $($c.Pending[0].Path) took longer than 60 s"
+          Set-Phase $c 'connected' "Not mapped: $($c.Pending[0].Path) (it took longer than 60 s)"
+          $c.Pending.Clear()
+        } elseif ($age -gt 60) { Fail $c 'mapping took longer than 60 s' }
         return
       }
       $c.Mapping = $false
@@ -708,23 +820,35 @@ function Step($c) {
         if ($out -match '1326|password|Kennwort|mot de passe') { $hint = ' (wrong password? 5 wrong ones lock the link)' }
         elseif ($out -match ' 85|already in use') { $hint = ' (the drive letter is in use: pick another)' }
         elseif ($out -match ' 67|network name') { $hint = ' (wrong password, the link is used up or locked, or SSHFS-Win cannot reach the tunnel)' }
+        $m = $c.Pending[0]
+        if ($extra) {
+          $c.Pending.Clear()
+          Say $c "failed: net use $($m.Letter) $($m.Path): $out$hint"
+          Set-Phase $c 'connected' "Not mapped: $($m.Path) ($out$hint)"
+          return
+        }
         $c.Remap = $false
-        Fail $c "net use: $out$hint"
+        Fail $c "net use $($m.Path): $out$hint"
         $c.Pw.Text = ''
         return
       }
-      $c.Drive = $c.Target
-      $first = -not $c.Remap
+      $m = $c.Pending[0]
+      $c.Pending.RemoveAt(0)
+      [void]$c.Maps.Add($m)
+      Say $c "mapped $($m.Letter) $($m.Path)"
+      if ($c.Pending.Count -gt 0) { Begin-NetUse $c; return }
+      $again = $c.Remap
+      $first = ($c.Maps.Count -eq 1)
       $c.Remap = $false
-      Say $c "mapped $($c.Drive)"
-      Set-Phase $c 'connected' "Mapped as $($c.Drive)"
-      if ($first) {
-        Log "drive $($link.Id): mapped $($c.Drive)"
-        Notify "Drive $($c.Drive) mapped: $($link.Title)"
-        Open-Result $c
-        if ($c.Visible) { Hide-Window $c }
+      Fill-Letters $c
+      Set-Phase $c 'connected' "Mapped: $(Get-DriveList $c)"
+      if ($again) {
+        Notify "Drives are back: $(Get-DriveList $c)"
       } else {
-        Notify "Drive $($c.Drive) is back"
+        Log "drive $($link.Id): mapped $($m.Letter) $($m.Path)"
+        Notify "Drive $($m.Letter) mapped: $($m.Path)"
+        Open-Result $c $m
+        if ($first -and $c.Visible) { Hide-Window $c }
       }
       break
     }
@@ -732,13 +856,15 @@ function Step($c) {
       if ($c.Kind -eq 'drive') {
         if ($c.Tunnel.HasExited) {
           Say $c "the tunnel ended: $(Get-LogError (Join-Path $c.Dir 'tunnel.log')); reconnecting ..."
+          $c.Pending.Clear()
+          foreach ($m in @($c.Maps)) { [void]$c.Pending.Add(@{ Letter = $m.Letter; Path = $m.Path; Unc = '' }) }
           Unmap-Drive $c
           $c.Remap = $true
           $c.Verifying = $false; $c.Mapping = $false
           Start-Tunnel $c
           Set-Phase $c 'reconnecting' 'Connection lost: reconnecting ...'
           $c.LastTry = Get-Date
-          Notify "Drive $($c.Target): connection lost, reconnecting ..." 'Warning'
+          Notify "Drives $(@($c.Pending | ForEach-Object { $_.Letter }) -join ', '): connection lost, reconnecting ..." 'Warning'
           if ($link.Expires -gt 0 -and [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -gt $link.Expires) {
             Say $c 'note: the link takes no new logins any more (expired): extend it in slurp'
           }
@@ -777,7 +903,7 @@ function On-CloseButton($c) {
 function On-Closing($c, $e) {
   if ($script:Quitting -or $c.Ended) { Disconnect $c; return }
   if ($c.Phase -eq 'connected') {
-    $what = $(if ($c.Kind -eq 'drive') { "Unmap $($c.Drive) and close?" } elseif ($c.Kind -eq 'shell') { 'End the shell (its terminal window) and close?' } else { 'Close the tunnel to the web view?' })
+    $what = $(if ($c.Kind -eq 'drive') { "Unmap $(Get-DriveList $c) and close?" } elseif ($c.Kind -eq 'shell') { 'End the shell (its terminal window) and close?' } else { 'Close the tunnel to the web view?' })
     if ($e.CloseReason -eq 'UserClosing') {
       $answer = [Windows.Forms.MessageBox]::Show($c.Form, "$what`r`n`r`nNo: keep it, in the tray.", 'slurp helper', 'YesNoCancel', 'Question')
       if ($answer -eq 'No') { $e.Cancel = $true; Hide-Window $c; return }
@@ -853,7 +979,7 @@ function Describe($c) {
   $text = "$($KindWord[$c.Kind]): $($c.Link.Title)"
   if ($text.Length -gt 60) { $text = $text.Substring(0, 57) + '...' }
   $state = switch ($c.Phase) {
-    'connected' { $(if ($c.Kind -eq 'drive') { "$($c.Drive) mapped" } else { 'open' }) }
+    'connected' { $(if ($c.Kind -eq 'drive') { "$((@($c.Maps) | ForEach-Object { $_.Letter }) -join ' ') mapped" } else { 'open' }) }
     'input' { 'not connected' }
     'reconnecting' { 'reconnecting' }
     default { 'connecting' }
@@ -875,7 +1001,7 @@ function Build-Menu {
       $null = Add-Item $sub.DropDown $OpenText[$c.Kind] 'open' $c
     }
     $null = Add-Item $sub.DropDown 'Show its window' 'show' $c
-    $null = Add-Item $sub.DropDown $(if ($c.Kind -eq 'drive' -and $c.Drive) { "Unmap $($c.Drive)" } else { 'Disconnect' }) 'disconnect' $c
+    $null = Add-Item $sub.DropDown $(if ($c.Kind -eq 'drive' -and $c.Maps.Count) { "Unmap $((@($c.Maps) | ForEach-Object { $_.Letter }) -join ', ')" } else { 'Disconnect' }) 'disconnect' $c
     [void]$menu.Items.Add($sub)
   }
   [void]$menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))
