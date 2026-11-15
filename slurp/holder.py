@@ -71,7 +71,8 @@ def _intro_brand():
 
 # The web page opens slurp:// links (for the slurp helper on the user's computer) like any URL from the app
 # (window.open). A browser may refuse that without a click right before, and nothing shows when the helper is not set
-# up: a banner with the link as a real link to click stays for a while.
+# up: a banner with the link as a real link to click stays for a while. Downloads open in a new tab (the page stays;
+# the browser closes that tab once the file comes); a browser that blocks the tab gets the banner with the download.
 LINK_BANNER = """<style>
 #slurp-link-banner { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 1000; display: none;
   background: #1d3b53; color: #fff; border: 1px solid #5aa0e0; border-radius: 6px; padding: 8px 14px;
@@ -82,16 +83,27 @@ LINK_BANNER = """<style>
 <script>
 (function () {
   var open = window.open.bind(window), timer = null;
-  function banner(url) {
+  function banner(url, download) {
     var b = document.getElementById("slurp-link-banner");
     if (!b) {
       b = document.createElement("div"); b.id = "slurp-link-banner";
-      b.innerHTML = 'Opening the slurp helper on this computer. Nothing happened? <a id="slurp-link-a">Open it</a> ' +
-        '(it needs the helper: Set up the helper in the link window) <button title="close">\u2715</button>';
+      b.innerHTML = '<span id="slurp-link-text"></span> <a id="slurp-link-a"></a> <span id="slurp-link-note"></span> ' +
+        '<button title="close">\u2715</button>';
       document.body.appendChild(b);
       b.querySelector("button").onclick = function () { b.style.display = "none"; };
     }
-    b.querySelector("#slurp-link-a").href = url;
+    var a = b.querySelector("#slurp-link-a");
+    a.href = url;
+    if (download) {
+      b.querySelector("#slurp-link-text").textContent = "Your download is ready:";
+      a.textContent = "Download it"; a.target = "_blank";
+      b.querySelector("#slurp-link-note").textContent = "(the browser did not open it by itself)";
+      a.onclick = function () { b.style.display = "none"; };
+    } else {
+      b.querySelector("#slurp-link-text").textContent = "Opening the slurp helper on this computer. Nothing happened?";
+      a.textContent = "Open it"; a.removeAttribute("target"); a.onclick = null;
+      b.querySelector("#slurp-link-note").textContent = "(it needs the helper: Set up the helper in the link window)";
+    }
     b.style.display = "block";
     clearTimeout(timer); timer = setTimeout(function () { b.style.display = "none"; }, 30000);
   }
@@ -100,6 +112,12 @@ LINK_BANNER = """<style>
       banner(url);
       try { window.location.href = url; } catch (e) {}
       return null;
+    }
+    if (typeof url === "string" && url.indexOf("/download/") === 0) {
+      var tab = null;
+      try { tab = open(url, "_blank"); } catch (e) {}
+      if (!tab) { banner(url, true); }
+      return tab;
     }
     return open(url, target);
   };
@@ -646,7 +664,7 @@ class Holder:
       self.deliveries = {k: v for k, v in self.deliveries.items() if now - v[2] < 600}
       key = secrets.token_urlsafe(12)
       self.deliveries[key] = (name, data, now)
-      reply = self.open_url(f"/download/{key}")
+      reply = self.open_url(f"/download/{key}", new_tab=True)
       if not reply.get("ok"):
         self.deliveries.pop(key, None)
       return reply
@@ -657,14 +675,15 @@ class Holder:
               "web": self.web[1] if self.web else None, "since": self.started, "version": __version__}
     return {"error": f"unknown request {cmd!r}"}
 
-  def open_url(self, url):
-    """The active view opens the URL, if it is a browser (a terminal cannot open anything on its computer)"""
+  def open_url(self, url, new_tab=False):
+    """The active view opens the URL, if it is a browser (a terminal cannot open anything on its computer); a download
+    in a new tab, so the page with slurp stays"""
     view = self.active
     if view is None or view.kind != "web" or not getattr(view, "send_text", None):
       return {"ok": False, "error": "the active view is not a browser"}
     if not (url.startswith("slurp:") or url.startswith("/download/") or url.startswith(("http://", "https://"))):
       return {"ok": False, "error": "not a URL the browser opens"}
-    view.send_text(json.dumps(["open_url", {"url": url, "new_tab": False}]))
+    view.send_text(json.dumps(["open_url", {"url": url, "new_tab": bool(new_tab)}]))
     return {"ok": True, "view": view.label}
 
   # ---- the web view (textual-serve's page, this terminal)
