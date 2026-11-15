@@ -80,7 +80,7 @@ function Get-KeyFingerprint($line) {
 $font = New-Object Drawing.Font('Segoe UI', 9)
 $bold = New-Object Drawing.Font('Segoe UI', 10, [Drawing.FontStyle]::Bold)
 $form = New-Object Windows.Forms.Form
-$form.Text = "slurp drive: $LinkTitle"
+$form.Text = "slurp drive ($SlurpVersion): $LinkTitle"
 $form.Font = $font
 $form.AutoScaleMode = 'Dpi'
 $form.ClientSize = New-Object Drawing.Size(560, 420)

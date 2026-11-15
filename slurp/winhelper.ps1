@@ -42,7 +42,8 @@ function Log($text) {
   try { [IO.File]::AppendAllText($HelperLog, (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + '  ' + $text + "`r`n") } catch { }
 }
 try { if ((Test-Path $HelperLog) -and (Get-Item $HelperLog).Length -gt 1MB) { Remove-Item $HelperLog -Force } } catch { }
-Log "tray starts (native helper: $Native)"
+if (-not $HelperVersion) { $HelperVersion = '?'; $HelperVersionText = '?' } # (set by the setup, from slurp)
+Log "tray starts: version $HelperVersionText (native helper: $Native)"
 
 # ---- tools
 function Find-Tool($name) {
@@ -180,6 +181,7 @@ function Parse-Link([string]$url) {
     Path = (([string]$q['path']) -replace '[\x00-\x1f\x7f]', ' ')
     WebPort = 0
     Token = ''
+    SlurpVersion = $(if ([string]$q['sv'] -cmatch '^[0-9][0-9A-Za-z.+-]{0,30}$') { [string]$q['sv'] } else { '' })
   }
   if ($link.Title.Length -gt 120) { $link.Title = $link.Title.Substring(0, 120) + '...' }
   # (a link names a host only without a jump: direct, or the public port of a relay; serveo: the link's name)
@@ -974,6 +976,11 @@ function Open-Link($url) {
   }
   $c = New-Connection $link
   Show-Window $c
+  if ($link.SlurpVersion -and $link.SlurpVersion -ne $HelperVersion) {
+    # (it works on, as far as it knows the link; what slurp changed since needs the helper of the same version)
+    Log "link of slurp $($link.SlurpVersion), helper $HelperVersion"
+    Say $c "This helper is version $HelperVersion, slurp is $($link.SlurpVersion): set the helper up again from slurp (a link window: Windows helper) to get the same version."
+  }
 }
 
 function Read-Inbox {
@@ -1062,7 +1069,7 @@ $script:InPanel = $false
 function New-Panel {
   $p = @{ Rows = @() }
   $form = New-Object Windows.Forms.Form
-  $form.Text = 'slurp helper'
+  $form.Text = "slurp helper $HelperVersionText"
   $form.Font = $UiFont
   $form.AutoScaleMode = 'Dpi'
   $form.ClientSize = New-Object Drawing.Size(860, 480)
@@ -1245,7 +1252,7 @@ function Describe($c) {
 function Build-Menu {
   $menu = $script:Menu
   $menu.Items.Clear()
-  $head = Add-Item $menu 'slurp helper: its window ...' 'panel' $null
+  $head = Add-Item $menu "slurp helper $($HelperVersion): its window ..." 'panel' $null
   $head.Font = New-Object Drawing.Font($head.Font, [Drawing.FontStyle]::Bold)
   if ($script:Conns.Count -eq 0) {
     $null = Add-Item $menu 'nothing open: open a link in slurp' 'none' $null -Disabled
@@ -1328,7 +1335,7 @@ $script:Menu.Add_Opening({ param($s, $e) Build-Menu; $e.Cancel = $false })
 Build-Menu
 $script:Tray = New-Object Windows.Forms.NotifyIcon
 $script:Tray.Icon = $Icon
-$script:Tray.Text = 'slurp helper'
+$script:Tray.Text = "slurp helper $HelperVersion"
 $script:Tray.ContextMenuStrip = $script:Menu
 $script:Tray.Visible = $true
 $script:Tray.Add_MouseClick({
@@ -1352,7 +1359,7 @@ $timer.Add_Tick({
     $script:Ticks += 1
     if ($script:Ticks % 3 -eq 0) { try { Update-Panel } catch { Log "panel: $($_.Exception.Message)" } }
     $n = @($script:Conns | Where-Object { $_.Phase -eq 'connected' }).Count
-    $text = $(if ($n) { "slurp helper: $n open" } else { 'slurp helper' })
+    $text = $(if ($n) { "slurp helper $($HelperVersion): $n open" } else { "slurp helper $HelperVersion" })
     if ($script:Tray.Text -ne $text) { $script:Tray.Text = $text }
   } finally { $script:InTick = $false }
 })

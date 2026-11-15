@@ -10,7 +10,7 @@ import os
 import time
 import zlib
 
-from . import share
+from . import VERSION_TEXT, share
 
 SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "windrive.ps1")
 CMD_LIMIT = 8191 # the longest line cmd takes
@@ -22,6 +22,7 @@ def ps_string(value):
 def settings(link):
   host, port = link.target()
   values = {
+    "SlurpVersion": ps_string(VERSION_TEXT),
     "LinkTitle": ps_string(link.title),
     "LinkRelayKind": ps_string(link.client_kind),
     "LinkRelayHost": ps_string(link.relay_host),

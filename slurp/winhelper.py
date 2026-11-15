@@ -36,7 +36,8 @@ def available(link):
 def link_url(link):
   """slurp://kind?... with what the helper needs (never the password); winhelper.ps1 checks every value"""
   host, port = link.target()
-  query = {"v": "1", "id": link.id, "t": link.title, "r": link.client_kind, "rh": link.relay_host, "j": link.jump(), # (direct, tcp: j empty)
+  from . import __version__
+  query = {"v": "1", "sv": __version__, "id": link.id, "t": link.title, "r": link.client_kind, "rh": link.relay_host, "j": link.jump(), # (direct, tcp: j empty)
            "h": host, "p": str(port), "u": share.LINK_USER, "fp": share.host_fingerprint(), "a": share.host_alias(),
            "x": str(int(link.expires or 0))}
   if link.read_only:
@@ -68,14 +69,18 @@ def setup_script():
     launcher = f.read()
   import base64
   from . import logo
-  values = (f"$Alias = {windrive.ps_string(share.host_alias())}\n"
+  from . import __version__, VERSION_TEXT
+  version = (f"$HelperVersion = {windrive.ps_string(__version__)}\n"
+             f"$HelperVersionText = {windrive.ps_string(VERSION_TEXT)}\n") # (the helper is versioned with slurp)
+  helper = version + helper
+  values = (version + f"$Alias = {windrive.ps_string(share.host_alias())}\n"
             f"$Fingerprint = {windrive.ps_string(share.host_fingerprint())}\n"
             f"$IconData = '{base64.b64encode(logo.ico((16, 24, 32, 48, 256))).decode()}'\n")
   return (values + here_string("Helper", helper) + here_string("Launcher", launcher) + r"""
 $ErrorActionPreference = 'Stop'
 $Dir = Join-Path $env:LOCALAPPDATA 'slurp-helper'
 $Exe = Join-Path $Dir 'slurp-open.exe'
-Write-Host "slurp helper: setting up in $Dir"
+Write-Host "slurp helper ${HelperVersionText}: setting up in $Dir"
 try {
   New-Item -ItemType Directory -Force -Path $Dir | Out-Null
   $m = $null
@@ -119,7 +124,7 @@ try {
     Write-Host 'slurp helper: ssh.exe is missing: add the Windows feature "OpenSSH Client" (Settings > Apps > Optional features)' -ForegroundColor Yellow
   }
   Start-Process $Exe
-  Write-Host "slurp helper: ready. Its icon is in the tray (^ next to the clock); it starts with Windows." -ForegroundColor Green
+  Write-Host "slurp helper ${HelperVersion}: ready. Its icon is in the tray (^ next to the clock); it starts with Windows." -ForegroundColor Green
   Write-Host "slurp helper: trusts this slurp: $Alias ($Fingerprint)"
   Write-Host 'slurp helper: in slurp, a link window: Open on my computer. Remove it again: its tray menu, Uninstall.'
 } catch {

@@ -1095,7 +1095,8 @@ class Slurp(App):
     """The header: the logo's mark (in the theme's colours), then the title as Textual shows it"""
     from textual.content import Content
     from . import logo
-    return Content.assemble(logo.mark(), " ", App.format_title(self, title, sub_title))
+    from . import VERSION_TEXT
+    return Content.assemble(logo.mark(), " ", App.format_title(self, title, sub_title), (f"  {VERSION_TEXT}", "dim"))
 
   def on_client(self):
     """The active view is a browser: slurp can open a URL (or a download) on the user's computer through it"""
@@ -1929,8 +1930,10 @@ REPORTS_OFF = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1015l\x1b[?1006l\x1b[?1004
 def check_main(argv):
   """slurp check FILE...: the checks of batch scripts as text, on the machine it runs on (e.g. a login node).
   Exit code 1 if a script has errors, 2 if a file cannot be read."""
+  from . import VERSION_TEXT
   parser = argparse.ArgumentParser(prog="slurp check", description="Check Slurm batch scripts (the rules of slurp's "
                                    "rule catalogue: slurp check --rules lists them).")
+  parser.add_argument("--version", action="version", version=f"slurp {VERSION_TEXT}")
   parser.add_argument("files", nargs="*", metavar="FILE")
   parser.add_argument("--no-probe", action="store_true", help="only the script itself: no paths, programs or quota")
   parser.add_argument("--rules", action="store_true", help="print the rule catalogue (Markdown) and exit")
@@ -1976,6 +1979,8 @@ def main():
   parser = argparse.ArgumentParser(prog="slurp", description="Interactive terminal UI for Slurm jobs, locally or on "
                                    "clusters over SSH (one tab per cluster, given with --ssh or added with +). "
                                    "'slurp check FILE...' checks batch scripts without the UI.")
+  from . import VERSION_TEXT, __version__
+  parser.add_argument("--version", action="version", version=f"slurp {VERSION_TEXT}")
   parser.add_argument("--log", metavar="FILE", help="write a debug log (all slurm commands that are run) to FILE")
   parser.add_argument("--ssh", metavar="HOST", nargs="*", default=[], help="add SSH cluster destinations (user@host or ~/.ssh/config aliases)")
   parser.add_argument("--serve", action="store_true", help="serve the app in a browser with textual-serve")
@@ -2006,6 +2011,12 @@ def main():
     app_args = [a for a in sys.argv[1:] if a not in ("--new", "--no-holder")]
     path = holder.socket_path(f"s{os.getpid()}" if args.new else "default")
     if holder.alive(path):
+      status = holder.control("status", path=path) or {}
+      running = status.get("version") or "older than 0.8.0"
+      if running != __version__: # (the running slurp keeps its code: this one's changes need a restart of it)
+        print(f"slurp {VERSION_TEXT}: the slurp running already is version {running}. Attaching to it; to use "
+              f"{__version__}, quit it (q, or Quit in its menu) and start slurp again.", file=sys.stderr)
+        time.sleep(2.5)
       if app_args:
         print("slurp is running already: attaching to it (its options stay as they were; + adds a tab, "
               "--new starts a separate one)", file=sys.stderr)

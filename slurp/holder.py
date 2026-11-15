@@ -34,6 +34,8 @@ import sys
 import termios
 import time
 
+from . import __version__
+
 log = logging.getLogger("slurp.holder")
 
 PACKAGE = os.path.dirname(os.path.abspath(__file__))
@@ -646,7 +648,7 @@ class Holder:
       now = time.time()
       return {"views": [{"label": v.label, "kind": v.kind, "active": v is self.active, "since": v.since,
                          "idle": now - v.last_input if v.last_input else None} for v in self.views],
-              "web": self.web[1] if self.web else None, "since": self.started}
+              "web": self.web[1] if self.web else None, "since": self.started, "version": __version__}
     return {"error": f"unknown request {cmd!r}"}
 
   def open_url(self, url):
@@ -913,9 +915,10 @@ def attach(path):
       print(message[0], file=sys.stderr)
   return code[0]
 
-def control(cmd, timeout=5, **kw):
-  """A request of the app to its holder -> the reply (dict); None if slurp does not run under a holder"""
-  path = os.environ.get("SLURP_HOLDER")
+def control(cmd, timeout=5, path=None, **kw):
+  """A request of the app to its holder (or to the holder at path) -> the reply (dict); None if slurp does not run
+  under a holder"""
+  path = path or os.environ.get("SLURP_HOLDER")
   if not path:
     return None
   s = socket.socket(socket.AF_UNIX)

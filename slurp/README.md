@@ -7,6 +7,14 @@ the files and resources associated with them. It is designed to run on a host
 with access to your Slurm commands, configuration, and job files. You can use
 it in a terminal or open it in a browser.
 
+**Version 0.8.0, beta** (`slurp --version`; the header shows it too). The
+Windows helper has the same version as the slurp that set it up: its tray
+icon, window and menu show it, and a link from a slurp of another version says
+so in the connection window (set the helper up again to update it). A new
+slurp that finds an older one still running says so before it attaches (quit
+the running one and start again to use the new version). What changed:
+[CHANGELOG.md](CHANGELOG.md).
+
 The images below are illustrative previews built from the app's current
 features and sample data; they are not screenshots from a live cluster.
 
