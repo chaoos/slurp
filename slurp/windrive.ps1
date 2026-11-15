@@ -12,18 +12,6 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
 
-# The launcher starts this PowerShell hidden (no console window). Windows applies that start state to the first
-# window the process shows (the console belongs to conhost, so that would be our window): a throwaway window takes it.
-$dummy = New-Object Windows.Forms.Form
-$dummy.ShowInTaskbar = $false
-$dummy.Opacity = 0
-$dummy.StartPosition = 'Manual'
-$dummy.Location = New-Object Drawing.Point(-2000, -2000)
-$dummy.Size = New-Object Drawing.Size(1, 1)
-$dummy.Show()
-$dummy.Close()
-$dummy.Dispose()
-
 $Work = $SlurpDir
 try { $Work = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($SlurpDir).ShortPath } catch { }
 $TunnelLog = Join-Path $Work 'tunnel.log'
@@ -315,7 +303,9 @@ function On-Tick {
         Fail "the relay connection ended: $err"
         return
       }
-      if ((Read-TunnelLog) -match 'Authenticated to|forwarding listening|Local connections to') {
+      # (the local port listens a moment after the login at the relay: "Local forwarding listening")
+      $tlog = Read-TunnelLog
+      if ($tlog -match 'forwarding listening' -or ($tlog -match 'Authenticated to' -and $age -gt 3)) {
         Say 'connected to the relay'
         $script:tries = 0
         Begin-Verify
@@ -416,6 +406,7 @@ $form.Add_FormClosing({
   Stop-All
 })
 $form.Add_Shown({
+  try { [IO.File]::WriteAllText((Join-Path $SlurpDir 'shown.txt'), (Get-Date).ToString('s')) } catch { }
   $form.WindowState = 'Normal'
   $form.BringToFront()
   $form.Activate()

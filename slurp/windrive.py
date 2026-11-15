@@ -45,10 +45,13 @@ def helper_script(link):
   return settings(link) + body + "\n"
 
 def launcher(link):
-  """What the pasted command runs: writes the helper into its own folder in %TEMP% and starts it as a hidden
-  PowerShell. Not with -File: a script file is subject to the execution policy, which Group Policy may set beyond
-  -ExecutionPolicy Bypass; the helper runs as a command instead (a short -EncodedCommand that reads the file). Errors
-  show in a message box and in error.log; if the window ends within a few seconds, the console says why."""
+  """What the pasted command runs: writes the helper into its own folder in %TEMP% and starts it as a PowerShell
+  without a console window. Not with -File: a script file is subject to the execution policy, which Group Policy may
+  set beyond -ExecutionPolicy Bypass; the helper runs as a command instead (a short -EncodedCommand that reads the
+  file). Not "hidden" either (Start-Process -WindowStyle Hidden): Windows applies that state to the first window the
+  process shows, which is the helper's window, so it never appeared. CREATE_NO_WINDOW (CreateNoWindow) gives the
+  PowerShell an invisible console and leaves its windows alone. Errors show in a message box and in error.log; the
+  console says when the window is shown (shown.txt), or why not."""
   script = helper_script(link)
   if "\n'@" in script:
     raise ValueError("windrive.ps1 must not have a line starting with '@")
@@ -64,19 +67,32 @@ def launcher(link):
     "  \"catch { `$m = (`$_ | Out-String); [IO.File]::WriteAllText(`$SlurpDir + '\\error.log', `$m); \" +\n"
     "  \"Add-Type -AssemblyName System.Windows.Forms; [void][Windows.Forms.MessageBox]::Show(`$m, 'slurp drive: error') }\"\n"
     "$e = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($b))\n"
-    "$p = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList '-NoProfile','-STA','-EncodedCommand',$e\n"
+    "$si = New-Object Diagnostics.ProcessStartInfo\n"
+    "$si.FileName = Join-Path $env:WINDIR 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'\n"
+    "$si.Arguments = '-NoProfile -STA -ExecutionPolicy Bypass -EncodedCommand ' + $e\n"
+    "$si.UseShellExecute = $false\n"
+    "$si.CreateNoWindow = $true\n"
+    "$si.WorkingDirectory = $d\n"
+    "$p = [Diagnostics.Process]::Start($si)\n"
     "Write-Host 'slurp: starting the drive window ...'\n"
     "$log = Join-Path $d 'error.log'\n"
-    "for ($i = 0; $i -lt 12 -and -not $p.HasExited -and -not (Test-Path $log); $i++) { Start-Sleep -Milliseconds 500 }\n"
+    "$shown = Join-Path $d 'shown.txt'\n"
+    "for ($i = 0; $i -lt 40 -and -not $p.HasExited -and -not (Test-Path $log) -and -not (Test-Path $shown); $i++) { Start-Sleep -Milliseconds 500 }\n"
     "if (Test-Path $log) { Write-Host 'slurp: the drive window failed:' -ForegroundColor Red; Get-Content $log | Write-Host }\n"
+    "elseif (Test-Path $shown) { Write-Host 'slurp: the drive window is open (it runs on its own; this window can be closed)' }\n"
     "elseif ($p.HasExited) { Write-Host ('slurp: the drive window ended right away (exit code ' + $p.ExitCode + ')') -ForegroundColor Red }\n"
-    "else { Write-Host 'slurp: the drive window is open (it runs on its own; this window can be closed)' }\n")
+    "else { Write-Host ('slurp: the drive window did not show within 20 s (PowerShell ' + $p.Id + ' still runs); its folder: ' + $d) -ForegroundColor Yellow }\n")
 
-def command(link):
-  """The command to paste (PowerShell or cmd, not the Run dialog: too long for it)"""
+def pack(script):
+  """A command to paste that runs the PowerShell script (compressed in it): no $ and no double quotes inside its
+  argument, so it is the same in PowerShell and in cmd (if it is short enough for cmd)"""
   packer = zlib.compressobj(9, zlib.DEFLATED, -15) # raw deflate, as .NET's DeflateStream reads it
-  data = packer.compress(launcher(link).encode("utf-8")) + packer.flush()
+  data = packer.compress(script.encode("utf-8")) + packer.flush()
   b64 = base64.b64encode(data).decode()
   return ("powershell -NoProfile -ExecutionPolicy Bypass -Command \"iex (New-Object IO.StreamReader((New-Object "
           "IO.Compression.DeflateStream((New-Object IO.MemoryStream(,[Convert]::FromBase64String('" + b64 + "'))),"
           "[IO.Compression.CompressionMode]::Decompress)),[Text.Encoding]::UTF8)).ReadToEnd()\"")
+
+def command(link):
+  """The command to paste (PowerShell or cmd, not the Run dialog: too long for it)"""
+  return pack(launcher(link))
