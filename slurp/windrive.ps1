@@ -227,7 +227,11 @@ function Start-Tunnel {
 }
 
 function Read-TunnelLog {
-  try { return [IO.File]::ReadAllText($TunnelLog) } catch { return '' }
+  # (shared for writing and deleting: ssh has its log open for writing while it runs; ReadAllText would fail on it)
+  try {
+    $stream = New-Object IO.FileStream($TunnelLog, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try { return (New-Object IO.StreamReader($stream, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $stream.Dispose() }
+  } catch { return '' }
 }
 
 function Tunnel-Error {

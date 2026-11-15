@@ -117,7 +117,11 @@ function Get-AliasOf($fp) {
 }
 
 function Read-Text($path) {
-  try { return [IO.File]::ReadAllText($path) } catch { return '' }
+  # (shared for writing and deleting: ssh has its log open for writing while it runs; ReadAllText would fail on it)
+  try {
+    $stream = New-Object IO.FileStream($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try { return (New-Object IO.StreamReader($stream, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $stream.Dispose() }
+  } catch { return '' }
 }
 
 # ---- the slurps known here (their host keys): the setup adds the one it came from, a link of another one asks
@@ -564,12 +568,14 @@ function Step($c) {
       }
       # (the local port listens a moment after the login at the relay: "Local forwarding listening")
       $tlog = Read-Text (Join-Path $c.Dir 'tunnel.log')
-      if ($tlog -match 'forwarding listening' -or ($tlog -match 'Authenticated to' -and $age -gt 3)) {
+      if ($tlog -match 'forwarding listening' -or ($tlog -match 'Authenticated to' -and $age -gt 3) -or
+          (-not $tlog -and $age -gt 3 -and (Test-Port $c.Port))) {
         Say $c 'connected to the relay'
         $c.Tries = 0
         Begin-Verify $c
       } elseif ($age -gt 30) {
-        Fail $c 'no answer from the relay within 30 s'
+        $last = @($tlog -split "`r?`n" | Where-Object { $_ }) | Select-Object -Last 1
+        Fail $c "no answer from the relay within 30 s (the tunnel's log ends: $(if ($last) { $last } else { 'nothing readable' }))"
       }
       break
     }
