@@ -190,24 +190,10 @@ function Parse-Link([string]$url) {
   return $link
 }
 
-# ---- the tray icon: a blue dot with an s
-function New-TrayIcon {
-  $bmp = New-Object Drawing.Bitmap(32, 32)
-  $g = [Drawing.Graphics]::FromImage($bmp)
-  $g.SmoothingMode = 'AntiAlias'
-  $g.TextRenderingHint = 'AntiAliasGridFit'
-  $g.Clear([Drawing.Color]::Transparent)
-  $brush = New-Object Drawing.SolidBrush([Drawing.Color]::FromArgb(255, 32, 104, 196))
-  $g.FillEllipse($brush, 1, 1, 30, 30)
-  $font = New-Object Drawing.Font('Segoe UI', 20, [Drawing.FontStyle]::Bold, [Drawing.GraphicsUnit]::Pixel)
-  $format = New-Object Drawing.StringFormat
-  $format.Alignment = 'Center'
-  $format.LineAlignment = 'Center'
-  $g.DrawString('s', $font, [Drawing.Brushes]::White, (New-Object Drawing.RectangleF(0, -2, 32, 32)), $format)
-  $g.Dispose()
-  return [Drawing.Icon]::FromHandle($bmp.GetHicon())
-}
-$Icon = New-TrayIcon
+# ---- the tray icon: slurp's logo (slurp.ico, written by the setup from slurp/logo.py)
+$Icon = $null
+try { $Icon = New-Object Drawing.Icon((Join-Path $SlurpHelperDir 'slurp.ico'), 32, 32) } catch { }
+if (-not $Icon) { $Icon = [Drawing.SystemIcons]::Application }
 
 $script:Conns = New-Object Collections.ArrayList
 $script:Quitting = $false

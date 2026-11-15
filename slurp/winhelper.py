@@ -63,8 +63,11 @@ def setup_script():
     helper = compact(f.read())
   with open(LAUNCHER, encoding="utf-8") as f:
     launcher = f.read()
+  import base64
+  from . import logo
   values = (f"$Alias = {windrive.ps_string(share.host_alias())}\n"
-            f"$Fingerprint = {windrive.ps_string(share.host_fingerprint())}\n")
+            f"$Fingerprint = {windrive.ps_string(share.host_fingerprint())}\n"
+            f"$IconData = '{base64.b64encode(logo.ico((16, 24, 32, 48, 256))).decode()}'\n")
   return (values + here_string("Helper", helper) + here_string("Launcher", launcher) + r"""
 $ErrorActionPreference = 'Stop'
 $Dir = Join-Path $env:LOCALAPPDATA 'slurp-helper'
@@ -85,6 +88,8 @@ try {
     }
   }
   [IO.File]::WriteAllText((Join-Path $Dir 'slurp-helper.ps1'), $Helper, (New-Object Text.UTF8Encoding $true))
+  $Ico = Join-Path $Dir 'slurp.ico'
+  [IO.File]::WriteAllBytes($Ico, [Convert]::FromBase64String($IconData))
   Write-Host 'slurp helper: compiling its launcher (slurp-open.exe) ...'
   Remove-Item $Exe -Force -ErrorAction SilentlyContinue
   Add-Type -TypeDefinition $Launcher -Language CSharp -OutputAssembly $Exe -OutputType WindowsApplication
@@ -92,16 +97,18 @@ try {
   $line = "$Alias $Fingerprint"
   if (-not ((Test-Path $trust) -and (@(Get-Content $trust) -contains $line))) { Add-Content -Path $trust -Value $line }
   $cls = 'HKCU:\Software\Classes\slurp'
-  foreach ($k in @($cls, "$cls\shell", "$cls\shell\open", "$cls\shell\open\command")) {
+  foreach ($k in @($cls, "$cls\DefaultIcon", "$cls\shell", "$cls\shell\open", "$cls\shell\open\command")) {
     if (-not (Test-Path $k)) { New-Item -Path $k | Out-Null }
   }
   Set-ItemProperty -Path $cls -Name '(default)' -Value 'URL:slurp link'
   Set-ItemProperty -Path $cls -Name 'URL Protocol' -Value ''
+  Set-ItemProperty -Path "$cls\DefaultIcon" -Name '(default)' -Value $Ico
   Set-ItemProperty -Path "$cls\shell\open\command" -Name '(default)' -Value ('"' + $Exe + '" "%1"')
   Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'slurp helper' -Value ('"' + $Exe + '" --tray')
   try {
     $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ([Environment]::GetFolderPath('Programs')) 'slurp helper.lnk'))
     $lnk.TargetPath = $Exe
+    $lnk.IconLocation = "$Ico,0"
     $lnk.Description = 'slurp helper: opens slurp links (in the tray)'
     $lnk.Save()
   } catch { Write-Host "slurp helper: no start menu entry ($($_.Exception.Message))" }
