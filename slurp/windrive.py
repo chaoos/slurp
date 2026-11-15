@@ -25,7 +25,7 @@ def settings(link):
     "LinkTitle": ps_string(link.title),
     "LinkRelayKind": ps_string(link.relay_type),
     "LinkRelayHost": ps_string(link.relay_host),
-    "LinkJump": ps_string(link.jump() if link.relay_type == "ssh-j" else link.relay_host),
+    "LinkJump": ps_string(link.jump()),
     "LinkTargetHost": ps_string(host),
     "LinkTargetPort": str(int(port)),
     "LinkUser": ps_string(share.LINK_USER),

@@ -165,9 +165,9 @@ function Parse-Link([string]$url) {
   $link = @{
     Kind = $kind
     Id = Need 'id' '^[0-9a-f]{8}$'
-    RelayKind = Need 'r' '^(ssh-j|openssh)$'
+    RelayKind = Need 'r' '^(ssh-j|openssh|direct)$'
     RelayHost = Need 'rh' '^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$'
-    Host = Need 'h' '^(slurp|localhost)$'
+    Host = Need 'h' '^(slurp|localhost|[A-Za-z0-9][A-Za-z0-9.-]{0,252})$'
     Port = [int](Need 'p' '^\d{1,5}$')
     Fingerprint = Need 'fp' '^SHA256:[A-Za-z0-9+/]{43}$'
     Alias = Need 'a' '^slurp-[0-9a-f]{8}$'
@@ -180,7 +180,9 @@ function Parse-Link([string]$url) {
     Token = ''
   }
   if ($link.Title.Length -gt 120) { $link.Title = $link.Title.Substring(0, 120) + '...' }
-  if ($link.RelayKind -eq 'ssh-j') { $link.Jump = Need 'j' '^[0-9a-f]{24}@[A-Za-z0-9][A-Za-z0-9.-]*$' }
+  if ($link.RelayKind -ne 'direct' -and $link.Host -notmatch '^(slurp|localhost)$') { throw "the link's host is not valid" }
+  if ($link.RelayKind -eq 'direct') { $link.Jump = '' }
+  elseif ($link.RelayKind -eq 'ssh-j') { $link.Jump = Need 'j' '^[0-9a-f]{24}@[A-Za-z0-9][A-Za-z0-9.-]*$' }
   else { $link.Jump = Need 'j' '^[A-Za-z0-9][A-Za-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9._-]*)?$' }
   if ($link.Port -lt 1 -or $link.Port -gt 65535) { throw "the link's port is not valid" }
   if ((Get-AliasOf $link.Fingerprint) -ne $link.Alias) { throw "the link's host key and its name do not match" }
@@ -259,7 +261,7 @@ function Resolve-Folder($link, [string]$text) {
 
 # SSHFS-Win: \\sshfs.r\user@host!port\path is the absolute path (\\sshfs\... would be relative to the login directory)
 function Get-Unc($c, $path) {
-  $unc = "\\sshfs.r\$($c.Link.User)@localhost!$($c.Port)"
+  $unc = "\\sshfs.r\$($c.Link.User)@$($c.UncHost)!$($c.Port)"
   if ($path -ne '/') { $unc += $path.Replace('/', '\') }
   return $unc
 }
@@ -286,7 +288,7 @@ function New-Connection($link) {
   $c = @{
     Link = $link; Kind = $link.Kind; Phase = 'input'; Since = (Get-Date); LastTry = (Get-Date)
     Tunnel = $null; Keyscan = $null; NetUse = $null; Client = $null
-    Port = 0; WebLocal = 0; Maps = (New-Object Collections.ArrayList); Pending = (New-Object Collections.ArrayList); Password = ''; Tries = 0
+    Port = 0; Host = '127.0.0.1'; UncHost = 'localhost'; WebLocal = 0; Maps = (New-Object Collections.ArrayList); Pending = (New-Object Collections.ArrayList); Password = ''; Tries = 0
     Remap = $false; Verifying = $false; Mapping = $false; Feeder = $null; Watcher = $null; FedAt = $null; Typing = $false; LogNoted = $false; KeyLine = ''; Visible = $false; Ended = $false
   }
   $c.Dir = Join-Path $ConnDir ("$($link.Kind)-$($link.Id)-" + (Get-Date).ToString('HHmmss'))
@@ -309,7 +311,7 @@ function New-Connection($link) {
   if ($link.Expires -gt 0) {
     $expires = ' · new logins until ' + [DateTimeOffset]::FromUnixTimeSeconds($link.Expires).LocalDateTime.ToString('ddd HH:mm')
   }
-  $detail = "$($KindWord[$c.Kind]) of $($link.Alias) · relay $($link.RelayHost)" + $(if ($link.ReadOnly) { ' · read only' } else { '' }) + $expires
+  $detail = "$($KindWord[$c.Kind]) of $($link.Alias) · " + $(if ($link.RelayKind -eq 'direct') { "directly to $($link.Host):$($link.Port)" } else { "relay $($link.RelayHost)" }) + $(if ($link.ReadOnly) { ' · read only' } else { '' }) + $expires
   $info.Text = "$($link.Title)`r`n$detail"
   $null = Add-Control $form $info 12 10 556 36
 
@@ -578,7 +580,18 @@ function Begin-Connect($c) {
   if ($want) { [void]$c.Pending.Add($want) }
   $c.FedAt = $null
   $c.Tries = 0
+  if ($c.Link.RelayKind -eq 'direct') {
+    # (no relay: straight to slurp's machine, which must be reachable from here)
+    $c.Port = $c.Link.Port
+    $c.Host = $c.Link.Host
+    $c.UncHost = $c.Link.Host
+    Say $c "connecting directly to $($c.Host) port $($c.Port) ..."
+    Begin-Verify $c
+    return
+  }
   $c.Port = Get-FreePort
+  $c.Host = '127.0.0.1'
+  $c.UncHost = 'localhost'
   Say $c "connecting to the relay $($c.Link.RelayHost) (local port $($c.Port)) ..."
   Start-Tunnel $c
   Set-Phase $c 'tunnel' 'Connecting to the relay ...'
@@ -590,7 +603,7 @@ function Begin-Verify($c) {
     Fail $c 'ssh-keyscan.exe not found: the host key of slurp cannot be checked (it comes with the OpenSSH Client)'
     return
   }
-  $c.Keyscan = Start-Proc $Keyscan "-T 10 -t ed25519 -p $($c.Port) 127.0.0.1" $c.Dir -Capture
+  $c.Keyscan = Start-Proc $Keyscan "-T 10 -t ed25519 -p $($c.Port) $($c.Host)" $c.Dir -Capture
   $reconnecting = ($c.Phase -eq 'reconnecting')
   Set-Phase $c $(if ($reconnecting) { 'reconnecting' } else { 'verify' }) $(if ($reconnecting) { 'Reconnecting: checking slurp ...' } else { 'Checking that slurp answers (its host key) ...' })
   $c.Verifying = $true
@@ -625,11 +638,11 @@ function Begin-Login($c, [switch]$Visible) {
   $c.LogNoted = $false
   if ($c.Kind -eq 'web') {
     $c.WebLocal = Get-FreePort
-    $arguments = "-N -o ExitOnForwardFailure=yes -L 127.0.0.1:$($c.WebLocal):127.0.0.1:$($link.WebPort) $common $($link.User)@127.0.0.1"
+    $arguments = "-N -o ExitOnForwardFailure=yes -L 127.0.0.1:$($c.WebLocal):127.0.0.1:$($link.WebPort) $common $($link.User)@$($c.Host)"
     $c.Client = Start-Proc $Ssh $arguments $c.Dir -Visible:$Visible
     Say $c "logging in, the web view comes to local port $($c.WebLocal) ..."
   } else {
-    $arguments = "-o RequestTTY=yes $common $($link.User)@127.0.0.1"
+    $arguments = "-o RequestTTY=yes $common $($link.User)@$($c.Host)"
     $c.Client = Start-Proc $Ssh $arguments $c.Dir -Visible
     $c.Feeder = $null
     $c.Typing = $true
@@ -724,6 +737,7 @@ function Step($c) {
       $line = @($out -split "`r?`n" | Where-Object { $_ -match 'ssh-ed25519' }) | Select-Object -First 1
       if (-not $line) {
         if ($c.Tries -lt 3) { Say $c 'slurp did not answer yet, trying again ...'; Start-Sleep -Milliseconds 700; Begin-Verify $c; return }
+        if ($link.RelayKind -eq 'direct') { Fail $c "slurp does not answer at $($c.Host) port $($c.Port): is this computer in a network that reaches it (VPN?), is slurp running, the link still valid?"; return }
         Fail $c 'slurp does not answer through the relay: is slurp running, and the link still valid (not revoked or expired)?'
         return
       }

@@ -30,6 +30,11 @@ PUBLIC_WARNING = (
 OWN_NOTE = ("Own relay {relay}: an OpenSSH jump host. slurp logs in to it with your keys (no prompts) and asks it "
             "for a free port; your terminal jumps through it to slurp.")
 
+DIRECT_NOTE = ("Direct, no relay: your machine connects to {host} port {port} itself, so it must reach this machine (the "
+               "same network, a VPN; no firewall in between). For this link slurp listens on that port on every "
+               "interface of this machine: whoever reaches it can try the password (5 wrong ones lock the link). "
+               "direct://host:port sets the name your machine knows this one by, and a fixed port.")
+
 def relay_setting():
   return load_config().get("link_relay") or share.DEFAULT_RELAY
 
@@ -38,6 +43,12 @@ def warning_text(relay, kind):
           else "your files (read and write, unless read only)")
   if share.is_public(relay):
     return Text(PUBLIC_WARNING.format(relay=share.parse_relay(relay)[1], what=what), style="yellow")
+  if share.parse_relay(relay)[0] == share.DIRECT:
+    try:
+      host, port = share.direct_address(relay)
+    except ValueError as e:
+      return Text(str(e), style="red")
+    return Text(DIRECT_NOTE.format(host=host, port=port or "(a free one)"), style="yellow")
   return Text(OWN_NOTE.format(relay=relay), style="dim")
 
 class ShellChoiceScreen(ModalScreen):
@@ -136,7 +147,7 @@ class LinkSetupScreen(ModalScreen):
                          tooltip=None if self.read_only_argv else "the cluster's sftp-server was not found: not possible")
         with Horizontal(classes="setup-row"):
           yield Label("Relay")
-          yield Input(relay_setting(), id="setup-relay", tooltip="ssh-j.com (public) or your own SSH jump host (user@host)")
+          yield Input(relay_setting(), id="setup-relay", tooltip="ssh-j.com (public), your own SSH jump host (user@host), or direct (no relay: your machine reaches this one itself; direct://host:port)")
         yield Static(id="setup-warning")
         with Horizontal(classes="setup-row"):
           yield Label("Logins")
@@ -175,6 +186,12 @@ class LinkSetupScreen(ModalScreen):
   def create(self, event):
     event.stop()
     relay = self.query_one("#setup-relay", Input).value.strip() or share.DEFAULT_RELAY
+    if share.parse_relay(relay)[0] == share.DIRECT:
+      try:
+        share.direct_address(relay)
+      except ValueError as e:
+        self.notify(str(e), severity="error")
+        return
     uses = self.query_one("#setup-uses", Select).value
     expiry = self.query_one("#setup-expiry", Select).value
     by_key = self.query_one("#setup-auth-key", RadioButton).value
@@ -209,7 +226,8 @@ def link_state(link, now=None):
   """The state of a link in words, for its view and the connection window"""
   now = now or time.time()
   relay = {"starting": ("starting", "yellow"), "connecting": (f"connecting to the relay {link.relay_host}", "yellow"),
-           "ready": (f"ready, via {link.relay_host}" + (f" port {link.relay_port}" if link.relay_port else ""), "green"),
+           "ready": (f"ready, directly at {link.relay_host} port {link.port}" if link.direct else
+                     f"ready, via {link.relay_host}" + (f" port {link.relay_port}" if link.relay_port else ""), "green"),
            "broken": (f"relay lost: {link.relay_error} (trying again)", "red"), "closed": ("closed", "dim")}[link.relay_state]
   if link.open(now):
     left = "once" if link.uses == 1 else f"{link.uses - link.logins} more logins" if link.uses else "any number of logins"

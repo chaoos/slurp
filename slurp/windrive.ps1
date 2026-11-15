@@ -264,7 +264,19 @@ function Begin-Map {
   if (-not $script:password) { $state.Text = 'Enter (or paste) the password of the link first.'; [void]$pw.Focus(); return }
   $script:drive = ''
   $script:target = [string]$letter.SelectedItem
+  if ($LinkRelayKind -eq 'direct') {
+    # (no relay: straight to slurp's machine)
+    $script:port = $LinkTargetPort
+    $script:sshhost = $LinkTargetHost
+    $script:unchost = $LinkTargetHost
+    Say "connecting directly to $LinkTargetHost port $LinkTargetPort ..."
+    $script:tries = 0
+    Begin-Verify
+    return
+  }
   $script:port = Get-FreePort
+  $script:sshhost = '127.0.0.1'
+  $script:unchost = 'localhost'
   Say "connecting to the relay $LinkRelayHost (local port $($script:port)) ..."
   Start-Tunnel
   Set-Phase 'tunnel' 'Connecting to the relay ...'
@@ -277,13 +289,13 @@ function Begin-Verify {
     Begin-NetUse
     return
   }
-  $script:keyscan = Start-Hidden $Keyscan "-T 10 -t ed25519 -p $($script:port) 127.0.0.1" -Capture
+  $script:keyscan = Start-Hidden $Keyscan "-T 10 -t ed25519 -p $($script:port) $($script:sshhost)" -Capture
   Set-Phase $(if ($script:phase -eq 'reconnecting') { 'reconnecting' } else { 'verify' }) $(if ($script:phase -eq 'reconnecting') { 'Reconnecting: checking slurp ...' } else { 'Checking that slurp answers (its host key) ...' })
   $script:verifying = $true
 }
 
 function Begin-NetUse {
-  $unc = "\\sshfs\$LinkUser@localhost!$($script:port)"
+  $unc = "\\sshfs\$LinkUser@$($script:unchost)!$($script:port)"
   Say "mapping $($script:target) to $unc ..."
   $script:netuse = Start-Hidden 'net.exe' "use $($script:target) $unc `"$($script:password)`" /user:$LinkUser /persistent:no" -Capture
   Set-Phase $(if ($script:remap) { 'reconnecting' } else { 'mapping' }) $(if ($script:remap) { 'Reconnecting: mapping again ...' } else { 'Logging in and mapping (password) ...' })

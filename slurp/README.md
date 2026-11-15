@@ -322,6 +322,15 @@ it asks only once).
 - **Your own relay**: any SSH server you can log in to with a key, e.g.
   `me@relay.example.org`; slurp asks it for a free port. Set it in the setup
   panel or as `"link_relay"` in the settings.
+- **direct** (no relay): when your machine reaches the one slurp runs on
+  itself (the same network, a VPN), `direct` makes the link listen on that
+  machine (every interface, a free port) and your ssh connects straight to it,
+  no third party. `direct://host:port` names the host your machine knows it by
+  (default: its own name) and a fixed port (one your firewall lets through);
+  with an address (`direct://10.1.2.3`) it listens on that address only. Whoever
+  reaches the port can try the password (5 wrong ones lock the link). The
+  commands, the drive window and the Windows helper then connect directly, with
+  no tunnel step.
 
 The **setup panel** of a link: the relay (with its warning), **Logins** (once,
 the default for shells; any number until it expires, the default for drives,
