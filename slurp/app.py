@@ -1081,6 +1081,12 @@ class Slurp(App):
                                        web=(reply["port"], reply["token"])), created)
     in_background(self, start, started, group="web")
 
+  def format_title(self, title, sub_title):
+    """The header: the logo's mark (in the theme's colours), then the title as Textual shows it"""
+    from textual.content import Content
+    from . import logo
+    return Content.assemble(logo.mark(), " ", App.format_title(self, title, sub_title))
+
   def on_client(self):
     """The active view is a browser: slurp can open a URL (or a download) on the user's computer through it"""
     from . import holder

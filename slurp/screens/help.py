@@ -268,6 +268,9 @@ class ViewHelpScreen(ModalScreen):
   ViewHelpScreen { align: center middle; }
   #vh-dialog { width: 110; max-width: 96%; height: 90%; border: thick $accent; background: $surface; padding: 0 1; }
   #vh-doc { height: 1fr; }
+  #vh-brand { height: 5; margin: 1 0 0 1; }
+  #vh-logo { width: 17; }
+  #vh-name { width: 1fr; padding-top: 1; }
   #vh-buttons { height: auto; align-horizontal: right; margin: 1 0 0 0; }
   #vh-buttons Button { margin-left: 1; }
   """
@@ -279,7 +282,13 @@ class ViewHelpScreen(ModalScreen):
 
   def compose(self):
     from .checks import DocViewer
+    from rich.text import Text
+    from .. import logo
     with Vertical(id="vh-dialog"):
+      with Horizontal(id="vh-brand"):
+        yield Static(Text("\n").join(logo.half_blocks()), id="vh-logo")
+        yield Static(Text.assemble(("slurp", "bold"), "\n", (logo.TAGLINE, "dim"), "\n",
+                                   ("jobs, files and nodes of Slurm clusters, in a terminal or a browser", "dim")), id="vh-name")
       yield DocViewer(self.markdown, id="vh-doc", show_table_of_contents=False, open_links=False)
       with Horizontal(id="vh-buttons"):
         yield Button("Guides (F1)", id="vh-guides")

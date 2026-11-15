@@ -42,6 +42,31 @@ RESET_TERMINAL = ("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?
                   "\x1b[?25h\x1b[?1049l")
 ALT_MODES = (47, 1047, 1049)
 
+def _logo_lines():
+  """The logo in 5 rows of terminal output (see logo.py; the holder does not import the app, logo.py is small)"""
+  try:
+    from . import logo
+  except ImportError:
+    import logo
+  return logo.ansi_lines()
+
+def _page_brand():
+  """The tab of the web view: slurp's logo and name"""
+  try:
+    from . import logo
+  except ImportError:
+    import logo
+  return f'<title>slurp</title><link rel="icon" href="{logo.svg_data_url()}">'
+
+def _intro_brand():
+  """The start screen of the web view (until the first output): the logo, the name, what it is"""
+  try:
+    from . import logo
+  except ImportError:
+    import logo
+  return (f'{logo.svg(size=72, boxed=True)}<div><div style="font-size:28px;font-weight:700;color:#e8eef4">slurp</div>'
+          f'<div style="font-size:13px;opacity:.7;margin-top:6px">{logo.TAGLINE}</div></div>')
+
 # The web page opens slurp:// links (for the slurp helper on the user's computer) like any URL from the app
 # (window.open). A browser may refuse that without a click right before, and nothing shows when the helper is not set
 # up: a banner with the link as a real link to click stays for a while.
@@ -473,7 +498,13 @@ class Holder:
     else:
       buttons = [("[ Take over ]", "take", " Enter"), (f"[ Watch: {'on' if view.watch else 'off'} ]", "watch", " w"),
                  ("[ Detach ]", "detach", " d")]
-    top = max((h - len(lines) - 2) // 2, 1)
+    art = _logo_lines()
+    show_logo = h >= len(lines) + len(art) + 5 and w >= 20
+    top = max((h - len(lines) - 2 - (len(art) + 1 if show_logo else 0)) // 2, 1)
+    if show_logo: # (the logo above the text, centred: 15 columns)
+      for i, line in enumerate(art):
+        out.append(f"\x1b[{top + i};{max((w - 15) // 2, 1) + 1}H{line}")
+      top += len(art) + 1
     for i, (text, style) in enumerate(lines):
       text = text[:w - 2]
       out.append(f"\x1b[{top + i};{max((w - len(text)) // 2, 1) + 1}H\x1b[0{';' + style if style else ''}m{text}\x1b[0m")
@@ -647,7 +678,8 @@ class Holder:
       page = templates.get_template("app_index.html").render(
         font_size=int(request.query.get("fontsize", "16") or 16), app_websocket_url=f"ws://{host}/ws",
         config={"static": {"url": f"http://{host}/static/"}}, application={"name": "slurp"}, ping_url="")
-      page = page.replace("<head>", "<head>" + LINK_BANNER, 1)
+      page = page.replace("<head>", "<head>" + LINK_BANNER + _page_brand(), 1)
+      page = re.sub(r'(<div class="intro">\s*)<svg.*?</svg>\s*<div>[^<]*</div>', lambda m: m[1] + _intro_brand(), page, count=1, flags=re.S)
       response = web.Response(text=page, content_type="text/html")
       response.set_cookie("slurp_token", self.web_token, httponly=True, samesite="Strict")
       return response
