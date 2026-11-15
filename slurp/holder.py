@@ -13,7 +13,9 @@ gets exactly what is on the screen; if its size differs, the app draws itself ag
 
 Views talk to the holder over a Unix socket (terminal views, and the app's control requests) or a websocket (browsers),
 in frames: one type byte (D data, M meta: JSON), four bytes of length, the payload. Browsers use textual-serve's
-protocol: binary messages of terminal output to them, ["stdin", text], ["resize", {width, height}], ["ping", x] from them.
+protocol: binary messages of terminal output to them, ["stdin", text], ["resize", {width, height}], ["ping", x] from them,
+and ["open_url", {url, new_tab}] to them: the app opens a URL in the browser that is active (a slurp:// link for the
+slurp helper on the user's computer, or a file to download, which the holder serves at /download/<key>).
 
 The holder does not import the app (it is long-lived and small); it needs pyte, and aiohttp and jinja2 (installed with
 textual-serve) for the web view."""
@@ -39,6 +41,44 @@ CTTY = "import fcntl, os, sys, termios; fcntl.ioctl(0, termios.TIOCSCTTY, 0); os
 RESET_TERMINAL = ("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?1004l\x1b[?2004l\x1b[<u\x1b[0m"
                   "\x1b[?25h\x1b[?1049l")
 ALT_MODES = (47, 1047, 1049)
+
+# The web page opens slurp:// links (for the slurp helper on the user's computer) like any URL from the app
+# (window.open). A browser may refuse that without a click right before, and nothing shows when the helper is not set
+# up: a banner with the link as a real link to click stays for a while.
+LINK_BANNER = """<style>
+#slurp-link-banner { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 1000; display: none;
+  background: #1d3b53; color: #fff; border: 1px solid #5aa0e0; border-radius: 6px; padding: 8px 14px;
+  font: 14px system-ui, sans-serif; box-shadow: 0 4px 16px rgba(0,0,0,.5); max-width: 90vw; }
+#slurp-link-banner a { color: #9fd0ff; font-weight: bold; }
+#slurp-link-banner button { margin-left: 12px; background: none; border: 0; color: #fff; cursor: pointer; font-size: 14px; }
+</style>
+<script>
+(function () {
+  var open = window.open.bind(window), timer = null;
+  function banner(url) {
+    var b = document.getElementById("slurp-link-banner");
+    if (!b) {
+      b = document.createElement("div"); b.id = "slurp-link-banner";
+      b.innerHTML = 'Opening the slurp helper on this computer. Nothing happened? <a id="slurp-link-a">Open it</a> ' +
+        '(it needs the helper: Set up the helper in the link window) <button title="close">\u2715</button>';
+      document.body.appendChild(b);
+      b.querySelector("button").onclick = function () { b.style.display = "none"; };
+    }
+    b.querySelector("#slurp-link-a").href = url;
+    b.style.display = "block";
+    clearTimeout(timer); timer = setTimeout(function () { b.style.display = "none"; }, 30000);
+  }
+  window.open = function (url, target) {
+    if (typeof url === "string" && url.indexOf("slurp:") === 0) {
+      banner(url);
+      try { window.location.href = url; } catch (e) {}
+      return null;
+    }
+    return open(url, target);
+  };
+})();
+</script>
+"""
 
 # ---------------------------------------------------------------------------
 # frames
@@ -260,6 +300,7 @@ class Holder:
     self.web = None       # (runner, port)
     self.web_token = ""
     self.info = ""        # what the app says about its web links (for the lock screens)
+    self.deliveries = {}  # key -> (file name, bytes, time): downloads for the browser (see deliver)
     self.dirty = False
     self.done = asyncio.Event()
     self.code = None
@@ -553,12 +594,39 @@ class Holder:
       self.info = request.get("text", "")
       self.refresh_locks()
       return {"ok": True}
+    if cmd == "open_url":
+      return self.open_url(str(request.get("url", "")))
+    if cmd == "deliver":
+      import base64
+      try:
+        data = base64.b64decode(request.get("data", ""))
+      except ValueError:
+        return {"error": "the data is not base64"}
+      name = re.sub(r"[^\w.-]", "_", str(request.get("name", "download")))[:80] or "download"
+      now = time.time()
+      self.deliveries = {k: v for k, v in self.deliveries.items() if now - v[2] < 600}
+      key = secrets.token_urlsafe(12)
+      self.deliveries[key] = (name, data, now)
+      reply = self.open_url(f"/download/{key}")
+      if not reply.get("ok"):
+        self.deliveries.pop(key, None)
+      return reply
     if cmd == "status":
       now = time.time()
       return {"views": [{"label": v.label, "kind": v.kind, "active": v is self.active, "since": v.since,
                          "idle": now - v.last_input if v.last_input else None} for v in self.views],
               "web": self.web[1] if self.web else None, "since": self.started}
     return {"error": f"unknown request {cmd!r}"}
+
+  def open_url(self, url):
+    """The active view opens the URL, if it is a browser (a terminal cannot open anything on its computer)"""
+    view = self.active
+    if view is None or view.kind != "web" or not getattr(view, "send_text", None):
+      return {"ok": False, "error": "the active view is not a browser"}
+    if not (url.startswith("slurp:") or url.startswith("/download/") or url.startswith(("http://", "https://"))):
+      return {"ok": False, "error": "not a URL the browser opens"}
+    view.send_text(json.dumps(["open_url", {"url": url, "new_tab": False}]))
+    return {"ok": True, "view": view.label}
 
   # ---- the web view (textual-serve's page, this terminal)
   async def web_start(self):
@@ -579,6 +647,7 @@ class Holder:
       page = templates.get_template("app_index.html").render(
         font_size=int(request.query.get("fontsize", "16") or 16), app_websocket_url=f"ws://{host}/ws",
         config={"static": {"url": f"http://{host}/static/"}}, application={"name": "slurp"}, ping_url="")
+      page = page.replace("<head>", "<head>" + LINK_BANNER, 1)
       response = web.Response(text=page, content_type="text/html")
       response.set_cookie("slurp_token", self.web_token, httponly=True, samesite="Strict")
       return response
@@ -600,7 +669,10 @@ class Holder:
             await ws.close()
             return
           try:
-            await ws.send_bytes(data)
+            if isinstance(data, str):
+              await ws.send_str(data)
+            else:
+              await ws.send_bytes(data)
           except Exception:
             return
       task = asyncio.create_task(writer())
@@ -608,6 +680,7 @@ class Holder:
       browser = next((b for b in ("Firefox", "Edg", "Chrome", "Safari") if b in agent), "a browser").replace("Edg", "Edge")
       view = View(self, "web", f"{browser} (web)", send, close,
                   int(request.query.get("width", "100") or 100), int(request.query.get("height", "30") or 30))
+      view.send_text = send # (a str is sent as a text message: ["open_url", ...])
       self.attach(view)
       try:
         async for message in ws:
@@ -630,8 +703,18 @@ class Holder:
         task.cancel()
       return ws
 
+    async def download(request):
+      if not secrets.compare_digest(request.cookies.get("slurp_token", ""), self.web_token):
+        return web.Response(status=403)
+      item = self.deliveries.get(request.match_info["key"])
+      if item is None or time.time() - item[2] > 600:
+        return web.Response(status=404, text="slurp: this download is gone (they last 10 minutes): ask for it again")
+      name, data, _ = item
+      return web.Response(body=data, content_type="application/octet-stream",
+                          headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+
     app = web.Application()
-    app.add_routes([web.get("/", index), web.get("/ws", websocket),
+    app.add_routes([web.get("/", index), web.get("/ws", websocket), web.get("/download/{key}", download),
                     web.static("/static", os.path.join(serve_dir, "static"))])
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
