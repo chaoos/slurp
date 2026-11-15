@@ -454,7 +454,10 @@ class LinkScreen(ModalScreen):
       grid.add_row("Login", "with your public key only")
     grid.add_row("Host key", f"{share.host_fingerprint()}  (your ssh shows it on the first connect, as {share.host_alias()})")
     live = link.live_sessions
-    grid.add_row("Sessions", f"{len(live)} open, {link.logins} logins so far" + (f", {link.failures} wrong passwords" if link.failures else ""))
+    sessions = Text(f"{len(live)} open, {link.logins} logins so far" + (f", {link.failures} wrong passwords" if link.failures else ""))
+    if any(self.app.this_view(s) for s in live):
+      sessions.append("  ◀ one is this view (the browser you are using)", style="bold")
+    grid.add_row("Sessions", sessions)
     self.query_one("#lv-state", Static).update(grid)
     if link.auth == "password":
       self.query_one("#lv-password", Button).display = link.open()
@@ -544,8 +547,11 @@ class LinkScreen(ModalScreen):
         self.app.link_manager.revoke(self.link)
         self.refresh_view()
     live = len(self.link.live_sessions)
-    self.app.push_screen(ConfirmScreen(f"Revoke link {self.link.id}", "No more logins with it"
-                                       + (f", and its {live} open session{'s' if live != 1 else ''} end." if live else "."), "Revoke"), done)
+    message = Text("No more logins with it" + (f", and its {live} open session{'s' if live != 1 else ''} end." if live else "."))
+    if any(self.app.this_view(s) for s in self.link.live_sessions):
+      message.append("\n\nThe browser you are using now is connected through this link: revoking it ends this very view. "
+                     "It goes blank, and you get back to slurp only from a terminal or through a new web link.", style="bold red")
+    self.app.push_screen(ConfirmScreen(f"Revoke link {self.link.id}", message, "Revoke"), done)
 
   @on(Button.Pressed, "#lv-close")
   def action_close(self, event=None):

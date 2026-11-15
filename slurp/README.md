@@ -572,6 +572,9 @@ screen, **Detach** (`d`) closes the view (slurp goes on). When the active view
 goes away (a browser tab closed, a terminal gone), another one becomes active
 by itself. Quitting asks when other views are attached, and closes them all.
 When no web link is left (revoked, expired), the web view stops listening.
+In the connection window's Links, the session of the browser you are on is
+marked **◀ this view**. Disconnecting it, or revoking its link, warns first
+that this ends the very view you are using.
 
 `--serve` (below) is different: every browser tab gets its own new slurp.
 

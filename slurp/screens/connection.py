@@ -253,8 +253,10 @@ class ConnectionScreen(ModalScreen):
         if not s.kind:
           continue
         duration = int((s.ended or now) - s.started)
+        here = s.ended is None and self.app.this_view(s)
         rows.append((f"session|{link.id}|{s.id}", (
-          f"  └ {s.id}", f"{s.kind} {'open' if s.ended is None else 'ended'} · {duration // 60}:{duration % 60:02d}",
+          Text.assemble(f"  └ {s.id}", (" ◀ this view", "bold green") if here else ""),
+          f"{s.kind} {'open' if s.ended is None else 'ended'} · {duration // 60}:{duration % 60:02d}",
           Text(f"{s.client or 'client ?'}" + (f", key {s.key[:20]}…" if s.key else ""), style="" if s.ended is None else "dim"),
           Text(f"{humanize.naturalsize(s.bytes_in)} in, {humanize.naturalsize(s.bytes_out)} out" + (f", {s.term} {s.size[0]}×{s.size[1]}" if s.term else ""),
                style="" if s.ended is None else "dim"),
@@ -300,10 +302,12 @@ class ConnectionScreen(ModalScreen):
     def done(yes):
       if yes:
         self.app.link_manager.disconnect(session)
-    self.app.push_screen(ConfirmScreen(f"Disconnect session {session.id}", f"End the {session.kind} of link {link.id} "
-                                       f"({link.title}) from {session.client or 'a client'}?"
-                                       + (" A mounted drive fails until it is unmounted." if session.kind == "drive" else ""),
-                                       "Disconnect"), done)
+    message = Text(f"End the {session.kind} of link {link.id} ({link.title}) from {session.client or 'a client'}?"
+                   + (" A mounted drive fails until it is unmounted." if session.kind == "drive" else ""))
+    if self.app.this_view(session):
+      message.append("\n\nThis is the session of the browser you are using now: disconnecting it ends this very view. "
+                     "It loses slurp until you log in through a web link again (this one, if it takes more logins) or use a terminal.", style="bold red")
+    self.app.push_screen(ConfirmScreen(f"Disconnect session {session.id}", message, "Disconnect"), done)
 
   def on_mount(self):
     self.show_title()

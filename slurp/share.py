@@ -215,6 +215,8 @@ class Session:
   ended: float | None = None
   conn: object = None
   proc: object = None            # subprocess.Popen (shell) or asyncio process (drive)
+  web_ports: set = field(default_factory=set) # a web session: the local ports of its forwarded connections to the
+                                              # web view (the holder knows the port of each browser: which one it is)
 
   def close(self):
     """Disconnect: end what it runs and the SSH connection"""
@@ -938,13 +940,23 @@ class _Server(asyncssh.SSHServer if asyncssh else object):
     link = self.link
     allowed = link.kind == "web" and link.web_port and dest_port == link.web_port and dest_host in ("127.0.0.1", "localhost")
     log.debug(f"link {link.id}: forwarding to {dest_host}:{dest_port} {'allowed' if allowed else 'refused'}")
-    if allowed:
-      session = next((s for s in link.sessions if s.conn is self.conn and s.ended is None), None)
-      if session is not None and not session.kind:
-        session.kind = "web"
-        self.manager._started(session)
-      return True
-    return False
+    if not allowed:
+      return False
+    session = next((s for s in link.sessions if s.conn is self.conn and s.ended is None), None)
+    if session is not None and not session.kind:
+      session.kind = "web"
+      self.manager._started(session)
+    async def forward():
+      """As asyncssh forwards (True), keeping the local port: the web view sees it as the browser's port"""
+      from asyncssh.forward import SSHForwarder
+      try:
+        transport, peer = await asyncio.get_running_loop().create_connection(SSHForwarder, "127.0.0.1", link.web_port)
+      except OSError as exc:
+        raise asyncssh.ChannelOpenError(asyncssh.OPEN_CONNECT_FAILED, str(exc)) from None
+      if session is not None:
+        session.web_ports.add(transport.get_extra_info("sockname")[1])
+      return SSHForwarder(peer)
+    return forward()
 
   def begin_auth(self, username):
     return True # a login is always needed

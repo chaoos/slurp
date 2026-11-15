@@ -275,7 +275,7 @@ class Slurp(App):
     if holder.under_holder(): # the theme follows the active view: the terminal's or the browser's
       import threading
       threading.Thread(target=holder.subscribe, daemon=True, name="active view",
-                       args=(lambda kind, label: self.call_from_thread(self.active_view_changed, kind),)).start()
+                       args=(lambda kind, label, port: self.call_from_thread(self.active_view_changed, kind, port),)).start()
 
   def theme_key(self, kind=None):
     """The config key of the theme: "theme" in a terminal, "theme_web" in a browser (slurp --serve, or the web view
@@ -294,7 +294,10 @@ class Slurp(App):
       self.theme_applied = theme # (switched to, not chosen: not stored again)
       self.theme = theme
 
-  def active_view_changed(self, kind):
+  active_view_port = 0 # the active view is a browser: the port it connects from (see holder.View.port)
+
+  def active_view_changed(self, kind, port=0):
+    self.active_view_port = port if kind == "web" else 0
     if kind and kind != self.view_kind:
       self.view_kind = kind
       self.apply_theme()
@@ -1132,6 +1135,10 @@ class Slurp(App):
     in_background(self, lambda: holder.control("deliver", name=name, data=base64.b64encode(data).decode()),
                   lambda reply: done(bool(reply and reply.get("ok")), (reply or {}).get("error", "no answer from the session holder")),
                   group="client")
+
+  def this_view(self, session):
+    """The session is the web link's tunnel of the browser this slurp is on now"""
+    return bool(self.active_view_port) and self.active_view_port in getattr(session, "web_ports", ())
 
   def web_links(self):
     return [l for l in self.link_manager.links if l.kind == "web"]

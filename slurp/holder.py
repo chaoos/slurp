@@ -310,6 +310,7 @@ class View:
     self.watch = False
     self.note = ""
     self.buttons = [] # (row, first col, last col, action)
+    self.port = 0     # a browser: the port its connection comes from (a web link's session forwards from it)
 
   def size_text(self):
     return f"{self.width}×{self.height}"
@@ -413,10 +414,13 @@ class Holder:
         self.announce()
     self.refresh_locks()
 
+  def active_meta(self):
+    a = self.active
+    return {"type": "active", "kind": a.kind if a else None, "label": a.label if a else "", "port": a.port if a else 0}
+
   def announce(self):
     """Tell the app which kind of view is active (terminal or web: each has its theme)"""
-    message = frame(b"M", {"type": "active", "kind": self.active.kind if self.active else None,
-                           "label": self.active.label if self.active else ""})
+    message = frame(b"M", self.active_meta())
     for writer in list(self.subscribers):
       if writer.is_closing():
         self.subscribers.remove(writer)
@@ -577,8 +581,7 @@ class Holder:
       return
     if hello.get("type") == "subscribe": # (the app: told whenever the active view changes)
       self.subscribers.append(writer)
-      writer.write(frame(b"M", {"type": "active", "kind": self.active.kind if self.active else None,
-                                "label": self.active.label if self.active else ""}))
+      writer.write(frame(b"M", self.active_meta()))
       while await read_frame(reader) is not None:
         pass
       if writer in self.subscribers:
@@ -715,6 +718,8 @@ class Holder:
       view = View(self, "web", f"{browser} (web)", send, close,
                   int(request.query.get("width", "100") or 100), int(request.query.get("height", "30") or 30))
       view.send_text = send # (a str is sent as a text message: ["open_url", ...])
+      peer = request.transport.get_extra_info("peername") if request.transport else None
+      view.port = peer[1] if peer else 0
       self.attach(view)
       try:
         async for message in ws:
@@ -942,7 +947,8 @@ def under_holder():
   return bool(os.environ.get("SLURP_HOLDER"))
 
 def subscribe(changed):
-  """(a thread of the app) changed(kind, label) whenever the active view changes; returns when the holder goes"""
+  """(a thread of the app) changed(kind, label, port) whenever the active view changes (port: a browser's, see
+  View.port); returns when the holder goes"""
   path = os.environ.get("SLURP_HOLDER")
   if not path:
     return
@@ -962,7 +968,7 @@ def subscribe(changed):
         if kind == b"M":
           meta = json.loads(payload)
           if meta.get("type") == "active":
-            changed(meta.get("kind"), meta.get("label", ""))
+            changed(meta.get("kind"), meta.get("label", ""), meta.get("port") or 0)
   except OSError:
     return
   finally:
