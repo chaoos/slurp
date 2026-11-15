@@ -168,6 +168,16 @@ moved up, job ids in log names, thread and binding settings, `module purge`, `wa
 A shell or drive of the cluster for your own terminal or file manager, through a relay: its state, logins, the
 password and slurp's host key, and the commands for your machine (Linux, macOS, Windows, PuTTY/WinSCP, ssh config),
 each with Copy. **New password** (the old one stops working), **Extend 1 h**, **Revoke** (no more logins, sessions end).
+
+**On your Windows computer** (password links): the slurp helper opens the link with one click. **Open on my
+computer** (slurp in your browser) hands it to the browser, which starts the helper; **Copy helper link** for Win+R
+(from a terminal). The helper asks for the password, then maps the drive, opens the web view or a terminal, and keeps
+it in its tray icon. **Set up the helper…** sets it up once on your computer.
+"""),
+  "HelperSetupScreen": ("The slurp helper", """
+The tray program for Windows that opens links with one click and the password. **Download the setup** (when slurp is
+open in your browser) gives `slurp-helper-setup.cmd` to run; **Copy the setup command** is the same for a PowerShell
+window. What it installs (in your user, no admin), what it needs, and how to remove it: in the window.
 """),
   "LinkSetupScreen": ("Link setup", """
 How a link for your own terminal works: the relay (public ssh-j.com, or your own SSH server), how many logins it

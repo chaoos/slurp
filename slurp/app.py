@@ -1081,6 +1081,41 @@ class Slurp(App):
                                        web=(reply["port"], reply["token"])), created)
     in_background(self, start, started, group="web")
 
+  def on_client(self):
+    """The active view is a browser: slurp can open a URL (or a download) on the user's computer through it"""
+    from . import holder
+    return self.is_web or (holder.under_holder() and self.view_kind == "web")
+
+  def open_on_client(self, url, done=lambda ok, why: None):
+    """Opens the URL in the active browser (a slurp:// link: the slurp helper there); done(ok, why) on the UI thread"""
+    from . import holder
+    if self.is_web:
+      self.open_url(url, new_tab=False)
+      done(True, "")
+      return
+    if not self.on_client():
+      done(False, "the active view is a terminal: slurp cannot open anything on its computer")
+      return
+    in_background(self, lambda: holder.control("open_url", url=url),
+                  lambda reply: done(bool(reply and reply.get("ok")), (reply or {}).get("error", "no answer from the session holder")),
+                  group="client")
+
+  def deliver_to_client(self, name, data, done=lambda ok, why: None):
+    """The browser that is active downloads the file (bytes)"""
+    import base64
+    import io
+    from . import holder
+    if self.is_web:
+      self.deliver_binary(io.BytesIO(data), save_filename=name, mime_type="application/octet-stream")
+      done(True, "")
+      return
+    if not self.on_client():
+      done(False, "the active view is a terminal: a download needs slurp in your browser (Remote web access)")
+      return
+    in_background(self, lambda: holder.control("deliver", name=name, data=base64.b64encode(data).decode()),
+                  lambda reply: done(bool(reply and reply.get("ok")), (reply or {}).get("error", "no answer from the session holder")),
+                  group="client")
+
   def web_links(self):
     return [l for l in self.link_manager.links if l.kind == "web"]
 

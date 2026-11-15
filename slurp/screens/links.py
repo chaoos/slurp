@@ -11,9 +11,9 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, RadioButton, RadioSet, Select, Static, Switch, TextArea
+from textual.widgets import Button, Input, Label, Markdown, RadioButton, RadioSet, Select, Static, Switch, TextArea
 
-from .. import share
+from .. import share, winhelper
 from ..config import load_config, update_config
 from .dialogs import ConfirmScreen, copy_text
 
@@ -239,6 +239,9 @@ class LinkScreen(ModalScreen):
   .lv-command-note { color: $text-muted; }
   .lv-command Horizontal { height: auto; }
   .lv-command Button { min-width: 10; margin-left: 1; }
+  #lv-helper { height: auto; border: round $accent; padding: 0 1; margin-bottom: 1; }
+  #lv-helper Horizontal { height: auto; margin-top: 1; }
+  #lv-helper Button { margin-right: 1; }
   #lv-buttons { height: auto; align-horizontal: right; margin: 1 0; }
   #lv-buttons Button { margin-left: 1; }
   """
@@ -302,6 +305,16 @@ class LinkScreen(ModalScreen):
       box.mount(Static(Text("The commands appear when the relay is ready …", style="yellow")))
       return
     widgets = []
+    if winhelper.available(link) is None:
+      widgets.append(Vertical(
+        Static("On your Windows computer: the slurp helper (one click, then the password)", classes="lv-command-title"),
+        Static(f"It {HELPER_DOES[link.kind]}, and keeps it in its tray icon. In slurp's web view, Open on my computer "
+               "hands the link to your browser, which starts the helper; from a terminal, copy the link and open it "
+               "with Win+R. Set it up once on your computer: Set up the helper.", classes="lv-command-note"),
+        Horizontal(Button("Open on my computer", id="lv-helper-open", variant="primary"),
+                   Button("Copy helper link", id="lv-helper-copy"),
+                   Button("Set up the helper…", id="lv-helper-setup")),
+        id="lv-helper"))
     if link.auth == "password":
       widgets.append(Vertical(Static("Password", classes="lv-command-title"),
                               Horizontal(Static(link.password, classes="lv-command-text", markup=False),
@@ -323,6 +336,28 @@ class LinkScreen(ModalScreen):
     else:
       title, text, _ = share.client_commands(self.link)[int(event.button.name)]
       copy_text(self.app, text, title)
+
+  @on(Button.Pressed, "#lv-helper-open")
+  def helper_open(self, event):
+    event.stop()
+    url = winhelper.link_url(self.link)
+    def done(ok, why):
+      if ok:
+        self.app.notify("Your browser hands the link to the slurp helper (the first time it asks whether to open it). "
+                        "Give the password there: Copy it here.", timeout=10)
+      else:
+        copy_text(self.app, url, f"the helper link of link {self.link.id} ({why}: open it with Win+R, paste, Enter)")
+    self.app.open_on_client(url, done)
+
+  @on(Button.Pressed, "#lv-helper-copy")
+  def helper_copy(self, event):
+    event.stop()
+    copy_text(self.app, winhelper.link_url(self.link), f"the helper link of link {self.link.id} (Win+R, paste, Enter)")
+
+  @on(Button.Pressed, "#lv-helper-setup")
+  def helper_setup(self, event):
+    event.stop()
+    self.app.push_screen(HelperSetupScreen())
 
   @on(Button.Pressed, "#lv-password")
   def new_password(self, event):
@@ -348,6 +383,86 @@ class LinkScreen(ModalScreen):
                                        + (f", and its {live} open session{'s' if live != 1 else ''} end." if live else "."), "Revoke"), done)
 
   @on(Button.Pressed, "#lv-close")
+  def action_close(self, event=None):
+    if event is not None:
+      event.stop()
+    self.dismiss()
+
+HELPER_DOES = {"drive": "maps the drive (pick its letter) and opens it in Explorer",
+               "shell": "opens a terminal window with the shell",
+               "web": "opens this slurp in your browser (the tunnel runs in the helper, no window to keep open)"}
+
+HELPER_TEXT = """\
+One click on **Open on my computer** in a link window, the link's password, and the helper does the rest: it maps
+the drive and opens Explorer, opens the web view in your browser, or opens a terminal window with the shell. What is
+open stays in its icon in the tray (^ next to the clock): open, show, disconnect. It is for Windows 10 and 11.
+
+**Set it up once** on your Windows computer (no admin rights needed):
+
+- **Download the setup** (when slurp is open in your browser): run `slurp-helper-setup.cmd` from your downloads.
+  Windows may warn about a file from the internet: *More info → Run anyway*.
+- or **Copy the setup command** and paste it into a PowerShell window (Start → PowerShell).
+
+Then the first link asks your browser whether to open slurp links with it: allow it (*always allow* saves the question).
+From a terminal (not the browser): **Copy helper link** in the link window, then Win+R, paste, Enter.
+
+**What the setup does:** it puts the helper into `%LOCALAPPDATA%\\slurp-helper`, compiles its small launcher there
+(`slurp-open.exe`, from source code in the setup: no program is downloaded), registers `slurp://` links for your
+Windows user, starts the helper with Windows (tray menu: *Start with Windows*), adds a start menu entry, and remembers
+this slurp's host key (`{fingerprint}`, as `{alias}`): a link of another slurp asks first. Setting it up again
+updates it. **Remove it:** tray menu → *Uninstall*.
+
+**It needs** the OpenSSH Client of Windows (an optional feature, there by default on Windows 11: *Settings → Apps →
+Optional features*). A drive also needs WinFsp and SSHFS-Win: the helper offers to install them (winget).
+
+**How it connects** (as the commands of the link window do): a tunnel to the relay (no password), then it checks
+slurp's host key through it against the one in the link, then logs in with the password you give it. The password is
+not in the link and not stored: the helper types it into ssh's prompt for you (or into `net use` for a drive).
+"""
+
+class HelperSetupScreen(ModalScreen):
+  """How to set up the slurp helper on Windows: download the setup (web view) or copy the setup command"""
+  DEFAULT_CSS = """
+  HelperSetupScreen { align: center middle; }
+  #hs-dialog { width: 110; max-width: 98%; height: 90%; border: thick $accent; background: $surface; padding: 0 1; }
+  #hs-title { text-style: bold; margin: 1 0 0 0; }
+  #hs-body { height: 1fr; }
+  #hs-buttons { height: auto; align-horizontal: right; margin: 1 0; }
+  #hs-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "close", "Close")]
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="hs-dialog"):
+      yield Static("The slurp helper for Windows", id="hs-title")
+      with VerticalScroll(id="hs-body"):
+        yield Markdown(HELPER_TEXT.replace("{fingerprint}", share.host_fingerprint()).replace("{alias}", share.host_alias()))
+      with Horizontal(id="hs-buttons"):
+        yield Button("Close", id="hs-close")
+        yield Button("Copy the setup command", id="hs-copy")
+        yield Button("Download the setup", id="hs-download", variant="primary",
+                     tooltip="slurp-helper-setup.cmd, in the browser that shows slurp now")
+
+  def on_mount(self):
+    self.query_one("#hs-download", Button).disabled = not self.app.on_client()
+
+  @on(Button.Pressed, "#hs-download")
+  def download(self, event):
+    event.stop()
+    def done(ok, why):
+      if ok:
+        self.app.notify(f"Your browser downloads {winhelper.SETUP_NAME}: run it (More info → Run anyway, if Windows warns)",
+                        timeout=10)
+      else:
+        self.app.notify(f"no download: {why}. Copy the setup command instead.", severity="warning", timeout=10)
+    self.app.deliver_to_client(winhelper.SETUP_NAME, winhelper.setup_file(), done)
+
+  @on(Button.Pressed, "#hs-copy")
+  def copy_command(self, event):
+    event.stop()
+    copy_text(self.app, winhelper.setup_command(), "the setup command of the slurp helper (paste it into PowerShell)")
+
+  @on(Button.Pressed, "#hs-close")
   def action_close(self, event=None):
     if event is not None:
       event.stop()
