@@ -245,20 +245,38 @@ class ConnectionScreen(ModalScreen):
       return
     now = time.time()
     rows = []
+    def health(level, words):
+      return Text(f"{'●' if level else '○'} {words}", style=HEALTH_STYLES[level] if level else "dim")
     for link in links:
       relay, logins = link_state(link, now)
+      what = f"{link.kind}: {link.tab}" if link.kind == "drive" else f"{link.kind}: {link.title}" # (a drive's folders: its sessions)
       rows.append((f"link|{link.id}", (Text.assemble(link.id, (" ◀ this view", "bold green") if link.cloudflare and self.app.this_view_link(link) else ""),
-                                       f"{link.kind}{' (read only)' if link.read_only else ''}: {link.title}", relay, logins,
+                                       health(*share.link_health(link)),
+                                       what + (" (read only)" if link.read_only else ""), relay, logins,
                                        "the address opens it (no logins)" if link.cloudflare else
                                        f"{len(link.live_sessions)} open, {link.logins} logins" + (f", {link.failures} wrong" if link.failures else ""))))
-      for s in link.sessions:
-        if not s.kind:
-          continue
+      sessions = [s for s in link.sessions if s.kind]
+      if link.kind == "drive":
+        # one row per folder: its newest session; the ones before it are its reconnects (sshfs, the helper reconnect)
+        groups = {}
+        for s in sessions:
+          groups.setdefault(s.path or f"?{s.id}", []).append(s) # (a folder not known yet: a row of its own)
+        shown = [(group[-1], group[:-1]) for group in groups.values()]
+      else:
+        shown = [(s, []) for s in sessions]
+      for s, before in shown:
         duration = int((s.ended or now) - s.started)
         here = s.ended is None and self.app.this_view(s)
+        level, words = share.session_health(s)
+        recent = [b for b in before[1:] + [s] if now - b.started < share.UNSTABLE] if before else []
+        if s.ended is None and recent and level == "good":
+          level, words = "warn", f"unstable: reconnected {len(recent)}× in {share.UNSTABLE // 60} min"
+        state = f"{'open' if s.ended is None else 'ended'} · {duration // 60}:{duration % 60:02d}"
         rows.append((f"session|{link.id}|{s.id}", (
           Text.assemble(f"  └ {s.id}", (" ◀ this view", "bold green") if here else ""),
-          f"{s.kind} {'open' if s.ended is None else 'ended'} · {duration // 60}:{duration % 60:02d}",
+          health(level, words),
+          Text.assemble(f"{s.path or '(folder not known yet)'} · {state}" if link.kind == "drive" else f"{s.kind} {state}",
+                        (f" · reconnected {len(before)}×", "yellow") if before else ""),
           Text(f"{s.client or 'client ?'}" + (f", key {s.key[:20]}…" if s.key else ""), style="" if s.ended is None else "dim"),
           Text(f"{humanize.naturalsize(s.bytes_in)} in, {humanize.naturalsize(s.bytes_out)} out" + (f", {s.term} {s.size[0]}×{s.size[1]}" if s.term else ""),
                style="" if s.ended is None else "dim"),
@@ -269,7 +287,7 @@ class ConnectionScreen(ModalScreen):
     old_keys = [k for k, _ in (self.links_shown or [])]
     self.links_shown = signature
     if not table.columns:
-      for label in ("Link", "What", "Relay / client", "Logins / traffic", "Sessions"):
+      for label in ("Link", "Health", "What", "Relay / client", "Logins / traffic", "Sessions"):
         table.add_column(label, key=label)
     if old_keys == [k for k, _ in rows] and table.row_count == len(rows):
       # the same rows, new values (traffic, durations): update the cells, the view (scrolling, cursor) stays as it is

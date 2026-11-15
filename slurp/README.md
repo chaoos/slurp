@@ -379,6 +379,14 @@ key and the state; **New password**, **Extend 1 h**, **Revoke**.
 The **connection window** (click the status of the tab) lists the links of the
 tab and their sessions (shell or drive, since when, client, traffic, terminal
 size); a click on a link opens its window, on a session disconnects it.
+**Health** shows for every link and session what the status of the tab shows
+for its SSH login: green *healthy* (with the round trip of a heartbeat that
+slurp sends each client it has not heard from for 15 s), yellow *slow* or
+*unstable* (the relay, or a drive's client, reconnected in the last 10
+minutes), red *no answer* or *relay lost*. A drive is one row, and under it one
+row per folder its clients mounted (`/scratch/…`, the login directory, …, as
+the client's first request names it), with how often that folder's
+connection was made again (sshfs and the helper reconnect by themselves).
 Logins, wrong passwords and lost relays are notified, the footer shows open
 links and sessions, and quitting with open sessions asks first. Every link and
 session is written to `~/.local/state/slurp/links.log` (never a password);

@@ -145,7 +145,9 @@ resolved destination, traffic and round-trip times, the ssh process and its TCP 
 - **Reconnect** (`R`) logs in again; **Disconnect** ends the session until the tab is selected again.
 - **Drive:** your login directory mounted on this machine (state, Mount/Unmount/Remount/Force unmount).
 - **Links:** shells and drives made for your own terminal: their state and sessions; select one for its commands,
-  a new password, more time or Revoke. When you use slurp in a browser through a web link, its session is marked
+  a new password, more time or Revoke. **Health** is as for the SSH login: healthy (a heartbeat's round trip), slow
+  or unstable (reconnects in the last 10 minutes), no answer or relay lost. A drive lists the folders its clients
+  mounted, one row each, with their reconnects. When you use slurp in a browser through a web link, its session is marked
   **◀ this view**; disconnecting it (or revoking its link) ends the view you are in, and slurp warns first.
 """),
   "PlacementScreen": ("Placement", """

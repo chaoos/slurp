@@ -223,6 +223,14 @@ class Session:
   proc: object = None            # subprocess.Popen (shell) or asyncio process (drive)
   web_ports: set = field(default_factory=set) # a web session: the local ports of its forwarded connections to the
                                               # web view (the holder knows the port of each browser: which one it is)
+  path: str = ""                 # a drive: the folder the client mounted (its first SFTP request names it)
+  latency: float | None = None   # the round trip of the last heartbeat, seconds
+  ping_sent: float | None = None # (monotonic) a heartbeat waits for its answer since then
+  last_heard: float = float("-inf") # (monotonic) the client was last heard from: data or a heartbeat answer
+
+  def responding(self):
+    """Seconds the heartbeat waits for its answer (None: it is not waiting)"""
+    return None if self.ping_sent is None else time.monotonic() - self.ping_sent
 
   def close(self):
     """Disconnect: end what it runs and the SSH connection"""
@@ -264,6 +272,7 @@ class Link:
   public_host: str = ""          # pinggy, cloudflare: the public host it gave
   relay_note: str = ""           # what happens while it starts (cloudflare: downloading cloudflared)
   relay_state: str = "starting"  # starting, connecting, ready, broken, closed
+  relay_losses: list = field(default_factory=list) # (monotonic) when the relay tunnel was lost (then it reconnects)
   relay_error: str = ""
   sessions: list = field(default_factory=list)
   server: object = None
@@ -354,6 +363,53 @@ class Link:
     if self.cloudflare:
       return f"https://{self.public_host}/?token={self.web_token}"
     return f"http://localhost:8000/?token={self.web_token}"
+
+UNSTABLE = 600 # seconds: reconnects within this long make a link (or a drive) unstable
+
+def session_health(session):
+  """("good" | "warn" | "bad", in words) of a session: its heartbeat, as for the SSH login of a tab (None: ended)"""
+  from .remote import PING_SLOW, SLOW_ROUND_TRIP
+  if session.ended is not None:
+    return None, "ended"
+  waiting, latency = session.responding(), session.latency
+  ms = f" {latency * 1000:.0f} ms" if latency is not None else ""
+  if waiting is not None and waiting > PING_SLOW:
+    return "bad", f"no answer for {waiting:.0f} s"
+  if waiting is not None and waiting > SLOW_ROUND_TRIP or latency is not None and latency > SLOW_ROUND_TRIP:
+    return "warn", "slow" + ms
+  return "good", "healthy" + ms
+
+def link_health(link):
+  """("good" | "warn" | "bad", in words) of a link: its relay tunnel, and how often it was lost lately (None: closed)"""
+  state = link.relay_state
+  recent = [t for t in link.relay_losses if time.monotonic() - t < UNSTABLE]
+  if state == "closed":
+    return None, "closed"
+  if state == "broken":
+    return "bad", "relay lost"
+  if state in ("starting", "connecting"):
+    return ("bad", "relay lost, reconnecting") if recent else ("warn", "connecting")
+  if recent:
+    return "warn", f"unstable: relay reconnected {len(recent)}× in {UNSTABLE // 60} min"
+  return "good", "listening" if link.direct else "healthy"
+
+def drive_path(data, home):
+  """The folder an SFTP client works in, from the start of what it sends (None: not named yet): the path of its first
+  request that has one (sshfs: LSTAT of the folder it mounts; others: REALPATH of "."), relative to home"""
+  pos = 0
+  while len(data) - pos >= 5:
+    size = struct.unpack(">I", data[pos:pos + 4])[0]
+    if len(data) - pos < 4 + size:
+      return None
+    kind = data[pos + 4]
+    if kind in (3, 7, 9, 11, 13, 14, 15, 16, 17, 19) and size >= 9: # (OPEN, LSTAT, SETSTAT, OPENDIR, ..., STAT, READLINK)
+      length = struct.unpack(">I", data[pos + 9:pos + 13])[0]
+      path = data[pos + 13:pos + 13 + length].decode(errors="replace")
+      if not path.startswith("/"):
+        path = os.path.normpath(os.path.join(home or "~", path))
+      return path
+    pos += 4 + size
+  return None
 
 def client_commands(link):
   """What the user runs on their own machine: [(title, text, note)]. The commands are complete only when the relay
@@ -571,6 +627,8 @@ class ShareManager:
       if link.finished:
         break
       link.relay_state = "broken"
+      if not (kind == "pinggy" and time.monotonic() - started > 55 * 60): # (pinggy: a new address every hour)
+        link.relay_losses = [t for t in link.relay_losses if time.monotonic() - t < UNSTABLE] + [time.monotonic()]
       link.relay_error = " | ".join(last) or f"ssh ended with {proc.returncode}"
       log.warning(f"relay tunnel of link {link.id} ended: {link.relay_error}")
       self.events("relay", link, None, link.relay_error)
@@ -653,6 +711,7 @@ class ShareManager:
       if link.finished:
         break
       link.relay_state = "broken"
+      link.relay_losses = [t for t in link.relay_losses if time.monotonic() - t < UNSTABLE] + [time.monotonic()]
       link.relay_error = " | ".join(last) or f"cloudflared ended with {proc.returncode}"
       log.warning(f"cloudflare tunnel of link {link.id} ended: {link.relay_error}")
       self.events("relay", link, None, link.relay_error)
@@ -664,7 +723,8 @@ class ShareManager:
     self.events("relay", link, None, "")
 
   def tick(self):
-    """Every second or so: close links that expired, were used up or have nothing left"""
+    """Every second or so: close links that expired, were used up or have nothing left; heartbeats"""
+    self.heartbeat()
     for link in self.links:
       if link.server is not None and not link.open():
         link.server.close() # no new logins; the sessions go on
@@ -676,6 +736,26 @@ class ShareManager:
           link.tunnel.terminate()
         except ProcessLookupError:
           pass
+
+  def heartbeat(self):
+    """A session not heard from for PING_INTERVAL (and a new one at once) gets a heartbeat: a global request its
+    client answers (keepalive@openssh.com; a refusal is an answer too), as the tab's SSH login has"""
+    from .remote import PING_INTERVAL
+    now = time.monotonic()
+    for session in self.live_sessions():
+      if session.conn is not None and session.ping_sent is None and now - session.last_heard >= PING_INTERVAL:
+        session.ping_sent = now
+        asyncio.ensure_future(self._ping(session))
+
+  async def _ping(self, session):
+    try:
+      await session.conn._make_global_request(b"keepalive@openssh.com")
+    except Exception as e: # (asyncssh's own call: if it is gone, no heartbeat)
+      log.debug(f"heartbeat of session {session.id}: {e!r}")
+      return
+    if session.ping_sent is not None:
+      now = time.monotonic()
+      session.latency, session.last_heard, session.ping_sent = now - session.ping_sent, now, None
 
   def revoke(self, link, end_sessions=True):
     link.revoked = True
@@ -745,6 +825,7 @@ class _Channel(asyncssh.SSHServerSession if asyncssh else object):
     self.out = b"" # input for the shell that its terminal did not take yet
     self.early = [] # data for the sftp server that came while it was starting
     self.early_eof = False
+    self.sftp_start = b"" # a drive: what the client sent first, until it names its folder
     self.can_write = asyncio.Event()
     self.can_write.set()
 
@@ -913,6 +994,12 @@ class _Channel(asyncssh.SSHServerSession if asyncssh else object):
     if self.session is None or datatype: # (nothing runs, or stderr data)
       return
     self.session.bytes_in += len(data)
+    self.session.last_heard = time.monotonic()
+    if self.mode == "drive" and not self.session.path and self.sftp_start is not None:
+      self.sftp_start += data
+      path = drive_path(self.sftp_start, self.link.path)
+      if path is not None or len(self.sftp_start) > 1 << 16:
+        self.session.path, self.sftp_start = path or "", None
     if self.mode == "shell":
       self.out += data
       self.write_pty()
