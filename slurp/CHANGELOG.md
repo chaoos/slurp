@@ -13,6 +13,8 @@ version may need the helper of the same version).
   earlier visit opens it (each page load gets a one-use ticket).
 - In the connection window, the web session of the browser you are on is
   marked "this view"; disconnecting or revoking it warns first.
+- **? slurp** at the top right: slurp in general, its version, the machine it
+  runs on (Copy details for a bug report); also "About slurp" in the palette.
 
 
 ## 0.8.0 (beta), 2026-11-15

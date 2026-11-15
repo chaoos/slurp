@@ -66,6 +66,7 @@ class SplitScreen(Screen):
         yield Button(cluster.name, id=f"cluster-tab-{index}", classes="cluster-tab", variant=variant, compact=True)
         yield Button("✕", id=f"cluster-close-{index}", classes="cluster-close", compact=True, tooltip="close the tab")
       yield Button("+", id="cluster-add", tooltip="Add a local or SSH cluster", compact=True)
+      yield Button("? slurp", id="about", compact=True, tooltip="about slurp: how it works, its version, the machine it runs on")
     with Horizontal(id="view-tabs"):
       yield Button("Jobs", id="view-jobs", classes="view-tab", compact=True, tooltip="the job list")
     with Horizontal(id="topbar"):
@@ -101,6 +102,10 @@ class SplitScreen(Screen):
     if event.button.id and event.button.id.startswith("cluster-close-"):
       event.stop()
       self.app.confirm_close_cluster(int(event.button.id.rsplit("-", 1)[1]))
+      return
+    if event.button.id == "about":
+      event.stop()
+      self.app.action_about()
       return
     if event.button.id == "view-help":
       event.stop()

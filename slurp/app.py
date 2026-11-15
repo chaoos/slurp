@@ -120,6 +120,7 @@ class Slurp(App):
   #cluster-tabs { height: 1; padding: 0 1; background: $panel; }
   #cluster-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 1; }
   #cluster-tabs Button.cluster-tab { margin-right: 0; }
+  #cluster-tabs #about { dock: right; margin-right: 0; text-style: bold; }
   #view-tabs { height: 1; padding: 0 1; background: $boost; }
   #view-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 0; }
   #view-tabs Button.view-close { width: 3; min-width: 3; padding: 0; margin-right: 1; color: $text-muted; }
@@ -1297,7 +1298,7 @@ class Slurp(App):
     await super().on_event(event)
 
   def check_action(self, action, parameters):
-    if not self.clusters and action not in ("quit", "command_palette", "help_quit", "view_help", "guides", "rule_catalogue", "options"):
+    if not self.clusters and action not in ("quit", "command_palette", "help_quit", "view_help", "about", "guides", "rule_catalogue", "options"):
       return False # no tab: only + (and quit)
     if action == "reload": # a key of the job table, not of the other windows
       return self.screen is self.main
@@ -1448,6 +1449,20 @@ class Slurp(App):
       if path:
         open_path(self, ["Jobs"], path)
     self.push_screen(NewScriptScreen(home or "."), created)
+
+  def action_about(self):
+    """? slurp: slurp in general, its version, the machine it runs on"""
+    from .screens.help import AboutScreen, about_facts, about_markdown, about_text
+    if isinstance(self.screen, AboutScreen):
+      return
+    in_background(self, lambda: about_facts(self),
+                  lambda facts: self.push_screen(AboutScreen(about_markdown(facts), about_text(facts))) if facts else None,
+                  group="about", connection=None)
+
+  def get_system_commands(self, screen):
+    from textual.app import SystemCommand
+    yield from super().get_system_commands(screen)
+    yield SystemCommand("About slurp", "how slurp works, its version, the machine it runs on", self.action_about)
 
   def action_view_help(self):
     """? : the help of the window shown (a shell: its terminal help)"""

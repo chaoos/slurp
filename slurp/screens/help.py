@@ -11,7 +11,8 @@ EVERYWHERE = """
 Tabs at the top are clusters (`+` adds one, `✕` closes one); under them the subtabs of the tab: **Jobs** and every
 window opened from it (`Ctrl-W` closes the one shown). `Ctrl-]` switches between the window and the shell pane on the
 right. The footer shows the keys of the window and, on the right, the state of the tab's connection (click it for the
-connection window).
+connection window). **? slurp** at the top right is about slurp in general: how it works, its version, the machine
+it runs on.
 """
 
 VIEW_HELP = {
@@ -176,6 +177,11 @@ computer** (slurp in your browser) hands it to the browser, which starts the hel
 (from a terminal). The helper asks for the password, then maps the drive, opens the web view or a terminal, and keeps
 it in its tray icon. **Set up the helper…** sets it up once on your computer.
 """),
+  "AboutScreen": ("About slurp", """
+slurp in general (how it works, where to find what), its version (and the commit it runs from), and the machine it
+runs on: host, system, CPUs, memory, load, user; how this slurp runs (in the background, its views), the active tab,
+where its settings and logs are. **Copy details** copies the version and the machine as text, for a bug report.
+"""),
   "HelperSetupScreen": ("The slurp helper", """
 The tray program for Windows that opens links with one click and the password. **Download the setup** (when slurp is
 open in your browser) gives `slurp-helper-setup.cmd` to run; **Copy the setup command** is the same for a PowerShell
@@ -280,9 +286,10 @@ class ViewHelpScreen(ModalScreen):
   """
   BINDINGS = [Binding("escape", "close", "Close"), Binding("question_mark", "close", "Close", show=False)]
 
-  def __init__(self, markdown):
+  def __init__(self, markdown, details=None):
+    """details: text for Copy details (the About window: version and machine, for a bug report)"""
     super().__init__()
-    self.markdown = markdown
+    self.markdown, self.details = markdown, details
 
   def compose(self):
     from .checks import DocViewer
@@ -295,6 +302,8 @@ class ViewHelpScreen(ModalScreen):
                                    ("jobs, files and nodes of Slurm clusters, in a terminal or a browser", "dim")), id="vh-name")
       yield DocViewer(self.markdown, id="vh-doc", show_table_of_contents=False, open_links=False)
       with Horizontal(id="vh-buttons"):
+        if self.details:
+          yield Button("Copy details", id="vh-copy", tooltip="the version and the machine, as text (for a bug report)")
         yield Button("Guides (F1)", id="vh-guides")
         yield Button("Rule catalogue (F2)", id="vh-rules")
         yield Button("Close", id="vh-close", variant="primary")
@@ -309,6 +318,12 @@ class ViewHelpScreen(ModalScreen):
       self.app.action_rule_catalogue(event.href[5:])
     elif event.href.startswith(("http://", "https://")):
       self.app.open_url(event.href)
+
+  @on(Button.Pressed, "#vh-copy")
+  def copy_details(self, event):
+    event.stop()
+    from .dialogs import copy_text
+    copy_text(self.app, self.details, "the details of slurp and this machine")
 
   @on(Button.Pressed, "#vh-guides")
   def guides(self, event):
@@ -326,7 +341,142 @@ class ViewHelpScreen(ModalScreen):
   def action_close(self):
     self.dismiss()
 
-NO_HELP_BUTTON = ("ViewHelpScreen", "TerminalHelpScreen")
+NO_HELP_BUTTON = ("ViewHelpScreen", "AboutScreen", "TerminalHelpScreen")
+
+class AboutScreen(ViewHelpScreen):
+  """The ? slurp of the top right corner: slurp in general, its version, the machine it runs on"""
+
+ABOUT = """
+slurp shows the jobs, files and nodes of Slurm clusters, in a terminal or in a browser. It runs on **this machine**
+(below) and reaches each cluster from here: this machine itself (a local tab) or over SSH (a tab per destination,
+one SSH connection each, with its jump hosts and keys from your `~/.ssh/config`).
+
+- **Tabs** at the top are clusters: `+` adds one (blank for this machine, or `user@host` / an alias), `✕` closes one.
+  Under them the **subtabs** of the tab: **Jobs**, and every window opened from it (`Ctrl-W` closes the one shown).
+- **The job list**: your queued, running and recently ended jobs, with progress, estimates and the findings of the
+  checks. A click (or Enter) opens a job: details, steps, logs that follow as they grow, nodes, placement, a shell.
+- **Checks** look at job scripts and finished jobs for mistakes (memory, time, paths, MPI, GPUs, …); the rule
+  catalogue (`F2`) lists them, the guides (`F1`) explain the background with the numbers of the active cluster.
+- **Shells and drives**: a shell on the cluster in slurp (the pane on the right, `Ctrl-]`), or from your own
+  terminal; your files as a drive on this machine or on yours. **Links** (an ssh command and a password, through a
+  relay) bring shells, drives and this slurp itself (**Web**, `W`) to your own computer; the connection window (click
+  the state at the bottom right) lists them.
+- **Sessions**: slurp keeps running in the background (like tmux); `slurp` again attaches to it, from another
+  terminal or a browser. `q` quits it.
+- **Help**: `?` (or the **?** at the right of the title bar) explains the window shown, with its keys; this page
+  (**? slurp**) is about slurp in general. `Ctrl-P` opens the command palette. Settings: **Options** in the palette.
+"""
+
+def _run(argv, cwd=None):
+  import subprocess
+  try:
+    return subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=10).stdout.strip()
+  except (OSError, subprocess.SubprocessError):
+    return ""
+
+def about_facts(app):
+  """What the About window shows (blocking: git, cloudflared and the session holder are asked; run it in a worker)"""
+  import getpass, importlib.metadata, os, platform, socket, sys, time
+  from .. import VERSION_TEXT, __version__, cloudflare, holder
+  from ..config import config_path
+  pkg = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+  f = {"version": VERSION_TEXT, "number": __version__, "package": pkg}
+  commit = _run(["git", "log", "-1", "--format=%h %cs"], cwd=pkg)
+  if commit:
+    changed = _run(["git", "status", "--porcelain", "--", "."], cwd=pkg)
+    f["commit"] = commit + (" (with local changes)" if changed else "")
+  f["python"] = f"{platform.python_version()} ({sys.executable})"
+  libs = []
+  for name in ("textual", "rich", "asyncssh", "textual-serve", "aiohttp", "pyte"):
+    try:
+      libs.append(f"{name} {importlib.metadata.version(name)}")
+    except importlib.metadata.PackageNotFoundError:
+      libs.append(f"{name} (not installed)")
+  f["libraries"] = ", ".join(libs)
+  path = cloudflare.binary()
+  f["cloudflared"] = f"{cloudflare.version(path) or '?'} ({path})" if path else "not here (downloaded when a web link through Cloudflare is made)"
+  # the machine
+  f["host"] = socket.getfqdn()
+  f["hostname"] = platform.node()
+  osname = ""
+  try:
+    osname = next((l.split("=", 1)[1].strip().strip('"') for l in open("/etc/os-release") if l.startswith("PRETTY_NAME=")), "")
+  except OSError:
+    pass
+  f["os"] = f"{osname or platform.system()}, kernel {platform.release()}, {platform.machine()}"
+  cpus = os.cpu_count() or 0
+  try:
+    usable = len(os.sched_getaffinity(0))
+  except (AttributeError, OSError):
+    usable = cpus
+  f["cpus"] = f"{cpus}" + (f" ({usable} usable by slurp)" if usable != cpus else "")
+  try:
+    mem = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/meminfo") if l.split(":")[0] in ("MemTotal", "MemAvailable")}
+    f["memory"] = f"{mem['MemTotal'] / 2**20:.1f} GiB, {mem.get('MemAvailable', 0) / 2**20:.1f} GiB available"
+  except (OSError, KeyError, ValueError, IndexError):
+    pass
+  try:
+    f["load"] = " ".join(f"{x:.2f}" for x in os.getloadavg()) + " (1, 5, 15 min)"
+  except OSError:
+    pass
+  try:
+    up = float(open("/proc/uptime").read().split()[0])
+    f["uptime"] = f"{int(up // 86400)} d {int(up % 86400 // 3600)} h" if up >= 86400 else f"{int(up // 3600)} h {int(up % 3600 // 60)} min"
+  except (OSError, ValueError, IndexError):
+    pass
+  f["user"] = f"{getpass.getuser()} (uid {os.getuid()})"
+  # this slurp
+  try:
+    started = os.stat(f"/proc/{os.getpid()}").st_mtime
+  except OSError:
+    started = None
+  f["process"] = f"pid {os.getpid()}" + (f", running since {time.strftime('%Y-%m-%d %H:%M', time.localtime(started))}" if started else "")
+  if holder.under_holder():
+    status = holder.control("status") or {}
+    views = status.get("views") or []
+    f["session"] = (f"in the background (session holder {os.environ.get('SLURP_HOLDER')}), {len(views)} view"
+                    f"{'s' if len(views) != 1 else ''} attached: " + ", ".join(v.get("label", "?") + (" (active)" if v.get("active") else "") for v in views)
+                    + (f"; web view on 127.0.0.1:{status['web']}" if status.get("web") else ""))
+  else:
+    f["session"] = "directly in this " + ("browser (--serve)" if app.is_web else "terminal (no session holder)")
+  f["view"] = (f"{getattr(app, 'view_kind', 'terminal')}, {app.size.width}×{app.size.height}, TERM={os.environ.get('TERM', '?')}"
+               + (f", COLORTERM={os.environ['COLORTERM']}" if os.environ.get("COLORTERM") else ""))
+  f["config"] = config_path()
+  f["state"] = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "slurp")
+  try:
+    cluster = app.cluster if app.clusters else None
+  except (AttributeError, IndexError):
+    cluster = None
+  if cluster is not None:
+    c = cluster.connection
+    f["tab"] = (f"{cluster.name}: " + (f"SSH {cluster.destination}" + (f", login node {c.hostname} as {c.user}" if c is not None and c.hostname else "")
+                                        if cluster.destination else "this machine"))
+  return f
+
+FACTS = [("Version", [("slurp", "version"), ("from", "commit"), ("installed in", "package"), ("Python", "python"),
+                      ("libraries", "libraries"), ("cloudflared", "cloudflared")]),
+         ("This machine (slurp runs here)", [("host", "host"), ("hostname", "hostname"), ("system", "os"), ("CPUs", "cpus"),
+                                             ("memory", "memory"), ("load", "load"), ("up for", "uptime"), ("user", "user")]),
+         ("This slurp", [("process", "process"), ("runs", "session"), ("view", "view"), ("active tab", "tab"),
+                         ("config", "config"), ("logs", "state")])]
+
+def about_text(facts):
+  """The facts as plain text (Copy details)"""
+  out = []
+  for title, rows in FACTS:
+    out.append(title)
+    out += [f"  {label}: {facts[key]}" for label, key in rows if facts.get(key)]
+  return "\n".join(out)
+
+def about_markdown(facts):
+  def cell(text):
+    return str(text).replace("|", "\\|")
+  out = [f"# About slurp {facts['version']}", ABOUT.strip(), ""]
+  for title, rows in FACTS:
+    out += [f"## {title}", "", "| | |", "|---|---|", *[f"| {label} | {cell(facts[key])} |" for label, key in rows if facts.get(key)], ""]
+  out += ["What changed from version to version: `CHANGELOG.md`, next to `README.md` (the whole manual) in "
+          f"`{facts['package']}`."]
+  return "\n".join(out)
 
 def add_help_button(screen):
   """The ? in the top right corner of a dialog (modal windows; the windows have theirs in the top bar)"""
