@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo-wordmark.svg" alt="slurp: Slurm at a glance" width="300"></p>
+
 # slurp
 
 `slurp` is a Textual interface for checking Slurm jobs and inspecting
@@ -635,3 +637,15 @@ top-left `←` button to go back.
 
 When using tmux, enable mouse support with `set -g mouse on` if you want to
 click and scroll inside the app.
+
+## Logo
+
+The *prompt meter*: a shell prompt whose cursor became a load meter. It is drawn
+on the terminal grid (a pixel is one column wide and half a row high), so the
+TUI shows it exactly with block characters: `❯▂▄█` in the header (in the
+theme's colours), five rows of `▀▄█` in the help windows and on the lock screen
+of a view. `slurp/logo.py` holds the pixel map and makes every other form from
+it: the favicon and the start screen of the web view, the tray icon and start
+menu entry of the slurp helper on Windows (`.ico`), and the files in `docs/`
+(`logo.svg`, `logo-plain.svg`, `logo-wordmark.svg`, `logo-256.png`, `logo.ico`;
+`python -m slurp.logo` writes them again).
