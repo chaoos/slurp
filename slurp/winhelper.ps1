@@ -12,6 +12,8 @@
 #   which asks for the password itself (the user types it there; the helper does not ask for it); the window hides
 #   when the shell's prompt shows (slurp-open.exe --watch, or ssh's log)
 # Windows of links that are open hide in the tray (its menu: open, show, disconnect); quitting closes them all.
+# A click on the tray icon shows the helper's window: every connection with its state (mapped folders, local port,
+# relay or direct, since when, logins until), its last steps, and Open, Show window, Reconnect, Disconnect, Remove.
 #
 # Kept simple on purpose: no line in this file starts with '@ (the setup embeds it in a here-string), no
 # multi-line strings (comment lines and indentation are stripped when it is embedded).
@@ -289,7 +291,7 @@ function New-Connection($link) {
     Link = $link; Kind = $link.Kind; Phase = 'input'; Since = (Get-Date); LastTry = (Get-Date)
     Tunnel = $null; Keyscan = $null; NetUse = $null; Client = $null
     Port = 0; Host = '127.0.0.1'; UncHost = 'localhost'; WebLocal = 0; Maps = (New-Object Collections.ArrayList); Pending = (New-Object Collections.ArrayList); Password = ''; Tries = 0
-    Remap = $false; Verifying = $false; Mapping = $false; Feeder = $null; Watcher = $null; FedAt = $null; Typing = $false; LogNoted = $false; KeyLine = ''; Visible = $false; Ended = $false
+    Remap = $false; Verifying = $false; Mapping = $false; Feeder = $null; Watcher = $null; FedAt = $null; Typing = $false; LogNoted = $false; KeyLine = ''; Visible = $false; Ended = $false; ConnectedAt = $null
   }
   $c.Dir = Join-Path $ConnDir ("$($link.Kind)-$($link.Id)-" + (Get-Date).ToString('HHmmss'))
   New-Item -ItemType Directory -Force -Path $c.Dir | Out-Null
@@ -465,6 +467,8 @@ function Notify($text, $kind = 'Info') {
 $Busy = @('tunnel', 'verify', 'login', 'opening', 'mapping', 'reconnecting')
 
 function Set-Phase($c, $phase, $text) {
+  if ($phase -eq 'connected' -and -not $c.ConnectedAt) { $c.ConnectedAt = Get-Date }
+  if ($phase -eq 'input') { $c.ConnectedAt = $null }
   $c.Phase = $phase
   $c.Since = Get-Date
   $c.State.Text = $text
@@ -964,18 +968,241 @@ function Read-Inbox {
     $text = Read-Text $f.FullName
     Remove-Item $f.FullName -Force -ErrorAction SilentlyContinue
     $text = $text.Trim()
-    if ($text -eq 'show') { Show-All }
+    if ($text -eq 'show') { Show-Panel }
     elseif ($text -eq 'quit') { Quit-Tray }
     elseif ($text -like 'slurp:*') { Open-Link $text }
   }
 }
 
-function Show-All {
-  if ($script:Conns.Count -eq 0) {
-    Notify 'The slurp helper runs. Open a link in slurp (a link window: Open on my computer) and it comes here.'
+# ---- what the helper window does with a connection
+function Reconnect($c) {
+  if ($Busy -contains $c.Phase) { return }
+  if ($c.Kind -ne 'shell' -and -not $c.Password) {
+    Show-Window $c
+    $c.State.Text = 'Paste the password of the link, then ' + $GoText[$c.Kind] + '.'
     return
   }
-  foreach ($c in @($script:Conns)) { Show-Window $c }
+  if ($c.Kind -eq 'shell' -and $c.Phase -eq 'connected') {
+    $answer = [Windows.Forms.MessageBox]::Show($script:Panel.Form, "Reconnect ends the shell in its terminal window and opens a new one.`r`n`r`nGo on?", 'slurp helper', 'YesNo', 'Question', 'Button2')
+    if ($answer -ne 'Yes') { return }
+  }
+  $prev = @($c.Maps | ForEach-Object { @{ Letter = $_.Letter; Path = $_.Path; Unc = '' } })
+  Say $c 'reconnecting (helper window) ...'
+  Log "$($c.Kind) $($c.Link.Id): reconnect"
+  Disconnect $c
+  $c.Pending.Clear()
+  Set-Phase $c 'input' 'Reconnecting ...'
+  Fill-Letters $c
+  $c.Pw.Text = $c.Password
+  Begin-Connect $c
+  # (a drive maps all its folders again, on their letters)
+  if ($c.Kind -eq 'drive' -and $prev.Count -and $c.Phase -ne 'input') {
+    $c.Pending.Clear()
+    foreach ($m in $prev) { [void]$c.Pending.Add($m) }
+  }
+}
+
+function Disconnect-Keep($c) {
+  if ($c.Phase -eq 'input') { return }
+  if ($c.Kind -eq 'shell' -and $c.Phase -eq 'connected') {
+    $answer = [Windows.Forms.MessageBox]::Show($script:Panel.Form, 'This ends the shell in its terminal window. Go on?', 'slurp helper', 'YesNo', 'Question', 'Button2')
+    if ($answer -ne 'Yes') { return }
+  }
+  Say $c 'disconnected (helper window)'
+  Log "$($c.Kind) $($c.Link.Id): disconnected"
+  Disconnect $c
+  $c.Pending.Clear()
+  $c.Remap = $false
+  Set-Phase $c 'input' ('Disconnected. ' + $GoText[$c.Kind] + ' (or Reconnect in the helper window) connects again.')
+  Fill-Letters $c
+}
+
+function Get-StateWord($c) {
+  switch ($c.Phase) {
+    'connected' { return $(if ($c.Kind -eq 'drive') { 'mapped' } elseif ($c.Kind -eq 'shell') { 'open' } else { 'open' }) }
+    'input' { return $(if ($c.State.Text -like 'Failed*') { 'failed' } elseif ($c.State.Text -like 'Disconnected*') { 'disconnected' } else { 'not connected' }) }
+    'reconnecting' { return 'reconnecting' }
+    'login' { return $(if ($c.Kind -eq 'shell') { 'password in the terminal' } else { 'logging in' }) }
+    'mapping' { return 'mapping' }
+    default { return 'connecting' }
+  }
+}
+
+function Get-Row($c) {
+  $link = $c.Link
+  $route = $(if ($link.RelayKind -eq 'direct') { "direct $($link.Host):$($link.Port)" } else { "relay $($link.RelayHost)" })
+  $details = switch ($c.Kind) {
+    'drive' { $(if ($c.Maps.Count) { Get-DriveList $c } elseif ($c.Pending.Count) { "($($c.Pending[0].Letter) $($c.Pending[0].Path))" } else { '' }) }
+    'web' { $(if ($c.Phase -eq 'connected' -and $c.WebLocal) { "http://localhost:$($c.WebLocal)" } else { '' }) }
+    default { $(if ($c.Phase -eq 'connected' -and $c.Client -and -not $c.Client.HasExited) { "terminal (ssh pid $($c.Client.Id))" } else { '' }) }
+  }
+  $since = $(if ($c.ConnectedAt) { $c.ConnectedAt.ToString('HH:mm') } else { '' })
+  $until = $(if ($link.Expires -gt 0) { [DateTimeOffset]::FromUnixTimeSeconds($link.Expires).LocalDateTime.ToString('ddd HH:mm') } else { 'until slurp quits' })
+  return @($KindWord[$c.Kind], $link.Title, (Get-StateWord $c), $details, $route, $link.Alias, $since, $until)
+}
+
+# ---- the helper window: a click on the tray icon
+$script:Panel = $null
+$script:InPanel = $false
+
+function New-Panel {
+  $p = @{ Rows = @() }
+  $form = New-Object Windows.Forms.Form
+  $form.Text = 'slurp helper'
+  $form.Font = $UiFont
+  $form.AutoScaleMode = 'Dpi'
+  $form.ClientSize = New-Object Drawing.Size(860, 480)
+  $form.MinimumSize = New-Object Drawing.Size(640, 380)
+  $form.StartPosition = 'CenterScreen'
+  $form.Icon = $Icon
+  $p.Form = $form
+
+  $head = New-Object Windows.Forms.Label
+  $head.Font = $UiBold
+  $head.Anchor = 'Top, Left, Right'
+  $p.Head = Add-Control $form $head 12 10 836 22
+  $info = New-Object Windows.Forms.Label
+  $info.Anchor = 'Top, Left, Right'
+  $info.ForeColor = [Drawing.SystemColors]::GrayText
+  $p.Info = Add-Control $form $info 12 34 836 34
+
+  $list = New-Object Windows.Forms.ListView
+  $list.View = 'Details'
+  $list.FullRowSelect = $true
+  $list.MultiSelect = $false
+  $list.HideSelection = $false
+  $list.Anchor = 'Top, Bottom, Left, Right'
+  foreach ($col in @(@('Kind', 70), @('Link', 200), @('State', 110), @('Details', 190), @('Route', 130), @('slurp', 110), @('Since', 50), @('Logins until', 90))) {
+    [void]$list.Columns.Add($col[0], $col[1])
+  }
+  $p.List = Add-Control $form $list 12 72 836 230
+
+  $steps = New-Object Windows.Forms.TextBox
+  $steps.Multiline = $true
+  $steps.ReadOnly = $true
+  $steps.ScrollBars = 'Vertical'
+  $steps.Font = New-Object Drawing.Font('Consolas', 9)
+  $steps.Anchor = 'Bottom, Left, Right'
+  $p.Steps = Add-Control $form $steps 12 310 836 110
+
+  $x = 12
+  foreach ($b in @(@('Open', 'open', 80), @('Show window', 'show', 100), @('Reconnect', 'reconnect', 90), @('Disconnect', 'disconnect', 90), @('Remove', 'remove', 80), @('Logs', 'logs', 60))) {
+    $btn = New-Object Windows.Forms.Button
+    $btn.Text = $b[0]
+    $btn.Tag = $b[1]
+    $btn.Anchor = 'Bottom, Left'
+    $null = Add-Control $form $btn $x 432 $b[2] 30
+    $btn.Add_Click({ param($s, $e) Panel-Action $s.Tag })
+    $p[$b[1]] = $btn
+    $x += $b[2] + 8
+  }
+  $more = New-Object Windows.Forms.Button
+  $more.Text = 'Helper ...'
+  $more.Anchor = 'Bottom, Right'
+  $null = Add-Control $form $more 676 432 82 30
+  $more.Add_Click({ param($s, $e) $script:Menu.Show($s, (New-Object Drawing.Point(0, $s.Height))) })
+  $close = New-Object Windows.Forms.Button
+  $close.Text = 'Close'
+  $close.Anchor = 'Bottom, Right'
+  $null = Add-Control $form $close 766 432 82 30
+  $close.Add_Click({ param($s, $e) $script:Panel.Form.Hide() })
+
+  $list.Add_SelectedIndexChanged({ param($s, $e) Update-Panel })
+  $list.Add_DoubleClick({ param($s, $e) Panel-Action 'show' })
+  $form.Add_FormClosing({ param($s, $e) if (-not $script:Quitting -and $e.CloseReason -eq 'UserClosing') { $e.Cancel = $true; $s.Hide() } })
+  $script:Panel = $p
+  return $p
+}
+
+function Get-Selected {
+  $p = $script:Panel
+  if (-not $p -or $p.List.SelectedItems.Count -eq 0) { return $null }
+  $c = $p.List.SelectedItems[0].Tag
+  if ($script:Conns -contains $c) { return $c }
+  return $null
+}
+
+function Panel-Action($action) {
+  $c = Get-Selected
+  if (-not $c) { return }
+  switch ($action) {
+    'open' { Open-Result $c }
+    'show' { Show-Window $c }
+    'reconnect' { Reconnect $c }
+    'disconnect' { Disconnect-Keep $c }
+    'remove' {
+      $answer = [Windows.Forms.MessageBox]::Show($script:Panel.Form, "Disconnect and remove it from the list?`r`n`r`n$($KindWord[$c.Kind]): $($c.Link.Title)", 'slurp helper', 'YesNo', 'Question', 'Button2')
+      if ($answer -eq 'Yes') { $c.Ended = $true; $c.Form.Close() }
+    }
+    'logs' { Start-Process explorer.exe $c.Dir }
+  }
+  Update-Panel
+}
+
+function Update-Panel {
+  $p = $script:Panel
+  # (changing the list raises its selection event, which calls this again: not into this one)
+  if (-not $p -or -not $p.Form.Visible -or $script:InPanel) { return }
+  $script:InPanel = $true
+  try { Update-PanelNow $p } finally { $script:InPanel = $false }
+}
+
+function Update-PanelNow($p) {
+  $conns = @($script:Conns)
+  $open = @($conns | Where-Object { $_.Phase -eq 'connected' }).Count
+  $p.Head.Text = $(if ($conns.Count) { "$($conns.Count) connection$(if ($conns.Count -ne 1) { 's' }), $open open" } else { 'Nothing open: in slurp, a link window: Open on my computer (or Copy helper link, then Win+R)' })
+  $auto = $false
+  try { $auto = [bool](Get-ItemProperty -Path $RunKey -Name 'slurp helper' -ErrorAction Stop) } catch { }
+  $p.Info.Text = "ssh: $(if ($Ssh) { $Ssh } else { 'missing (Windows feature OpenSSH Client)' })  ·  SSHFS-Win: $(if (Test-Sshfs) { 'installed' } else { 'not installed (drives need it)' })  ·  " +
+                 "start with Windows: $(if ($auto) { 'on' } else { 'off' })  ·  known slurps: $(@(Get-Trusted).Count)`r`n" +
+                 "Folder: $SlurpHelperDir  ·  a double click on a row shows its window; the tray icon's menu has the rest"
+  $list = $p.List
+  $selected = Get-Selected
+  # (rows are updated in place: a rebuild would lose the selection and flicker)
+  if ($list.Items.Count -ne $conns.Count -or @(for ($i = 0; $i -lt $conns.Count; $i++) { if ($list.Items[$i].Tag -ne $conns[$i]) { 1 } }).Count) {
+    $list.BeginUpdate()
+    $list.Items.Clear()
+    foreach ($c in $conns) {
+      $row = Get-Row $c
+      $item = New-Object Windows.Forms.ListViewItem($row[0])
+      foreach ($v in $row[1..($row.Count - 1)]) { [void]$item.SubItems.Add([string]$v) }
+      $item.Tag = $c
+      [void]$list.Items.Add($item)
+      if ($c -eq $selected) { $item.Selected = $true }
+    }
+    if ($list.SelectedItems.Count -eq 0 -and $list.Items.Count -gt 0) { $list.Items[0].Selected = $true }
+    $list.EndUpdate()
+  } else {
+    for ($i = 0; $i -lt $conns.Count; $i++) {
+      $row = Get-Row $conns[$i]
+      $item = $list.Items[$i]
+      for ($j = 0; $j -lt $row.Count; $j++) { if ($item.SubItems[$j].Text -ne [string]$row[$j]) { $item.SubItems[$j].Text = [string]$row[$j] } }
+      $state = $row[2]
+      $colour = $(if ($state -eq 'failed') { [Drawing.Color]::Firebrick } elseif ($state -eq 'mapped' -or $state -eq 'open') { [Drawing.Color]::DarkGreen } else { [Drawing.SystemColors]::WindowText })
+      if ($item.ForeColor -ne $colour) { $item.ForeColor = $colour }
+    }
+  }
+  $c = Get-Selected
+  $busy = ($c -and $Busy -contains $c.Phase)
+  $p.open.Enabled = [bool]($c -and $c.Phase -eq 'connected' -and $c.Kind -ne 'shell')
+  $p.show.Enabled = [bool]$c
+  $p.reconnect.Enabled = [bool]($c -and -not $busy)
+  $p.disconnect.Enabled = [bool]($c -and $c.Phase -ne 'input')
+  $p.remove.Enabled = [bool]$c
+  $p.logs.Enabled = [bool]$c
+  $p.open.Text = $(if ($c -and $c.Kind -eq 'web') { 'Browser' } else { 'Explorer' })
+  $text = $(if ($c) { $c.State.Text + "`r`n" + ((@($c.Steps.Lines | Where-Object { $_ }) | Select-Object -Last 6) -join "`r`n") } else { '' })
+  if ($p.Steps.Text -ne $text) { $p.Steps.Text = $text; $p.Steps.SelectionStart = $p.Steps.Text.Length; $p.Steps.ScrollToCaret() }
+}
+
+function Show-Panel {
+  $p = $script:Panel
+  if (-not $p) { $p = New-Panel }
+  if (-not $p.Form.Visible) { $p.Form.Show() }
+  if ($p.Form.WindowState -eq 'Minimized') { $p.Form.WindowState = 'Normal' }
+  if ($Native) { try { [SlurpOpen]::Bring($p.Form.Handle) } catch { } }
+  $p.Form.Activate()
+  Update-Panel
 }
 
 # ---- the tray and its menu
@@ -1004,7 +1231,7 @@ function Describe($c) {
 function Build-Menu {
   $menu = $script:Menu
   $menu.Items.Clear()
-  $head = Add-Item $menu 'slurp helper' 'none' $null -Disabled
+  $head = Add-Item $menu 'slurp helper: its window ...' 'panel' $null
   $head.Font = New-Object Drawing.Font($head.Font, [Drawing.FontStyle]::Bold)
   if ($script:Conns.Count -eq 0) {
     $null = Add-Item $menu 'nothing open: open a link in slurp' 'none' $null -Disabled
@@ -1034,6 +1261,7 @@ function Run-Item($tag) {
   switch ($tag.Action) {
     'open' { Open-Result $c }
     'show' { Show-Window $c }
+    'panel' { Show-Panel }
     'disconnect' { $c.Ended = $true; $c.Form.Close() }
     'autostart' {
       try {
@@ -1062,6 +1290,7 @@ function Quit-Tray {
   $timer.Stop()
   foreach ($c in @($script:Conns)) { try { $c.Ended = $true; $c.Form.Close() } catch { } }
   foreach ($c in @($script:Conns)) { try { Disconnect $c } catch { } }
+  if ($script:Panel) { try { $script:Panel.Form.Close(); $script:Panel.Form.Dispose() } catch { } }
   $script:Tray.Visible = $false
   $script:Tray.Dispose()
   [Windows.Forms.Application]::Exit()
@@ -1090,12 +1319,13 @@ $script:Tray.ContextMenuStrip = $script:Menu
 $script:Tray.Visible = $true
 $script:Tray.Add_MouseClick({
   param($s, $e)
-  if ($e.Button -eq 'Left') { Show-All }
+  if ($e.Button -eq 'Left') { Show-Panel }
 })
 
 $timer = New-Object Windows.Forms.Timer
 $timer.Interval = 400
 $script:InTick = $false
+$script:Ticks = 0
 $timer.Add_Tick({
   # (a message box in a tick runs its own message loop, where the timer ticks again: not into this one)
   if ($script:InTick) { return }
@@ -1105,6 +1335,8 @@ $timer.Add_Tick({
     foreach ($c in @($script:Conns)) {
       try { Step $c } catch { try { Fail $c $_.Exception.Message } catch { Log "step: $($_.Exception.Message)" } }
     }
+    $script:Ticks += 1
+    if ($script:Ticks % 3 -eq 0) { try { Update-Panel } catch { Log "panel: $($_.Exception.Message)" } }
     $n = @($script:Conns | Where-Object { $_.Phase -eq 'connected' }).Count
     $text = $(if ($n) { "slurp helper: $n open" } else { 'slurp helper' })
     if ($script:Tray.Text -ne $text) { $script:Tray.Text = $text }

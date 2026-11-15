@@ -413,7 +413,8 @@ HELPER_DOES = {"drive": "maps a folder ($HOME, $SCRATCH, $PROJECT, … or one yo
 HELPER_TEXT = """\
 One click on **Open on my computer** in a link window, the link's password, and the helper does the rest: it maps
 the drive and opens Explorer, opens the web view in your browser, or opens a terminal window with the shell. What is
-open stays in its icon in the tray (^ next to the clock): open, show, disconnect. It is for Windows 10 and 11.
+open stays in its icon in the tray (^ next to the clock): a click on it shows every connection and its state, with
+Reconnect, Disconnect and more. It is for Windows 10 and 11.
 
 **Set it up once** on your Windows computer (no admin rights needed):
 

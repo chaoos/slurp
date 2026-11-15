@@ -377,8 +377,14 @@ link, and:
 
 The password is not part of the link and not stored: for a web view the helper
 types it into ssh's prompt for you, for a drive it gives it to `net use`. What is open stays in the
-tray icon (^ next to the clock): its menu opens, shows and disconnects each
-one, and has *Start with Windows*, *Known slurps*, the folder with the logs,
+tray icon (^ next to the clock). **A click on it** shows the helper's window:
+every connection with its state (mapped folders, the web view's local port,
+relay or direct, since when, until when the link takes logins) and its last
+steps, with **Explorer**/**Browser**, **Show window**, **Reconnect** (a drive
+maps all its folders again; the password is remembered while the helper runs),
+**Disconnect** (it stays in the list), **Remove** and **Logs**; it also shows
+whether ssh and SSHFS-Win are there. The icon's menu has the same per
+connection, and *Start with Windows*, *Known slurps*, the folder with the logs,
 *Uninstall* and *Quit*. Closing a window asks whether to disconnect or keep it
 in the tray.
 
