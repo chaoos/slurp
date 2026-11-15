@@ -311,6 +311,7 @@ class View:
     self.note = ""
     self.buttons = [] # (row, first col, last col, action)
     self.port = 0     # a browser: the port its connection comes from (a web link's session forwards from it)
+    self.host = ""    # a browser: the host it asked for (through Cloudflare: the link's public address)
 
   def size_text(self):
     return f"{self.width}×{self.height}"
@@ -417,7 +418,8 @@ class Holder:
 
   def active_meta(self):
     a = self.active
-    return {"type": "active", "kind": a.kind if a else None, "label": a.label if a else "", "port": a.port if a else 0}
+    return {"type": "active", "kind": a.kind if a else None, "label": a.label if a else "", "port": a.port if a else 0,
+            "host": a.host if a else ""}
 
   def announce(self):
     """Tell the app which kind of view is active (terminal or web: each has its theme)"""
@@ -697,13 +699,14 @@ class Holder:
       ticket = secrets.token_urlsafe(18)
       self.web_tickets[ticket] = now
       host = request.host
+      secure = request.headers.get("X-Forwarded-Proto") == "https" # (through Cloudflare: the browser has HTTPS)
       page = templates.get_template("app_index.html").render(
-        font_size=int(request.query.get("fontsize", "16") or 16), app_websocket_url=f"ws://{host}/ws",
-        config={"static": {"url": f"http://{host}/static/"}}, application={"name": "slurp"}, ping_url="")
+        font_size=int(request.query.get("fontsize", "16") or 16), app_websocket_url=f"{'wss' if secure else 'ws'}://{host}/ws",
+        config={"static": {"url": f"{'https' if secure else 'http'}://{host}/static/"}}, application={"name": "slurp"}, ping_url="")
       page = page.replace("<head>", "<head>" + LINK_BANNER + _page_brand(), 1)
       page = re.sub(r'(<div class="intro">\s*)<svg.*?</svg>\s*<div>[^<]*</div>', lambda m: m[1] + _intro_brand(), page, count=1, flags=re.S)
       response = web.Response(text=page, content_type="text/html")
-      response.set_cookie("slurp_view", ticket, httponly=True, samesite="Strict")
+      response.set_cookie("slurp_view", ticket, httponly=True, samesite="Strict", secure=secure)
       response.del_cookie("slurp_token") # (of an older slurp)
       response.headers["Cache-Control"] = "no-store"
       return response
@@ -736,11 +739,13 @@ class Holder:
       task = asyncio.create_task(writer())
       agent = request.headers.get("User-Agent", "")
       browser = next((b for b in ("Firefox", "Edg", "Chrome", "Safari") if b in agent), "a browser").replace("Edg", "Edge")
-      view = View(self, "web", f"{browser} (web)", send, close,
+      remote = re.sub(r"[^0-9A-Fa-f.:]", "", request.headers.get("Cf-Connecting-Ip", ""))[:45] # (via Cloudflare: from where)
+      view = View(self, "web", f"{browser} (web" + (f", via Cloudflare from {remote})" if remote else ")"), send, close,
                   int(request.query.get("width", "100") or 100), int(request.query.get("height", "30") or 30))
       view.send_text = send # (a str is sent as a text message: ["open_url", ...])
       peer = request.transport.get_extra_info("peername") if request.transport else None
       view.port = peer[1] if peer else 0
+      view.host = request.host.split(":")[0] if remote else "" # (only through Cloudflare: it names the link)
       self.attach(view)
       try:
         async for message in ws:
@@ -970,8 +975,8 @@ def under_holder():
   return bool(os.environ.get("SLURP_HOLDER"))
 
 def subscribe(changed):
-  """(a thread of the app) changed(kind, label, port) whenever the active view changes (port: a browser's, see
-  View.port); returns when the holder goes"""
+  """(a thread of the app) changed(kind, label, port, host) whenever the active view changes (port, host: a
+  browser's, see View); returns when the holder goes"""
   path = os.environ.get("SLURP_HOLDER")
   if not path:
     return
@@ -991,7 +996,7 @@ def subscribe(changed):
         if kind == b"M":
           meta = json.loads(payload)
           if meta.get("type") == "active":
-            changed(meta.get("kind"), meta.get("label", ""), meta.get("port") or 0)
+            changed(meta.get("kind"), meta.get("label", ""), meta.get("port") or 0, meta.get("host") or "")
   except OSError:
     return
   finally:

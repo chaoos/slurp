@@ -4,6 +4,17 @@ slurp and its Windows helper share one version number. Beta: settings, link
 formats and the helper may still change between versions (a link from one
 version may need the helper of the same version).
 
+## Unreleased
+
+- Web links through Cloudflare: a quick tunnel (cloudflared, downloaded once,
+  no account) gives the web view a public https address that opens in any
+  browser, with nothing to install on your side and no password.
+- The web view needs the token in the URL every time; no cookie from an
+  earlier visit opens it (each page load gets a one-use ticket).
+- In the connection window, the web session of the browser you are on is
+  marked "this view"; disconnecting or revoking it warns first.
+
+
 ## 0.8.0 (beta), 2026-11-15
 
 The first version with a number. What slurp has at this point:

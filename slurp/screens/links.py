@@ -21,6 +21,7 @@ from .dialogs import ConfirmScreen, copy_text
 # the relay choices of the setup panel: (id, label, what it is in short); the details below when chosen
 RELAYS = [
   ("direct", "direct", "no relay: your machine reaches this one itself"),
+  ("cloudflare", "Cloudflare", "an HTTPS address, nothing on your side, no account"), # (web links only)
   ("sshj", "ssh-j.com", "public, no account, the default: ssh jumps through"),
   ("serveo", "serveo.net", "public, no account: the same way as ssh-j.com"),
   ("pinggy", "pinggy.io", "public TCP port, no account; 60 minutes an address"),
@@ -60,6 +61,31 @@ OWN_NOTE = ("Relay {relay}: a plain OpenSSH jump host that both ends reach, no t
             "terminal logs in there too and jumps through it to slurp. Or sshj://host: a relay that works like "
             "ssh-j.com.")
 
+CLOUDFLARE_NOTE = (
+  "Cloudflare: a free quick tunnel (no account). slurp runs Cloudflare's tunnel client, cloudflared, here; it gets a "
+  "random public HTTPS address (https://<words>.trycloudflare.com) that leads to this slurp's web view. On your side "
+  "nothing at all: open the address in any browser, anywhere. No ssh, no password, no helper.\n"
+  "• The address (with its token) is the key: anyone who has it gets this slurp itself, with all its tabs, shells "
+  "and drives, as you on the cluster. Do not share or post it; prefer a short expiry; revoke the link when done.\n"
+  "• Cloudflare ends the HTTPS: unlike an SSH relay it can read everything that passes (the screen, your keys).\n"
+  "• A quick tunnel is meant for testing: no uptime guarantee. When it is lost slurp opens a new one, at a new "
+  "address.\n"
+  "• The first time slurp downloads cloudflared (about 40 MB, from Cloudflare's releases on GitHub) into "
+  "~/.local/share/slurp/bin, unless one is on PATH or set in the config (\"cloudflared\").\n"
+  "• Your site's rules may not allow access through third-party services.")
+
+WEB_INTRO = ("This slurp in your browser, from anywhere: an ssh tunnel through the relay (only to the web view, nothing "
+             "else), then a URL. How it goes, once the link is made:\n"
+             "  1. On your machine, paste the ssh command of the link into a terminal (cmd or PowerShell on Windows) and "
+             "give the link's password.\n"
+             "  2. It says that the tunnel is open and shows the URL. Keep that window open: it carries the browser's "
+             "connection (Ctrl-C there ends it).\n"
+             "  3. Open the URL in your browser. It shows this same slurp: one view is active at a time, so while this "
+             "one is, the browser shows a lock screen with Take over.")
+WEB_INTRO_CLOUDFLARE = ("This slurp in your browser, from anywhere, through Cloudflare: once the link is made, it shows an "
+                        "https:// address; open it in any browser. It shows this same slurp: one view is active at a "
+                        "time, so while this one is, the browser shows a lock screen with Take over.")
+
 DIRECT_NOTE = ("Direct, no relay: your machine connects to {host} port {port} itself, so it must reach this machine (the "
                "same network, a VPN; no firewall in between). For this link slurp listens on that port on every "
                "interface of this machine (with an address as the host: only on that one); whoever reaches it can "
@@ -75,12 +101,17 @@ def relay_choice(relay):
     return ("sshj", "") if rest == share.PUBLIC_RELAY else ("custom", f"sshj://{rest}")
   if kind == "sshreach":
     return "sshreach", rest
-  if kind in ("serveo", "pinggy"):
+  if kind in ("serveo", "pinggy", share.CLOUDFLARE):
     return kind, ""
   return "custom", rest
 
-def relay_setting():
-  return load_config().get("link_relay") or share.DEFAULT_RELAY
+def relay_setting(kind=None):
+  """The relay last used (web links: their own, as only they can go through Cloudflare)"""
+  config = load_config()
+  relay = (config.get("link_relay_web") if kind == "web" else None) or config.get("link_relay") or share.DEFAULT_RELAY
+  if kind != "web" and share.parse_relay(relay)[0] == share.CLOUDFLARE:
+    return share.DEFAULT_RELAY
+  return relay
 
 def machine():
   """The key of this machine in "link_direct" (a home directory, and so the config, is often shared by many nodes)"""
@@ -106,6 +137,8 @@ def warning_text(relay, kind):
   except ValueError as e:
     return Text(str(e), style="red")
   rtype, rest = share.parse_relay(relay)
+  if rtype == share.CLOUDFLARE:
+    return Text(CLOUDFLARE_NOTE, style="yellow")
   if share.is_public(relay):
     return Text(PUBLIC_INTRO[rtype].format(relay=rest) + "\n" + PUBLIC_POINTS.format(what=what), style="yellow")
   if rtype == share.DIRECT:
@@ -194,14 +227,7 @@ class LinkSetupScreen(ModalScreen):
                    + self.what, id="setup-title", markup=False)
       with VerticalScroll(id="setup-body"):
         if self.kind == "web":
-          yield Static("This slurp in your browser, from anywhere: an ssh tunnel through the relay (only to the web "
-                       "view, nothing else), then a URL. How it goes, once the link is made:\n"
-                       "  1. On your machine, paste the ssh command of the link into a terminal (cmd or PowerShell on "
-                       "Windows) and give the link's password.\n"
-                       "  2. It says that the tunnel is open and shows the URL. Keep that window open: it carries the "
-                       "browser's connection (Ctrl-C there ends it).\n"
-                       "  3. Open the URL in your browser. It shows this same slurp: one view is active at a time, so "
-                       "while this one is, the browser shows a lock screen with Take over.", markup=False, classes="setup-row")
+          yield Static(WEB_INTRO, markup=False, classes="setup-row", id="setup-web-intro")
         if self.kind == "drive":
           yield Static(f"Your files on the cluster as a drive (SFTP): sshfs on Linux and macOS, SSHFS-Win on Windows, "
                        f"or WinSCP, Cyberduck, file managers. It starts in {self.path}.", markup=False, classes="setup-row")
@@ -209,12 +235,14 @@ class LinkSetupScreen(ModalScreen):
             yield Label("Read only")
             yield Switch(value=False, id="setup-ro", disabled=self.read_only_argv is None,
                          tooltip=None if self.read_only_argv else "the cluster's sftp-server was not found: not possible")
-        chosen, text = relay_choice(relay_setting())
+        chosen, text = relay_choice(relay_setting(self.kind))
         stored = load_config()
         with Horizontal(classes="setup-row"):
           yield Label("Relay")
           with RadioSet(id="setup-relays"):
             for rid, label, short in RELAYS:
+              if rid == "cloudflare" and self.kind != "web":
+                continue
               yield RadioButton(Text.assemble((label.ljust(19), "bold"), (short, "dim")), value=rid == chosen, id=f"setup-relay-{rid}")
         with Horizontal(classes="setup-row setup-for-custom"):
           yield Label("Relay host")
@@ -237,7 +265,7 @@ class LinkSetupScreen(ModalScreen):
           yield Input(port, id="setup-direct-port", type="integer", placeholder="a free one",
                       tooltip="a fixed port (e.g. one the firewall lets through), or empty for a free one")
         yield Static(id="setup-warning")
-        with Horizontal(classes="setup-row"):
+        with Horizontal(classes="setup-row setup-ssh-only"):
           yield Label("Logins")
           yield Select([("once", 1), ("any number until it expires", 0)], value=1 if self.kind == "shell" else 0,
                        allow_blank=False, id="setup-uses")
@@ -245,7 +273,7 @@ class LinkSetupScreen(ModalScreen):
           yield Label("Expires after")
           yield Select([(label, -1 if s is None else s) for label, s in share.EXPIRY_CHOICES], value=share.DEFAULT_EXPIRY,
                        allow_blank=False, id="setup-expiry")
-        with Horizontal(classes="setup-row"):
+        with Horizontal(classes="setup-row setup-ssh-only"):
           yield Label("Login with")
           with RadioSet(id="setup-auth"):
             yield RadioButton("a password (made by slurp)", value=True, id="setup-auth-password")
@@ -270,6 +298,11 @@ class LinkSetupScreen(ModalScreen):
     if chosen == "direct":
       return share.direct_relay(self.query_one("#setup-direct-host", Input).value or socket.getfqdn(),
                                 self.query_one("#setup-direct-port", Input).value)
+    if chosen == "cloudflare":
+      from .. import cloudflare
+      if cloudflare.available():
+        raise ValueError(f"Cloudflare: {cloudflare.available()}")
+      return share.CLOUDFLARE
     if chosen == "sshreach":
       relay = "sshreach://" + self.query_one("#setup-sshreach", Input).value.strip().removeprefix("sshreach://")
     elif chosen == "custom":
@@ -303,6 +336,11 @@ class LinkSetupScreen(ModalScreen):
     for rid in ("direct", "sshreach", "custom"):
       for row in self.query(f".setup-for-{rid}"):
         row.display = chosen == rid
+    for row in self.query(".setup-ssh-only"): # (Cloudflare: no logins, no password; the address is the key)
+      row.display = chosen != "cloudflare"
+    self.query_one("#setup-key", TextArea).display = chosen != "cloudflare" and self.query_one("#setup-auth-key", RadioButton).value
+    if self.kind == "web":
+      self.query_one("#setup-web-intro", Static).update(WEB_INTRO_CLOUDFLARE if chosen == "cloudflare" else WEB_INTRO)
     widget = self.query_one("#setup-warning", Static)
     try:
       relay = self.relay()
@@ -329,7 +367,7 @@ class LinkSetupScreen(ModalScreen):
       return
     uses = self.query_one("#setup-uses", Select).value
     expiry = self.query_one("#setup-expiry", Select).value
-    by_key = self.query_one("#setup-auth-key", RadioButton).value
+    by_key = self.query_one("#setup-auth-key", RadioButton).value and relay != share.CLOUDFLARE
     key = self.query_one("#setup-key", TextArea).text.strip()
     if by_key:
       try:
@@ -344,17 +382,18 @@ class LinkSetupScreen(ModalScreen):
                       web_port=self.web[0] if self.web else 0, web_token=self.web[1] if self.web else "")
     # (the relay is a setting: the next link uses it too; what the fields of the others say is kept as well)
     rtype = share.parse_relay(relay)[0]
+    key = "link_relay_web" if self.kind == "web" else "link_relay"
     if rtype == share.DIRECT: # (the relay "direct"; the host and port for this machine)
       host, port = share.direct_address(relay)
       stored = dict(load_config().get("link_direct") or {})
       stored[machine()] = {"host": host, **({"port": port} if port else {})}
-      update_config(link_relay=share.DIRECT, link_direct=stored)
+      update_config(**{key: share.DIRECT}, link_direct=stored)
     elif rtype == "sshreach":
-      update_config(link_relay=relay, link_sshreach=share.parse_relay(relay)[1])
+      update_config(**{key: relay}, link_sshreach=share.parse_relay(relay)[1])
     elif self.chosen() == "custom":
-      update_config(link_relay=relay, link_relay_custom=relay)
-    elif relay != relay_setting():
-      update_config(link_relay=relay)
+      update_config(**{key: relay}, link_relay_custom=relay)
+    elif relay != relay_setting(self.kind):
+      update_config(**{key: relay})
     try:
       self.app.link_manager.create(link)
     except Exception as e:
@@ -371,11 +410,21 @@ class LinkSetupScreen(ModalScreen):
 def link_state(link, now=None):
   """The state of a link in words, for its view and the connection window"""
   now = now or time.time()
-  relay = {"starting": ("starting", "yellow"), "connecting": (f"connecting to the relay {link.relay_host}", "yellow"),
-           "ready": (f"ready, directly at {link.relay_host} port {link.port}" if link.direct else
+  relay = {"starting": ("starting", "yellow"),
+           "connecting": (f"connecting to Cloudflare{': ' + link.relay_note if link.relay_note else ''}" if link.cloudflare else
+                          f"connecting to the relay {link.relay_host}", "yellow"),
+           "ready": (f"ready, at https://{link.public_host} (Cloudflare)" if link.cloudflare else
+                     f"ready, directly at {link.relay_host} port {link.port}" if link.direct else
                      f"ready, at {link.target()[0]} port {link.target()[1]} ({share.parse_relay(link.relay)[1].split('@')[-1].split(':')[0]})" if link.straight else
                      f"ready, via {link.relay_host}" + (f" port {link.relay_port}" if link.relay_port else ""), "green"),
            "broken": (f"relay lost: {link.relay_error} (trying again)", "red"), "closed": ("closed", "dim")}[link.relay_state]
+  if link.cloudflare: # (no logins to count)
+    if not link.open(now):
+      return Text(relay[0], style=relay[1]), Text(f"opens no more: {link.why_closed()}", style="dim")
+    rest = int(link.expires - now) if link.expires is not None else None
+    return Text(relay[0], style=relay[1]), Text("the address opens it" + (
+      f", for {rest // 60}:{rest % 60:02d} more (until {datetime.fromtimestamp(link.expires):%H:%M})" if rest is not None
+      else ", until slurp quits"), style="green")
   if link.open(now):
     left = "once" if link.uses == 1 else f"{link.uses - link.logins} more logins" if link.uses else "any number of logins"
     if link.expires is not None:
@@ -448,16 +497,22 @@ class LinkScreen(ModalScreen):
     grid.add_column()
     grid.add_row("Relay", relay)
     grid.add_row("Logins", logins)
-    if link.auth == "password":
+    if link.cloudflare:
+      grid.add_row("Address", Text.assemble((link.url(), "bold"), ("  ◀ this view (the browser you are using came through it)", "bold")
+                                            if self.app.this_view_link(link) else "") if link.ready()
+                   else Text("comes when the tunnel is ready", style="dim"))
+    elif link.auth == "password":
       grid.add_row("Password", Text(link.password, style="bold"))
     else:
       grid.add_row("Login", "with your public key only")
-    grid.add_row("Host key", f"{share.host_fingerprint()}  (your ssh shows it on the first connect, as {share.host_alias()})")
+    if not link.cloudflare:
+      grid.add_row("Host key", f"{share.host_fingerprint()}  (your ssh shows it on the first connect, as {share.host_alias()})")
     live = link.live_sessions
-    sessions = Text(f"{len(live)} open, {link.logins} logins so far" + (f", {link.failures} wrong passwords" if link.failures else ""))
-    if any(self.app.this_view(s) for s in live):
-      sessions.append("  ◀ one is this view (the browser you are using)", style="bold")
-    grid.add_row("Sessions", sessions)
+    if not link.cloudflare:
+      sessions = Text(f"{len(live)} open, {link.logins} logins so far" + (f", {link.failures} wrong passwords" if link.failures else ""))
+      if any(self.app.this_view(s) for s in live):
+        sessions.append("  ◀ one is this view (the browser you are using)", style="bold")
+      grid.add_row("Sessions", sessions)
     self.query_one("#lv-state", Static).update(grid)
     if link.auth == "password":
       self.query_one("#lv-password", Button).display = link.open()
@@ -548,7 +603,7 @@ class LinkScreen(ModalScreen):
         self.refresh_view()
     live = len(self.link.live_sessions)
     message = Text("No more logins with it" + (f", and its {live} open session{'s' if live != 1 else ''} end." if live else "."))
-    if any(self.app.this_view(s) for s in self.link.live_sessions):
+    if self.app.this_view_link(self.link):
       message.append("\n\nThe browser you are using now is connected through this link: revoking it ends this very view. "
                      "It goes blank, and you get back to slurp only from a terminal or through a new web link.", style="bold red")
     self.app.push_screen(ConfirmScreen(f"Revoke link {self.link.id}", message, "Revoke"), done)

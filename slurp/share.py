@@ -30,6 +30,9 @@ Relays (the setting "link_relay"):
   (at that port, or a free one) and the client runs  ssh -p <port> <user>@<host> ; for a machine the client reaches
   itself (the same network, a VPN), without a third party; host is this machine's name unless given
 The session stays SSH encrypted from the client to slurp; the relay only passes bytes along.
+- "cloudflare" (web links only, no SSH at all): a Cloudflare quick tunnel (cloudflared, see cloudflare.py) gives the
+  web view a random public HTTPS address; the browser opens it with the web view's token, nothing on the user's side.
+  Cloudflare ends the HTTPS there: it sees what passes, unlike the SSH relays.
 
 Everything here runs on the event loop of the app; the app gets events (logins, failures, ...) by a callback."""
 
@@ -61,7 +64,8 @@ PUBLIC_RELAY = "ssh-j.com"
 SERVEO = "serveo.net"
 PINGGY = "free.pinggy.io"
 DIRECT = "direct" # (a "relay" setting: no relay, the client connects to this machine itself)
-STRAIGHT = ("direct", "pinggy", "sshreach") # (relay types the client connects to without a jump: a host and a port)
+CLOUDFLARE = "cloudflare" # (web links only: a Cloudflare quick tunnel to the web view, an HTTPS address; see cloudflare.py)
+STRAIGHT = ("direct", "pinggy", "sshreach", "cloudflare") # (relay types the client connects to without a jump: a host and a port)
 DEFAULT_RELAY = PUBLIC_RELAY
 MAX_FAILURES = 5          # wrong passwords (or keys) until a link is locked
 LINK_USER = "slurp"       # the user name in the commands (any name is accepted)
@@ -120,6 +124,8 @@ def parse_relay(relay):
   relay = (relay or DEFAULT_RELAY).strip()
   if relay == DIRECT or relay.startswith(DIRECT + "://"):
     return DIRECT, relay.removeprefix(DIRECT).removeprefix("://").strip("/")
+  if relay in (CLOUDFLARE, "trycloudflare.com"):
+    return CLOUDFLARE, "trycloudflare.com"
   if relay in ("serveo", SERVEO):
     return "serveo", SERVEO
   if relay in ("pinggy", "pinggy.io", PINGGY):
@@ -183,7 +189,7 @@ def direct_relay(host, port=0):
 def is_public(relay):
   """Run by a third party (a public relay, or a service with an account)"""
   kind, host = parse_relay(relay)
-  return (kind, host) in (("ssh-j", PUBLIC_RELAY), ("serveo", SERVEO), ("pinggy", PINGGY)) or kind == "sshreach"
+  return (kind, host) in (("ssh-j", PUBLIC_RELAY), ("serveo", SERVEO), ("pinggy", PINGGY)) or kind in ("sshreach", CLOUDFLARE)
 
 def die_with_parent():
   """In the child, before exec: the kernel ends it when slurp ends, even when slurp crashes or is killed (Linux;
@@ -255,7 +261,8 @@ class Link:
   locked: bool = False
   port: int = 0                  # of slurp's server for it, on 127.0.0.1
   relay_port: int = 0            # openssh relay: the port at the relay; pinggy: the public port
-  public_host: str = ""          # pinggy: the public host it gave
+  public_host: str = ""          # pinggy, cloudflare: the public host it gave
+  relay_note: str = ""           # what happens while it starts (cloudflare: downloading cloudflared)
   relay_state: str = "starting"  # starting, connecting, ready, broken, closed
   relay_error: str = ""
   sessions: list = field(default_factory=list)
@@ -328,7 +335,7 @@ class Link:
     kind = self.relay_type
     if kind == DIRECT:
       return self.relay_host, self.port
-    if kind == "pinggy":
+    if kind in ("pinggy", CLOUDFLARE):
       return self.public_host, self.relay_port
     if kind == "sshreach":
       return self.relay_host, sshreach_address(self.relay)[2]
@@ -336,6 +343,17 @@ class Link:
 
   def ready(self):
     return self.relay_state == "ready" and bool(self.target()[1]) and bool(self.target()[0])
+
+  @property
+  def cloudflare(self):
+    """A web link through a Cloudflare quick tunnel: no SSH at all, the browser opens url()"""
+    return self.relay_type == CLOUDFLARE
+
+  def url(self):
+    """The address to open in the browser (a web link)"""
+    if self.cloudflare:
+      return f"https://{self.public_host}/?token={self.web_token}"
+    return f"http://localhost:8000/?token={self.web_token}"
 
 def client_commands(link):
   """What the user runs on their own machine: [(title, text, note)]. The commands are complete only when the relay
@@ -346,6 +364,10 @@ def client_commands(link):
   p = [] if port == 22 else ["-p", str(port)]
   ssh_opts = [*([] if link.straight else ["-J", link.jump()]), *p, "-o", f"HostKeyAlias={alias}"]
   out = []
+  if link.cloudflare:
+    return [("Open in your browser (anywhere: nothing to install, no password)", link.url(),
+             "the address is the key: whoever has it gets this slurp, until you revoke the link or it expires. Each "
+             "new tunnel (also after a lost one) has a new address: copy it again then")]
   if link.kind == "web":
     local = 8000
     url = f"http://localhost:{local}/?token={link.web_token}"
@@ -420,9 +442,14 @@ class ShareManager:
   # ---- links
   def create(self, link):
     """Start a link: its server and its relay tunnel (in the background)"""
-    if asyncssh is None:
+    if link.cloudflare:
+      if link.kind != "web":
+        raise ValueError("Cloudflare carries the web view only (shells and drives need an SSH relay)")
+      link.uses, link.auth = None, "token" # (no logins to count: the address with its token opens it)
+    elif asyncssh is None:
       raise RuntimeError(available())
-    host_key() # (created now, not in a login)
+    else:
+      host_key() # (created now, not in a login)
     self.links.append(link)
     audit(f"link {link.id} created: {link.kind} '{link.title}' (tab {link.tab}), relay {link.relay}, "
           f"{'once' if link.uses == 1 else f'{link.uses} logins' if link.uses else 'any number of logins'}, "
@@ -432,6 +459,9 @@ class ShareManager:
     return link
 
   async def _run(self, link):
+    if link.cloudflare:
+      await self._cloudflare(link)
+      return
     try:
       where, port = ("127.0.0.1", 0)
       if link.direct: # (every interface; only that one if the setting names an address: direct://192.168.1.5)
@@ -543,6 +573,88 @@ class ShareManager:
       link.relay_state = "broken"
       link.relay_error = " | ".join(last) or f"ssh ended with {proc.returncode}"
       log.warning(f"relay tunnel of link {link.id} ended: {link.relay_error}")
+      self.events("relay", link, None, link.relay_error)
+      if time.monotonic() - started > 60:
+        delay = 2
+      await asyncio.sleep(delay)
+      delay = min(delay * 2, 60)
+    link.relay_state = "closed"
+    self.events("relay", link, None, "")
+
+  async def _cloudflare(self, link):
+    """A Cloudflare quick tunnel to the web view, kept up while the link lasts (a new one, at a new address, when
+    it is lost)"""
+    from . import cloudflare
+    delay = 2
+    while not link.finished:
+      link.relay_state, link.public_host, link.relay_port = "connecting", "", 0
+      self.events("relay", link, None, "")
+      path = cloudflare.binary()
+      if path is None:
+        def progress(done, total):
+          link.relay_note = f"downloading cloudflared: {done >> 20} of {total >> 20 or '?'} MB"
+        link.relay_note = "downloading cloudflared"
+        try:
+          path = await asyncio.to_thread(cloudflare.download, progress)
+        except Exception as e:
+          link.relay_state, link.relay_error, link.relay_note = "broken", f"cannot get cloudflared: {e}", ""
+          self.events("relay", link, None, link.relay_error)
+          return
+        audit(f"link {link.id}: downloaded cloudflared {cloudflare.version(path)} to {path}")
+        link.relay_note = ""
+      argv = cloudflare.argv(path, link.web_port)
+      log.debug(f"cloudflare tunnel of link {link.id}: {shlex.join(argv)}")
+      started = time.monotonic()
+      try:
+        proc = link.tunnel = await asyncio.create_subprocess_exec(*argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                                                  stderr=subprocess.PIPE, start_new_session=True,
+                                                                  preexec_fn=die_with_parent if sys.platform.startswith("linux") else None)
+      except OSError as e:
+        link.relay_state, link.relay_error = "broken", f"cannot run cloudflared: {e}"
+        self.events("relay", link, None, link.relay_error)
+        return
+      host, last, waiting = "", [], None
+      async def in_dns(host):
+        """Ready once the address is in public DNS: a browser that asks too early gets "no such name" and its
+        resolver keeps that for minutes"""
+        nonlocal delay
+        link.relay_note = "waiting for the address to be in DNS"
+        self.events("relay", link, None, "")
+        for _ in range(60):
+          found = await asyncio.to_thread(cloudflare.resolves, host)
+          if found is None: # (that resolver cannot be asked from here: a few seconds are usually enough)
+            await asyncio.sleep(8)
+            break
+          if found:
+            await asyncio.sleep(1)
+            break
+          await asyncio.sleep(1)
+        if proc.returncode is None and not link.finished:
+          link.public_host, link.relay_port, link.relay_note = host, 443, ""
+          link.relay_state, link.relay_error, delay = "ready", "", 2
+          audit(f"link {link.id}: Cloudflare tunnel ready at https://{host}")
+          self.events("relay", link, None, "")
+      while True:
+        line = await proc.stderr.readline()
+        if not line:
+          break
+        text = line.decode(errors="replace").strip()
+        m = cloudflare.ADDRESS.search(text)
+        if m and not host:
+          host = m[1]
+        if host and cloudflare.CONNECTED in text and waiting is None and link.relay_state != "ready":
+          waiting = asyncio.ensure_future(in_dns(host))
+        if " ERR " in f" {text} ":
+          last = (last + [re.sub(r"^\S+ (ERR|WRN|INF) ", "", text)])[-2:]
+      await proc.wait()
+      if waiting is not None:
+        waiting.cancel()
+      link.tunnel, link.relay_note = None, ""
+      if link.finished:
+        break
+      link.relay_state = "broken"
+      link.relay_error = " | ".join(last) or f"cloudflared ended with {proc.returncode}"
+      log.warning(f"cloudflare tunnel of link {link.id} ended: {link.relay_error}")
       self.events("relay", link, None, link.relay_error)
       if time.monotonic() - started > 60:
         delay = 2

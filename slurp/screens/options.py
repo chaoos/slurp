@@ -79,7 +79,8 @@ class OptionsScreen(ModalScreen):
           yield Input(c.get("link_relay") or "ssh-j.com", id="op-relay")
         yield Static("direct, ssh-j.com, serveo.net, pinggy, sshreach://user@server:port, or your own SSH server "
                      "(user@host). A link's setup panel lists them with what each one means (and keeps the host and "
-                     "port of direct for each machine slurp runs on).", classes="op-note")
+                     "port of direct for each machine slurp runs on). Web links keep their own relay, which can also be cloudflare "
+                     "(a public https address, no ssh).", classes="op-note")
         yield Static("Checks: rules not to report (muted)", classes="op-section")
         muted = set(c.get("checks_muted") or [])
         yield SelectionList(*[Selection(f"{r.id}  {r.title}", r.id, r.id in muted) for r in checks.RULES.values()],

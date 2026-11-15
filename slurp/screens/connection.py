@@ -247,7 +247,9 @@ class ConnectionScreen(ModalScreen):
     rows = []
     for link in links:
       relay, logins = link_state(link, now)
-      rows.append((f"link|{link.id}", (link.id, f"{link.kind}{' (read only)' if link.read_only else ''}: {link.title}", relay, logins,
+      rows.append((f"link|{link.id}", (Text.assemble(link.id, (" ◀ this view", "bold green") if link.cloudflare and self.app.this_view_link(link) else ""),
+                                       f"{link.kind}{' (read only)' if link.read_only else ''}: {link.title}", relay, logins,
+                                       "the address opens it (no logins)" if link.cloudflare else
                                        f"{len(link.live_sessions)} open, {link.logins} logins" + (f", {link.failures} wrong" if link.failures else ""))))
       for s in link.sessions:
         if not s.kind:

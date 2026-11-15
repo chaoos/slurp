@@ -169,6 +169,7 @@ moved up, job ids in log names, thread and binding settings, `module purge`, `wa
 A shell or drive of the cluster for your own terminal or file manager, through a relay: its state, logins, the
 password and slurp's host key, and the commands for your machine (Linux, macOS, Windows, PuTTY/WinSCP, ssh config),
 each with Copy. **New password** (the old one stops working), **Extend 1 h**, **Revoke** (no more logins, sessions end).
+A web link through Cloudflare has only its https address (no password): Revoke ends the tunnel, the address with it.
 
 **On your Windows computer** (password links): the slurp helper opens the link with one click. **Open on my
 computer** (slurp in your browser) hands it to the browser, which starts the helper; **Copy helper link** for Win+R
@@ -183,7 +184,9 @@ window. What it installs (in your user, no admin), what it needs, and how to rem
   "LinkSetupScreen": ("Link setup", """
 How a link for your own terminal works: the relay (public ssh-j.com, or your own SSH server), how many logins it
 allows and how long, password or your public key, and for drives read only. A public relay sees only encrypted
-traffic, but anyone who has the command and the password can log in until the link expires.
+traffic, but anyone who has the command and the password can log in until the link expires. Web links can also
+go through **Cloudflare**: a public https address that opens in any browser, nothing to install, no password (the
+address is the key; Cloudflare can read what passes).
 """),
   "DriveScreen": ("Drive", """
 Your login directory of the cluster as a drive: **on this machine** (sshfs through the tab's session, at the path

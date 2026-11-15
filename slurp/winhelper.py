@@ -25,6 +25,8 @@ SETUP_MARK = "#SLURP-SETUP"
 
 def available(link):
   """None if the helper can open the link, else why not"""
+  if link.cloudflare:
+    return "a Cloudflare link needs no helper: its address opens in any browser"
   if link.auth != "password":
     return "the helper logs in with a password: this link takes a key"
   if link.kind not in ("shell", "drive", "web"):

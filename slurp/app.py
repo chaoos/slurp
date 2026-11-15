@@ -275,7 +275,7 @@ class Slurp(App):
     if holder.under_holder(): # the theme follows the active view: the terminal's or the browser's
       import threading
       threading.Thread(target=holder.subscribe, daemon=True, name="active view",
-                       args=(lambda kind, label, port: self.call_from_thread(self.active_view_changed, kind, port),)).start()
+                       args=(lambda kind, label, port, host: self.call_from_thread(self.active_view_changed, kind, port, host),)).start()
 
   def theme_key(self, kind=None):
     """The config key of the theme: "theme" in a terminal, "theme_web" in a browser (slurp --serve, or the web view
@@ -295,9 +295,11 @@ class Slurp(App):
       self.theme = theme
 
   active_view_port = 0 # the active view is a browser: the port it connects from (see holder.View.port)
+  active_view_host = "" # ... through Cloudflare: the address it opened (a Cloudflare link's public host)
 
-  def active_view_changed(self, kind, port=0):
+  def active_view_changed(self, kind, port=0, host=""):
     self.active_view_port = port if kind == "web" else 0
+    self.active_view_host = host if kind == "web" else ""
     if kind and kind != self.view_kind:
       self.view_kind = kind
       self.apply_theme()
@@ -1140,6 +1142,13 @@ class Slurp(App):
     """The session is the web link's tunnel of the browser this slurp is on now"""
     return bool(self.active_view_port) and self.active_view_port in getattr(session, "web_ports", ())
 
+  def this_view_link(self, link):
+    """The browser this slurp is on now came through the link (an SSH web link: one of its sessions; Cloudflare: its
+    address)"""
+    if link.cloudflare:
+      return bool(self.active_view_host) and self.active_view_host == link.public_host
+    return any(self.this_view(s) for s in link.live_sessions)
+
   def web_links(self):
     return [l for l in self.link_manager.links if l.kind == "web"]
 
@@ -1159,7 +1168,8 @@ class Slurp(App):
     lines = []
     for l in self.web_links():
       if l.open() or l.live_sessions:
-        lines.append(f"web link {l.id} via {l.relay_host}: {l.logins} logins, {len(l.live_sessions)} open"
+        lines.append((f"web link {l.id} via Cloudflare ({l.public_host or 'starting'})" if l.cloudflare else
+                      f"web link {l.id} via {l.relay_host}: {l.logins} logins, {len(l.live_sessions)} open")
                      + (f", until {datetime.fromtimestamp(l.expires):%H:%M}" if l.expires else ""))
     text = "\n".join(lines)
     if text != getattr(self, "web_info_sent", ""):

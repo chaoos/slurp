@@ -562,6 +562,24 @@ it). The page needs the URL with the token every time: `http://localhost:8000`
 alone is refused, and nothing a browser kept from an earlier visit opens it
 (each page load gets a ticket of its own, good for its one connection).
 
+**Through Cloudflare** (the relay *Cloudflare* in the setup panel, for web
+links only) there is nothing to do on your side: slurp runs Cloudflare's
+tunnel client, `cloudflared`, which gets a random public address
+(`https://<words>.trycloudflare.com`, a free *quick tunnel*, no account), and
+the link window shows it with the token: open it in any browser, anywhere. No
+ssh, no password, no helper. The address is the key (whoever has it gets
+this slurp), so keep it to yourself, prefer a short expiry and revoke the
+link when done. Cloudflare ends the HTTPS, so unlike an SSH relay it can read
+what passes. A quick tunnel has no uptime guarantee; when it is lost slurp
+opens a new one, at a new address. slurp shows the address once it is in
+DNS (a browser that asks too early would keep "no such name" for minutes).
+The first time, slurp downloads `cloudflared` (about 40 MB, from Cloudflare's
+releases on GitHub) into `~/.local/share/slurp/bin`, unless one is on `PATH`
+or the config names one (`"cloudflared": "/path/to/cloudflared"`). It uses
+HTTP/2 over TCP (port 7844), as QUIC (UDP) is often blocked: on Alps
+(daint) it is. The web links remember their relay apart from shells and
+drives (`link_relay_web`).
+
 The browser is another view of the same slurp (textual-serve's page, a
 terminal). **One view is active at a time**: its keys and mouse go to slurp,
 and the screen takes its size. The others show a lock screen: who is active
