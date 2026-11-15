@@ -310,18 +310,24 @@ The node of a job only gets shells, never a drive.
 It works wherever your machine is, also when slurp runs behind several hops:
 slurp runs a small SSH server for each link (on `127.0.0.1` only) and connects
 out to a **relay**; your `ssh` connects out to the same relay and jumps through
-it to slurp. The session stays SSH encrypted from your terminal to slurp; the
-relay only passes bytes along. On the first connect your ssh shows slurp's host
-key, whose fingerprint the link window shows (remembered under one name, so
-it asks only once).
+it to slurp (`ssh -J`). A relay is nothing more than an SSH host that both ends
+can reach: it only passes bytes along, the session stays SSH encrypted from
+your terminal to slurp, and slurp's host key is checked end to end (on the
+first connect your ssh shows it; the link window shows its fingerprint,
+remembered under one name, so it asks only once). The relay is a setting (the
+setup panel, or `"link_relay"` in the settings):
 
-- **ssh-j.com** (the default) is a public relay run by a third party: each link
-  gets a random name there. The setup panel warns about what that means
-  (anyone with the command and the password gets in as you; the relay sees
-  that connections happen; your site's rules may not allow it).
-- **Your own relay**: any SSH server you can log in to with a key, e.g.
-  `me@relay.example.org`; slurp asks it for a free port. Set it in the setup
-  panel or as `"link_relay"` in the settings.
+- **ssh-j.com**, the default and the prime example: a public relay, there for
+  exactly this. It needs no account on either end: slurp registers each link
+  under a random name, your ssh asks for that name. It is run by a third party:
+  the setup panel warns about what that means (anyone with the command and the
+  password gets in as you; the relay sees that connections happen; your site's
+  rules may not allow it). Another relay of that kind: `sshj://host`.
+- **Any OpenSSH server** that both ends reach, e.g. `me@relay.example.org`: a
+  plain jump host, nothing to install. slurp logs in to it with your key and
+  asks it for a free port (`ssh -R 0:...`), so it must allow forwarding (the
+  default); your ssh then needs a login there too (the same account, or
+  another). Nobody else is involved.
 - **direct** (no relay): when your machine reaches the one slurp runs on
   itself (the same network, a VPN), `direct` makes the link listen on that
   machine (every interface, a free port) and your ssh connects straight to it,

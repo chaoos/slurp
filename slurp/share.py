@@ -2,16 +2,19 @@
 
 A link is a one-time ticket: slurp runs a small SSH server (asyncssh) on 127.0.0.1 for it and makes that port
 reachable through a relay, which both sides reach from the outside, so it works whatever lies between the user's
-machine and the one slurp runs on (hops, NAT). The client logs in with a random password (or a public key) and gets
+machine and the one slurp runs on (hops, NAT). A relay is just an SSH host both ends reach (the client jumps through
+it, ssh -J; the session stays encrypted end to end); ssh-j.com is the default (public, no accounts), any OpenSSH
+server works as well. The client logs in with a random password (or a public key) and gets
 - a shell: the same command as a shell inside slurp, run in a pseudo terminal and passed through byte by byte
   (on the login node over the tab's SSH session, or on a node of a running job), or
 - a drive: the SFTP server of the cluster (sftp-server over the tab's SSH session), passed through byte by byte, for
   sshfs, SSHFS-Win, WinSCP, file managers.
 
-Relays:
-- "ssh-j" (ssh-j.com, public): slurp runs  ssh <name>@ssh-j.com -N -R slurp:22:127.0.0.1:<port>  and the client
+Relays (the setting "link_relay"):
+- "ssh-j" (ssh-j.com, the default, public; or sshj://host, a relay of the same kind): no account on either end, a
+  link is a random name there. slurp runs  ssh <name>@ssh-j.com -N -R slurp:22:127.0.0.1:<port>  and the client
   ssh -J <name>@ssh-j.com <user>@slurp ; <name> is random, links of other names are not reachable
-- "openssh" (your own jump host): slurp runs  ssh <relay> -N -R 0:127.0.0.1:<port> , the relay picks a free port P
+- "openssh" (any OpenSSH server both ends can log in to, e.g. me@relay.example.org): slurp runs  ssh <relay> -N -R 0:127.0.0.1:<port> , the relay picks a free port P
   and the client runs  ssh -J <relay> -p P <user>@localhost
 - "direct" (no relay: "direct", or direct://host[:port]): slurp's server listens on every interface of this machine
   (at that port, or a free one) and the client runs  ssh -p <port> <user>@<host> ; for a machine the client reaches

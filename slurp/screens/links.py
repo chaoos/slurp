@@ -25,10 +25,11 @@ PUBLIC_WARNING = (
   "prefer one use and a short expiry.\n"
   "• The relay sees that a connection happens, when, and how much data flows; it may go offline at any time.\n"
   "• Your site's rules may not allow access through third-party relays.\n"
-  "Your own relay avoids this: any SSH server you can log in to with a key, set below or as \"link_relay\" in "
-  "~/.config/slurp/config.json.")
-OWN_NOTE = ("Own relay {relay}: an OpenSSH jump host. slurp logs in to it with your keys (no prompts) and asks it "
-            "for a free port; your terminal jumps through it to slurp.")
+  "A relay is just an SSH host both ends reach: any OpenSSH server you (and your machine) can log in to does the "
+  "same without a third party (user@host below, or \"link_relay\" in ~/.config/slurp/config.json); or direct, "
+  "if your machine reaches this one itself.")
+OWN_NOTE = ("Relay {relay}: a plain OpenSSH jump host that both ends reach. slurp logs in to it with your keys (no "
+            "prompts) and asks it for a free port; your terminal logs in there too and jumps through it to slurp.")
 
 DIRECT_NOTE = ("Direct, no relay: your machine connects to {host} port {port} itself, so it must reach this machine (the "
                "same network, a VPN; no firewall in between). For this link slurp listens on that port on every "
