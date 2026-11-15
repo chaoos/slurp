@@ -327,6 +327,7 @@ class Holder:
     self.proc = None
     self.web = None       # (runner, port)
     self.web_token = ""
+    self.web_tickets = {} # a page load's ticket (its cookie) -> when it was given (0: its websocket is open)
     self.info = ""        # what the app says about its web links (for the lock screens)
     self.deliveries = {}  # key -> (file name, bytes, time): downloads for the browser (see deliver)
     self.dirty = False
@@ -674,11 +675,27 @@ class Holder:
     serve_dir = os.path.dirname(textual_serve.__file__)
     templates = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.join(serve_dir, "templates")), autoescape=True)
     self.web_token = secrets.token_urlsafe(18)
+    self.web_tickets = {}
+
+    def ticket_of(request, open_):
+      """The page's ticket, if it is valid: unused (open_ False: for its websocket, within a minute of the page
+      load) or in use by an open websocket (open_ True: downloads). The token itself is never a cookie: a page
+      needs the URL with the token every time, and what a browser kept from an earlier visit opens nothing."""
+      ticket = request.cookies.get("slurp_view", "")
+      given = next((g for t, g in self.web_tickets.items() if secrets.compare_digest(t, ticket)), None) if ticket else None
+      if given is None:
+        return None
+      return ticket if (given == 0 if open_ else given and time.time() - given < 60) else None
 
     async def index(request):
-      if not secrets.compare_digest(request.query.get("token", ""), self.web_token) and \
-         not secrets.compare_digest(request.cookies.get("slurp_token", ""), self.web_token):
-        return web.Response(status=403, text="slurp: this needs the link's URL (with its token)")
+      if not secrets.compare_digest(request.query.get("token", ""), self.web_token):
+        return web.Response(status=403, text="slurp: this needs the link's URL, with its token (?token=...)")
+      now = time.time()
+      for t, given in list(self.web_tickets.items()):
+        if given and now - given >= 60:
+          del self.web_tickets[t] # (pages that never opened their websocket)
+      ticket = secrets.token_urlsafe(18)
+      self.web_tickets[ticket] = now
       host = request.host
       page = templates.get_template("app_index.html").render(
         font_size=int(request.query.get("fontsize", "16") or 16), app_websocket_url=f"ws://{host}/ws",
@@ -686,12 +703,16 @@ class Holder:
       page = page.replace("<head>", "<head>" + LINK_BANNER + _page_brand(), 1)
       page = re.sub(r'(<div class="intro">\s*)<svg.*?</svg>\s*<div>[^<]*</div>', lambda m: m[1] + _intro_brand(), page, count=1, flags=re.S)
       response = web.Response(text=page, content_type="text/html")
-      response.set_cookie("slurp_token", self.web_token, httponly=True, samesite="Strict")
+      response.set_cookie("slurp_view", ticket, httponly=True, samesite="Strict")
+      response.del_cookie("slurp_token") # (of an older slurp)
+      response.headers["Cache-Control"] = "no-store"
       return response
 
     async def websocket(request):
-      if not secrets.compare_digest(request.cookies.get("slurp_token", ""), self.web_token):
+      ticket = ticket_of(request, False)
+      if ticket is None:
         return web.Response(status=403)
+      self.web_tickets[ticket] = 0 # (used: one websocket per page load; a page that closed reloads, with the token)
       ws = web.WebSocketResponse(heartbeat=15)
       await ws.prepare(request)
       queue = asyncio.Queue()
@@ -740,10 +761,11 @@ class Holder:
       finally:
         self.detach(view)
         task.cancel()
+        self.web_tickets.pop(ticket, None)
       return ws
 
     async def download(request):
-      if not secrets.compare_digest(request.cookies.get("slurp_token", ""), self.web_token):
+      if ticket_of(request, True) is None:
         return web.Response(status=403)
       item = self.deliveries.get(request.match_info["key"])
       if item is None or time.time() - item[2] > 600:
@@ -769,6 +791,7 @@ class Holder:
       return
     runner, port = self.web
     self.web = None
+    self.web_tickets = {}
     for view in [v for v in self.views if v.kind == "web"]:
       view.close(None)
       self.detach(view)

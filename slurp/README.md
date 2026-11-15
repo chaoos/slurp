@@ -558,7 +558,9 @@ ssh -L 8000:127.0.0.1:<port> -J <name>@ssh-j.com slurp@slurp   # (the link windo
 It asks for the link's password, then says that the tunnel is open and
 shows the URL (`http://localhost:8000/?token=…`). Keep that window open while
 you use the browser: it carries the connection (Ctrl-C or `q` there closes
-it).
+it). The page needs the URL with the token every time: `http://localhost:8000`
+alone is refused, and nothing a browser kept from an earlier visit opens it
+(each page load gets a ticket of its own, good for its one connection).
 
 The browser is another view of the same slurp (textual-serve's page, a
 terminal). **One view is active at a time**: its keys and mouse go to slurp,
