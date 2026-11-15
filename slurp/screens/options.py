@@ -77,7 +77,9 @@ class OptionsScreen(ModalScreen):
         with Horizontal(classes="op-row"):
           yield Label("Relay")
           yield Input(c.get("link_relay") or "ssh-j.com", id="op-relay")
-        yield Static("ssh-j.com (public), or your own SSH server you can log in to with a key (user@host).", classes="op-note")
+        yield Static("ssh-j.com (public), your own SSH server you can log in to with a key (user@host), or direct "
+                     "(no relay; the host and port your machine connects to are set in a link's setup panel, and kept "
+                     "for each machine slurp runs on).", classes="op-note")
         yield Static("Checks: rules not to report (muted)", classes="op-section")
         muted = set(c.get("checks_muted") or [])
         yield SelectionList(*[Selection(f"{r.id}  {r.title}", r.id, r.id in muted) for r in checks.RULES.values()],

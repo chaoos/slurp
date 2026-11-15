@@ -127,6 +127,18 @@ def direct_address(relay):
     host = socket.getfqdn()
   return host, port
 
+def direct_relay(host, port=0):
+  """The relay setting of a direct link to host (the name the client knows this machine by) and port (0: a free one);
+  ValueError if they are not valid"""
+  host, port = (host or "").strip(), str(port or "").strip()
+  if port and not port.isdigit():
+    raise ValueError(f"the port {port} is not a number")
+  relay = f"{DIRECT}://{host}" + (f":{int(port)}" if port and int(port) else "") if host else DIRECT
+  if not host and port and int(port):
+    raise ValueError("give the host too (the name your machine knows this one by)")
+  direct_address(relay)
+  return relay
+
 def is_public(relay):
   return parse_relay(relay) == ("ssh-j", PUBLIC_RELAY)
 

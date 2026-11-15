@@ -1,6 +1,7 @@
 """Shells and drives for the user's own terminal: the choice of the Shell buttons, the setup panel of a link and its
 view (commands, password, state)"""
 
+import socket
 import time
 from datetime import datetime
 
@@ -33,11 +34,28 @@ OWN_NOTE = ("Relay {relay}: a plain OpenSSH jump host that both ends reach. slur
 
 DIRECT_NOTE = ("Direct, no relay: your machine connects to {host} port {port} itself, so it must reach this machine (the "
                "same network, a VPN; no firewall in between). For this link slurp listens on that port on every "
-               "interface of this machine: whoever reaches it can try the password (5 wrong ones lock the link). "
-               "direct://host:port sets the name your machine knows this one by, and a fixed port.")
+               "interface of this machine (with an address as the host: only on that one); whoever reaches it can "
+               "try the password (5 wrong ones lock the link). Host: the name your machine knows this one by (a "
+               "fully qualified name, an alias, an address); slurp remembers it, and the port, for this machine.")
 
 def relay_setting():
   return load_config().get("link_relay") or share.DEFAULT_RELAY
+
+def machine():
+  """The key of this machine in "link_direct" (a home directory, and so the config, is often shared by many nodes)"""
+  return socket.gethostname()
+
+def direct_setting():
+  """(host, port) of direct links from this machine: what the relay setting names (direct://host:port), else what
+  was stored for this machine, else its fully qualified name and a free port ("")"""
+  kind, rest = share.parse_relay(relay_setting())
+  if kind == share.DIRECT and rest:
+    host, _, port = rest.partition(":")
+    return host, port
+  entry = (load_config().get("link_direct") or {}).get(machine())
+  if isinstance(entry, dict) and entry.get("host"):
+    return str(entry["host"]), str(entry.get("port") or "")
+  return socket.getfqdn(), ""
 
 def warning_text(relay, kind):
   what = ("a shell" if kind == "shell" else "this slurp itself, with all its tabs, shells and drives" if kind == "web"
@@ -148,7 +166,19 @@ class LinkSetupScreen(ModalScreen):
                          tooltip=None if self.read_only_argv else "the cluster's sftp-server was not found: not possible")
         with Horizontal(classes="setup-row"):
           yield Label("Relay")
-          yield Input(relay_setting(), id="setup-relay", tooltip="ssh-j.com (public), your own SSH jump host (user@host), or direct (no relay: your machine reaches this one itself; direct://host:port)")
+          relay = relay_setting()
+          yield Input(share.DIRECT if share.parse_relay(relay)[0] == share.DIRECT else relay, id="setup-relay",
+                      tooltip="ssh-j.com (public), your own SSH jump host (user@host), or direct (no relay: your machine reaches this one itself)")
+        host, port = direct_setting()
+        with Horizontal(classes="setup-row setup-direct"):
+          yield Label("Host")
+          yield Input(host, id="setup-direct-host", placeholder=socket.getfqdn(),
+                      tooltip="the name or address your machine connects to: this machine's fully qualified name, "
+                              "or the one it has on your network or VPN")
+        with Horizontal(classes="setup-row setup-direct"):
+          yield Label("Port")
+          yield Input(port, id="setup-direct-port", type="integer", placeholder="a free one",
+                      tooltip="a fixed port (e.g. one the firewall lets through), or empty for a free one")
         yield Static(id="setup-warning")
         with Horizontal(classes="setup-row"):
           yield Label("Logins")
@@ -172,12 +202,36 @@ class LinkSetupScreen(ModalScreen):
     self.show_warning()
     self.query_one("#setup-create", Button).focus()
 
-  @on(Input.Changed, "#setup-relay")
-  def show_warning(self, event=None):
+  def relay(self):
+    """The relay of the link to make (direct: with the host and port of the fields); ValueError if not valid"""
     relay = self.query_one("#setup-relay", Input).value.strip() or share.DEFAULT_RELAY
+    if share.parse_relay(relay)[0] != share.DIRECT:
+      return relay
+    kind, rest = share.parse_relay(relay)
+    if rest: # (direct://host:port typed in the relay field: into the fields)
+      host, _, port = rest.partition(":")
+      self.query_one("#setup-relay", Input).value = share.DIRECT
+      self.query_one("#setup-direct-host", Input).value = host
+      self.query_one("#setup-direct-port", Input).value = port
+    return share.direct_relay(self.query_one("#setup-direct-host", Input).value or socket.getfqdn(),
+                              self.query_one("#setup-direct-port", Input).value)
+
+  @on(Input.Changed, "#setup-relay")
+  @on(Input.Changed, "#setup-direct-host")
+  @on(Input.Changed, "#setup-direct-port")
+  def show_warning(self, event=None):
+    typed = self.query_one("#setup-relay", Input).value.strip() or share.DEFAULT_RELAY
+    direct = share.parse_relay(typed)[0] == share.DIRECT
+    for row in self.query(".setup-direct"):
+      row.display = direct
     widget = self.query_one("#setup-warning", Static)
-    widget.update(warning_text(relay, self.kind))
-    widget.styles.border = ("round", "yellow" if share.is_public(relay) else "gray")
+    try:
+      relay = self.relay()
+    except ValueError as e:
+      widget.update(Text(str(e), style="red"))
+    else:
+      widget.update(warning_text(relay, self.kind))
+    widget.styles.border = ("round", "yellow" if share.is_public(typed) else "gray")
 
   @on(RadioSet.Changed, "#setup-auth")
   def auth_changed(self, event):
@@ -186,13 +240,11 @@ class LinkSetupScreen(ModalScreen):
   @on(Button.Pressed, "#setup-create")
   def create(self, event):
     event.stop()
-    relay = self.query_one("#setup-relay", Input).value.strip() or share.DEFAULT_RELAY
-    if share.parse_relay(relay)[0] == share.DIRECT:
-      try:
-        share.direct_address(relay)
-      except ValueError as e:
-        self.notify(str(e), severity="error")
-        return
+    try:
+      relay = self.relay()
+    except ValueError as e:
+      self.notify(str(e), severity="error")
+      return
     uses = self.query_one("#setup-uses", Select).value
     expiry = self.query_one("#setup-expiry", Select).value
     by_key = self.query_one("#setup-auth-key", RadioButton).value
@@ -208,7 +260,12 @@ class LinkSetupScreen(ModalScreen):
                       uses=uses or None, expiry=None if expiry == -1 else expiry, auth="key" if by_key else "password",
                       public_key=key if by_key else "", path=self.path, read_only=read_only,
                       web_port=self.web[0] if self.web else 0, web_token=self.web[1] if self.web else "")
-    if relay != relay_setting():
+    if share.parse_relay(relay)[0] == share.DIRECT: # (the relay "direct"; the host and port for this machine)
+      host, port = share.direct_address(relay)
+      stored = dict(load_config().get("link_direct") or {})
+      stored[machine()] = {"host": host, **({"port": port} if port else {})}
+      update_config(link_relay=share.DIRECT, link_direct=stored)
+    elif relay != relay_setting():
       update_config(link_relay=relay) # (the relay is a setting: the next link uses it too)
     try:
       self.app.link_manager.create(link)
