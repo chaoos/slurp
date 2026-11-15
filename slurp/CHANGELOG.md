@@ -18,6 +18,11 @@ version may need the helper of the same version).
   mounted, with their reconnects.
 - **? slurp** at the top right: slurp in general, its version, the machine it
   runs on (Copy details for a bug report); also "About slurp" in the palette.
+- The Windows helper has one window: the connections, and below them the one
+  selected with its settings and steps (no window per connection any more); a
+  right click on a row: open, map another folder, unmap one, open another
+  shell, reconnect, disconnect, logs, copy the details, remove. The
+  "Helper ..." button is gone (the tray's menu has the helper's settings).
 
 
 ## 0.8.0 (beta), 2026-11-15

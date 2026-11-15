@@ -643,8 +643,8 @@ updates it. **Remove it:** tray menu → *Uninstall*.
 Optional features*). A drive also needs WinFsp and SSHFS-Win: the helper offers to install them (winget).
 
 **How it connects** (as the commands of the link window do): a tunnel to the relay (no password), then it checks
-slurp's host key through it against the one in the link, then logs in with the password you give it: in its window for
-a drive or the web view, in the terminal for a shell (ssh asks there). The password is not in the link and not stored:
+slurp's host key through it against the one in the link, then logs in with the password you give it: in its window (below the
+connection) for a drive or the web view, in the terminal for a shell (ssh asks there). The password is not in the link and not stored:
 the helper types it into ssh's prompt for you for the web view, or gives it to `net use` for a drive.
 """
 

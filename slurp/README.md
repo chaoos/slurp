@@ -407,28 +407,35 @@ link, and:
 - **drive**: maps a folder of the cluster (SSHFS-Win, `net use`) and opens
   Explorer. Its list has `$HOME`, `$SCRATCH`, `$PROJECT`, `$STORE` and `$WORK`
   (those that are set, with their paths) and `/`; or type a path (absolute,
-  `$SCRATCH/run1`, or relative to `$HOME`). **Map another** maps more folders,
-  on other letters, through the same connection. It reconnects them all when
+  `$SCRATCH/run1`, or relative to `$HOME`). *Map another folder* (a right
+  click on its row) maps more folders, on other letters, through the same
+  connection. It reconnects them all when
   the connection drops;
 - **web view**: an SSH tunnel to the web view (no window to keep open) and the
   browser at it;
 - **shell**: at once (nothing to ask), a terminal window with the shell,
   where ssh asks for the password (you type or paste it there, once; 3
-  tries); the helper's window hides by itself as soon as the shell's prompt
-  shows.
+  tries); the helper sees when the shell's prompt shows. *Open another shell*
+  (a right click on its row) opens one more, if the link takes more logins.
 
 The password is not part of the link and not stored: for a web view the helper
 types it into ssh's prompt for you, for a drive it gives it to `net use`. What is open stays in the
-tray icon (^ next to the clock). **A click on it** shows the helper's window:
-every connection with its state (mapped folders, the web view's local port,
-relay or direct, since when, until when the link takes logins) and its last
-steps, with **Explorer**/**Browser**, **Show window**, **Reconnect** (a drive
-maps all its folders again; the password is remembered while the helper runs),
-**Disconnect** (it stays in the list), **Remove** and **Logs**; it also shows
-whether ssh and SSHFS-Win are there. The icon's menu has the same per
-connection, and *Start with Windows*, *Known slurps*, the folder with the logs,
-*Uninstall* and *Quit*. Closing a window asks whether to disconnect or keep it
-in the tray.
+tray icon (^ next to the clock). The helper has **one window** (a click on the
+icon; it shows by itself when a link comes): every connection is a row with
+its state (mapped folders, the web view's local port, relay or direct, since
+when, until when the link takes logins), and the row selected shows below
+the list: what it is, its settings while it is not connected (folder, letter,
+password, then *Map drive* / *Open web view* / *Open terminal*), its state and
+all its steps. **A right click on a row** has what that connection can do: open
+it (each mapped letter in Explorer, the web view in the browser), *Map another
+folder…* (a small window: folder and letter) and *Unmap* one letter for a
+drive, *Open another shell* for a shell, *Reconnect* (a drive maps all its
+folders again; the password is remembered while the helper runs),
+*Disconnect* (it stays in the list), *Logs*, *Copy the details* and *Remove*.
+The buttons under the list do the most common of these. The window also shows
+whether ssh and SSHFS-Win are there. The icon's menu has the connections too,
+and the helper's own settings: *Start with Windows*, *Known slurps*, the
+folder with the logs, *Uninstall* and *Quit*.
 
 **Set it up once** (no admin rights): **Set up the helper…** in a link
 window. **Download the setup** (with slurp in your browser) gives

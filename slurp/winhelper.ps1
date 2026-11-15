@@ -3,17 +3,19 @@
 # registers slurp:// for this user (no admin). A click on a link in slurp's web view (or Win+R and the link):
 # the browser starts slurp-open.exe, which hands the link to this tray (a file in its inbox) and starts it if needed.
 #
-# A link is a shell, a drive or the web view of one slurp. For each one the tray shows a window:
+# A link is a shell, a drive or the web view of one slurp. Each one is a connection, a row of the helper window:
 #   the password of the link (drive and web view; and the drive letter) -> the tunnel to the relay (ssh -N -L, no
 #   password) -> the host key of slurp through it (ssh-keyscan, against the fingerprint in the link, and the slurps
 #   known here) -> drive: net use (SSHFS-Win) of the folder picked ($HOME, $SCRATCH, ... or typed in; more
 #   folders later, on other letters, through the same tunnel) and Explorer; web view: ssh -N -L (the password typed into its
 #   console by slurp-open.exe --feed) and the browser; shell: at once (nothing to ask) ssh in a terminal window,
 #   which asks for the password itself (the user types it there; the helper does not ask for it); the window hides
-#   when the shell's prompt shows (slurp-open.exe --watch, or ssh's log)
-# Windows of links that are open hide in the tray (its menu: open, show, disconnect); quitting closes them all.
-# A click on the tray icon shows the helper's window: every connection with its state (mapped folders, local port,
-# relay or direct, since when, logins until), its last steps, and Open, Show window, Reconnect, Disconnect, Remove.
+#   is the user's (the helper sees its prompt: slurp-open.exe --watch, or ssh's log)
+# The helper window (a click on the tray icon; it shows by itself when a link comes) lists every connection with its
+# state (mapped folders, local port, relay or direct, since when, logins until); below the list the selected one: its
+# settings while it is not connected (folder, letter, password), its state and its steps. A right click on a row: what
+# that connection can do (open, map another folder, unmap one, open another shell, reconnect, disconnect, logs,
+# remove). Quitting closes them all.
 #
 # Kept simple on purpose: no line in this file starts with '@ (the setup embeds it in a here-string), no
 # multi-line strings (comment lines and indentation are stripped when it is embedded).
@@ -224,7 +226,6 @@ if (-not $Icon) { $Icon = [Drawing.SystemIcons]::Application }
 
 $script:Conns = New-Object Collections.ArrayList
 $script:Quitting = $false
-$script:Hidden = @{} # the first time a window hides into the tray it says so
 
 $KindWord = @{ drive = 'Drive'; shell = 'Shell'; web = 'Web view' }
 $GoText = @{ drive = 'Map drive'; shell = 'Open terminal'; web = 'Open web view' }
@@ -281,11 +282,16 @@ function Get-DriveList($c) {
   return ((@($c.Maps) | ForEach-Object { "$($_.Letter) $($_.Path)" }) -join ', ')
 }
 
+function First-FreeLetter {
+  $free = @(Get-FreeLetters)
+  if ($free.Count) { return "$($free[0]):" }
+  return ''
+}
+
 function Fill-Letters($c) {
-  if (-not $c.Letter) { return }
-  $c.Letter.Items.Clear()
-  foreach ($l in (Get-FreeLetters)) { $null = $c.Letter.Items.Add("$($l):") }
-  if ($c.Letter.Items.Count -gt 0) { $c.Letter.SelectedIndex = 0 }
+  if ($c.Kind -ne 'drive') { return }
+  $c.LetterChoice = First-FreeLetter
+  $script:PanelDirty = $true
 }
 
 function Add-Control($form, $c, $x, $y, $w, $h) {
@@ -295,145 +301,23 @@ function Add-Control($form, $c, $x, $y, $w, $h) {
   return $c
 }
 
+# a connection is a row of the helper window, which shows its details and settings (no window of its own)
 function New-Connection($link) {
   $c = @{
     Link = $link; Kind = $link.Kind; Phase = 'input'; Since = (Get-Date); LastTry = (Get-Date)
     Tunnel = $null; Keyscan = $null; NetUse = $null; Client = $null
     Port = 0; Host = '127.0.0.1'; UncHost = 'localhost'; WebLocal = 0; Maps = (New-Object Collections.ArrayList); Pending = (New-Object Collections.ArrayList); Password = ''; Tries = 0
-    Remap = $false; Verifying = $false; Mapping = $false; Feeder = $null; Watcher = $null; FedAt = $null; Typing = $false; LogNoted = $false; KeyLine = ''; Visible = $false; Ended = $false; ConnectedAt = $null
+    Remap = $false; Verifying = $false; Mapping = $false; Feeder = $null; Watcher = $null; FedAt = $null; Typing = $false; LogNoted = $false; KeyLine = ''; Ended = $false; ConnectedAt = $null
+    StateText = ''; Lines = (New-Object Collections.ArrayList); PwDraft = ''; FolderText = ''; LetterChoice = ''
   }
-  $c.Dir = Join-Path $ConnDir ("$($link.Kind)-$($link.Id)-" + (Get-Date).ToString('HHmmss'))
+  $c.Dir = Join-Path $ConnDir ("$($link.Kind)-$($link.Id)-" + (Get-Date).ToString('HHmmssfff'))
   New-Item -ItemType Directory -Force -Path $c.Dir | Out-Null
-
-  $form = New-Object Windows.Forms.Form
-  $form.Text = "slurp $($KindWord[$c.Kind].ToLower()): $($link.Title)"
-  $form.Font = $UiFont
-  $form.AutoScaleMode = 'Dpi'
-  $form.ClientSize = New-Object Drawing.Size(580, 440)
-  $form.FormBorderStyle = 'FixedDialog'
-  $form.MaximizeBox = $false
-  $form.StartPosition = 'CenterScreen'
-  $form.Icon = $Icon
-  $form.Tag = $c
-  $c.Form = $form
-
-  $info = New-Object Windows.Forms.Label
-  $expires = ''
-  if ($link.Expires -gt 0) {
-    $expires = ' · new logins until ' + [DateTimeOffset]::FromUnixTimeSeconds($link.Expires).LocalDateTime.ToString('ddd HH:mm')
-  }
-  $detail = "$($KindWord[$c.Kind]) of $($link.Alias) · " + $(if ($link.RelayKind -eq 'direct') { "directly to $($link.Host):$($link.Port)" } elseif ($link.RelayKind -eq 'tcp') { "relay $($link.RelayHost), at $($link.Host):$($link.Port)" } else { "relay $($link.RelayHost)" }) + $(if ($link.ReadOnly) { ' · read only' } else { '' }) + $expires
-  $info.Text = "$($link.Title)`r`n$detail"
-  $null = Add-Control $form $info 12 10 556 36
-
-  $y = 56
-  $c.Letter = $null
-  $c.Folder = $null
   if ($c.Kind -eq 'drive') {
-    $lblF = New-Object Windows.Forms.Label
-    $lblF.Text = 'Folder on the cluster:'
-    $null = Add-Control $form $lblF 12 ($y + 3) 150 20
-    $folder = New-Object Windows.Forms.ComboBox
-    $folder.DropDownStyle = 'DropDown'
-    $folder.MaxDropDownItems = 12
-    foreach ($d in (Get-FolderChoices $link)) { $null = $folder.Items.Add($d.Label) }
-    $folder.SelectedIndex = 0
-    $c.Folder = Add-Control $form $folder 170 $y 398 24
-    $y += 22
-    $hint = New-Object Windows.Forms.Label
-    $hint.Text = 'Pick one, or type a path: /abs/path, $SCRATCH/run1, or relative to $HOME. Map more later, on other letters.'
-    $hint.ForeColor = [Drawing.SystemColors]::GrayText
-    $null = Add-Control $form $hint 170 ($y + 2) 398 18
-    $y += 26
-    $lbl = New-Object Windows.Forms.Label
-    $lbl.Text = 'Drive letter:'
-    $null = Add-Control $form $lbl 12 ($y + 3) 150 20
-    $letter = New-Object Windows.Forms.ComboBox
-    $letter.DropDownStyle = 'DropDownList'
-    foreach ($l in (Get-FreeLetters)) { $null = $letter.Items.Add("$($l):") }
-    if ($letter.Items.Count -gt 0) { $letter.SelectedIndex = 0 }
-    $c.Letter = Add-Control $form $letter 170 $y 80 24
-    $y += 34
+    $c.FolderText = (Get-FolderChoices $link)[0].Label
+    $c.LetterChoice = First-FreeLetter
   }
-  # (a shell has no password field: ssh asks for the password in the terminal window)
-  $askPw = ($c.Kind -ne 'shell')
-  $lblPw = New-Object Windows.Forms.Label
-  $lblPw.Text = 'Password of the link:'
-  $lblPw.Visible = $askPw
-  $null = Add-Control $form $lblPw 12 ($y + 3) 150 20
-  $pw = New-Object Windows.Forms.TextBox
-  $pw.UseSystemPasswordChar = $true
-  $pw.Visible = $askPw
-  $c.Pw = Add-Control $form $pw 170 $y 220 24
-  $paste = New-Object Windows.Forms.Button
-  $paste.Text = 'Paste'
-  $paste.Tag = $c
-  $paste.Visible = $askPw
-  $c.Paste = Add-Control $form $paste 398 ($y - 1) 70 26
-  $show = New-Object Windows.Forms.CheckBox
-  $show.Text = 'Show'
-  $show.Tag = $c
-  $show.Visible = $askPw
-  $c.Show = Add-Control $form $show 476 ($y + 2) 80 22
-  if ($askPw) { $y += 36 }
-
-  $state = New-Object Windows.Forms.Label
-  $state.Font = $UiBold
-  if ($askPw) { $state.Text = 'Paste the password of the link (slurp shows it), then ' + $GoText[$c.Kind] + '.' }
-  else { $state.Text = 'Opening the terminal: it asks for the password of the link (slurp shows it).' }
-  $c.State = Add-Control $form $state 12 $y 556 22
-  $y += 26
-  $steps = New-Object Windows.Forms.TextBox
-  $steps.Multiline = $true
-  $steps.ReadOnly = $true
-  $steps.ScrollBars = 'Vertical'
-  $steps.BackColor = [Drawing.SystemColors]::Window
-  $c.Steps = Add-Control $form $steps 12 $y 556 (390 - $y - 12)
-
-  $go = New-Object Windows.Forms.Button
-  $go.Text = $GoText[$c.Kind]
-  $go.Tag = $c
-  $c.Go = Add-Control $form $go 12 398 116 30
-  $open = New-Object Windows.Forms.Button
-  $open.Text = $OpenText[$c.Kind]
-  $open.Tag = $c
-  $open.Enabled = $false
-  $open.Visible = ($c.Kind -ne 'shell')
-  $c.Open = Add-Control $form $open 136 398 124 30
-  $logs = New-Object Windows.Forms.Button
-  $logs.Text = 'Logs'
-  $logs.Tag = $c
-  $c.Logs = Add-Control $form $logs 268 398 70 30
-  $hide = New-Object Windows.Forms.Button
-  $hide.Text = 'Hide'
-  $hide.Tag = $c
-  $c.Hide = Add-Control $form $hide 346 398 80 30
-  $close = New-Object Windows.Forms.Button
-  $close.Text = 'Close'
-  $close.Tag = $c
-  $c.Close = Add-Control $form $close 434 398 134 30
-  $form.AcceptButton = $go
-
-  $go.Add_Click({ param($s, $e) Begin-Connect $s.Tag })
-  $paste.Add_Click({
-    param($s, $e)
-    $c = $s.Tag
-    $text = ''
-    try { $text = [Windows.Forms.Clipboard]::GetText() } catch { }
-    if ($text) { $c.Pw.Text = $text.Trim(); Say $c 'password pasted' } else { Say $c 'the clipboard has no text' }
-    [void]$c.Pw.Focus()
-  })
-  $show.Add_CheckedChanged({ param($s, $e) $s.Tag.Pw.UseSystemPasswordChar = -not $s.Checked })
-  $open.Add_Click({ param($s, $e) Open-Result $s.Tag })
-  $logs.Add_Click({ param($s, $e) Start-Process explorer.exe $s.Tag.Dir })
-  $hide.Add_Click({ param($s, $e) Hide-Window $s.Tag })
-  $close.Add_Click({ param($s, $e) On-CloseButton $s.Tag })
-  $form.Add_FormClosing({ param($s, $e) On-Closing $s.Tag $e })
-  $form.Add_FormClosed({ param($s, $e) Remove-Connection $s.Tag })
-  # (a shell has nothing to ask here: its terminal opens at once)
-  $form.Add_Shown({ param($s, $e) $c = $s.Tag; Bring-Window $c; if ($c.Pw.Visible) { [void]$c.Pw.Focus() } else { [void]$c.Go.Focus() }
-    if ($c.Kind -eq 'shell' -and $c.Phase -eq 'input') { Begin-Connect $c } })
-
+  if ($c.Kind -ne 'shell') { $c.StateText = 'Paste the password of the link (slurp shows it), then ' + $GoText[$c.Kind] + '.' }
+  else { $c.StateText = 'Opening the terminal: it asks for the password of the link (slurp shows it).' }
   [void]$script:Conns.Add($c)
   Say $c "link $($link.Id) of $($link.Alias) (host key $($link.Fingerprint))"
   if (-not $Ssh) { Say $c 'ssh.exe not found: install the Windows feature "OpenSSH Client" (Settings > Apps > Optional features)' }
@@ -441,32 +325,38 @@ function New-Connection($link) {
   return $c
 }
 
-function Bring-Window($c) {
-  $f = $c.Form
-  $c.Visible = $true
-  if (-not $f.Visible) { $f.Show() }
-  if ($f.WindowState -eq 'Minimized') { $f.WindowState = 'Normal' }
-  if ($Native) { try { [SlurpOpen]::Bring($f.Handle) } catch { } }
-  $f.TopMost = $true
-  $f.Activate()
-  $f.TopMost = $false
+# what the connection is: of which slurp, the route, read only, until when it takes logins
+function Get-Detail($c) {
+  $link = $c.Link
+  $expires = ''
+  if ($link.Expires -gt 0) { $expires = ' · new logins until ' + [DateTimeOffset]::FromUnixTimeSeconds($link.Expires).LocalDateTime.ToString('ddd HH:mm') }
+  return "$($KindWord[$c.Kind]) of $($link.Alias) · " + $(if ($link.RelayKind -eq 'direct') { "directly to $($link.Host):$($link.Port)" } elseif ($link.RelayKind -eq 'tcp') { "relay $($link.RelayHost), at $($link.Host):$($link.Port)" } else { "relay $($link.RelayHost)" }) + $(if ($link.ReadOnly) { ' · read only' } else { '' }) + $expires
 }
 
+# the helper window, with this connection selected
 function Show-Window($c) {
-  Bring-Window $c
-}
-
-function Hide-Window($c) {
-  $c.Visible = $false
-  $c.Form.Hide()
-  if (-not $script:Hidden[$c.Kind] -and $c.Phase -ne 'input') {
-    $script:Hidden[$c.Kind] = $true
-    Notify "$($KindWord[$c.Kind]) stays open: the slurp icon in the tray (^ at the clock) shows it again, and disconnects it."
-  }
+  Show-Panel
+  Select-Conn $c
 }
 
 function Say($c, $text) {
-  $c.Steps.AppendText((Get-Date).ToString('HH:mm:ss') + '  ' + $text + "`r`n")
+  [void]$c.Lines.Add((Get-Date).ToString('HH:mm:ss') + '  ' + $text)
+  if ($c.Lines.Count -gt 500) { $c.Lines.RemoveRange(0, 100) }
+  $script:PanelDirty = $true
+}
+
+# a question in a message box, in front of the helper window when it shows (Yes, No, Cancel, OK)
+function Ask($text, $buttons = 'YesNo', $icon = 'Question', $default = 'Button2') {
+  $owner = $null
+  if ($script:Panel -and $script:Panel.Form.Visible) { $owner = $script:Panel.Form }
+  if ($owner) { return [string][Windows.Forms.MessageBox]::Show($owner, $text, 'slurp helper', $buttons, $icon, $default) }
+  return [string][Windows.Forms.MessageBox]::Show($text, 'slurp helper', $buttons, $icon, $default)
+}
+
+function Clear-Password($c) {
+  $c.PwDraft = ''
+  $p = $script:Panel
+  if ($p -and $p.Shown -eq $c) { $p.Loading = $true; $p.Pw.Text = ''; $p.Loading = $false }
 }
 
 function Notify($text, $kind = 'Info') {
@@ -480,23 +370,8 @@ function Set-Phase($c, $phase, $text) {
   if ($phase -eq 'input') { $c.ConnectedAt = $null }
   $c.Phase = $phase
   $c.Since = Get-Date
-  $c.State.Text = $text
-  $busy = $Busy -contains $phase
-  $editable = ($phase -eq 'input')
-  $c.Go.Enabled = $editable
-  $c.Pw.Enabled = $editable
-  $c.Paste.Enabled = $editable
-  $more = ($editable -or ($phase -eq 'connected' -and $c.Kind -eq 'drive'))
-  if ($c.Letter) { $c.Letter.Enabled = $more; $c.Folder.Enabled = $more }
-  if ($c.Kind -eq 'drive') {
-    $c.Go.Enabled = $more
-    $c.Go.Text = $(if ($phase -eq 'connected') { 'Map another' } else { $GoText['drive'] })
-  }
-  $c.Open.Enabled = ($phase -eq 'connected')
-  if ($phase -eq 'connected') { $c.Close.Text = $(if ($c.Kind -eq 'drive') { 'Unmap and close' } else { 'Disconnect' }) }
-  elseif ($busy) { $c.Close.Text = 'Stop' }
-  else { $c.Close.Text = 'Close' }
-  $c.Form.UseWaitCursor = $busy
+  $c.StateText = $text
+  $script:PanelDirty = $true
 }
 
 function Stop-All($c) {
@@ -516,7 +391,7 @@ function Fail($c, $text) {
   $c.Pending.Clear()
   Stop-All $c
   Set-Phase $c 'input' "Failed: $text"
-  if (-not $c.Visible -and -not $script:Quitting) { Show-Window $c }
+  if (-not $script:Quitting) { Show-Window $c }
 }
 
 function Unmap-Drive($c) {
@@ -563,9 +438,7 @@ function Get-LogError($path) {
 function Begin-Connect($c) {
   if (-not $Ssh) { Fail $c 'ssh.exe not found: install the Windows feature "OpenSSH Client" (Settings > Apps > Optional features)'; return }
   if ($c.Kind -eq 'drive' -and -not (Test-Sshfs)) {
-    $answer = [Windows.Forms.MessageBox]::Show($c.Form,
-      "A drive needs WinFsp and SSHFS-Win, which are not installed.`r`n`r`nInstall them now with winget? (Windows asks for permission; then press Map drive again.)`r`n`r`nNo: open the download page instead.",
-      'slurp helper', 'YesNoCancel', 'Question')
+    $answer = Ask "A drive needs WinFsp and SSHFS-Win, which are not installed.`r`n`r`nInstall them now with winget? (Windows asks for permission; then press Map drive again.)`r`n`r`nNo: open the download page instead." 'YesNoCancel' 'Question' 'Button1'
     if ($answer -eq 'Yes') {
       Say $c 'installing WinFsp and SSHFS-Win with winget ...'
       try {
@@ -580,12 +453,12 @@ function Begin-Connect($c) {
   }
   $want = $null
   if ($c.Kind -eq 'drive') {
-    if ($c.Letter.SelectedIndex -lt 0) { $c.State.Text = 'No free drive letter.'; return }
-    $path = Resolve-Folder $c.Link $c.Folder.Text
-    if (-not $path) { $c.State.Text = "Folder: $script:FolderError"; [void]$c.Folder.Focus(); return }
+    if (-not $c.LetterChoice) { $c.StateText = 'No free drive letter.'; return }
+    $path = Resolve-Folder $c.Link $c.FolderText
+    if (-not $path) { $c.StateText = "Folder: $script:FolderError"; Focus-Input $c 'folder'; return }
     $same = @($c.Maps | Where-Object { $_.Path -ceq $path })
-    if ($same.Count) { $c.State.Text = "$path is mapped already, as $($same[0].Letter)"; return }
-    $want = @{ Letter = [string]$c.Letter.SelectedItem; Path = $path; Unc = '' }
+    if ($same.Count) { $c.StateText = "$path is mapped already, as $($same[0].Letter)"; return }
+    $want = @{ Letter = $c.LetterChoice; Path = $path; Unc = '' }
     if ($c.Phase -eq 'connected') {
       # (another folder through the same tunnel, with the same password)
       [void]$c.Pending.Add($want)
@@ -593,8 +466,8 @@ function Begin-Connect($c) {
       return
     }
   }
-  $c.Password = $c.Pw.Text.Trim()
-  if (-not $c.Password -and $c.Kind -ne 'shell') { $c.State.Text = 'Paste (or type) the password of the link first.'; [void]$c.Pw.Focus(); return }
+  $c.Password = ([string]$c.PwDraft).Trim()
+  if (-not $c.Password -and $c.Kind -ne 'shell') { $c.StateText = 'Paste (or type) the password of the link first.'; Focus-Input $c 'pw'; return }
   $c.Pending.Clear()
   if ($want) { [void]$c.Pending.Add($want) }
   $c.FedAt = $null
@@ -667,7 +540,7 @@ function Begin-Login($c, [switch]$Visible) {
     $c.Typing = $true
     Start-Watch $c
     Say $c 'the terminal window is open: ssh asks for the password there'
-    Set-Phase $c 'login' 'Give the password in the terminal (right-click pastes). This window hides when you are in.'
+    Set-Phase $c 'login' 'Give the password in the terminal (right-click pastes there).'
     return
   }
   if ($Visible) { $c.Feeder = $null; $c.Typing = $true }
@@ -699,7 +572,6 @@ function Shell-In($c, $how) {
   $c.Watcher = $null
   Say $c "logged in ($how)"
   Connected $c 'The terminal is open, logged in (closing it ends the shell).' "Shell open: $($c.Link.Title)"
-  if ($c.Visible) { Hide-Window $c }
 }
 
 $WatchErrors = @{ 2 = "no console of ssh"; 5 = "no login within 5 minutes"; 6 = "its screen cannot be read" }
@@ -715,7 +587,7 @@ function Connected($c, $text, $note) {
   Say $c $text
   Log "$($c.Kind) $($c.Link.Id): $text"
   Notify $note
-  $c.Pw.Text = ''
+  Clear-Password $c
 }
 
 function Step($c) {
@@ -785,7 +657,7 @@ function Step($c) {
         $hint = ''
         if ($log -match 'Permission denied|Too many authentication failures' -or ($c.FedAt -and -not $log)) {
           $hint = ' (wrong password, or the link takes no more logins: used, expired or revoked; 5 wrong passwords lock it)'
-          $c.Pw.Text = ''
+          Clear-Password $c
         }
         Fail $c "the login ended: $(Get-LogError $logFile)$hint"
         return
@@ -831,7 +703,6 @@ function Step($c) {
       if (Test-Port $c.WebLocal) {
         Connected $c "The web view is open: http://localhost:$($c.WebLocal)" "Web view open in your browser: $($link.Title)"
         Open-Result $c
-        if ($c.Visible) { Hide-Window $c }
       } elseif ($age -gt 20) { Fail $c 'the web view did not answer within 20 s' }
       break
     }
@@ -863,7 +734,7 @@ function Step($c) {
         }
         $c.Remap = $false
         Fail $c "net use $($m.Path): $out$hint"
-        $c.Pw.Text = ''
+        Clear-Password $c
         return
       }
       $m = $c.Pending[0]
@@ -872,7 +743,6 @@ function Step($c) {
       Say $c "mapped $($m.Letter) $($m.Path)"
       if ($c.Pending.Count -gt 0) { Begin-NetUse $c; return }
       $again = $c.Remap
-      $first = ($c.Maps.Count -eq 1)
       $c.Remap = $false
       Fill-Letters $c
       Set-Phase $c 'connected' "Mapped: $(Get-DriveList $c)"
@@ -882,7 +752,6 @@ function Step($c) {
         Log "drive $($link.Id): mapped $($m.Letter) $($m.Path)"
         Notify "Drive $($m.Letter) mapped: $($m.Path)"
         Open-Result $c $m
-        if ($first -and $c.Visible) { Hide-Window $c }
       }
       break
     }
@@ -916,7 +785,7 @@ function Step($c) {
           Notify "Shell ended: $($link.Title)"
           Stop-All $c
           $c.Ended = $true
-          $c.Form.Close()
+          Remove-Connection $c
         } else {
           Fail $c "the tunnel to the web view ended: $(Get-LogError (Join-Path $c.Dir 'client.log')). Paste the password again to reconnect."
         }
@@ -927,33 +796,12 @@ function Step($c) {
   }
 }
 
-function On-CloseButton($c) {
-  if ($c.Phase -eq 'input' -or $c.Phase -eq 'connected') { $c.Form.Close(); return }
-  Say $c 'stopped'
-  Disconnect $c
-  Set-Phase $c 'input' 'Stopped.'
-}
-
-function On-Closing($c, $e) {
-  if ($script:Quitting -or $c.Ended) { Disconnect $c; return }
-  if ($c.Phase -eq 'connected') {
-    $what = $(if ($c.Kind -eq 'drive') { "Unmap $(Get-DriveList $c) and close?" } elseif ($c.Kind -eq 'shell') { 'End the shell (its terminal window) and close?' } else { 'Close the tunnel to the web view?' })
-    if ($e.CloseReason -eq 'UserClosing') {
-      $answer = [Windows.Forms.MessageBox]::Show($c.Form, "$what`r`n`r`nNo: keep it, in the tray.", 'slurp helper', 'YesNoCancel', 'Question')
-      if ($answer -eq 'No') { $e.Cancel = $true; Hide-Window $c; return }
-      if ($answer -ne 'Yes') { $e.Cancel = $true; return }
-    }
-  } elseif ($Busy -contains $c.Phase) {
-    Say $c 'stopped'
-  }
-  Disconnect $c
-}
-
 function Remove-Connection($c) {
   Disconnect $c
   [void]$script:Conns.Remove($c)
   try { Remove-Item -Recurse -Force $c.Dir -ErrorAction SilentlyContinue } catch { }
-  try { $c.Form.Dispose() } catch { }
+  $script:PanelDirty = $true
+  Update-Panel
 }
 
 # ---- links that arrive (from slurp-open.exe)
@@ -976,6 +824,8 @@ function Open-Link($url) {
   }
   $c = New-Connection $link
   Show-Window $c
+  # (a shell has nothing to ask here: its terminal opens at once)
+  if ($c.Kind -eq 'shell') { Begin-Connect $c }
   if ($link.SlurpVersion -and $link.SlurpVersion -ne $HelperVersion) {
     # (it works on, as far as it knows the link; what slurp changed since needs the helper of the same version)
     Log "link of slurp $($link.SlurpVersion), helper $HelperVersion"
@@ -999,22 +849,21 @@ function Read-Inbox {
 function Reconnect($c) {
   if ($Busy -contains $c.Phase) { return }
   if ($c.Kind -ne 'shell' -and -not $c.Password) {
+    $c.StateText = 'Paste the password of the link, then ' + $GoText[$c.Kind] + '.'
     Show-Window $c
-    $c.State.Text = 'Paste the password of the link, then ' + $GoText[$c.Kind] + '.'
     return
   }
   if ($c.Kind -eq 'shell' -and $c.Phase -eq 'connected') {
-    $answer = [Windows.Forms.MessageBox]::Show($script:Panel.Form, "Reconnect ends the shell in its terminal window and opens a new one.`r`n`r`nGo on?", 'slurp helper', 'YesNo', 'Question', 'Button2')
-    if ($answer -ne 'Yes') { return }
+    if ((Ask "Reconnect ends the shell in its terminal window and opens a new one.`r`n`r`nGo on?") -ne 'Yes') { return }
   }
   $prev = @($c.Maps | ForEach-Object { @{ Letter = $_.Letter; Path = $_.Path; Unc = '' } })
-  Say $c 'reconnecting (helper window) ...'
+  Say $c 'reconnecting ...'
   Log "$($c.Kind) $($c.Link.Id): reconnect"
   Disconnect $c
   $c.Pending.Clear()
   Set-Phase $c 'input' 'Reconnecting ...'
   Fill-Letters $c
-  $c.Pw.Text = $c.Password
+  $c.PwDraft = $c.Password
   Begin-Connect $c
   # (a drive maps all its folders again, on their letters)
   if ($c.Kind -eq 'drive' -and $prev.Count -and $c.Phase -ne 'input') {
@@ -1026,22 +875,21 @@ function Reconnect($c) {
 function Disconnect-Keep($c) {
   if ($c.Phase -eq 'input') { return }
   if ($c.Kind -eq 'shell' -and $c.Phase -eq 'connected') {
-    $answer = [Windows.Forms.MessageBox]::Show($script:Panel.Form, 'This ends the shell in its terminal window. Go on?', 'slurp helper', 'YesNo', 'Question', 'Button2')
-    if ($answer -ne 'Yes') { return }
+    if ((Ask 'This ends the shell in its terminal window. Go on?') -ne 'Yes') { return }
   }
-  Say $c 'disconnected (helper window)'
+  Say $c 'disconnected'
   Log "$($c.Kind) $($c.Link.Id): disconnected"
   Disconnect $c
   $c.Pending.Clear()
   $c.Remap = $false
-  Set-Phase $c 'input' ('Disconnected. ' + $GoText[$c.Kind] + ' (or Reconnect in the helper window) connects again.')
+  Set-Phase $c 'input' ('Disconnected. ' + $GoText[$c.Kind] + ' (or Reconnect) connects again.')
   Fill-Letters $c
 }
 
 function Get-StateWord($c) {
   switch ($c.Phase) {
     'connected' { return $(if ($c.Kind -eq 'drive') { 'mapped' } elseif ($c.Kind -eq 'shell') { 'open' } else { 'open' }) }
-    'input' { return $(if ($c.State.Text -like 'Failed*') { 'failed' } elseif ($c.State.Text -like 'Disconnected*') { 'disconnected' } else { 'not connected' }) }
+    'input' { return $(if ($c.StateText -like 'Failed*') { 'failed' } elseif ($c.StateText -like 'Disconnected*') { 'disconnected' } else { 'not connected' }) }
     'reconnecting' { return 'reconnecting' }
     'login' { return $(if ($c.Kind -eq 'shell') { 'password in the terminal' } else { 'logging in' }) }
     'mapping' { return 'mapping' }
@@ -1062,18 +910,20 @@ function Get-Row($c) {
   return @($KindWord[$c.Kind], $link.Title, (Get-StateWord $c), $details, $route, $link.Alias, $since, $until)
 }
 
-# ---- the helper window: a click on the tray icon
+# ---- the helper window: a click on the tray icon. Every connection is a row; the one selected shows below it, with
+# its settings (folder, letter and password until it is connected) and its steps; a right click on a row: its menu
 $script:Panel = $null
 $script:InPanel = $false
+$script:PanelDirty = $false
 
 function New-Panel {
-  $p = @{ Rows = @() }
+  $p = @{ Shown = $null; ShownLines = -1; ShownPhase = ''; ShownLayout = ''; Loading = $false }
   $form = New-Object Windows.Forms.Form
   $form.Text = "slurp helper $HelperVersionText"
   $form.Font = $UiFont
   $form.AutoScaleMode = 'Dpi'
-  $form.ClientSize = New-Object Drawing.Size(860, 480)
-  $form.MinimumSize = New-Object Drawing.Size(640, 380)
+  $form.ClientSize = New-Object Drawing.Size(900, 640)
+  $form.MinimumSize = New-Object Drawing.Size(720, 560)
   $form.StartPosition = 'CenterScreen'
   $form.Icon = $Icon
   $p.Form = $form
@@ -1081,55 +931,126 @@ function New-Panel {
   $head = New-Object Windows.Forms.Label
   $head.Font = $UiBold
   $head.Anchor = 'Top, Left, Right'
-  $p.Head = Add-Control $form $head 12 10 836 22
+  $p.Head = Add-Control $form $head 12 10 876 22
   $info = New-Object Windows.Forms.Label
   $info.Anchor = 'Top, Left, Right'
   $info.ForeColor = [Drawing.SystemColors]::GrayText
-  $p.Info = Add-Control $form $info 12 34 836 34
+  $p.Info = Add-Control $form $info 12 34 876 34
 
   $list = New-Object Windows.Forms.ListView
   $list.View = 'Details'
   $list.FullRowSelect = $true
   $list.MultiSelect = $false
   $list.HideSelection = $false
-  $list.Anchor = 'Top, Bottom, Left, Right'
-  foreach ($col in @(@('Kind', 70), @('Link', 200), @('State', 110), @('Details', 190), @('Route', 130), @('slurp', 110), @('Since', 50), @('Logins until', 90))) {
+  $list.Anchor = 'Top, Left, Right'
+  foreach ($col in @(@('Kind', 70), @('Link', 210), @('State', 120), @('Details', 200), @('Route', 130), @('slurp', 110), @('Since', 50), @('Logins until', 90))) {
     [void]$list.Columns.Add($col[0], $col[1])
   }
-  $p.List = Add-Control $form $list 12 72 836 230
+  $p.List = Add-Control $form $list 12 72 876 170
+  $menu = New-Object Windows.Forms.ContextMenuStrip
+  $menu.Add_Opening({ param($s, $e) Build-ConnMenu $s; $e.Cancel = ($s.Items.Count -eq 0) })
+  $list.ContextMenuStrip = $menu
+  # (a right click selects the row under it first: its menu is about that one)
+  $list.Add_MouseDown({ param($s, $e) if ($e.Button -eq 'Right') { $hit = $s.HitTest($e.Location); if ($hit.Item) { $hit.Item.Selected = $true; $hit.Item.Focused = $true } } })
 
+  # the selected connection
+  $title = New-Object Windows.Forms.Label
+  $title.Font = $UiBold
+  $title.Anchor = 'Top, Left, Right'
+  $title.AutoEllipsis = $true
+  $p.Title = Add-Control $form $title 12 252 876 20
+  $detail = New-Object Windows.Forms.Label
+  $detail.Anchor = 'Top, Left, Right'
+  $detail.ForeColor = [Drawing.SystemColors]::GrayText
+  $detail.AutoEllipsis = $true
+  $p.Detail = Add-Control $form $detail 12 274 876 18
+
+  $lblF = New-Object Windows.Forms.Label
+  $lblF.Text = 'Folder on the cluster:'
+  $p.FolderLabel = Add-Control $form $lblF 12 301 150 20
+  $folder = New-Object Windows.Forms.ComboBox
+  $folder.DropDownStyle = 'DropDown'
+  $folder.MaxDropDownItems = 12
+  $folder.Anchor = 'Top, Left, Right'
+  $p.Folder = Add-Control $form $folder 170 298 520 24
+  $lblL = New-Object Windows.Forms.Label
+  $lblL.Text = 'Letter:'
+  $lblL.Anchor = 'Top, Right'
+  $p.LetterLabel = Add-Control $form $lblL 704 301 50 20
+  $letter = New-Object Windows.Forms.ComboBox
+  $letter.DropDownStyle = 'DropDownList'
+  $letter.Anchor = 'Top, Right'
+  $p.Letter = Add-Control $form $letter 758 298 70 24
+  $hint = New-Object Windows.Forms.Label
+  $hint.Text = 'Pick one, or type a path: /abs/path, $SCRATCH/run1, or relative to $HOME. More folders later: right click, Map another folder.'
+  $hint.ForeColor = [Drawing.SystemColors]::GrayText
+  $hint.Anchor = 'Top, Left, Right'
+  $p.Hint = Add-Control $form $hint 170 324 718 18
+
+  $lblPw = New-Object Windows.Forms.Label
+  $lblPw.Text = 'Password of the link:'
+  $p.PwLabel = Add-Control $form $lblPw 12 351 150 20
+  $pw = New-Object Windows.Forms.TextBox
+  $pw.UseSystemPasswordChar = $true
+  $p.Pw = Add-Control $form $pw 170 348 240 24
+  $paste = New-Object Windows.Forms.Button
+  $paste.Text = 'Paste'
+  $p.Paste = Add-Control $form $paste 418 347 70 26
+  $showPw = New-Object Windows.Forms.CheckBox
+  $showPw.Text = 'Show'
+  $p.ShowPw = Add-Control $form $showPw 496 350 70 22
+  $go = New-Object Windows.Forms.Button
+  $p.Go = Add-Control $form $go 574 346 140 28
+
+  $state = New-Object Windows.Forms.Label
+  $state.Font = $UiBold
+  $state.Anchor = 'Top, Left, Right'
+  $state.AutoEllipsis = $true
+  $p.State = Add-Control $form $state 12 384 876 22
   $steps = New-Object Windows.Forms.TextBox
   $steps.Multiline = $true
   $steps.ReadOnly = $true
   $steps.ScrollBars = 'Vertical'
+  $steps.BackColor = [Drawing.SystemColors]::Window
   $steps.Font = New-Object Drawing.Font('Consolas', 9)
-  $steps.Anchor = 'Bottom, Left, Right'
-  $p.Steps = Add-Control $form $steps 12 310 836 110
+  $steps.Anchor = 'Top, Bottom, Left, Right'
+  $p.Steps = Add-Control $form $steps 12 410 876 180
 
   $x = 12
-  foreach ($b in @(@('Open', 'open', 80), @('Show window', 'show', 100), @('Reconnect', 'reconnect', 90), @('Disconnect', 'disconnect', 90), @('Remove', 'remove', 80), @('Logs', 'logs', 60))) {
+  foreach ($b in @(@('Open', 'open', 90), @('Reconnect', 'reconnect', 90), @('Disconnect', 'disconnect', 90), @('Remove', 'remove', 80), @('Logs', 'logs', 60))) {
     $btn = New-Object Windows.Forms.Button
     $btn.Text = $b[0]
     $btn.Tag = $b[1]
     $btn.Anchor = 'Bottom, Left'
-    $null = Add-Control $form $btn $x 432 $b[2] 30
+    $null = Add-Control $form $btn $x 600 $b[2] 30
     $btn.Add_Click({ param($s, $e) Panel-Action $s.Tag })
     $p[$b[1]] = $btn
     $x += $b[2] + 8
   }
-  $more = New-Object Windows.Forms.Button
-  $more.Text = 'Helper ...'
-  $more.Anchor = 'Bottom, Right'
-  $null = Add-Control $form $more 676 432 82 30
-  $more.Add_Click({ param($s, $e) $script:Menu.Show($s, (New-Object Drawing.Point(0, $s.Height))) })
   $close = New-Object Windows.Forms.Button
   $close.Text = 'Close'
   $close.Anchor = 'Bottom, Right'
-  $null = Add-Control $form $close 766 432 82 30
+  $null = Add-Control $form $close 806 600 82 30
   $close.Add_Click({ param($s, $e) $script:Panel.Form.Hide() })
 
+  # (what is typed belongs to the connection shown: kept with it, also when another row is selected)
+  $pw.Add_TextChanged({ param($s, $e) $p = $script:Panel; if ($p -and -not $p.Loading -and $p.Shown) { $p.Shown.PwDraft = $s.Text } })
+  $folder.Add_TextChanged({ param($s, $e) $p = $script:Panel; if ($p -and -not $p.Loading -and $p.Shown) { $p.Shown.FolderText = $s.Text } })
+  $letter.Add_SelectedIndexChanged({ param($s, $e) $p = $script:Panel; if ($p -and -not $p.Loading -and $p.Shown) { $p.Shown.LetterChoice = [string]$s.SelectedItem } })
+  $paste.Add_Click({
+    param($s, $e)
+    $p = $script:Panel
+    $text = ''
+    try { $text = [Windows.Forms.Clipboard]::GetText() } catch { }
+    if ($p.Shown) { if ($text) { $p.Pw.Text = $text.Trim(); Say $p.Shown 'password pasted' } else { Say $p.Shown 'the clipboard has no text' } }
+    [void]$p.Pw.Focus()
+    Update-Panel
+  })
+  $showPw.Add_CheckedChanged({ param($s, $e) $script:Panel.Pw.UseSystemPasswordChar = -not $s.Checked })
+  $go.Add_Click({ param($s, $e) $c = $script:Panel.Shown; if ($c) { Begin-Connect $c }; Update-Panel })
+  $form.AcceptButton = $go
   $list.Add_SelectedIndexChanged({ param($s, $e) Update-Panel })
-  $list.Add_DoubleClick({ param($s, $e) Panel-Action 'show' })
+  $list.Add_DoubleClick({ param($s, $e) $c = Get-Selected; if ($c -and $c.Phase -eq 'connected' -and $c.Kind -ne 'shell') { Conn-Action 'open' $c } })
   $form.Add_FormClosing({ param($s, $e) if (-not $script:Quitting -and $e.CloseReason -eq 'UserClosing') { $e.Cancel = $true; $s.Hide() } })
   $script:Panel = $p
   return $p
@@ -1143,21 +1064,187 @@ function Get-Selected {
   return $null
 }
 
+function Select-Conn($c) {
+  $p = $script:Panel
+  if (-not $p) { return }
+  Update-Panel
+  foreach ($item in $p.List.Items) { if ($item.Tag -eq $c) { $item.Selected = $true; $item.Focused = $true; $item.EnsureVisible() } }
+  Update-Panel
+  Focus-Input $c ''
+}
+
+# the field to fill in next ('pw', 'folder'; '': whichever is first)
+function Focus-Input($c, $which) {
+  $p = $script:Panel
+  if (-not $p -or $p.Shown -ne $c -or $c.Phase -ne 'input') { return }
+  if ($which -eq 'folder' -and $c.Kind -eq 'drive') { [void]$p.Folder.Focus() }
+  elseif ($c.Kind -ne 'shell') { [void]$p.Pw.Focus() }
+  else { [void]$p.Go.Focus() }
+}
+
 function Panel-Action($action) {
   $c = Get-Selected
-  if (-not $c) { return }
+  if ($c) { Conn-Action $action $c }
+}
+
+# what the helper window (its buttons, a row's menu) and the tray's menu do with a connection
+function Conn-Action($action, $c, $m = $null) {
   switch ($action) {
+    'go' { Begin-Connect $c }
     'open' { Open-Result $c }
-    'show' { Show-Window $c }
+    'openmap' { Open-Result $c $m }
+    'mapanother' { Map-Another $c }
+    'unmap' { Unmap-One $c $m }
+    'another' { Another-Shell $c }
     'reconnect' { Reconnect $c }
     'disconnect' { Disconnect-Keep $c }
-    'remove' {
-      $answer = [Windows.Forms.MessageBox]::Show($script:Panel.Form, "Disconnect and remove it from the list?`r`n`r`n$($KindWord[$c.Kind]): $($c.Link.Title)", 'slurp helper', 'YesNo', 'Question', 'Button2')
-      if ($answer -eq 'Yes') { $c.Ended = $true; $c.Form.Close() }
-    }
     'logs' { Start-Process explorer.exe $c.Dir }
+    'copy' {
+      $text = "$($KindWord[$c.Kind]): $($c.Link.Title)`r`n$(Get-Detail $c)`r`n$($c.StateText)`r`n`r`n" + ($c.Lines -join "`r`n")
+      try { [Windows.Forms.Clipboard]::SetText($text) } catch { }
+    }
+    'remove' { Remove-Ask $c }
+    'show' { Show-Window $c }
   }
   Update-Panel
+}
+
+function Add-ConnItem($menu, $text, $action, $c, $m = $null, [switch]$Disabled) {
+  $item = New-Object Windows.Forms.ToolStripMenuItem($text)
+  $item.Tag = @{ Action = $action; Conn = $c; Map = $m }
+  $item.Enabled = -not $Disabled
+  $item.Add_Click({ param($s, $e) Conn-Action $s.Tag.Action $s.Tag.Conn $s.Tag.Map })
+  [void]$menu.Items.Add($item)
+}
+
+# the menu of a row: what can be done with that connection now
+function Build-ConnMenu($menu) {
+  $menu.Items.Clear()
+  $c = Get-Selected
+  if (-not $c) { return }
+  $connected = ($c.Phase -eq 'connected')
+  $busy = ($Busy -contains $c.Phase)
+  if ($c.Phase -eq 'input') { Add-ConnItem $menu $GoText[$c.Kind] 'go' $c }
+  if ($c.Kind -eq 'drive') {
+    foreach ($m in @($c.Maps)) { Add-ConnItem $menu "Open $($m.Letter) in Explorer   $($m.Path)" 'openmap' $c $m }
+    Add-ConnItem $menu 'Map another folder ...' 'mapanother' $c -Disabled:(-not $connected)
+    if ($c.Maps.Count -gt 1) { foreach ($m in @($c.Maps)) { Add-ConnItem $menu "Unmap $($m.Letter)   $($m.Path)" 'unmap' $c $m } }
+  } elseif ($c.Kind -eq 'web') {
+    Add-ConnItem $menu 'Open in browser' 'open' $c -Disabled:(-not $connected)
+  } else {
+    Add-ConnItem $menu 'Open another shell' 'another' $c
+  }
+  [void]$menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))
+  Add-ConnItem $menu 'Reconnect' 'reconnect' $c -Disabled:$busy
+  $off = $(if ($busy) { 'Stop' } elseif ($c.Kind -eq 'drive' -and $c.Maps.Count) { "Disconnect (unmap $((@($c.Maps) | ForEach-Object { $_.Letter }) -join ', '))" } else { 'Disconnect' })
+  Add-ConnItem $menu $off 'disconnect' $c -Disabled:($c.Phase -eq 'input')
+  [void]$menu.Items.Add((New-Object Windows.Forms.ToolStripSeparator))
+  Add-ConnItem $menu 'Logs (its folder)' 'logs' $c
+  Add-ConnItem $menu 'Copy the details' 'copy' $c
+  Add-ConnItem $menu 'Remove ...' 'remove' $c
+}
+
+function Remove-Ask($c) {
+  $what = $(if ($c.Phase -eq 'input') { 'Remove it from the list?' }
+            elseif ($c.Kind -eq 'drive') { "Unmap $(Get-DriveList $c) and remove it from the list?" }
+            elseif ($c.Kind -eq 'shell') { 'End the shell (its terminal window) and remove it from the list?' }
+            else { 'Close the tunnel to the web view and remove it from the list?' })
+  if ((Ask "$what`r`n`r`n$($KindWord[$c.Kind]): $($c.Link.Title)") -ne 'Yes') { return }
+  $c.Ended = $true
+  Remove-Connection $c
+}
+
+# a drive: one more folder on another letter, through the same tunnel and with the same password
+function Map-Another($c) {
+  if ($c.Kind -ne 'drive' -or $c.Phase -ne 'connected') { return }
+  $f = New-Object Windows.Forms.Form
+  $f.Text = "Map another folder: $($c.Link.Title)"
+  $f.Font = $UiFont
+  $f.AutoScaleMode = 'Dpi'
+  $f.FormBorderStyle = 'FixedDialog'
+  $f.MaximizeBox = $false
+  $f.MinimizeBox = $false
+  $f.ShowInTaskbar = $false
+  $f.StartPosition = 'CenterParent'
+  $f.Icon = $Icon
+  $f.ClientSize = New-Object Drawing.Size(560, 176)
+  $lblF = New-Object Windows.Forms.Label
+  $lblF.Text = 'Folder on the cluster:'
+  $null = Add-Control $f $lblF 12 15 150 20
+  $folder = New-Object Windows.Forms.ComboBox
+  $folder.DropDownStyle = 'DropDown'
+  $folder.MaxDropDownItems = 12
+  $mapped = @($c.Maps | ForEach-Object { $_.Path })
+  $choices = @(Get-FolderChoices $c.Link)
+  foreach ($d in $choices) { $null = $folder.Items.Add($d.Label) }
+  $next = @($choices | Where-Object { $mapped -notcontains $_.Path }) | Select-Object -First 1
+  $folder.Text = $(if ($next) { $next.Label } else { $choices[0].Label })
+  $null = Add-Control $f $folder 170 12 378 24
+  $hint = New-Object Windows.Forms.Label
+  $hint.Text = 'Pick one, or type a path: /abs/path, $SCRATCH/run1, or relative to $HOME.'
+  $hint.ForeColor = [Drawing.SystemColors]::GrayText
+  $null = Add-Control $f $hint 170 38 378 18
+  $lblL = New-Object Windows.Forms.Label
+  $lblL.Text = 'Drive letter:'
+  $null = Add-Control $f $lblL 12 69 150 20
+  $letter = New-Object Windows.Forms.ComboBox
+  $letter.DropDownStyle = 'DropDownList'
+  foreach ($l in (Get-FreeLetters)) { $null = $letter.Items.Add("$($l):") }
+  if ($letter.Items.Count -gt 0) { $letter.SelectedIndex = 0 }
+  $null = Add-Control $f $letter 170 66 80 24
+  $err = New-Object Windows.Forms.Label
+  $err.ForeColor = [Drawing.Color]::Firebrick
+  $null = Add-Control $f $err 12 100 536 30
+  $ok = New-Object Windows.Forms.Button
+  $ok.Text = 'Map drive'
+  $null = Add-Control $f $ok 356 136 100 30
+  $cancel = New-Object Windows.Forms.Button
+  $cancel.Text = 'Cancel'
+  $cancel.DialogResult = 'Cancel'
+  $null = Add-Control $f $cancel 464 136 84 30
+  $f.AcceptButton = $ok
+  $f.CancelButton = $cancel
+  $f.Tag = @{ Conn = $c; Folder = $folder; Letter = $letter; Error = $err; Path = $null; Drive = $null }
+  $ok.Add_Click({
+    param($s, $e)
+    $form = $s.FindForm()
+    $st = $form.Tag
+    $path = Resolve-Folder $st.Conn.Link $st.Folder.Text
+    if (-not $path) { $st.Error.Text = "Folder: $script:FolderError"; return }
+    $same = @($st.Conn.Maps | Where-Object { $_.Path -ceq $path })
+    if ($same.Count) { $st.Error.Text = "$path is mapped already, as $($same[0].Letter)"; return }
+    if ($st.Letter.SelectedIndex -lt 0) { $st.Error.Text = 'No free drive letter.'; return }
+    $st.Path = $path
+    $st.Drive = [string]$st.Letter.SelectedItem
+    $form.DialogResult = 'OK'
+  })
+  $owner = $script:Panel.Form
+  $result = $(if ($owner -and $owner.Visible) { $f.ShowDialog($owner) } else { $f.ShowDialog() })
+  $st = $f.Tag
+  $f.Dispose()
+  if ([string]$result -ne 'OK' -or -not $st.Path -or $c.Phase -ne 'connected') { return }
+  [void]$c.Pending.Add(@{ Letter = $st.Drive; Path = $st.Path; Unc = '' })
+  Begin-NetUse $c
+}
+
+# a drive: unmap one folder (the last one: the drive disconnects)
+function Unmap-One($c, $m) {
+  if ($c.Maps.Count -le 1) { Disconnect-Keep $c; return }
+  try {
+    $proc = Start-Proc 'net.exe' "use $($m.Letter) /delete /y" $null -Capture
+    $null = $proc.WaitForExit(10000)
+  } catch { }
+  [void]$c.Maps.Remove($m)
+  Say $c "unmapped $($m.Letter) $($m.Path)"
+  Fill-Letters $c
+  Set-Phase $c 'connected' "Mapped: $(Get-DriveList $c)"
+}
+
+# a shell: one more terminal through the same link (if the link takes more logins)
+function Another-Shell($c) {
+  $n = New-Connection $c.Link
+  Show-Window $n
+  Begin-Connect $n
 }
 
 function Update-Panel {
@@ -1165,7 +1252,7 @@ function Update-Panel {
   # (changing the list raises its selection event, which calls this again: not into this one)
   if (-not $p -or -not $p.Form.Visible -or $script:InPanel) { return }
   $script:InPanel = $true
-  try { Update-PanelNow $p } finally { $script:InPanel = $false }
+  try { Update-PanelNow $p; $script:PanelDirty = $false } finally { $script:InPanel = $false }
 }
 
 function Update-PanelNow($p) {
@@ -1176,7 +1263,7 @@ function Update-PanelNow($p) {
   try { $auto = [bool](Get-ItemProperty -Path $RunKey -Name 'slurp helper' -ErrorAction Stop) } catch { }
   $p.Info.Text = "ssh: $(if ($Ssh) { $Ssh } else { 'missing (Windows feature OpenSSH Client)' })  ·  SSHFS-Win: $(if (Test-Sshfs) { 'installed' } else { 'not installed (drives need it)' })  ·  " +
                  "start with Windows: $(if ($auto) { 'on' } else { 'off' })  ·  known slurps: $(@(Get-Trusted).Count)`r`n" +
-                 "Folder: $SlurpHelperDir  ·  a double click on a row shows its window; the tray icon's menu has the rest"
+                 "Folder: $SlurpHelperDir  ·  right click a row for what it can do; the tray icon's menu has the helper's own settings"
   $list = $p.List
   $selected = Get-Selected
   # (rows are updated in place: a rebuild would lose the selection and flicker)
@@ -1191,29 +1278,102 @@ function Update-PanelNow($p) {
       [void]$list.Items.Add($item)
       if ($c -eq $selected) { $item.Selected = $true }
     }
-    if ($list.SelectedItems.Count -eq 0 -and $list.Items.Count -gt 0) { $list.Items[0].Selected = $true }
+    if ($list.SelectedItems.Count -eq 0 -and $list.Items.Count -gt 0) { $list.Items[$list.Items.Count - 1].Selected = $true }
     $list.EndUpdate()
-  } else {
-    for ($i = 0; $i -lt $conns.Count; $i++) {
-      $row = Get-Row $conns[$i]
-      $item = $list.Items[$i]
-      for ($j = 0; $j -lt $row.Count; $j++) { if ($item.SubItems[$j].Text -ne [string]$row[$j]) { $item.SubItems[$j].Text = [string]$row[$j] } }
-      $state = $row[2]
-      $colour = $(if ($state -eq 'failed') { [Drawing.Color]::Firebrick } elseif ($state -eq 'mapped' -or $state -eq 'open') { [Drawing.Color]::DarkGreen } else { [Drawing.SystemColors]::WindowText })
-      if ($item.ForeColor -ne $colour) { $item.ForeColor = $colour }
-    }
+  }
+  for ($i = 0; $i -lt $conns.Count; $i++) {
+    $row = Get-Row $conns[$i]
+    $item = $list.Items[$i]
+    for ($j = 0; $j -lt $row.Count; $j++) { if ($item.SubItems[$j].Text -ne [string]$row[$j]) { $item.SubItems[$j].Text = [string]$row[$j] } }
+    $state = $row[2]
+    $colour = $(if ($state -eq 'failed') { [Drawing.Color]::Firebrick } elseif ($state -eq 'mapped' -or $state -eq 'open') { [Drawing.Color]::DarkGreen } else { [Drawing.SystemColors]::WindowText })
+    if ($item.ForeColor -ne $colour) { $item.ForeColor = $colour }
   }
   $c = Get-Selected
   $busy = ($c -and $Busy -contains $c.Phase)
   $p.open.Enabled = [bool]($c -and $c.Phase -eq 'connected' -and $c.Kind -ne 'shell')
-  $p.show.Enabled = [bool]$c
   $p.reconnect.Enabled = [bool]($c -and -not $busy)
   $p.disconnect.Enabled = [bool]($c -and $c.Phase -ne 'input')
+  $p.disconnect.Text = $(if ($busy) { 'Stop' } else { 'Disconnect' })
   $p.remove.Enabled = [bool]$c
   $p.logs.Enabled = [bool]$c
   $p.open.Text = $(if ($c -and $c.Kind -eq 'web') { 'Browser' } else { 'Explorer' })
-  $text = $(if ($c) { $c.State.Text + "`r`n" + ((@($c.Steps.Lines | Where-Object { $_ }) | Select-Object -Last 6) -join "`r`n") } else { '' })
-  if ($p.Steps.Text -ne $text) { $p.Steps.Text = $text; $p.Steps.SelectionStart = $p.Steps.Text.Length; $p.Steps.ScrollToCaret() }
+  Show-Details $p $c
+}
+
+# below the list: the connection selected, its settings while it is not connected, its state and steps
+function Show-Details($p, $c) {
+  $p.Form.UseWaitCursor = [bool]($c -and $Busy -contains $c.Phase)
+  if ($p.Shown -ne $c) {
+    # (another row: its own fields; what was typed for the one before stays with it)
+    $p.Shown = $c
+    $p.ShownLines = -1
+    $p.ShownPhase = ''
+    $p.Loading = $true
+    try {
+      $p.Pw.Text = $(if ($c) { $c.PwDraft } else { '' })
+      $p.Folder.Items.Clear()
+      if ($c -and $c.Kind -eq 'drive') {
+        foreach ($d in (Get-FolderChoices $c.Link)) { $null = $p.Folder.Items.Add($d.Label) }
+        $p.Folder.Text = $c.FolderText
+      } else { $p.Folder.Text = '' }
+    } finally { $p.Loading = $false }
+  }
+  $phase = $(if ($c) { $c.Phase } else { '' })
+  if ($phase -ne $p.ShownPhase) {
+    $p.ShownPhase = $phase
+    if ($c -and $c.Kind -eq 'drive' -and $phase -eq 'input') {
+      # (the free letters now; the one chosen stays if it is still free)
+      $p.Loading = $true
+      try {
+        $p.Letter.Items.Clear()
+        foreach ($l in (Get-FreeLetters)) { $null = $p.Letter.Items.Add("$($l):") }
+        $i = $p.Letter.Items.IndexOf($c.LetterChoice)
+        if ($i -lt 0 -and $p.Letter.Items.Count -gt 0) { $i = 0 }
+        $p.Letter.SelectedIndex = $i
+        $c.LetterChoice = [string]$p.Letter.SelectedItem
+      } finally { $p.Loading = $false }
+    }
+  }
+  $editable = ($c -and $phase -eq 'input')
+  $drive = ($editable -and $c.Kind -eq 'drive')
+  $pw = ($editable -and $c.Kind -ne 'shell')
+  $layout = "$([bool]$c) $drive $pw $editable"
+  if ($layout -ne $p.ShownLayout) {
+    $p.ShownLayout = $layout
+    foreach ($w in @($p.FolderLabel, $p.Folder, $p.LetterLabel, $p.Letter, $p.Hint)) { $w.Visible = $drive }
+    foreach ($w in @($p.PwLabel, $p.Pw, $p.Paste, $p.ShowPw)) { $w.Visible = $pw }
+    $p.Go.Visible = $editable
+    $p.Title.Visible = [bool]$c
+    $p.Detail.Visible = [bool]$c
+    $p.Steps.Visible = [bool]$c
+    # (the rows not shown take no room: the state and the steps move up)
+    $y = 298
+    if ($drive) { $p.FolderLabel.Top = $y + 3; $p.Folder.Top = $y; $p.LetterLabel.Top = $y + 3; $p.Letter.Top = $y; $p.Hint.Top = $y + 26; $y += 50 }
+    if ($editable) { $p.PwLabel.Top = $y + 3; $p.Pw.Top = $y; $p.Paste.Top = $y - 1; $p.ShowPw.Top = $y + 2; $p.Go.Top = $y - 2; $y += 36 }
+    $p.State.Top = $y
+    $bottom = $p.open.Top - 10
+    $p.Steps.Top = $y + 26
+    $p.Steps.Height = [Math]::Max(60, $bottom - $p.Steps.Top)
+  }
+  if (-not $c) {
+    $p.State.Text = $(if ($script:Conns.Count) { 'Select a connection.' } else { '' })
+    return
+  }
+  $p.Go.Text = $GoText[$c.Kind]
+  $p.Title.Text = "$($KindWord[$c.Kind]): $($c.Link.Title)"
+  $p.Detail.Text = Get-Detail $c
+  if ($p.State.Text -ne $c.StateText) { $p.State.Text = $c.StateText }
+  $p.State.ForeColor = $(if ($c.StateText -like 'Failed*') { [Drawing.Color]::Firebrick } else { [Drawing.SystemColors]::ControlText })
+  # (the steps: new lines appended, the box keeps its scrolling otherwise)
+  if ($p.ShownLines -lt 0 -or $p.ShownLines -gt $c.Lines.Count) {
+    $p.Steps.Text = (($c.Lines -join "`r`n") + $(if ($c.Lines.Count) { "`r`n" } else { '' }))
+    $p.Steps.SelectionStart = $p.Steps.Text.Length
+    $p.Steps.ScrollToCaret()
+  } elseif ($p.ShownLines -lt $c.Lines.Count) {
+    $p.Steps.AppendText((($c.Lines.GetRange($p.ShownLines, $c.Lines.Count - $p.ShownLines)) -join "`r`n") + "`r`n")
+  }
+  $p.ShownLines = $c.Lines.Count
 }
 
 function Show-Panel {
@@ -1222,7 +1382,9 @@ function Show-Panel {
   if (-not $p.Form.Visible) { $p.Form.Show() }
   if ($p.Form.WindowState -eq 'Minimized') { $p.Form.WindowState = 'Normal' }
   if ($Native) { try { [SlurpOpen]::Bring($p.Form.Handle) } catch { } }
+  $p.Form.TopMost = $true
   $p.Form.Activate()
+  $p.Form.TopMost = $false
   Update-Panel
 }
 
@@ -1262,7 +1424,7 @@ function Build-Menu {
     if ($c.Phase -eq 'connected' -and $c.Kind -ne 'shell') {
       $null = Add-Item $sub.DropDown $OpenText[$c.Kind] 'open' $c
     }
-    $null = Add-Item $sub.DropDown 'Show its window' 'show' $c
+    $null = Add-Item $sub.DropDown 'Show in the helper window' 'show' $c
     $null = Add-Item $sub.DropDown $(if ($c.Kind -eq 'drive' -and $c.Maps.Count) { "Unmap $((@($c.Maps) | ForEach-Object { $_.Letter }) -join ', ')" } else { 'Disconnect' }) 'disconnect' $c
     [void]$menu.Items.Add($sub)
   }
@@ -1280,10 +1442,10 @@ function Build-Menu {
 function Run-Item($tag) {
   $c = $tag.Conn
   switch ($tag.Action) {
-    'open' { Open-Result $c }
-    'show' { Show-Window $c }
+    'open' { Conn-Action 'open' $c }
+    'show' { Conn-Action 'show' $c }
     'panel' { Show-Panel }
-    'disconnect' { $c.Ended = $true; $c.Form.Close() }
+    'disconnect' { Conn-Action 'disconnect' $c }
     'autostart' {
       try {
         $on = $false
@@ -1309,8 +1471,7 @@ function Quit-Tray {
   $script:Quitting = $true
   Log 'tray quits'
   $timer.Stop()
-  foreach ($c in @($script:Conns)) { try { $c.Ended = $true; $c.Form.Close() } catch { } }
-  foreach ($c in @($script:Conns)) { try { Disconnect $c } catch { } }
+  foreach ($c in @($script:Conns)) { try { $c.Ended = $true; Disconnect $c } catch { } }
   if ($script:Panel) { try { $script:Panel.Form.Close(); $script:Panel.Form.Dispose() } catch { } }
   $script:Tray.Visible = $false
   $script:Tray.Dispose()
@@ -1357,7 +1518,7 @@ $timer.Add_Tick({
       try { Step $c } catch { try { Fail $c $_.Exception.Message } catch { Log "step: $($_.Exception.Message)" } }
     }
     $script:Ticks += 1
-    if ($script:Ticks % 3 -eq 0) { try { Update-Panel } catch { Log "panel: $($_.Exception.Message)" } }
+    if ($script:PanelDirty -or $script:Ticks % 3 -eq 0) { try { Update-Panel } catch { Log "panel: $($_.Exception.Message)" } }
     $n = @($script:Conns | Where-Object { $_.Phase -eq 'connected' }).Count
     $text = $(if ($n) { "slurp helper $($HelperVersion): $n open" } else { "slurp helper $HelperVersion" })
     if ($script:Tray.Text -ne $text) { $script:Tray.Text = $text }
