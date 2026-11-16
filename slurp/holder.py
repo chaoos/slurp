@@ -35,10 +35,10 @@ import termios
 import time
 
 from . import __version__
+from .cli import slurp_command
 
 log = logging.getLogger("slurp.holder")
 
-PACKAGE = os.path.dirname(os.path.abspath(__file__))
 CTTY = "import fcntl, os, sys, termios; fcntl.ioctl(0, termios.TIOCSCTTY, 0); os.execvp(sys.argv[1], sys.argv[1:])"
 RESET_TERMINAL = ("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?1004l\x1b[?2004l\x1b[<u\x1b[0m"
                   "\x1b[?25h\x1b[?1049l")
@@ -361,7 +361,7 @@ class Holder:
     self.set_size(self.cols, self.rows)
     env = os.environ | {"SLURP_INNER": "1", "SLURP_HOLDER": self.path}
     env.pop("SLURP_HOLDER_SIZE", None)
-    self.proc = subprocess.Popen([sys.executable, "-c", CTTY, sys.executable, PACKAGE, *self.args], stdin=slave,
+    self.proc = subprocess.Popen([sys.executable, "-c", CTTY, *slurp_command(*self.args)], stdin=slave,
                                  stdout=slave, stderr=slave, start_new_session=True, env=env, close_fds=True)
     os.close(slave)
     os.set_blocking(master, False)
@@ -872,7 +872,7 @@ def start_holder(path, args):
   logdir = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "slurp")
   os.makedirs(logdir, exist_ok=True)
   with open(os.path.join(logdir, "holder.err"), "ab") as err:
-    subprocess.Popen([sys.executable, PACKAGE, "--holder", path, *args], stdin=subprocess.DEVNULL, stdout=err,
+    subprocess.Popen(slurp_command("--holder", path, *args), stdin=subprocess.DEVNULL, stdout=err,
                      stderr=err, start_new_session=True, env=os.environ | {"SLURP_HOLDER_SIZE": f"{cols}x{rows}"})
   deadline = time.time() + 10
   while time.time() < deadline:

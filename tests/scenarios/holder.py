@@ -10,6 +10,7 @@ for k in ("SLURP_INNER", "SLURP_HOLDER"): ENV.pop(k, None)
 os.makedirs(ENV["XDG_RUNTIME_DIR"], mode=0o700)
 sys.path.insert(0, REPO)
 import pyte
+from slurp.cli import slurp_command # (this checkout's slurp, as slurp starts itself)
 results = []
 def check(name, cond, info=""):
   results.append(bool(cond)); print(f"{'PASS' if cond else 'FAIL'}  {name}  {'' if cond else info}", flush=True)
@@ -20,7 +21,7 @@ class Term:
     import fcntl, struct, termios
     self.master, slave = os.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-    self.proc = subprocess.Popen([PY, os.path.join(REPO, "slurp"), *args], stdin=slave, stdout=slave, stderr=slave,
+    self.proc = subprocess.Popen(slurp_command(*args), stdin=slave, stdout=slave, stderr=slave,
                                  env=ENV, start_new_session=True, preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0))
     os.close(slave)
     self.screen = pyte.Screen(cols, rows); self.stream = pyte.ByteStream(self.screen)

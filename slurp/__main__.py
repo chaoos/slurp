@@ -8,6 +8,6 @@ if sys.path and os.path.abspath(sys.path[0] or ".") == here: # run as python3 sl
   sys.path.pop(0)
 sys.path.insert(0, os.path.dirname(here)) # the repository, where the package is
 
-from slurp.app import main
+from slurp.cli import main
 
 main()
