@@ -2329,8 +2329,10 @@ async def t_drive(app, pilot):
         and not scr.query_one("#drive-mount").disabled and not scr.query_one("#drive-link").disabled, scr.query_one("#drive-path").value if ok else None)
   scr.query_one("#drive-path").value = mnt
   scr.query_one("#drive-ro").value = True; await pilot.pause(0.2)
-  await pilot.click("#drive-mount")
-  ok = await until(pilot, lambda: cluster.drive is not None and cluster.drive.state == "mounted", 20) # (the drive is made by the click's handler)
+  button = scr.query_one("#drive-mount")
+  check("Mount is there and can be pressed", button.display and not button.disabled)
+  button.press() # (not a click: a notification over the button can take a click at that place)
+  ok = await until(pilot, lambda: cluster.drive is not None and cluster.drive.state == "mounted", 20) # (the drive is made by the press's handler)
   drive = cluster.drive
   listing = await asyncio.get_running_loop().run_in_executor(None, lambda: sorted(os.listdir(mnt)) if ok else [])
   check("Mount here: sshfs through the tab's session, the login directory at the path", ok and listing == sorted(os.listdir(home)),
