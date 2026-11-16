@@ -23,7 +23,7 @@ COLORS = {"g": "#38d39f", "c": "#26c6da", "a": "#f5b841"}
 THEME = {"g": "$success", "c": "$accent", "a": "$warning"} # (in Textual: the colours of the active theme)
 BOX = "#14202b" # the background of the boxed icon
 MARK = (("❯", "g"), ("▂▄", "c"), ("█", "a"))
-TAGLINE = "Slurm at a glance"
+TAGLINE = "All of slurm in one slurp"
 WIDTH, HEIGHT = len(PIXELS[0]), len(PIXELS)
 
 def mark(theme=True):
@@ -113,7 +113,7 @@ def wordmark_svg():
   inner = svg(boxed=True).split(">", 1)[1].rsplit("</svg>", 1)[0].replace("<title>slurp</title>", "")
   pad = (WIDTH - HEIGHT) / 2
   return ('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="72" viewBox="0 0 300 72">'
-          '<title>slurp: Slurm at a glance</title>'
+          f'<title>slurp: {TAGLINE}</title>'
           f'<svg x="0" y="0" width="72" height="72" viewBox="-1 {-pad - 1:g} {WIDTH + 2} {WIDTH + 2}" shape-rendering="crispEdges">{inner}</svg>'
           '<text x="88" y="44" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" font-size="38" font-weight="700" '
           'fill="#2aa889">slurp</text>'

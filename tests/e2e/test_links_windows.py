@@ -312,7 +312,7 @@ async def holder_part(check):
     async with s.get(f"http://127.0.0.1:{port}/?token={h.web_token}") as r:
       page = await r.text()
     check("the page: slurp's name and favicon, the start screen with the logo (not Textual's)",
-          "<title>slurp</title>" in page and 'rel="icon" href="data:image/svg+xml,' in page and "Slurm at a glance" in page
+          "<title>slurp</title>" in page and 'rel="icon" href="data:image/svg+xml,' in page and "All of slurm in one slurp" in page
           and "Textual Application" not in page and "M2927.81" not in page)
     check("the page has the link banner (before textual.js)", "slurp-link-banner" in page and page.index("slurp-link-banner") < page.index("textual.js"))
     ws = await s.ws_connect(f"http://127.0.0.1:{port}/ws?width=80&height=24")

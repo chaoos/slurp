@@ -1,4 +1,4 @@
-<p align="center"><img src="images/logo-wordmark.svg" alt="slurp: Slurm at a glance" width="300"></p>
+<p align="center"><img src="images/logo-wordmark.svg" alt="slurp: All of slurm in one slurp" width="300"></p>
 
 # slurp
 

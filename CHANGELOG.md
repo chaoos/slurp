@@ -6,6 +6,7 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The tagline is "All of slurm in one slurp" (was "Slurm at a glance").
 - slurp could end right at its start with an error (no attribute "main")
   when its 0.25 s timer came before the job list was shown.
 - Save to a file (the copy window) uses the cache directory as it is when

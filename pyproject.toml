@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "slurp"
-description = "Slurm at a glance: a terminal and browser UI for Slurm jobs, locally or on clusters over SSH"
+description = "All of slurm in one slurp: a terminal and browser UI for Slurm jobs, locally or on clusters over SSH"
 readme = "README.md"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
