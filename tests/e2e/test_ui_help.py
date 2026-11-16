@@ -1,5 +1,5 @@
 """slurp's UI against the lab: help, About and the views of the windows (the scenarios are in ui_scenarios.py)"""
-from ui_scenarios import t_about, t_view_help, t_term_help, t_pane_help, t_scrollback, t_this_view
+from ui_scenarios import t_about, t_view_help, t_term_help, t_pane_help, t_scrollback, t_this_view, t_web_links_everywhere
 
 
 def test_about(ui, check):
@@ -24,3 +24,7 @@ def test_scrollback(ui, check):
 
 def test_this_view(ui, check):
   ui(t_this_view, check)
+
+
+def test_web_links_everywhere(ui, check):
+  ui(t_web_links_everywhere, check)

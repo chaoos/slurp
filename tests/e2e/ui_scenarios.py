@@ -850,6 +850,31 @@ async def t_this_view(app, pilot):
     app.active_view_changed(kind, 0)
     mgr.links.remove(link)
 
+async def t_web_links_everywhere(app, pilot):
+  """A web link is this whole slurp, not one tab: the connection window of every tab lists it; a shell link only its own"""
+  mgr = app.link_manager
+  web = Link("web", "this slurp on lab", app.clusters[1].name, lambda: [], relay="ssh-j.com", uses=None, web_port=1, web_token="t")
+  shell = Link("shell", "shell (lab)", app.clusters[1].name, lambda: [], relay="ssh-j.com")
+  for link in (web, shell):
+    link.relay_state = "ready"
+    mgr.links.append(link)
+  try:
+    rows = {}
+    for i in (0, 1):
+      app.push_screen(ConnectionScreen(app.clusters[i])); await pilot.pause(0.5)
+      cs = app.screen
+      if isinstance(cs, ConnectionScreen):
+        cs.show_links(); await pilot.pause(0.2)
+        table = cs.query_one("#conn-links")
+        rows[i] = [k.value for k in table.rows] if table.display else []
+      await pilot.press("escape"); await pilot.pause(0.3)
+    check("the lab tab's window lists both its links", rows.get(1) and f"link|{web.id}" in rows[1] and f"link|{shell.id}" in rows[1], rows)
+    check("another tab's window lists the web link, not the shell link of lab", rows.get(0) is not None and f"link|{web.id}" in rows[0]
+          and f"link|{shell.id}" not in rows[0], rows)
+  finally:
+    for link in (web, shell):
+      mgr.links.remove(link)
+
 async def t_cloudflare_ask(app, pilot):
   """No cloudflared here: Create link asks before downloading it (No: nothing happens); Download: the link's window
   shows downloading cloudflared (with the MB), then installing cloudflared, then the tunnel"""

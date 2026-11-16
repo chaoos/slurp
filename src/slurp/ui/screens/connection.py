@@ -202,15 +202,16 @@ class ConnectionScreen(ModalScreen):
   links_shown = None
 
   def show_links(self):
-    """The links of this tab (shells and drives for the user's own terminal) and their sessions: a click on a link
-    shows it (commands, password, Revoke), on a session offers to disconnect it"""
-    links = [l for l in self.app.link_manager.links if l.tab == self.cluster.name and not (l.finished and l.relay_state == "closed"
-                                                                                          and time.time() - l.created > 3600)]
+    """The links of this tab (shells and drives for the user's own terminal) and the web links (this whole slurp, in
+    the window of every tab), and their sessions: a click on a link shows it (commands, password, Revoke), on a
+    session offers to disconnect it"""
+    links = [l for l in self.app.link_manager.links if (l.kind == "web" or l.tab == self.cluster.name)
+             and not (l.finished and l.relay_state == "closed" and time.time() - l.created > 3600)]
     title = self.query_one("#conn-links-title", Static)
     table = self.query_one("#conn-links", ClickTable)
     table.display = bool(links)
-    title.update(Text("Links: shells and drives from your own terminal (click one)", style="bold underline") if links else
-                 Text("Links: none. Shell → From your own terminal, or Drive, makes one.", style="dim"))
+    title.update(Text("Links: shells and drives from your own terminal, web views of this slurp (click one)", style="bold underline") if links else
+                 Text("Links: none. Shell → From your own terminal, Drive, or Web makes one.", style="dim"))
     if not links:
       return
     now = time.time()
@@ -219,7 +220,8 @@ class ConnectionScreen(ModalScreen):
       return Text(f"{'●' if level else '○'} {words}", style=HEALTH_STYLES[level] if level else "dim")
     for link in links:
       relay, logins = link_state(link, now)
-      what = f"{link.kind}: {link.tab}" if link.kind == "drive" else f"{link.kind}: {link.title}" # (a drive's folders: its sessions)
+      what = (f"{link.kind}: {link.tab}" if link.kind == "drive" else # (a drive's folders: its sessions)
+              "web: this slurp (all tabs)" if link.kind == "web" else f"{link.kind}: {link.title}")
       rows.append((f"link|{link.id}", (Text.assemble(link.id, (" ◀ this view", "bold green") if link.cloudflare and self.app.this_view_link(link) else ""),
                                        health(*share.link_health(link)),
                                        what + (" (read only)" if link.read_only else ""), relay, logins,

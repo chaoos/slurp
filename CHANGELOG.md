@@ -10,6 +10,8 @@ version may need the helper of the same version).
   in its middle, with what to do (a tab for a cluster with `+`, or
   `slurp --ssh`), instead of an error notification for every Slurm command at
   each load. `r` looks again.
+- Web links (this slurp in a browser) belong to no tab: the connection
+  window of every tab lists them, not only that of the tab they were made in.
 - The slurp helper for Linux: **Open on my computer** in a link window, the
   password, and a drive is mounted (sshfs, `~/slurp/<link>/<folder>`) and
   opened in the file manager, a web view opens in the browser, or a terminal
