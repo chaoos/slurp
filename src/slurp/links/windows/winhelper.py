@@ -39,7 +39,7 @@ def link_url(link):
   """slurp://kind?... with what the helper needs (never the password); winhelper.ps1 checks every value"""
   host, port = link.target()
   from ... import __version__
-  query = {"v": "1", "sv": __version__, "id": link.id, "t": link.title, "r": link.client_kind, "rh": link.relay_host, "j": link.jump(), # (direct, tcp: j empty)
+  query = {"v": "1", "sv": __version__, "id": link.id, "t": link.title, "r": link.client_kind, "rh": link.relay_host.rsplit("@", 1)[-1], "j": link.jump(), # (rh: shown; an own relay "me@host": its host) # (direct, tcp: j empty)
            "h": host, "p": str(port), "u": share.LINK_USER, "fp": share.host_fingerprint(), "a": share.host_alias(),
            "x": str(int(link.expires or 0))}
   if link.read_only:

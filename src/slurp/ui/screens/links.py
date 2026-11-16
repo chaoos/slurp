@@ -12,9 +12,10 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Markdown, RadioButton, RadioSet, Select, Static, Switch, TextArea
+from textual.widgets import Button, Input, Label, Markdown, RadioButton, RadioSet, Select, Static, Switch, TabbedContent, TabPane, TextArea
 
 from ...links import share
+from ...links import linux as linhelper
 from ...links.windows import winhelper
 from ...config import load_config, update_config
 from .dialogs import ConfirmScreen, copy_text
@@ -555,10 +556,10 @@ class LinkScreen(ModalScreen):
     widgets = []
     if winhelper.available(link) is None:
       widgets.append(Vertical(
-        Static("On your Windows computer: the slurp helper (one click, then the password)", classes="lv-command-title"),
-        Static(f"It {HELPER_DOES[link.kind]}, and keeps it in its tray icon. In slurp's web view, Open on my computer "
-               "hands the link to your browser, which starts the helper; from a terminal, copy the link and open it "
-               "with Win+R. Set it up once on your computer: Set up the helper.", classes="lv-command-note"),
+        Static("On your computer (Windows or Linux): the slurp helper (one click, then the password)", classes="lv-command-title"),
+        Static(f"It {HELPER_DOES[link.kind]}. In slurp's web view, Open on my computer hands the link to your browser, "
+               "which starts the helper; from a terminal, copy the link and open it: Win+R on Windows, xdg-open 'link' "
+               "on Linux. Set it up once on your computer: Set up the helper.", classes="lv-command-note"),
         Horizontal(Button("Open on my computer", id="lv-helper-open", variant="primary", compact=True),
                    Button("Copy helper link", id="lv-helper-copy", compact=True),
                    Button("Set up the helper…", id="lv-helper-setup", compact=True)),
@@ -594,13 +595,15 @@ class LinkScreen(ModalScreen):
         self.app.notify("Your browser hands the link to the slurp helper (the first time it asks whether to open it). "
                         "Give the password there: Copy it here.", timeout=10)
       else:
-        copy_text(self.app, url, f"the helper link of link {self.link.id} ({why}: open it with Win+R, paste, Enter)")
+        copy_text(self.app, url, f"the helper link of link {self.link.id} ({why}: open it with Win+R, paste, Enter on Windows; "
+                                 "xdg-open 'link' on Linux)")
     self.app.open_on_client(url, done)
 
   @on(Button.Pressed, "#lv-helper-copy")
   def helper_copy(self, event):
     event.stop()
-    copy_text(self.app, winhelper.link_url(self.link), f"the helper link of link {self.link.id} (Win+R, paste, Enter)")
+    copy_text(self.app, winhelper.link_url(self.link), f"the helper link of link {self.link.id} (Windows: Win+R, paste, Enter; "
+                                                      "Linux: xdg-open 'link')")
 
   @on(Button.Pressed, "#lv-helper-setup")
   def helper_setup(self, event):
@@ -639,7 +642,7 @@ class LinkScreen(ModalScreen):
       event.stop()
     self.dismiss()
 
-HELPER_DOES = {"drive": "maps a folder ($HOME, $SCRATCH, $PROJECT, … or one you type; more on other letters) and opens it in Explorer",
+HELPER_DOES = {"drive": "maps a folder ($HOME, $SCRATCH, $PROJECT, … or one you type) and opens it in Explorer or your file manager",
                "shell": "opens a terminal window with the shell at once (it asks for the password there)",
                "web": "opens this slurp in your browser (the tunnel runs in the helper, no window to keep open)"}
 
@@ -673,31 +676,72 @@ connection) for a drive or the web view, in the terminal for a shell (ssh asks t
 the helper types it into ssh's prompt for you for the web view, or gives it to `net use` for a drive.
 """
 
+LINUX_TEXT = """\
+One click on **Open on my computer** in a link window, the link's password, and the helper does the rest: it mounts
+the drive (in `~/slurp/<link>/<folder>`) and opens your file manager, opens the web view in your browser, or opens a
+terminal window with the shell. It asks with small windows (zenity or kdialog) and says what happened in notifications.
+**slurp helper** in your applications lists what is open (to open it again or end it); in a terminal:
+`slurp-helper list`, `slurp-helper stop ID` (or `all`). Ejecting a drive in the file manager ends it too.
+
+**Set it up once** on your Linux computer (no root needed):
+
+- **Download the setup** (when slurp is open in your browser), then in a terminal: `sh ~/Downloads/slurp-helper-setup.sh`.
+- or **Copy the setup command** and paste it into a terminal (one long line).
+
+Then the first link asks your browser whether to open slurp links with *slurp helper*: allow it. From a terminal (not
+the browser): **Copy helper link** in the link window, then `xdg-open 'slurp://…'` (or
+`~/.local/share/slurp-helper/slurp-helper 'slurp://…'`).
+
+**What the setup does:** it puts the helper (one Python script, readable, nothing compiled or downloaded) into
+`~/.local/share/slurp-helper`, registers `slurp://` links for your user (a `.desktop` file and `xdg-mime`), and
+remembers this slurp's host key (`{fingerprint}`, as `{alias}`): a link of another slurp asks first. Setting it up
+again updates it. **Remove it:** `~/.local/share/slurp-helper/slurp-helper uninstall`.
+
+**It needs** `python3`, OpenSSH (`ssh`, `ssh-keyscan`; 8.4 or newer) and, to ask for the password in a window, zenity
+or kdialog. A drive also needs `sshfs` (e.g. `sudo apt install sshfs`, `sudo dnf install fuse-sshfs`). The setup says
+what is missing.
+
+**How it connects** (as the commands of the link window do): a tunnel to the relay (no password), then it checks
+slurp's host key through it against the one in the link, then logs in with the password you give it (for a shell: in
+the terminal, where ssh asks for it). The password is not in the link and never written to disk: ssh gets it from the
+helper. A drive reconnects when the connection drops; each folder is one connection (open the link again for another).
+"""
+
 class HelperSetupScreen(ModalScreen):
-  """How to set up the slurp helper on Windows: download the setup (web view) or copy the setup command"""
+  """How to set up the slurp helper on Windows or Linux: download the setup (web view) or copy the setup command"""
   DEFAULT_CSS = """
   HelperSetupScreen { align: center middle; }
   #hs-dialog { width: 110; max-width: 98%; height: 90%; border: thick $accent; background: $surface; padding: 0 1; }
   #hs-title { text-style: bold; margin: 1 0 0 0; }
-  #hs-body { height: 1fr; }
+  #hs-tabs { height: 1fr; }
+  #hs-tabs TabPane { padding: 0; }
+  .hs-body { height: 1fr; }
+  .hs-buttons { height: auto; align-horizontal: right; margin: 1 0 0 0; }
+  .hs-buttons Button { margin-left: 1; }
   #hs-buttons { height: auto; align-horizontal: right; margin: 1 0; }
-  #hs-buttons Button { margin-left: 1; }
   """
   BINDINGS = [Binding("escape", "close", "Close")]
 
   def compose(self) -> ComposeResult:
     with Vertical(id="hs-dialog"):
-      yield Static("The slurp helper for Windows", id="hs-title")
-      with VerticalScroll(id="hs-body"):
-        yield Markdown(HELPER_TEXT.replace("{fingerprint}", share.host_fingerprint()).replace("{alias}", share.host_alias()))
+      yield Static("The slurp helper: links open on your computer with one click", id="hs-title")
+      with TabbedContent(id="hs-tabs"):
+        for system, text, prefix, name, where in (("Windows", HELPER_TEXT, "hs", winhelper.SETUP_NAME, "PowerShell"),
+                                                  ("Linux", LINUX_TEXT, "hs-linux", linhelper.SETUP_NAME, "a terminal")):
+          with TabPane(system, id=f"{prefix}-tab"):
+            with VerticalScroll(classes="hs-body"):
+              yield Markdown(text.replace("{fingerprint}", share.host_fingerprint()).replace("{alias}", share.host_alias()))
+            with Horizontal(classes="hs-buttons"):
+              yield Button("Copy the setup command", id=f"{prefix}-copy", compact=True, tooltip=f"to paste into {where}")
+              yield Button("Download the setup", id=f"{prefix}-download", variant="primary",
+                           tooltip=f"{name}, in the browser that shows slurp now", compact=True)
       with Horizontal(id="hs-buttons"):
         yield Button("Close", id="hs-close", compact=True)
-        yield Button("Copy the setup command", id="hs-copy", compact=True)
-        yield Button("Download the setup", id="hs-download", variant="primary",
-                     tooltip="slurp-helper-setup.cmd, in the browser that shows slurp now", compact=True)
 
   def on_mount(self):
-    self.query_one("#hs-download", Button).disabled = not self.app.on_client()
+    for button in self.query(".hs-buttons Button").results(Button):
+      if button.id.endswith("-download"):
+        button.disabled = not self.app.on_client()
 
   @on(Button.Pressed, "#hs-download")
   def download(self, event):
@@ -714,6 +758,22 @@ class HelperSetupScreen(ModalScreen):
   def copy_command(self, event):
     event.stop()
     copy_text(self.app, winhelper.setup_command(), "the setup command of the slurp helper (paste it into PowerShell)")
+
+  @on(Button.Pressed, "#hs-linux-download")
+  def download_linux(self, event):
+    event.stop()
+    def done(ok, why):
+      if ok:
+        self.app.notify(f"Your browser downloads {linhelper.SETUP_NAME}: run it in a terminal: sh ~/Downloads/{linhelper.SETUP_NAME}",
+                        timeout=10)
+      else:
+        self.app.notify(f"no download: {why}. Copy the setup command instead.", severity="warning", timeout=10)
+    self.app.deliver_to_client(linhelper.SETUP_NAME, linhelper.setup_file(), done)
+
+  @on(Button.Pressed, "#hs-linux-copy")
+  def copy_linux_command(self, event):
+    event.stop()
+    copy_text(self.app, linhelper.setup_command(), "the setup command of the slurp helper for Linux (paste it into a terminal)")
 
   @on(Button.Pressed, "#hs-close")
   def action_close(self, event=None):

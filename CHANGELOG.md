@@ -10,6 +10,15 @@ version may need the helper of the same version).
   in its middle, with what to do (a tab for a cluster with `+`, or
   `slurp --ssh`), instead of an error notification for every Slurm command at
   each load. `r` looks again.
+- The slurp helper for Linux: **Open on my computer** in a link window, the
+  password, and a drive is mounted (sshfs, `~/slurp/<link>/<folder>`) and
+  opened in the file manager, a web view opens in the browser, or a terminal
+  window opens with the shell, as the Windows helper does. One Python script
+  (only python3 needed), set up once from **Set up the helper…** (tab Linux):
+  a setup to download or one line to paste; dialogs with zenity or kdialog,
+  desktop notifications, `slurp-helper list` / `stop`.
+- Helper links of an own relay given as `user@host` were refused by the
+  Windows helper ("no valid 'rh'"): the link now carries only the host there.
 - Switching to a tab without an SSH session no longer logs in right away:
   its job list shows a **Connect** button in the middle (a bar above the jobs
   from last time, if it has some). slurp still logs in at the start and for a

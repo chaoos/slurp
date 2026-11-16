@@ -220,9 +220,11 @@ runs on: host, system, CPUs, memory, load, user; how this slurp runs (in the bac
 where its settings and logs are. **Copy details** copies the version and the machine as text, for a bug report.
 """),
   "HelperSetupScreen": ("The slurp helper", """
-The tray program for Windows that opens links with one click and the password. **Download the setup** (when slurp is
-open in your browser) gives `slurp-helper-setup.cmd` to run; **Copy the setup command** is the same for a PowerShell
-window. What it installs (in your user, no admin), what it needs, and how to remove it: in the window.
+The program on your own computer that opens links with one click and the password: a tab for **Windows** (a tray
+program) and one for **Linux** (a Python script, with dialogs and notifications). **Download the setup** (when slurp
+is open in your browser) gives `slurp-helper-setup.cmd` or `slurp-helper-setup.sh` to run; **Copy the setup command**
+is the same to paste into PowerShell or a terminal. What it installs (in your user, no admin or root), what it needs,
+and how to remove it: in the window.
 """),
   "LinkSetupScreen": ("Link setup", """
 How a link for your own terminal works: the relay (public ssh-j.com, or your own SSH server), how many logins it

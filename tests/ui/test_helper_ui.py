@@ -2,6 +2,7 @@
 import asyncio
 from textual.app import App
 from slurp.links import share as sh
+from slurp.links import linux as linhelper
 from slurp.links.windows import winhelper
 from slurp.ui.app import Slurp as SlurpApp
 from slurp.ui.screens import links as L
@@ -34,7 +35,10 @@ async def main(check, copied):
     check("Download is off in a terminal", hs.query_one("#hs-download").disabled)
     await pilot.click("#hs-copy"); await pilot.pause(0.2)
     check("Copy the setup command", copied[-1][0] == winhelper.setup_command())
-    hs.query_one("Markdown")
+    hs.query_one("TabbedContent").active = "hs-linux-tab"; await pilot.pause(0.3)
+    check("the Linux tab: its download is off in a terminal too", hs.query_one("#hs-linux-download").disabled)
+    await pilot.click("#hs-linux-copy"); await pilot.pause(0.2)
+    check("Copy the Linux setup command", copied[-1][0] == linhelper.setup_command() and "terminal" in copied[-1][1], copied[-1][1])
     await pilot.press("escape"); await pilot.pause(0.2)
     check("Escape closes it", type(app.screen).__name__ == "LinkScreen")
     key = sh.Link("shell", "k", "t", lambda: [], auth="key", public_key="ssh-ed25519 AAAA"); key.relay_state = "ready"

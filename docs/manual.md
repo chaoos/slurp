@@ -510,6 +510,41 @@ before it is used. Setting it up again updates it. It needs the OpenSSH Client
 of Windows (an optional feature, there by default on Windows 11); a drive also
 needs WinFsp and SSHFS-Win, which it offers to install with winget.
 
+### The slurp helper on Linux
+
+The same one click for Linux: **Open on my computer** in the link window (or
+`xdg-open 'slurp://…'` with the link from **Copy helper link**), the link's
+password in a small window, and the helper connects through the relay, checks
+slurp's host key against the one in the link, and:
+
+- **drive**: asks which folder (`$HOME`, `$SCRATCH`, …, `/`, or one you
+  type), mounts it with sshfs at `~/slurp/<link>/<folder>` and opens your file
+  manager. It reconnects when the connection drops. Ejecting it in the file
+  manager (or `fusermount -u`) ends it; for another folder open the link again;
+- **web view**: an SSH tunnel to the web view and the browser at it;
+- **shell**: a terminal window that connects and then runs ssh, which asks
+  for the password there.
+
+It asks with zenity or kdialog (in the terminal if it runs in one) and reports
+with desktop notifications; a failure shows in a window, with why. **slurp
+helper** in your applications lists the open connections (open one again, or
+end it); in a terminal `slurp-helper list` and `slurp-helper stop ID` (or
+`all`). The password is not part of the link and never written to disk: ssh
+gets it from the helper as its askpass program.
+
+**Set it up once** (no root): **Set up the helper…** in a link window, tab
+**Linux**. **Download the setup** (with slurp in your browser) gives
+`slurp-helper-setup.sh` (run `sh ~/Downloads/slurp-helper-setup.sh`); **Copy
+the setup command** is the same as one line to paste into a terminal. It puts
+the helper, one Python script that needs only `python3`, into
+`~/.local/share/slurp-helper`, registers `slurp://` for your user (a `.desktop`
+file and `xdg-mime`), and remembers this slurp's host key: a link of another
+slurp asks before it is used. Setting it up again updates it;
+`~/.local/share/slurp-helper/slurp-helper uninstall` removes it. It needs
+OpenSSH 8.4 or newer (`ssh`, `ssh-keyscan`), zenity or kdialog for its windows,
+and for a drive `sshfs`; the setup says what is missing. macOS keeps the
+commands of the link window for now.
+
 Links need the Python package `asyncssh` (`python -m pip install asyncssh`);
 without it slurp says so in the Shell dialog and works as before. A drive uses
 the cluster's `sftp-server` (read only needs it; otherwise the cluster's
