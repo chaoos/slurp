@@ -90,6 +90,11 @@ async def until(pilot, cond, t=20):
     except Exception: pass
   return False
 def notes(app): return [(n.title, n.message) for n in app._notifications]
+def note_ids(app): return {n.identity for n in app._notifications}
+def new_notes(app, seen):
+  """the notifications that came after note_ids gave seen (by identity: counting them would not do, Textual drops
+  the ones that expired from the list meanwhile)"""
+  return [(n.title, n.message) for n in app._notifications if n.identity not in seen]
 def slurp_modules():
   """every module of the slurp package"""
   return [importlib.import_module(m.name) for m in pkgutil.walk_packages(slurp.__path__, "slurp.") if not m.name.endswith("__main__")]
@@ -1512,21 +1517,23 @@ async def t_copy_views(app, pilot):
   try:
     update_config(copy="terminal"); cfg = load_config(); cfg.pop("copy_web", None); open(config_path(), "w").write(json.dumps(cfg))
     dialogs.local_clipboard = lambda text: used.append(text) or None
-    n = len(app._notifications)
+    seen = note_ids(app)
     dialogs.copy_text(app, "abc", "the test text"); await pilot.pause(0.3)
     check("terminal view, \"copy\": \"terminal\": copied without asking", not isinstance(app.screen, CopyScreen)
-          and any("through the terminal" in m for _, m in notes(app)[n:]) and used == ["abc"])
+          and any("through the terminal" in m for _, m in new_notes(app, seen)) and used == ["abc"])
     app.active_view_changed("web"); used.clear()
     dialogs.copy_text(app, "def", "the test text")
     ok = await until(pilot, lambda: isinstance(app.screen, CopyScreen), 5)
     check("a browser active: it has its own setting (asks), and this machine's clipboard tool is not used", ok and used == [])
-    await pilot.click("#copy-arrived"); await pilot.pause(0.3)
+    await pilot.click("#copy-arrived")
+    await until(pilot, lambda: load_config().get("copy_web") == "terminal" and not isinstance(app.screen, CopyScreen), 5)
     cfg = load_config()
     check("It arrived, in a browser: stored as copy_web, the terminal's stays", cfg.get("copy_web") == "terminal" and cfg.get("copy") == "terminal", cfg)
     update_config(copy=None)
-    n = len(app._notifications)
-    dialogs.copy_text(app, "ghi", "the test text"); await pilot.pause(0.3)
-    check("browser: copied without asking now", not isinstance(app.screen, CopyScreen) and any("through the terminal" in m for _, m in notes(app)[n:]))
+    seen = note_ids(app)
+    dialogs.copy_text(app, "ghi", "the test text")
+    await until(pilot, lambda: any("through the terminal" in m for _, m in new_notes(app, seen)), 5)
+    check("browser: copied without asking now", not isinstance(app.screen, CopyScreen) and any("through the terminal" in m for _, m in new_notes(app, seen)))
     app.active_view_changed("terminal")
     dialogs.copy_text(app, "jkl", "the test text")
     ok = await until(pilot, lambda: isinstance(app.screen, CopyScreen), 5)
