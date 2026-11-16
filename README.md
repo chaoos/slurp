@@ -77,7 +77,7 @@ pre-commit run --all-files             # the lint (ruff) and file checks; pre-co
   [tests/e2e/conftest.py](tests/e2e/conftest.py).
 
 The same runs on GitHub Actions ([.github/workflows/tests.yml](.github/workflows/tests.yml)):
-the unit tests on Python 3.11 to 3.13, the lab on 3.12.
+the lint, the unit and ui tests on Python 3.11 to 3.13, the e2e tests on 3.12.
 
 ## License
 
