@@ -1,5 +1,7 @@
 """Shared test setup.
 
+* The tests use the installed slurp, which must be this checkout's (pip install -e ".[all,dev]"): the run stops if it
+  is another copy (a second checkout or worktree; PYTHONPATH=src picks this one).
 * Every test runs with its own empty XDG directories: no test reads or writes the user's slurp config, cache, state
   or data (slurp reads $XDG_* when it needs a path, so setting them before each test is enough).
 * ``check(name, cond, info="")``: a soft assertion. The test goes on after a failed check and fails at the end,
@@ -20,6 +22,16 @@ sys.path.insert(0, os.path.join(ROOT, "tests")) # (the lab package)
 from lab import Lab, missing_tools # noqa: E402
 
 XDG = ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME")
+
+
+def pytest_configure(config):
+  """The tests run against the installed slurp (as users get it); it must be this checkout's (pip install -e .)"""
+  import slurp
+  here = os.path.realpath(os.path.join(ROOT, "src", "slurp"))
+  got = os.path.dirname(os.path.realpath(slurp.__file__))
+  if got != here:
+    pytest.exit(f"slurp is imported from {got}, not from this checkout ({here}): install it with pip install -e "
+                f"\".[all,dev]\" (or run with PYTHONPATH={os.path.join(ROOT, 'src')})", returncode=4)
 
 
 @pytest.fixture(autouse=True)
