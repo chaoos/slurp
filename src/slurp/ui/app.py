@@ -222,6 +222,7 @@ class Slurp(App):
 
   def __init__(self):
     super().__init__()
+    self.main = None # the job list (MainScreen sets it when it is mounted; the timer of tick() may run before)
     self.link_manager = ShareManager(self.link_event) # shells and drives for the user's own terminal
     # the tabs of the last run (from the config; a local tab the first time), and the destinations given with --ssh
     saved = load_config()
