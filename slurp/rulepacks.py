@@ -17,6 +17,7 @@ Keys (all optional):
   muted = ["R08"]                  # rules that do not apply here
   options = ["uenv", "view"]       # sbatch options of site plugins (S04)
   docs = "https://docs.cscs.ch"    # the site's documentation (guides)
+  status = "https://status.cscs.ch" # the site's status page (outages, maintenance): shown when the login fails
   [[advice]]                       # E03: a pattern in the script and what to say about it
   pattern = "conda activate"
   text = "..."
@@ -24,6 +25,7 @@ Keys (all optional):
 """
 
 import fnmatch
+import functools
 import os
 
 try:
@@ -59,6 +61,18 @@ def load_packs():
         pack["_path"] = path
         packs.append(pack)
   return packs
+
+@functools.lru_cache(maxsize=64)
+def status_page(tab, destination):
+  """The status page of the site of a tab (its pack's "status"), "" if none: matched by the tab's name and its SSH
+  destination only (it is wanted when the login fails, before the login node can say who it is)"""
+  names = [n.lower() for n in (tab, destination) if n]
+  names += [n.split("@")[-1] for n in names if "@" in n]
+  for pack in load_packs():
+    if any(fnmatch.fnmatch(n, pattern.lower()) for pattern in pack.get("match", []) for n in names):
+      url = str(pack.get("status") or "")
+      return url if url.startswith(("https://", "http://")) else ""
+  return ""
 
 def pack_for(tab, destination, facts):
   """The first pack that matches the tab, its destination or the login node's host name ({} if none)"""

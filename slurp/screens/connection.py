@@ -373,7 +373,7 @@ class ConnectionScreen(ModalScreen):
       if printed:
         text.append(" · the login may wait for input: answer it in the pane on the right (close this window)",
                     style="yellow")
-      return text
+      return text.append_text(self.site_status()) if cluster.attempts > 1 else text
     if c.state == "closed":
       return Text("disconnected (closed) · Reconnect logs in again", style="bold")
     delay = self.app.RECONNECT_DELAYS[min(cluster.attempts, len(self.app.RECONNECT_DELAYS) - 1)]
@@ -382,7 +382,24 @@ class ConnectionScreen(ModalScreen):
                 style="bold red")
     if c.wanted:
       text.append(f" · next attempt in {left:.0f} s" if left >= 1 else " · reconnecting", style="red")
+    return text.append_text(self.site_status())
+
+  def site_status(self):
+    """When the login fails: the cluster may be down; its site's status page (a link), if a rule pack knows it"""
+    from ..rulepacks import status_page
+    url = status_page(self.cluster.name, self.cluster.destination or "")
+    text = Text("\nThe cluster may be down or in maintenance: ", style="yellow")
+    if url:
+      text.append("check its status page ", style="yellow")
+      text.append_text(url_text(url))
+      text.append(" (a click opens it)", style="dim")
+    else:
+      text.append("check the status page of the site (its web pages, or the news of its support)", style="yellow")
     return text
+
+  def on_click(self, event):
+    if open_clicked_url(self.app, event): # (the status page in the window's text)
+      event.stop()
 
   def show(self):
     if not self.is_mounted:

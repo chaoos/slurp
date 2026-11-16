@@ -252,7 +252,13 @@ pane on the right, where password, key passphrase, keyboard-interactive, and
 OTP prompts are answered. Once you are logged in, the pane hides by itself
 and the job list loads; nothing has to be typed after the login. A failed
 login stays in the pane so the error can be read; Enter there logs in again,
-and closing it (`✕`) gives up the connection.
+and closing it (`✕`) gives up the connection. When the login fails or the
+connection is lost, the cluster may be down or in maintenance: for a site
+whose rule pack names its status page (CSCS: `https://status.cscs.ch`, JSC:
+`https://status.jsc.fz-juelich.de/`), the
+status at the bottom right says *check status.cscs.ch*, and a click on it
+opens the page (a click elsewhere there opens the connection window, which
+says the same, with the link).
 
 The session runs a shell on the cluster that the app sends its commands to:
 a reload (or opening a file, a directory, the job details) only sends lines
@@ -575,10 +581,12 @@ table for the node), GPUs, failed jobs. Their rule links open the catalogue.
 **Site rule packs** add what Slurm does not tell: scratch purge days, parallel
 filesystems, NUMA domains per node, the GPU architecture, site plugin options
 of `sbatch`, rules that do not apply, and site advice. A pack is a TOML file
-in `slurp/rules/` (one for CSCS Alps is included) or in
+in `slurp/rules/` (included: CSCS Alps, and JSC's JURECA, JUWELS, JUSUF and
+JEDI) or in
 `~/.config/slurp/rules/`; it applies when one of its `match` patterns matches
-the tab, its SSH destination or the login node's host name. See
-`slurp/rulepacks.py` for the keys.
+the tab, its SSH destination or the login node's host name. It can also name
+the site's documentation (`docs`, for the guides) and its status page
+(`status`, shown when the login fails). See `slurp/rulepacks.py` for the keys.
 
 **Without the UI**, `slurp check job.sh ...` prints the findings of batch
 scripts (on the machine it runs on, e.g. a login node): exit code 1 if a script

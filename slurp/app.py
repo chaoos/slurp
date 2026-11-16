@@ -732,8 +732,35 @@ class Slurp(App):
   def spinner(self):
     return "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[self.spinner_frame % 10]
 
+  def open_page(self, url):
+    """A web page (a site's status page, …): in the browser when slurp is shown in one, else with this machine's"""
+    if self.on_client():
+      self.open_on_client(url, lambda ok, why: None if ok else self.notify(f"{url}: {why}", severity="warning"))
+      return
+    try:
+      self.open_url(url)
+    except Exception as e:
+      log.debug(f"opening {url}: {e!r}")
+    self.notify(f"opening {url} with this machine's browser (none? in a terminal that knows links, Ctrl+click on it "
+                "opens it there; or copy it)", timeout=10)
+
+  def status_hint(self, cluster):
+    """" · check status.cscs.ch" (a link) for a tab whose site has a status page (rule packs), else None"""
+    from .rulepacks import status_page
+    url = status_page(cluster.name, cluster.destination or "")
+    if not url:
+      return None
+    return Text.assemble((" · check ", "red"), url_text(url, url.split("://", 1)[1].rstrip("/")))
+
   def connection_text(self, cluster):
     """State of the SSH session of a tab, for the footer"""
+    text = self.connection_state_text(cluster)
+    c = cluster.connection
+    failing = c is not None and (c.state not in ("new", "closed", "ready", "connecting") or c.state == "connecting" and cluster.attempts > 1)
+    hint = self.status_hint(cluster) if failing and cluster.destination else None
+    return text.append_text(hint) if hint is not None else text
+
+  def connection_state_text(self, cluster):
     if not cluster.destination:
       return Text("local", style="dim")
     c = cluster.connection
@@ -753,7 +780,7 @@ class Slurp(App):
       attempt = f" (attempt {cluster.attempts})" if cluster.attempts > 1 else ""
       return Text(f"{self.spinner()} SSH {cluster.destination}: {what}{attempt}", style="yellow")
     # broken
-    reason = f" ({c.error})" if c.error else ""
+    reason = f" ({c.error[:60] + '…' if len(c.error) > 60 else c.error})" if c.error else "" # (short: the status page follows)
     if not c.wanted:
       return Text(f"SSH {cluster.destination}: disconnected{reason} · select the tab to log in", style="red")
     delay = self.RECONNECT_DELAYS[min(cluster.attempts, len(self.RECONNECT_DELAYS) - 1)]

@@ -153,11 +153,26 @@ def command_args(text):
   """argv of a command typed in an editor: lines may end with a backslash, the lines are joined"""
   return shlex.split(text.replace("\\\n", " ").replace("\n", " "))
 
+def url_text(url, label=None):
+  """A link in a text: underlined; a click on it opens it (open_clicked_url), a terminal that knows hyperlinks also
+  opens it itself (Ctrl+click)"""
+  from rich.style import Style
+  return Text(label or url, style=Style(underline=True, link=url, meta={"open_url": url}))
+
+def open_clicked_url(app, event):
+  """A click on a url_text: open it (True), else False"""
+  url = (event.style.meta or {}).get("open_url") if event.style is not None else None
+  if not url:
+    return False
+  app.open_page(url)
+  return True
+
 class ConnectionStatus(Static):
-  """State of the SSH session in the footer; a click opens the connection window"""
+  """State of the SSH session in the footer; a click opens the connection window (on a link in it: the link)"""
   def on_click(self, event):
     event.stop()
-    self.app.action_connection()
+    if not open_clicked_url(self.app, event):
+      self.app.action_connection()
 
 class TimePlot(Widget):
   """Values over time as bars from zero (the last value at each moment), with the largest value on the y axis and

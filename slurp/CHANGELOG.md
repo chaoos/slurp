@@ -7,6 +7,13 @@ version may need the helper of the same version).
 ## Unreleased
 
 
+- When the login to a cluster fails (or the connection is lost), slurp says to
+  check its site's status page, as a link: for CSCS https://status.cscs.ch,
+  for JSC https://status.jsc.fz-juelich.de/ (the rule pack's new key
+  "status"); in the status at the bottom right and in the connection window.
+- Rule packs for JSC's JURECA, JUWELS, JUSUF and JEDI: their documentation
+  (for the guides) and the status page.
+
 - Categories of jobs, like folders (`project X/production runs`): mark jobs
   in the job list (`m`), put them in a category (`c`, a new one is made); a
   Category column, `cat:` in the filter; the Categories window (`K`): the

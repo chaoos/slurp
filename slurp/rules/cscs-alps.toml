@@ -2,6 +2,7 @@
 name = "CSCS Alps"
 match = ["daint*", "clariden*", "santis*", "eiger*", "*.cscs.ch", "*.alps.cscs.ch"]
 docs = "https://docs.cscs.ch"
+status = "https://status.cscs.ch"
 scratch_purge_days = 30
 parallel_fs = ["/capstor", "/iopsstor"]
 numa_domains = 4
