@@ -9,8 +9,42 @@ HERE = os.environ.get("SLURP_TEST_WORK") or sys.exit("SLURP_TEST_WORK: the lab d
 os.environ["PATH"] = os.path.join(LAB, "bin") + ":" + os.environ["PATH"]
 os.environ.pop("SSH_AUTH_SOCK", None); os.environ.pop("DISPLAY", None)
 os.environ["XDG_CACHE_HOME"] = os.path.join(HERE, "xdgcache") # (never the user's cache)
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import slurm_tui as st
+for var, sub in (("XDG_STATE_HOME", "xdgstate"), ("XDG_CONFIG_HOME", "xdgtest"), ("XDG_DATA_HOME", "xdgdata")):
+  if var not in os.environ: # (never the user's: an empty config for every run; the log of links, cloudflared)
+    os.environ[var] = os.path.join(HERE, sub)
+    if var == "XDG_CONFIG_HOME": shutil.rmtree(os.environ[var], ignore_errors=True)
+import collections, importlib, pkgutil
+sys.path.insert(0, os.environ.get("SLURP_REPO") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))) # (this checkout's slurp)
+import slurp
+from slurp import checks, environment, remote, state
+from slurp.screens import dialogs
+from textual.coordinate import Coordinate
+from textual.screen import Screen
+from textual.widgets import Markdown, RadioButton, TextArea
+from slurp.app import Slurp
+from slurp.config import config_path, load_config, update_config
+from slurp.jobs import array_overview, ERR_SIZES, JobProgress, progress_state
+from slurp.remote import HEALTH_STYLES
+from slurp.screens.array import ArrayScreen, epoch
+from slurp.screens.categories import CategoriesScreen, CategorizeScreen, NONE
+from slurp.screens.checks import FixPreviewScreen, GuidesScreen, RuleCatalogueScreen
+from slurp.screens.clusterinfo import cluster_health, ClusterInfoScreen
+from slurp.screens.connection import ConnectionScreen
+from slurp.screens.dialogs import CommandScreen, ConfirmScreen, CopyScreen, RestartScreen, RunArrayScreen
+from slurp.screens.files import DirScreen, FileScreen, open_path
+from slurp.screens.help import AboutScreen, VIEW_HELP, ViewHelpScreen
+from slurp.screens.job import JobScreen
+from slurp.screens.links import DriveScreen, link_state, LinkScreen, LinkSetupScreen, ShellChoiceScreen
+from slurp.screens.main import MainScreen
+from slurp.screens.options import OptionsScreen
+from slurp.screens.script import ScriptScreen
+from slurp.screens.shell import screen_text, TerminalHelpScreen, TerminalScreen
+from slurp.screens.storage import QuotaScreen, ScratchScreen
+from slurp.screens.wizard import NewScriptScreen
+from slurp.share import client_commands, host_fingerprint, is_public, Link, link_health, parse_relay, Session
+from slurp.state import setup_logging
+from slurp.terminal import TerminalView
+from slurp.widgets import ClickTable, ConnectionStatus, Spinning
 import slurp.categories as _categories # (the lab's "cluster" is this machine: never the real ~/.config/slurp/categories.json)
 CATEGORIES_FILE = _categories.FILE = os.path.join(HERE, "xdgcat", "categories.json")
 shutil.rmtree(os.path.dirname(CATEGORIES_FILE), ignore_errors=True)
@@ -23,7 +57,7 @@ def term(app): s = app.shell; return "\n".join(s.vt.display) if s and s.vt else 
 def sterm(app):
   """the screen of the shell subtab shown"""
   scr = app.screen
-  s = scr.session if isinstance(scr, st.TerminalScreen) else None
+  s = scr.session if isinstance(scr, TerminalScreen) else None
   return "\n".join(s.vt.display) if s and s.vt else ""
 async def until(pilot, cond, t=20):
   t0 = time.time()
@@ -34,10 +68,13 @@ async def until(pilot, cond, t=20):
     except Exception: pass
   return False
 def notes(app): return [(n.title, n.message) for n in app._notifications]
+def slurp_modules():
+  """every module of the slurp package"""
+  return [importlib.import_module(m.name) for m in pkgutil.walk_packages(slurp.__path__, "slurp.") if not m.name.endswith("__main__")]
 async def main():
-  st.setup_logging(os.path.join(OUT, "small.log"))
-  st.initial_ssh_destinations = ["lab"]
-  app = st.SlurmTUI()
+  setup_logging(os.path.join(OUT, "small.log"))
+  state.initial_ssh_destinations = ["lab"]
+  app = Slurp()
   async with app.run_test(size=(170, 45)) as pilot:
     asyncio.get_running_loop().set_task_factory(asyncio.eager_task_factory) # (as App.run does; run_test does not)
     await until(pilot, lambda: "passphrase" in term(app)); await pilot.pause(0.3)
@@ -60,7 +97,7 @@ async def t_close(app, pilot):
   app.add_cluster(""); await pilot.pause(0.5)
   check("a third tab", len(app.clusters) == 3 and app.cluster_index == 2)
   await pilot.click("#cluster-close-2"); await pilot.pause(0.3)
-  check("✕ asks for confirmation", isinstance(app.screen, st.ConfirmScreen))
+  check("✕ asks for confirmation", isinstance(app.screen, ConfirmScreen))
   await pilot.click("#confirm-no"); await pilot.pause(0.3)
   check("No keeps the tab", len(app.clusters) == 3)
   await pilot.click("#cluster-close-2"); await pilot.pause(0.3)
@@ -81,7 +118,7 @@ async def t_close(app, pilot):
         and main.query_one("#notabs").display and [b.id for b in main.query("#cluster-tabs Button")] == ["cluster-add", "about"],
         [b.id for b in main.query("#cluster-tabs Button")])
   await pilot.press("r", "t", "c", "i", "C", "d"); await pilot.pause(0.3)
-  check("keys do nothing without a tab", isinstance(app.screen, st.MainScreen) and app.shell is None)
+  check("keys do nothing without a tab", isinstance(app.screen, MainScreen) and app.shell is None)
   app.add_cluster("lab"); await pilot.pause(0.5)
   ok = await until(pilot, lambda: "passphrase" in term(app), 15); await pilot.pause(0.3)
   await pilot.press(*"pw123", "enter")
@@ -105,7 +142,7 @@ async def t_zebra(app, pilot):
   after = row_styles(app)
   check("switching tabs", before == after, f"{before} -> {after}")
   t = app.screen.query_one("#jobs"); t.focus(); await pilot.press("enter")
-  await until(pilot, lambda: isinstance(app.screen, st.JobScreen))
+  await until(pilot, lambda: isinstance(app.screen, JobScreen))
   app.select_cluster(2); await pilot.pause(0.5)
   app.select_cluster(1); await pilot.pause(0.5)
   app.show_view(None); await pilot.pause(0.5)
@@ -116,7 +153,7 @@ async def t_zebra(app, pilot):
   check("rows look the same after a reload", row_styles(app) == before, row_styles(app))
   app.screen.query_one("#reload").focus(); await pilot.press("enter")
   await until(pilot, lambda: app.cluster.loader is None); await pilot.pause(0.3)
-  check("also after a reload with the button, the table has the focus", isinstance(app.focused, st.ClickTable) and row_styles(app) == before)
+  check("also after a reload with the button, the table has the focus", isinstance(app.focused, ClickTable) and row_styles(app) == before)
   t = app.main.query_one("#jobs")
   for y in (2, 3):
     print("NONE-FG", y, [sg.text for sg in t.render_line(y) if sg.text.strip() and sg.style.color is None][:12])
@@ -129,18 +166,18 @@ async def t_reconnect(app, pilot):
   await pilot.click("#connstatus"); await pilot.pause(0.5)
   await pilot.click("#conn-reconnect")
   ok = await until(pilot, lambda: "passphrase" in term(app), 15)
-  check("Reconnect: the window closes, the login is in the pane and has the focus", ok and not isinstance(app.screen, st.ConnectionScreen)
-        and app.shell is app.cluster.login_terminal and isinstance(app.focused, st.TerminalView), type(app.focused).__name__)
+  check("Reconnect: the window closes, the login is in the pane and has the focus", ok and not isinstance(app.screen, ConnectionScreen)
+        and app.shell is app.cluster.login_terminal and isinstance(app.focused, TerminalView), type(app.focused).__name__)
   await pilot.press(*"pw123", "enter")
   check("typed straight into it: logged in again", await until(pilot, lambda: app.ssh.ready and app.shell is None, 20))
 
 async def t_restart(app, pilot):
   got = []
-  app.push_screen(st.RestartScreen("9001", ["sbatch", "job.sh"]), got.append); await pilot.pause(0.3)
+  app.push_screen(RestartScreen("9001", ["sbatch", "job.sh"]), got.append); await pilot.pause(0.3)
   ed = app.screen.query_one("#restart-command")
-  check("restart command in a bash editor", isinstance(ed, st.TextArea) and ed.language == "bash" and ed.read_only and ed.text == "sbatch job.sh")
+  check("restart command in a bash editor", isinstance(ed, TextArea) and ed.language == "bash" and ed.read_only and ed.text == "sbatch job.sh")
   app.screen.query_one("#restart-options").focus()
-  list(app.screen.query(st.RadioButton))[2].value = True; await pilot.pause(0.3)
+  list(app.screen.query(RadioButton))[2].value = True; await pilot.pause(0.3)
   check("Custom makes it editable", not ed.read_only, app.screen.query_one("#restart-options").pressed_index)
   ed.load_text("sbatch \\\n  --time=1:00:00 \\\n  job.sh")
   await pilot.pause(0.1)
@@ -152,7 +189,7 @@ async def t_interactive(app, pilot):
   if os.path.exists(calls): os.unlink(calls)
   app.select_cluster(1); await pilot.pause(0.3)
   await pilot.click("#interactive-job"); await pilot.pause(0.3)
-  ed = app.screen.query_one("#command-text") if isinstance(app.screen, st.CommandScreen) else None
+  ed = app.screen.query_one("#command-text") if isinstance(app.screen, CommandScreen) else None
   check("the button opens the dialog with the command in a bash editor", ed is not None and ed.language == "bash" and "sleep infinity" in ed.text)
   ed.load_text(ed.text.replace("01:00:00", "00:30:00")); await pilot.pause(0.1)
   await pilot.click("#command-submit")
@@ -163,13 +200,13 @@ async def t_interactive(app, pilot):
   check("the job id is shown", await until(pilot, lambda: any("submitted interactive job 9100" in m for _, m in notes(app)), 5))
   await pilot.press("i"); await pilot.pause(0.3)
   await pilot.press("escape"); await pilot.pause(0.3)
-  check("i opens it too, Esc cancels", not isinstance(app.screen, st.CommandScreen) and open(calls).read().count("sbatch") <= 1)
+  check("i opens it too, Esc cancels", not isinstance(app.screen, CommandScreen) and open(calls).read().count("sbatch") <= 1)
 
 async def t_cluster_info(app, pilot):
   from rich.console import Console
   def text():
     scr = app.screen
-    if not isinstance(scr, st.ClusterInfoScreen) or not hasattr(scr, "shown"): return ""
+    if not isinstance(scr, ClusterInfoScreen) or not hasattr(scr, "shown"): return ""
     c = Console(width=200, record=True, file=open(os.devnull, "w")); c.print(scr.shown); return c.export_text()
   app.select_cluster(1); await pilot.pause(0.3)
   await pilot.click("#cluster-info")
@@ -185,16 +222,16 @@ async def t_cluster_info(app, pilot):
   check("health in the title, coloured: 1 of 20 down is degraded (yellow)", "● degraded" in title and "3 of 20 nodes not usable" in title
         and app.screen.query_one("#ci-dialog").has_class("-warn"), title)
   info = dict(app.screen.info); info["states"] = dict(info["states"], down=5)
-  check("5 of 20 down: unhealthy (red)", st.cluster_health(info)[0] == "bad")
-  info["states"] = {"allocated": 20}; info["flags"] = st.collections.Counter(); info["reservations"] = []
-  check("all up: healthy (green)", st.cluster_health(info) == ("good", "all 20 nodes usable"))
+  check("5 of 20 down: unhealthy (red)", cluster_health(info)[0] == "bad")
+  info["states"] = {"allocated": 20}; info["flags"] = collections.Counter(); info["reservations"] = []
+  check("all up: healthy (green)", cluster_health(info) == ("good", "all 20 nodes usable"))
   app.save_screenshot(filename="cluster_info.svg", path=OUT)
   first = app.screen.info["time"]; await pilot.pause(1.1)
   await pilot.press("r"); await until(pilot, lambda: app.screen.info["time"] != first, 10)
   check("its own reload", app.screen.info["time"] != first)
   await pilot.press("escape"); await pilot.pause(0.3)
   await pilot.press("C"); await pilot.pause(0.3)
-  check("C opens it", isinstance(app.screen, st.ClusterInfoScreen))
+  check("C opens it", isinstance(app.screen, ClusterInfoScreen))
   await pilot.press("escape")
 
 def slurm_calls():
@@ -238,12 +275,12 @@ async def t_ci_noconn(app, pilot):
   app.disconnect(app.cluster); await pilot.pause(0.5)
   await pilot.press("C"); await pilot.pause(0.5)
   scr = app.screen
-  txt = str(scr.query_one("#ci-info").render()) if isinstance(scr, st.ClusterInfoScreen) else ""
+  txt = str(scr.query_one("#ci-info").render()) if isinstance(scr, ClusterInfoScreen) else ""
   check("cluster info without connection says so at once, with Reload, Reconnect, Close", "No connection to lab: not connected" in txt
         and all(scr.query(b) for b in ("#ci-reload", "#ci-reconnect", "#ci-close")), txt)
   await pilot.click("#ci-reconnect")
   ok = await until(pilot, lambda: "passphrase" in term(app), 15); await pilot.pause(0.3)
-  check("Reconnect there: the window closes, the login is in front", ok and not isinstance(app.screen, st.ClusterInfoScreen))
+  check("Reconnect there: the window closes, the login is in front", ok and not isinstance(app.screen, ClusterInfoScreen))
   await pilot.press(*"pw123", "enter")
   await until(pilot, lambda: app.ssh.ready, 20)
   app.select_cluster(0); await pilot.pause(0.3)
@@ -255,9 +292,9 @@ async def t_ci_noconn(app, pilot):
 
 async def t_border(app, pilot):
   await pilot.press("t"); await pilot.pause(0.3); await pilot.press("enter") # (the choice: In slurp)
-  ok = await until(pilot, lambda: isinstance(app.screen, st.TerminalScreen) and "(cluster)" in sterm(app), 15)
+  ok = await until(pilot, lambda: isinstance(app.screen, TerminalScreen) and "(cluster)" in sterm(app), 15)
   await pilot.press(*"echo cols=$(tput cols) rows=$(tput lines)", "enter"); await pilot.pause(1)
-  view = app.screen.query_one(st.TerminalView)
+  view = app.screen.query_one(TerminalView)
   check("the shell (a subtab) has a border and fits inside it", ok and view.styles.border_top[0] == "round"
         and f"cols={view.size.width} rows={view.size.height}" in sterm(app), f"{view.size} {sterm(app)[-200:]!r}")
   app.save_screenshot(filename="border.svg", path=OUT)
@@ -265,29 +302,27 @@ async def t_border(app, pilot):
 
 async def t_term_help(app, pilot):
   await pilot.press("t"); await pilot.pause(0.3); await pilot.press("enter") # (In slurp)
-  ok = await until(pilot, lambda: isinstance(app.screen, st.TerminalScreen) and "(cluster)" in sterm(app), 15)
+  ok = await until(pilot, lambda: isinstance(app.screen, TerminalScreen) and "(cluster)" in sterm(app), 15)
   await pilot.press(*"echo HELPMARK", "enter"); await until(pilot, lambda: sterm(app).count("HELPMARK") >= 2, 5)
   scr = app.screen
   check("the shell subtab has a Help button", ok and scr.query("#shell-help"))
   await pilot.click("#shell-help"); await pilot.pause(0.5)
   help = app.screen
-  md = "\n".join(m._markdown for m in help.query(st.Markdown)) if isinstance(help, st.TerminalHelpScreen) else ""
-  check("Help opens the terminal help", isinstance(help, st.TerminalHelpScreen) and "Copying out" in md and "Pasting" in md
+  md = "\n".join(m._markdown for m in help.query(Markdown)) if isinstance(help, TerminalHelpScreen) else ""
+  check("Help opens the terminal help", isinstance(help, TerminalHelpScreen) and "Copying out" in md and "Pasting" in md
         and "login node" in md and "Ctrl+X" not in md and "subtab bar" in md, md[:200])
   app.save_screenshot(filename="term_help.svg", path=OUT)
-  check("the screen text has the output", "HELPMARK" in st.screen_text(scr.session))
+  check("the screen text has the output", "HELPMARK" in screen_text(scr.session))
   got = []
-  orig = st.screens.dialogs.copy_text if hasattr(st, "screens") else None
-  import importlib; dialogs = importlib.import_module(st.TerminalHelpScreen.__module__.rsplit(".", 1)[0] + ".dialogs")
   real = dialogs.copy_text; dialogs.copy_text = lambda app_, text, what="": got.append(text)
   try:
     await pilot.click("#thelp-copy"); await pilot.pause(0.4)
   finally:
     dialogs.copy_text = real
   check("Copy the screen copies the visible screen and closes", got and "HELPMARK" in got[0] and app.screen is scr, got[:1])
-  check("the shell has the focus again", isinstance(app.focused, st.TerminalView))
+  check("the shell has the focus again", isinstance(app.focused, TerminalView))
   await pilot.click("#shell-help"); await pilot.pause(0.4); await pilot.press("escape"); await pilot.pause(0.3)
-  check("Esc closes the help, keys go to the shell again", app.screen is scr and isinstance(app.focused, st.TerminalView))
+  check("Esc closes the help, keys go to the shell again", app.screen is scr and isinstance(app.focused, TerminalView))
   app.action_close_view(); await pilot.pause(0.5)
 
 async def t_pane_help(app, pilot):
@@ -295,11 +330,11 @@ async def t_pane_help(app, pilot):
     check("pane help: a login pane to test (skipped: none open)", True); return
   await pilot.click(".tinfo"); await pilot.pause(0.5)
   help = app.screen
-  md = "\n".join(m._markdown for m in help.query(st.Markdown)) if isinstance(help, st.TerminalHelpScreen) else ""
+  md = "\n".join(m._markdown for m in help.query(Markdown)) if isinstance(help, TerminalHelpScreen) else ""
   check("ⓘ of the pane opens the help, for the login", "login of the tab" in md and "Ctrl+X" in md and "gives up" in md, md[:150])
   app.save_screenshot(filename="pane_help.svg", path=OUT)
   await pilot.press("escape"); await pilot.pause(0.3)
-  check("Esc: back, the pane has the focus", isinstance(app.focused, st.TerminalView))
+  check("Esc: back, the pane has the focus", isinstance(app.focused, TerminalView))
 
 def fv_ids(screen, sel):
   v = screen.query_one(sel)
@@ -320,7 +355,7 @@ async def t_checks_ui(app, pilot):
   await pilot.press("exclamation_mark"); await pilot.pause(0.3)
   check("! again shows all", len(list(t.rows)) > 8)
   t.focus(); t.move_cursor(row=t.get_row_index("9005")); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.JobScreen) and app.screen.query_one("#job-checks").findings, 20)
+  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.query_one("#job-checks").findings, 20)
   js = app.screen
   ids = fv_ids(js, "#job-checks") if ok else []
   check("the job window checks the submitted script: R01, R02, P01, S03, B05", all(i in ids for i in ("R01", "R02", "P01", "S03", "B05")),
@@ -336,7 +371,7 @@ async def t_checks_ui(app, pilot):
   check("an entry opens: why it matters, how to fix, the catalogue link", "Why it matters" in body and "How to fix" in body and "rule catalogue" in body, body[:200])
   rid = js.query_one("#job-checks").findings[0].rule.id
   app.action_rule_catalogue(rid)
-  ok = await until(pilot, lambda: isinstance(app.screen, st.RuleCatalogueScreen), 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, RuleCatalogueScreen), 10)
   await pilot.pause(1.0)
   cat = app.screen
   viewer = cat.query_one("#doc")
@@ -346,7 +381,7 @@ async def t_checks_ui(app, pilot):
   check("the catalogue is a subtab of its own", "Rule catalogue" in vtabs(app) and app.current_mode != "_default", vtabs(app))
   app.show_view(next(v for v in app.cluster.views if v.title == "job 9005")); await pilot.pause(0.3)
   app.action_rule_catalogue("B05"); await pilot.pause(1.0)
-  check("another rule link: the same subtab, at the other rule", isinstance(app.screen, st.RuleCatalogueScreen) and app.screen is cat
+  check("another rule link: the same subtab, at the other rule", isinstance(app.screen, RuleCatalogueScreen) and app.screen is cat
         and cat.rule_id == "B05" and vtabs(app).count("Rule catalogue") == 1, vtabs(app))
   await pilot.press("escape"); await pilot.pause(0.3)
   check("Esc: the job list, the catalogue stays a subtab", app.screen is app.main and "Rule catalogue" in vtabs(app))
@@ -354,8 +389,8 @@ async def t_checks_ui(app, pilot):
   wd = os.path.join(LAB, "jobs", "9001"); path = os.path.join(wd, "bad_job.sh")
   open(path, "w").write("#!/bin/bash\n#SBATCH --nodes=2\n#SBATCH --mem=8\n#SBATCH --output=missing_dir/%j.out\n"
                         "#SBATCH --cpus-per-task=8\nmodule load gcc\ncd nowhere\nsrun /bin/ls\n#SBATCH --time=01:00:00\n")
-  st.open_path(app, ["Jobs"], path)
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ScriptScreen) and app.screen.findings, 20)
+  open_path(app, ["Jobs"], path)
+  ok = await until(pilot, lambda: isinstance(app.screen, ScriptScreen) and app.screen.findings, 20)
   sc = app.screen
   ids = [f.rule.id for f in sc.findings] if ok else []
   check("a batch script opens in the script view, checked: R01 P01 P02 S03 N04", all(i in ids for i in ("R01", "P01", "P02", "S03", "N04")),
@@ -372,18 +407,18 @@ async def t_checks_ui(app, pilot):
   ok = await until(pilot, lambda: any("would start at" in n.message for n in app._notifications), 10)
   check("Test: sbatch --test-only, when it would start", ok, notes(app)[-2:])
   calls = os.path.join(LAB, "sbatch_calls"); n0 = len(open(calls).read().splitlines()) if os.path.exists(calls) else 0
-  await pilot.click("#sc-submit"); ok = await until(pilot, lambda: isinstance(app.screen, st.ConfirmScreen), 5)
+  await pilot.click("#sc-submit"); ok = await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 5)
   msg = str(app.screen.query_one("#confirm-message").render()) if ok else ""
   check("Submit asks, with the errors found", ok and "errors" in msg, msg)
   await pilot.click("#confirm-yes") if app.screen.query("#confirm-yes") else await pilot.press("enter")
   ok = await until(pilot, lambda: os.path.exists(calls) and len(open(calls).read().splitlines()) > n0, 10)
   check("Submit runs sbatch with the script", ok and "bad_job.sh" in open(calls).read().splitlines()[-1], open(calls).read().splitlines()[-1:] if os.path.exists(calls) else "")
-  await until(pilot, lambda: isinstance(app.screen, st.ScriptScreen), 5)
+  await until(pilot, lambda: isinstance(app.screen, ScriptScreen), 5)
   check("one Check button (no separate Check environment)", not sc.query("#sc-env") and sc.query("#sc-check"))
-  real_replay = st.replay_environment
+  real_replay = environment.replay_environment
   def slow_replay(ctx):
     time.sleep(1.5); return real_replay(ctx)
-  st.replay_environment = slow_replay
+  environment.replay_environment = slow_replay
   try:
     await pilot.click("#sc-check")
     ok1 = await until(pilot, lambda: sc.ctx is not None and sc.ctx.replay is None and "checking the environment" in str(sc.query_one("#sc-findings").query_one(".fv-summary").render()), 10)
@@ -394,7 +429,7 @@ async def t_checks_ui(app, pilot):
     still = [c for c in sc.query("#sc-findings Collapsible") if getattr(c, "finding_key", None) == key]
     check("an entry opened meanwhile stays open when the environment results come", ok2 and still and not still[0].collapsed)
   finally:
-    st.replay_environment = real_replay
+    environment.replay_environment = real_replay
   ok = await until(pilot, lambda: sc.ctx is not None and sc.ctx.replay is not None and "E04" in [f.rule.id for f in sc.findings], 30)
   ids = [f.rule.id for f in sc.findings]
   check("then the environment: the setup replayed (the module load fails here: E04), ls checked with ldd",
@@ -409,22 +444,22 @@ async def t_checks_more(app, pilot):
   await until(pilot, lambda: app.cluster.loader is None, 30)
   # the guides, and a rule link in them
   await pilot.press("f1")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.GuidesScreen), 15)
+  ok = await until(pilot, lambda: isinstance(app.screen, GuidesScreen), 15)
   g = app.screen
   check("F1 opens the guides, with the cluster's numbers", ok and "NUMA placement" in g.markdown and "normal" in g.markdown
         and "128 cores" in g.markdown, g.markdown[:200] if ok else "")
   doc = g.query_one("#doc").document
-  doc.post_message(st.Markdown.LinkClicked(doc, "rule:P01")); await pilot.pause(1.0)
-  check("a rule link in the guides opens the rule in the catalogue", isinstance(app.screen, st.RuleCatalogueScreen) and app.screen.rule_id == "P01")
+  doc.post_message(Markdown.LinkClicked(doc, "rule:P01")); await pilot.pause(1.0)
+  check("a rule link in the guides opens the rule in the catalogue", isinstance(app.screen, RuleCatalogueScreen) and app.screen.rule_id == "P01")
   cat = app.screen
   d = cat.query_one("#doc").document
-  d.post_message(st.Markdown.LinkClicked(d, "rule:B05")); await pilot.pause(0.8)
+  d.post_message(Markdown.LinkClicked(d, "rule:B05")); await pilot.pause(0.8)
   check("a rule link inside the catalogue jumps within it", app.screen is cat and cat.rule_id == "B05")
   await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.3)
   # the wizard
   app.screen.query_one("#jobs").focus()
   await pilot.press("n")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.NewScriptScreen) and app.screen.facts is not None, 15)
+  ok = await until(pilot, lambda: isinstance(app.screen, NewScriptScreen) and app.screen.facts is not None, 15)
   w = app.screen
   w.query_one("#ns-kind").value = "gpu"; await pilot.pause(0.5)
   pv = w.query_one("#ns-preview").text
@@ -434,7 +469,7 @@ async def t_checks_more(app, pilot):
   w.query_one("#ns-path").value = path; await pilot.pause(0.6)
 
   await pilot.click("#ns-create")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ScriptScreen) and app.screen.path == path and app.screen.ctx is not None, 20)
+  ok = await until(pilot, lambda: isinstance(app.screen, ScriptScreen) and app.screen.path == path and app.screen.ctx is not None, 20)
   sc = app.screen
   bad = [(f.rule.id, f.evidence) for f in sc.findings if f.severity != "info" and f.rule.id not in ("P03", "E04")] if ok else "not opened"  # (the lab has no module command)
   check("Create writes it (and logs/), opens it in the script view, without errors or warnings",
@@ -445,18 +480,18 @@ async def t_checks_more(app, pilot):
   open(bad_path, "w").write("#!/bin/bash\r\n#SBATCH --nodes=1\r\n#SBATCH --cpus-per-task=4\r\n#SBATCH --output=o.txt\r\nmodule load gcc/1\r\nsrun ./x\r\n#SBATCH --time=01:00:00\r\n")
   for f in os.listdir(os.path.dirname(bad_path)):
     if f.startswith("tofix.fixed"): os.remove(os.path.join(os.path.dirname(bad_path), f))
-  st.open_path(app, ["Jobs"], bad_path)
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ScriptScreen) and app.screen.path == bad_path and app.screen.findings, 20)
+  open_path(app, ["Jobs"], bad_path)
+  ok = await until(pilot, lambda: isinstance(app.screen, ScriptScreen) and app.screen.path == bad_path and app.screen.findings, 20)
   sc = app.screen
   await pilot.click("#sc-fix")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.FixPreviewScreen), 5)
+  ok = await until(pilot, lambda: isinstance(app.screen, FixPreviewScreen), 5)
   done = app.screen.done if ok else []
   diff = app.screen.diff if ok else ""
   check("Fixed copy shows what it fixes, as a diff", ok and any("S01" in d for d in done) and any("S03" in d for d in done)
         and "+#SBATCH --time" in diff, (done, diff[:300]))
   await pilot.click("#fx-write")
   fixed = os.path.join(os.path.dirname(bad_path), "tofix.fixed.sh")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ScriptScreen) and app.screen.path == fixed and app.screen.findings is not None and app.screen.ctx, 20)
+  ok = await until(pilot, lambda: isinstance(app.screen, ScriptScreen) and app.screen.path == fixed and app.screen.findings is not None and app.screen.ctx, 20)
   ids = [f.rule.id for f in app.screen.findings] if ok else []
   check("Write: the fixed copy opens, checked: S01 S03 N04 gone", ok and os.path.exists(fixed) and not {"S01", "S03", "N04"} & set(ids)
         and "\r" not in open(fixed, newline="").read(), ids)
@@ -475,8 +510,8 @@ async def t_checks_more(app, pilot):
     view = sc2.query_one("#sc-findings")
     view.query(".fv-mute").first().press(); await pilot.pause(0.2)
     ok = await until(pilot, lambda: not any(x.rule.id == rid for x in sc2.findings) and sc2.ctx is not None, 10)
-    check(f"Mute everywhere: {rid} goes into the config and is not reported", ok and rid in st.load_config().get("checks_muted", []))
-    st.update_config(checks_muted=[])
+    check(f"Mute everywhere: {rid} goes into the config and is not reported", ok and rid in load_config().get("checks_muted", []))
+    update_config(checks_muted=[])
   for _ in range(4):
     if app.screen is app.main: break
     await pilot.press("escape"); await pilot.pause(0.3)
@@ -485,12 +520,12 @@ async def t_checks_more(app, pilot):
   check("there is a failed job in the list", failed is not None, (app.cluster.name, type(app.screen).__name__, sorted({j.state for j in app.cluster.jobs.values()})))
   if failed is None: return
   t.focus(); t.move_cursor(row=t.get_row_index(failed.jid)); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.JobScreen) and app.screen.query_one("#checks-changed").display, 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.query_one("#checks-changed").display, 10)
   js = app.screen
   ids = [f.rule.id for f in js.query_one("#job-checks").findings] if await until(pilot, lambda: js.query_one("#job-checks").findings, 15) else []
   check("a failed job: U03 explains why", "U03" in ids, ids)
   await pilot.click("#checks-changed")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.FileScreen) and "What changed" in app.screen.query_one("#text").text, 15)
+  ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and "What changed" in app.screen.query_one("#text").text, 15)
   check("What changed compares with the last run that worked", ok, app.screen.query_one("#text").text[:300] if ok else type(app.screen))
   await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.3)
   # node topology in Cluster info
@@ -501,8 +536,8 @@ async def t_checks_more(app, pilot):
   check("Cluster info shows the node topology", ok and app.screen.info.get("facts") and "topology" in shot and app.screen.info["facts"].partitions["normal"].cores == 64)
   await pilot.press("escape"); await pilot.pause(0.3)
   # B09: heavy processes on the login node (said once)
-  real = st.login_hogs
-  st.login_hogs = lambda: [(4242, 99.0, 20, "heavy_sim")]
+  real = checks.login_hogs
+  checks.login_hogs = lambda: [(4242, 99.0, 20, "heavy_sim")]
   try:
     app.check_login_nodes(); await until(pilot, lambda: any("heavy_sim" in m for _, m in notes(app)), 10)
     n1 = sum("heavy_sim" in m for _, m in notes(app))
@@ -510,17 +545,17 @@ async def t_checks_more(app, pilot):
     n2 = sum("heavy_sim" in m for _, m in notes(app))
     check("B09: heavy work on the login node is said, once", n1 == 1 and n2 == 1, (n1, n2))
   finally:
-    st.login_hogs = real
+    checks.login_hogs = real
 
 async def t_view_help(app, pilot):
   await until(pilot, lambda: app.cluster.loader is None, 30)
   import inspect
-  classes = {n for m in st.MODS for n, o in vars(m).items() if inspect.isclass(o) and issubclass(o, st.Screen)}
-  missing = sorted(n for n in classes if n.endswith("Screen") and n not in st.VIEW_HELP and n not in ("SplitScreen", "DocScreen", "ViewHelpScreen", "TerminalHelpScreen", "ModalScreen", "Screen"))
+  classes = {n for m in slurp_modules() for n, o in vars(m).items() if inspect.isclass(o) and issubclass(o, Screen)}
+  missing = sorted(n for n in classes if n.endswith("Screen") and n not in VIEW_HELP and n not in ("SplitScreen", "DocScreen", "ViewHelpScreen", "TerminalHelpScreen", "ModalScreen", "Screen"))
   check("every window and dialog has a help text", not missing, missing)
   check("the job list has a ? in its top bar", bool(app.screen.query("#view-help")))
   await pilot.click("#view-help")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ViewHelpScreen), 5)
+  ok = await until(pilot, lambda: isinstance(app.screen, ViewHelpScreen), 5)
   md = app.screen.markdown if ok else ""
   check("? opens the help of the job list: text, its keys, the keys of everywhere", "# Job list" in md and "Only problems" in md
         and "New job script" in md and "## Everywhere" in md and "Interactive job" in md and "Focus Next" not in md, md[:300])
@@ -528,38 +563,38 @@ async def t_view_help(app, pilot):
   await pilot.press("escape"); await pilot.pause(0.3)
   check("Esc closes it", app.screen is app.main)
   t = app.screen.query_one("#jobs"); t.focus(); await pilot.press("question_mark")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ViewHelpScreen), 5)
+  ok = await until(pilot, lambda: isinstance(app.screen, ViewHelpScreen), 5)
   check("the ? key opens it too", ok)
   await pilot.press("question_mark"); await pilot.pause(0.3)
   check("? again closes it", app.screen is app.main)
   t.focus(); t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter")
-  await until(pilot, lambda: isinstance(app.screen, st.JobScreen), 10)
-  await pilot.click("#view-help"); ok = await until(pilot, lambda: isinstance(app.screen, st.ViewHelpScreen), 5)
+  await until(pilot, lambda: isinstance(app.screen, JobScreen), 10)
+  await pilot.click("#view-help"); ok = await until(pilot, lambda: isinstance(app.screen, ViewHelpScreen), 5)
   check("the job window's ? explains the job window", ok and "# Job window" in app.screen.markdown and "Shell on node" in app.screen.markdown)
   await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.3)
   await pilot.press("C")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ClusterInfoScreen) and app.screen.query(".help-corner"), 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, ClusterInfoScreen) and app.screen.query(".help-corner"), 10)
   check("a dialog (Cluster info) has a ? in its corner", ok)
   if ok:
     app.screen.query_one(".help-corner").press()
-    ok = await until(pilot, lambda: isinstance(app.screen, st.ViewHelpScreen), 5)
+    ok = await until(pilot, lambda: isinstance(app.screen, ViewHelpScreen), 5)
     check("its ? explains it", ok and "# Cluster info" in app.screen.markdown, app.screen.markdown[:100] if ok else "")
     app.save_screenshot(filename="help_ci.svg", path=OUT)
     await pilot.press("escape"); await pilot.pause(0.2)
   await pilot.press("escape"); await pilot.pause(0.3)
   await pilot.press("t"); await pilot.pause(0.3); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.TerminalScreen), 15)
-  await pilot.click("#view-help"); ok = await until(pilot, lambda: isinstance(app.screen, st.TerminalHelpScreen), 5)
+  ok = await until(pilot, lambda: isinstance(app.screen, TerminalScreen), 15)
+  await pilot.click("#view-help"); ok = await until(pilot, lambda: isinstance(app.screen, TerminalHelpScreen), 5)
   check("a shell's ? opens its terminal help", ok)
   await pilot.press("escape"); await pilot.pause(0.3)
   app.action_close_view(); await pilot.pause(0.5)
 
 async def t_scrollback(app, pilot):
   await until(pilot, lambda: app.cluster.loader is None, 30)
-  st.update_config(terminal_scrollback=10000)
+  update_config(terminal_scrollback=10000)
   await pilot.press("t"); await pilot.pause(0.3); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.TerminalScreen) and "(cluster)" in sterm(app), 15)
-  scr = app.screen; view = scr.query_one(st.TerminalView); vt = scr.session.vt
+  ok = await until(pilot, lambda: isinstance(app.screen, TerminalScreen) and "(cluster)" in sterm(app), 15)
+  scr = app.screen; view = scr.query_one(TerminalView); vt = scr.session.vt
   await pilot.press(*"seq 1 300", "enter")
   ok = await until(pilot, lambda: "\n300" in sterm(app) or sterm(app).splitlines()[-2:] and any(l.strip() == "300" for l in sterm(app).splitlines()), 10)
   check("lines that scroll off the screen go into the history", ok and len(vt.history) >= 250, len(vt.history))
@@ -570,7 +605,6 @@ async def t_scrollback(app, pilot):
         and second.isdigit() and int(second) < 250, (view.scroll, top[-60:], second))
   # select by dragging (real mouse events, 1 cell border)
   got = []
-  import importlib; dialogs = importlib.import_module(st.TerminalHelpScreen.__module__.rsplit(".", 1)[0] + ".dialogs")
   real = dialogs.copy_text; dialogs.copy_text = lambda app_, text, what="": got.append(text)
   try:
     await pilot.mouse_down(view, offset=(1, 3)); await pilot.hover(view, offset=(4, 5)); await pilot.mouse_up(view, offset=(4, 5))
@@ -599,29 +633,29 @@ async def t_scrollback(app, pilot):
   ok = await until(pilot, lambda: len(vt.history) == 0, 5)
   check("clear empties the history", ok, len(vt.history))
   app.action_close_view(); await pilot.pause(0.5)
-  st.update_config(terminal_scrollback=50)
+  update_config(terminal_scrollback=50)
   await pilot.press("t"); await pilot.pause(0.3); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.TerminalScreen) and "(cluster)" in sterm(app), 15)
+  ok = await until(pilot, lambda: isinstance(app.screen, TerminalScreen) and "(cluster)" in sterm(app), 15)
   check("the history length comes from the config", ok and app.screen.session.vt.history.maxlen == 50)
   app.action_close_view(); await pilot.pause(0.5)
-  st.update_config(terminal_scrollback=10000)
+  update_config(terminal_scrollback=10000)
 
 async def t_this_view(app, pilot):
   """slurp in a browser through a web link: its session is marked "this view"; disconnecting it, or revoking the
   link, warns that this ends the very view"""
   await until(pilot, lambda: app.cluster.loader is None, 30)
   mgr = app.link_manager
-  link = st.Link("web", "this slurp on lab", app.cluster.name, lambda: [], relay="ssh-j.com", uses=None, web_port=1, web_token="t")
+  link = Link("web", "this slurp on lab", app.cluster.name, lambda: [], relay="ssh-j.com", uses=None, web_port=1, web_token="t")
   link.relay_state = "ready"
-  mine = st.Session(link, "s1", kind="web", client="SSH-2.0-OpenSSH_9.6", web_ports={40001, 40002})
-  other = st.Session(link, "s2", kind="web", client="SSH-2.0-PuTTY", web_ports={40003})
+  mine = Session(link, "s1", kind="web", client="SSH-2.0-OpenSSH_9.6", web_ports={40001, 40002})
+  other = Session(link, "s2", kind="web", client="SSH-2.0-PuTTY", web_ports={40003})
   link.sessions += [mine, other]; mgr.links.append(link)
   kind = app.view_kind
   try:
     app.active_view_changed(kind, 0)
     for _ in range(3):
       await pilot.click("#connstatus")
-      if await until(pilot, lambda: isinstance(app.screen, st.ConnectionScreen), 3):
+      if await until(pilot, lambda: isinstance(app.screen, ConnectionScreen), 3):
         break
     cs = app.screen
     table = cs.query_one("#conn-links")
@@ -633,28 +667,28 @@ async def t_this_view(app, pilot):
           and "this view" not in cell("s2"), (cell("s1"), cell("s2")))
     app.save_screenshot(filename="this_view.svg", path=OUT)
     table.focus(); table.move_cursor(row=table.get_row_index(f"session|{link.id}|s2")); await pilot.press("enter"); await pilot.pause(0.4)
-    text = str(app.screen.dialog_message) if isinstance(app.screen, st.ConfirmScreen) else ""
+    text = str(app.screen.dialog_message) if isinstance(app.screen, ConfirmScreen) else ""
     check("disconnecting another session: no warning", text and "this very view" not in text, text)
     await pilot.press("escape"); await pilot.pause(0.3)
     table.move_cursor(row=table.get_row_index(f"session|{link.id}|s1")); await pilot.press("enter"); await pilot.pause(0.4)
-    text = str(app.screen.dialog_message) if isinstance(app.screen, st.ConfirmScreen) else ""
+    text = str(app.screen.dialog_message) if isinstance(app.screen, ConfirmScreen) else ""
     check("disconnecting the session of this view warns that it ends this very view", "ends this very view" in text, text)
     app.save_screenshot(filename="this_view_disconnect.svg", path=OUT)
     await pilot.press("escape"); await pilot.pause(0.3)
-    check("No: nothing is disconnected", mine.ended is None and isinstance(app.screen, st.ConnectionScreen))
+    check("No: nothing is disconnected", mine.ended is None and isinstance(app.screen, ConnectionScreen))
     table.move_cursor(row=table.get_row_index(f"link|{link.id}")); await pilot.press("enter"); await pilot.pause(0.5)
     lv = app.screen
-    state = lambda: rendered(lv.query_one("#lv-state").content) if isinstance(lv, st.LinkScreen) else ""
+    state = lambda: rendered(lv.query_one("#lv-state").content) if isinstance(lv, LinkScreen) else ""
     await until(pilot, lambda: "Sessions" in state(), 3)
     state = state()
     check("the link's window says one of its sessions is this view", "one is this view" in state, (type(lv).__name__, state[-300:]))
     await pilot.click("#lv-revoke"); await pilot.pause(0.4)
-    text = str(app.screen.dialog_message) if isinstance(app.screen, st.ConfirmScreen) else ""
+    text = str(app.screen.dialog_message) if isinstance(app.screen, ConfirmScreen) else ""
     check("revoking the link of this view warns too", "revoking it ends this very view" in text, text)
     await pilot.press("escape"); await pilot.pause(0.2)
     app.active_view_changed("terminal", 0); lv.refresh_view(); await pilot.pause(0.2)
     await pilot.click("#lv-revoke"); await pilot.pause(0.4)
-    text = str(app.screen.dialog_message) if isinstance(app.screen, st.ConfirmScreen) else ""
+    text = str(app.screen.dialog_message) if isinstance(app.screen, ConfirmScreen) else ""
     check("from a terminal: revoking it does not warn", text and "this very view" not in text, text)
     await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.3)
   finally:
@@ -686,30 +720,30 @@ exec sleep 300
     path = os.path.join(cf.data_dir(), "cloudflared"); shutil.copy(fake, path)
     return path
   saved = (cf.download, cf.resolves, shutil.which)
-  before = st.load_config().get("link_relay")
-  st.update_config(cloudflared=None, link_relay_web="cloudflare")
+  before = load_config().get("link_relay")
+  update_config(cloudflared=None, link_relay_web="cloudflare")
   cf.download, cf.resolves = download, (lambda host: True)
   cf.shutil.which = lambda name: None if name == "cloudflared" else saved[2](name) # (none on PATH either)
   link = None
   try:
     check("no cloudflared here", cf.binary() is None)
     app.cf_ask = None
-    app.push_screen(st.LinkSetupScreen("web", "this slurp on lab", app.cluster.name, lambda: [], web=(1, "tok-dl")),
+    app.push_screen(LinkSetupScreen("web", "this slurp on lab", app.cluster.name, lambda: [], web=(1, "tok-dl")),
                     lambda l: setattr(app, "cf_ask", l)); await pilot.pause(0.5)
     await pilot.click("#setup-create"); await pilot.pause(0.5)
     ask = app.screen
-    text = str(ask.dialog_message) if isinstance(ask, st.ConfirmScreen) else ""
+    text = str(ask.dialog_message) if isinstance(ask, ConfirmScreen) else ""
     check("Create link asks first: what cloudflared is, how big, from where, to where", "Download cloudflared?" in getattr(ask, "dialog_title", "")
           and "40 MB" in text and "github.com/cloudflare/cloudflared" in text and cf.data_dir() in text, text)
     app.save_screenshot(filename="cloudflare_ask.svg", path=OUT)
     await pilot.click("#confirm-no"); await pilot.pause(0.4)
-    check("No: nothing downloaded, no link, the setup panel stays", not calls and app.cf_ask is None and isinstance(app.screen, st.LinkSetupScreen))
+    check("No: nothing downloaded, no link, the setup panel stays", not calls and app.cf_ask is None and isinstance(app.screen, LinkSetupScreen))
     await pilot.click("#setup-create"); await pilot.pause(0.5); await pilot.click("#confirm-yes")
     ok = await until(pilot, lambda: app.cf_ask is not None, 5)
     link = app.cf_ask
     seen = []
     def watch():
-      text = str(st.link_state(link)[0])
+      text = str(link_state(link)[0])
       if not seen or seen[-1] != text: seen.append(text)
       return link.ready()
     ok = ok and await until(pilot, watch, 20)
@@ -717,17 +751,17 @@ exec sleep 300
           ok and any(t.startswith("downloading cloudflared: ") and "of 40 MB" in t for t in seen) and any(t.startswith("installing cloudflared") for t in seen)
           and seen.index(next(t for t in seen if t.startswith("installing"))) > seen.index(next(t for t in seen if t.startswith("downloading")))
           and seen[-1].startswith("ready, at https://fake-download-words"), seen)
-    check("its health meanwhile: downloading cloudflared (degraded, as connecting)", st.link_health(st.Link("web", "x", "t", lambda: [], relay="cloudflare",
+    check("its health meanwhile: downloading cloudflared (degraded, as connecting)", link_health(Link("web", "x", "t", lambda: [], relay="cloudflare",
           relay_state="downloading")) == ("warn", "downloading cloudflared"))
     check("then cloudflared is there: the next link does not ask", calls == ["download"] and cf.binary() == os.path.join(cf.data_dir(), "cloudflared"))
   finally:
     cf.download, cf.resolves, cf.shutil.which = saved
-    st.update_config(link_relay_web=None, link_relay=before)
+    update_config(link_relay_web=None, link_relay=before)
     if link is not None:
       app.link_manager.revoke(link)
       if link in app.link_manager.links: app.link_manager.links.remove(link)
     shutil.rmtree(cf.data_dir(), ignore_errors=True)
-    while not isinstance(app.screen, st.MainScreen) and len(app.screen_stack) > 1:
+    while not isinstance(app.screen, MainScreen) and len(app.screen_stack) > 1:
       await pilot.press("escape"); await pilot.pause(0.2)
 
 async def t_web_cloudflare(app, pilot):
@@ -746,22 +780,22 @@ echo "2099-01-01T00:00:01Z INF Registered tunnel connection connIndex=0 location
 exec sleep 300
 """)
   os.chmod(fake, 0o755)
-  before = st.load_config().get("link_relay")
-  st.update_config(cloudflared=fake, link_relay="lab-relay", link_relay_web=None)
+  before = load_config().get("link_relay")
+  update_config(cloudflared=fake, link_relay="lab-relay", link_relay_web=None)
   resolves, kind = cf.resolves, app.view_kind
   cf.resolves = lambda host: True # (the fake name is in no DNS)
   try:
-    check("parse_relay: cloudflare; a public relay; straight (no jump)", st.parse_relay("cloudflare") == ("cloudflare", "trycloudflare.com")
-          and st.is_public("cloudflare") and st.Link("web", "x", "t", lambda: [], relay="cloudflare").jump() == "")
+    check("parse_relay: cloudflare; a public relay; straight (no jump)", parse_relay("cloudflare") == ("cloudflare", "trycloudflare.com")
+          and is_public("cloudflare") and Link("web", "x", "t", lambda: [], relay="cloudflare").jump() == "")
     try:
-      app.link_manager.create(st.Link("shell", "x", app.cluster.name, lambda: [], relay="cloudflare")); refused = False
+      app.link_manager.create(Link("shell", "x", app.cluster.name, lambda: [], relay="cloudflare")); refused = False
     except ValueError:
       refused = True
     check("a shell (or drive) link through Cloudflare is refused", refused)
-    app.push_screen(st.LinkSetupScreen("shell", "a shell", app.cluster.name, lambda: [])); await pilot.pause(0.5)
+    app.push_screen(LinkSetupScreen("shell", "a shell", app.cluster.name, lambda: [])); await pilot.pause(0.5)
     check("the shell's panel has no Cloudflare choice", not app.screen.query("#setup-relay-cloudflare"))
     await pilot.press("escape"); await pilot.pause(0.3)
-    app.push_screen(st.LinkSetupScreen("web", "this slurp on lab", app.cluster.name, lambda: [], web=(1, "tok-cf")),
+    app.push_screen(LinkSetupScreen("web", "this slurp on lab", app.cluster.name, lambda: [], web=(1, "tok-cf")),
                     lambda link: setattr(app, "cf_link", link)); await pilot.pause(0.5)
     scr = app.screen
     check("the web panel offers Cloudflare; the relay of shells (lab-relay) is chosen until the web links have their own",
@@ -781,10 +815,10 @@ exec sleep 300
     args = open(marker).read() if os.path.exists(marker) else ""
     check("cloudflared runs the quick tunnel to the web view, HTTP/2, its own config", "tunnel --config" in args and "--protocol http2" in args
           and "--url http://127.0.0.1:1" in args, args)
-    check("the setting: the web links' own relay (cloudflare), the shells' stays", st.load_config().get("link_relay_web") == "cloudflare"
-          and st.load_config().get("link_relay") == "lab-relay")
+    check("the setting: the web links' own relay (cloudflare), the shells' stays", load_config().get("link_relay_web") == "cloudflare"
+          and load_config().get("link_relay") == "lab-relay")
     check("its address: https, with the token", link.url() == "https://fake-words-here.trycloudflare.com/?token=tok-cf", link.url())
-    lv = st.LinkScreen(link); app.push_screen(lv); await pilot.pause(0.6)
+    lv = LinkScreen(link); app.push_screen(lv); await pilot.pause(0.6)
     await until(pilot, lambda: lv.query(".lv-copy"), 5)
     state = rendered(lv.query_one("#lv-state").content)
     texts = " ".join(rendered(w.content) for w in lv.query(".lv-command-text"))
@@ -796,7 +830,7 @@ exec sleep 300
     state = rendered(lv.query_one("#lv-state").content)
     check("the browser in use came through this address: the link window says it is this view", "this view" in state, state)
     await pilot.click("#lv-revoke"); await pilot.pause(0.4)
-    text = str(app.screen.dialog_message) if isinstance(app.screen, st.ConfirmScreen) else ""
+    text = str(app.screen.dialog_message) if isinstance(app.screen, ConfirmScreen) else ""
     check("and Revoke warns that it ends this very view", "revoking it ends this very view" in text, text)
     await pilot.click("#confirm-yes"); await pilot.pause(0.5)
     ok = await until(pilot, lambda: (app.link_manager.tick(), link.relay_state == "closed")[1], 10)
@@ -805,7 +839,7 @@ exec sleep 300
   finally:
     app.active_view_changed(kind, 0, "")
     cf.resolves = resolves
-    st.update_config(cloudflared=None, link_relay_web=None, link_relay=before)
+    update_config(cloudflared=None, link_relay_web=None, link_relay=before)
     if getattr(app, "cf_link", None) in app.link_manager.links:
       app.link_manager.revoke(app.cf_link); app.link_manager.links.remove(app.cf_link)
 
@@ -818,7 +852,7 @@ async def t_about(app, pilot):
   region = button.first().region if button else None
   check("the job list has ? slurp at the top right", button and region.y == 0 and region.right >= app.size.width - 2, region)
   await pilot.click("#about")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.AboutScreen), 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, AboutScreen), 10)
   md = app.screen.markdown if ok else ""
   check("it opens About slurp: the version, how slurp works", ok and f"About slurp {slurp.VERSION_TEXT}" in md and "The job list" in md, md[:200])
   check("the machine slurp runs on: host, system, CPUs, memory, user", all(x in md for x in (socket.getfqdn(), "kernel", "| CPUs |", "GiB", "uid"))
@@ -836,29 +870,29 @@ async def t_links_health(app, pilot):
   await until(pilot, lambda: app.cluster.loader is None, 30)
   mgr = app.link_manager
   now, mono = time.time(), time.monotonic()
-  drive = st.Link("drive", f"{app.cluster.name} /home/u", app.cluster.name, lambda: [], relay="ssh-j.com", uses=None, path="/home/u")
+  drive = Link("drive", f"{app.cluster.name} /home/u", app.cluster.name, lambda: [], relay="ssh-j.com", uses=None, path="/home/u")
   drive.relay_state = "ready"
   def sess(sid, path, started, ended=None, latency=0.03, ping=None):
-    x = st.Session(drive, sid, kind="drive", client="SSH-2.0-OpenSSH_for_Windows_9.5", path=path, started=started, ended=ended, latency=latency)
+    x = Session(drive, sid, kind="drive", client="SSH-2.0-OpenSSH_for_Windows_9.5", path=path, started=started, ended=ended, latency=latency)
     x.ping_sent = ping
     return x
   drive.sessions += [sess("a1", "/scratch/u", now - 400, now - 300), sess("a2", "/scratch/u", now - 290, now - 100),
                      sess("a3", "/scratch/u", now - 90), sess("b1", "/home/u", now - 1000, latency=2.0)]
-  shell = st.Link("shell", "a shell", app.cluster.name, lambda: [], relay="ssh-j.com")
+  shell = Link("shell", "a shell", app.cluster.name, lambda: [], relay="ssh-j.com")
   shell.relay_state, shell.relay_error = "broken", "connection reset"
-  shaky = st.Link("shell", "another shell", app.cluster.name, lambda: [], relay="ssh-j.com")
+  shaky = Link("shell", "another shell", app.cluster.name, lambda: [], relay="ssh-j.com")
   shaky.relay_state, shaky.relay_losses = "ready", [mono - 30, mono - 200]
-  silent = st.Session(shaky, "c1", kind="shell", client="SSH-2.0-PuTTY", latency=0.05)
+  silent = Session(shaky, "c1", kind="shell", client="SSH-2.0-PuTTY", latency=0.05)
   silent.ping_sent = mono - 12
   shaky.sessions.append(silent)
-  done = st.Link("shell", "a closed shell", app.cluster.name, lambda: [], relay="ssh-j.com")
+  done = Link("shell", "a closed shell", app.cluster.name, lambda: [], relay="ssh-j.com")
   done.relay_state, done.revoked = "closed", True
   for l in (drive, shell, shaky, done):
     mgr.links.append(l)
   try:
     for _ in range(3):
       await pilot.click("#connstatus")
-      if await until(pilot, lambda: isinstance(app.screen, st.ConnectionScreen), 3):
+      if await until(pilot, lambda: isinstance(app.screen, ConnectionScreen), 3):
         break
     cs = app.screen
     table = cs.query_one("#conn-links")
@@ -882,7 +916,7 @@ async def t_links_health(app, pilot):
           and "closed" in row(f"link|{done.id}")[1], row(f"link|{done.id}"))
     check("a session without an answer for 12 s: no answer", re.search(r"no answer for 1[2-9] s", row(f"session|{shaky.id}|c1")[1]), row(f"session|{shaky.id}|c1")[1])
     styles = {key: table.get_row(key)[1].style for key in (f"link|{drive.id}", mine[0], f"link|{shell.id}")}
-    check("the colours of the SSH login: green, yellow, red", [str(v) for v in styles.values()] == [st.HEALTH_STYLES[x] for x in ("good", "warn", "bad")], styles)
+    check("the colours of the SSH login: green, yellow, red", [str(v) for v in styles.values()] == [HEALTH_STYLES[x] for x in ("good", "warn", "bad")], styles)
     app.save_screenshot(filename="links_health.svg", path=OUT)
     await pilot.press("escape"); await pilot.pause(0.3)
   finally:
@@ -907,7 +941,7 @@ async def t_categories(app, pilot):
         and "2 marked" in cluster.summary, (cluster.marked, first, cluster.summary[-80:]))
   await pilot.press("c"); await pilot.pause(0.5)
   cz = app.screen
-  check("c: the dialog, for the 2 marked jobs", isinstance(cz, st.CategorizeScreen) and "2 jobs: 9000, 9001" in str(cz.query_one("#cz-title").render()))
+  check("c: the dialog, for the 2 marked jobs", isinstance(cz, CategorizeScreen) and "2 jobs: 9000, 9001" in str(cz.query_one("#cz-title").render()))
   cz.query_one("#cz-path").value = " proj X / production "
   await pilot.press("enter")
   ok = await until(pilot, lambda: cluster.categories.category_of("9001") == "proj X/production", 10)
@@ -932,14 +966,14 @@ async def t_categories(app, pilot):
   await pilot.press("escape"); await pilot.pause(0.3)
   # the job window
   table.focus(); table.move_cursor(row=table.get_row_index("9001")); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.JobScreen), 10); await pilot.pause(0.5)
+  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10); await pilot.pause(0.5)
   info = rendered(app.screen.query_one("#info").content) if ok and app.screen.query("#info") else ""
   check("the job window shows its category", "proj X/production" in info, info[:300])
   app.show_view(None)
   await pilot.pause(0.4)
   # the window
   await pilot.click("#categories")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.CategoriesScreen), 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10)
   cs = app.screen
   tree = cs.query_one("#cat-tree")
   labels = lambda: [str(n.label) for n in tree.root.children] + [str(n.label) for c in tree.root.children for n in c.children]
@@ -961,7 +995,7 @@ async def t_categories(app, pilot):
   ok = await until(pilot, lambda: cluster.categories.category_of("9003") == "", 10)
   check("take a job out (x)", ok)
   # not categorized: the jobs of the job list in no category
-  loose_node = lambda: next((n for n in tree.root.children if n.data == st.NONE), None)
+  loose_node = lambda: next((n for n in tree.root.children if n.data == NONE), None)
   n_loose = len({j.jid.partition("_")[0] for j in cluster.jobs.values() if not cluster.categories.category_of(j.jid)})
   check("the tree has 'not categorized' with the jobs of the job list in none", loose_node() is not None
         and str(loose_node().label) == f"not categorized  {n_loose}", (str(loose_node().label) if loose_node() else None, n_loose))
@@ -974,18 +1008,18 @@ async def t_categories(app, pilot):
   app.screen.query_one("#cz-path").value = "proj X/checks"; await pilot.press("enter")
   ok = await until(pilot, lambda: cluster.categories.category_of("9003") == "proj X/checks", 10); await pilot.pause(0.4)
   check("c there: the job into a category; it leaves 'not categorized'", ok and "9003" not in [str(k.value) for k in jt.rows]
-        and str(loose_node().label) == f"not categorized  {n_loose - 1}", (str(loose_node().label), cs.path == st.NONE, "9003" in [str(k.value) for k in jt.rows], type(app.screen).__name__, app.focused))
+        and str(loose_node().label) == f"not categorized  {n_loose - 1}", (str(loose_node().label), cs.path == NONE, "9003" in [str(k.value) for k in jt.rows], type(app.screen).__name__, app.focused))
   await pilot.press("l"); await pilot.pause(0.8)
   shown = [str(k.value) for k in table.rows] if app.screen is app.main else []
   check("In the job list (l): cat:- lists the jobs in no category", app.main.query_one("#jfilter").value == "cat:-" and shown
         and not {"9000", "9001", "9003"} & set(shown), (app.main.query_one("#jfilter").value, shown[:5], type(app.screen).__name__, app.focused))
   await pilot.press("escape"); await pilot.pause(0.3)
-  await pilot.click("#categories"); await until(pilot, lambda: isinstance(app.screen, st.CategoriesScreen), 10); await pilot.pause(0.3)
+  await pilot.click("#categories"); await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10); await pilot.pause(0.3)
   cs = app.screen; tree = cs.query_one("#cat-tree"); jt = cs.query_one("#cat-jobs")
   node = next(n for n in tree.root.children if n.data == "proj X")
   tree.move_cursor(node); await pilot.pause(0.4)
   await pilot.press("delete"); await pilot.pause(0.4)
-  text = str(app.screen.dialog_message) if isinstance(app.screen, st.ConfirmScreen) else ""
+  text = str(app.screen.dialog_message) if isinstance(app.screen, ConfirmScreen) else ""
   check("delete asks, saying what goes", "categories in it go too" in text and "no category then" in text, text)
   await pilot.click("#confirm-yes")
   ok = await until(pilot, lambda: not cluster.categories.paths, 10)
@@ -1029,7 +1063,7 @@ async def t_status_page(app, pilot):
   class Footer(ModalScreen):
     def compose(self):
       with Vertical(): # (a dialog gets its ? button in its first container)
-        yield st.ConnectionStatus(text, id="fake-status")
+        yield ConnectionStatus(text, id="fake-status")
   try:
     app.push_screen(Footer()); await pilot.pause(0.3)
     x = text.plain.index("status.cscs.ch")
@@ -1039,11 +1073,11 @@ async def t_status_page(app, pilot):
     await pilot.press("escape"); app.pop_screen() if isinstance(app.screen, Footer) else None; await pilot.pause(0.2)
   finally:
     app.open_page, app.action_connection = saved
-  cs = st.ConnectionScreen(tab)
+  cs = ConnectionScreen(tab)
   site = cs.site_status().plain
   check("the connection window: the cluster may be down, its status page as a link", "may be down or in maintenance" in site
         and "https://status.cscs.ch" in site and any(getattr(sp.style, "meta", {}).get("open_url") == "https://status.cscs.ch" for sp in cs.site_status().spans), site)
-  cs2 = st.ConnectionScreen(other)
+  cs2 = ConnectionScreen(other)
   check("…and without a known page: still the advice", "may be down" in cs2.site_status().plain and "http" not in cs2.site_status().plain)
 
 async def t_offline(app, pilot):
@@ -1070,7 +1104,7 @@ async def t_offline(app, pilot):
   app.save_screenshot(filename="offline.svg", path=OUT)
   table.focus(); table.move_cursor(row=table.get_row_index("9001")); await pilot.press("c"); await pilot.pause(0.5)
   cz = app.screen
-  if isinstance(cz, st.CategorizeScreen):
+  if isinstance(cz, CategorizeScreen):
     cz.query_one("#cz-path").value = "offline/test"; await pilot.press("enter"); await pilot.pause(0.5)
   check("categorize while it cannot be reached: done here, the change kept for later", down.categories is not None
         and down.categories.category_of("9001") == "offline/test" and down.pending_categories == [["assign", ["9001"], "offline/test", {"9001": "run01"}]]
@@ -1080,7 +1114,7 @@ async def t_offline(app, pilot):
         and not os.path.exists(os.path.join(os.environ["XDG_CONFIG_HOME"], "slurp", "categories.json")))
   await until(pilot, lambda: json.load(open(jobcache.path_of(down))).get("pending"), 5)
   check("the kept change is in the kept list (a restart keeps it)", json.load(open(jobcache.path_of(down)))["pending"] == down.pending_categories)
-  table.focus(); await pilot.press("K"); ok = await until(pilot, lambda: isinstance(app.screen, st.CategoriesScreen), 10); await pilot.pause(0.6)
+  table.focus(); await pilot.press("K"); ok = await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10); await pilot.pause(0.6)
   info = rendered(app.screen.query_one("#cat-info").render()) if ok else ""
   check("the Categories window (K; the login pane narrows the toolbar): says the cluster cannot be reached, numbers from the kept jobs", "cannot be reached" in info and "Node hours" in info, (info[:300], type(app.screen).__name__, notes(app)[-2:]))
   await pilot.press("escape"); await pilot.pause(0.3); app.show_view(None); await pilot.pause(0.3)
@@ -1104,9 +1138,9 @@ async def t_links_scroll(app, pilot):
   long = "drive: lab " + "/very/long/path" * 12
   links = []
   for i in range(2):
-    l = st.Link("drive", long + str(i), app.cluster.name, lambda: [], relay="ssh-j.com", uses=None, path="/x")
+    l = Link("drive", long + str(i), app.cluster.name, lambda: [], relay="ssh-j.com", uses=None, path="/x")
     l.relay_state = "ready"
-    l.sessions.append(st.Session(l, f"s{i}", kind="drive", client="SSH-2.0-OpenSSH_9.6 " + "x" * 80, term="", bytes_in=1000))
+    l.sessions.append(Session(l, f"s{i}", kind="drive", client="SSH-2.0-OpenSSH_9.6 " + "x" * 80, term="", bytes_in=1000))
     links.append(l); mgr.links.append(l)
   try:
     await pilot.click("#connstatus"); await pilot.pause(0.8)
@@ -1121,7 +1155,7 @@ async def t_links_scroll(app, pilot):
       links[0].sessions[0].bytes_in += 50000 * (n + 1); cs.show_links(); await pilot.pause(0.4)
     check("updated values keep the table scrolled where it was", x > 0 and table.scroll_x == x and "51.0 kB" not in str(table.get_row(f"session|{links[0].id}|s0")),
           (x, table.scroll_x))
-    links[1].sessions.append(st.Session(links[1], "s9", kind="drive", client="new")); cs.show_links(); await pilot.pause(0.5)
+    links[1].sessions.append(Session(links[1], "s9", kind="drive", client="new")); cs.show_links(); await pilot.pause(0.5)
     check("a new row keeps the table scrolled where it was too", len(mine()) == 5 and table.scroll_x == x, (len(mine()), table.scroll_x, x))
     await pilot.press("escape"); await pilot.pause(0.3)
   finally:
@@ -1132,8 +1166,8 @@ async def t_script_edit(app, pilot):
   await until(pilot, lambda: app.cluster.loader is None, 30)
   path = os.path.join(LAB, "jobs", "9003", "edit_me.sh")
   open(path, "w").write("#!/bin/bash -l\n#SBATCH --nodes=1\n#SBATCH --time=01:00:00\nset -eo pipefail\nsrun /bin/true\n")
-  st.open_path(app, ["Jobs"], path)
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ScriptScreen) and app.screen.ctx is not None, 20)
+  open_path(app, ["Jobs"], path)
+  ok = await until(pilot, lambda: isinstance(app.screen, ScriptScreen) and app.screen.ctx is not None, 20)
   sc = app.screen; area = sc.query_one("#script-text")
   await pilot.click("#sc-edit"); await pilot.pause(0.3)
   check("Edit makes the script editable in place, with the focus", ok and sc.editing and not area.read_only and app.focused is area
@@ -1173,7 +1207,7 @@ async def t_script_edit(app, pilot):
   await pilot.press("ctrl+z"); await pilot.pause(sc.LIVE_DELAY + 0.5)
   check("Ctrl+Z undoes (the text differs from the file again: modified)", area.text != before
         and "modified" in str(sc.query_one("#script-status").render()), area.text[:80])
-  await pilot.press("escape"); ok = await until(pilot, lambda: isinstance(app.screen, st.ConfirmScreen), 5)
+  await pilot.press("escape"); ok = await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 5)
   check("Esc with unsaved changes asks", ok and "Leave without saving" in str(app.screen.query_one("#confirm-message").render()))
   await pilot.click("#confirm-yes"); await pilot.pause(0.5)
   check("Discard: not editing, the text is the file's again", not sc.editing and area.read_only and "--mem=8" in area.text, area.text[:100])
@@ -1181,17 +1215,17 @@ async def t_script_edit(app, pilot):
   area.cursor_location = (0, 0); await pilot.press(*"# x", "enter"); await pilot.pause(0.2)
   open(path, "a").write("# changed elsewhere\n"); os.utime(path, (time.time() + 5, time.time() + 5))
   await pilot.pause(3.5)
-  await pilot.press("ctrl+s"); ok = await until(pilot, lambda: isinstance(app.screen, st.ConfirmScreen), 8)
+  await pilot.press("ctrl+s"); ok = await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 8)
   check("Save asks before overwriting a file changed on disk meanwhile", ok and "Overwrite" in str(app.screen.query_one("#confirm-yes").label))
   await pilot.click("#confirm-yes")
   ok = await until(pilot, lambda: open(path).read().startswith("# x"), 8)
   check("Overwrite writes the edited version", ok and "changed elsewhere" not in open(path).read())
   await pilot.press(*"y"); await pilot.pause(0.3)
   view = next(v for v in app.cluster.views if v.mode == app.current_mode)
-  app.action_close_view(); ok = await until(pilot, lambda: isinstance(app.screen, st.ConfirmScreen), 5)
+  app.action_close_view(); ok = await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 5)
   check("closing the subtab with unsaved changes asks", ok and "unsaved" in str(app.screen.query_one("#confirm-message").render()))
   await pilot.click("#confirm-no"); await pilot.pause(0.3)
-  check("No: the subtab stays", view in app.cluster.views and isinstance(app.screen, st.ScriptScreen))
+  check("No: the subtab stays", view in app.cluster.views and isinstance(app.screen, ScriptScreen))
   await pilot.press("ctrl+s"); await until(pilot, lambda: not sc.unsaved(), 5)
   await pilot.press("escape"); await pilot.pause(0.3)
   check("Esc without changes just stops editing", not sc.editing)
@@ -1201,8 +1235,8 @@ async def t_chdir(app, pilot):
   await until(pilot, lambda: app.cluster.loader is None, 30)
   path = os.path.join(LAB, "jobs", "9004", "chdir_job.sh")
   open(path, "w").write("#!/bin/bash -l\n#SBATCH --time=01:00:00\nsrun /bin/true\n")
-  st.open_path(app, ["Jobs"], path)
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ScriptScreen) and app.screen.ctx is not None, 20)
+  open_path(app, ["Jobs"], path)
+  ok = await until(pilot, lambda: isinstance(app.screen, ScriptScreen) and app.screen.ctx is not None, 20)
   sc = app.screen
   for value, shown in (("/nonexistent/run1", "/nonexistent/run1"), ("run_missing", os.path.join(os.path.dirname(path), "run_missing"))):
     open(path, "w").write(f"#!/bin/bash -l\n#SBATCH --chdir={value}\n#SBATCH --time=01:00:00\nsrun /bin/true\n")
@@ -1230,7 +1264,7 @@ async def t_web_access(app, pilot):
     check("without the session holder, Web says why", any("session holder" in m for _, m in notes(app)), notes(app)[-1:])
     hm.under_holder, hm.control = (lambda: True), fake
     await pilot.press("W")
-    ok = await until(pilot, lambda: isinstance(app.screen, st.LinkSetupScreen), 10)
+    ok = await until(pilot, lambda: isinstance(app.screen, LinkSetupScreen), 10)
     scr = app.screen
     check("Web: the web view starts, then the link setup for remote web access", ok and scr.kind == "web" and ("web_start", {}) in calls
           and "Remote web access" in str(scr.query_one("#setup-title").render()) and scr.query_one("#setup-uses").value == 0)
@@ -1242,7 +1276,7 @@ async def t_web_access(app, pilot):
           "password" in steps and "Keep that window open" in steps and "Take over" in steps, steps[:200])
     scr.query_one("#setup-relay-custom").value = True; scr.query_one("#setup-relay").value = "lab-relay"; await pilot.pause(0.2)
     await pilot.click("#setup-create")
-    ok = await until(pilot, lambda: isinstance(app.screen, st.LinkScreen), 10)
+    ok = await until(pilot, lambda: isinstance(app.screen, LinkScreen), 10)
     ls = app.screen; link = ls.link
     ok = ok and await until(pilot, lambda: link.ready(), 20)
     await pilot.pause(1.2)
@@ -1253,7 +1287,7 @@ async def t_web_access(app, pilot):
     ok = await until(pilot, lambda: any(c == "info" and "web link" in kw.get("text", "") for c, kw in calls), 6)
     check("the other views' lock screens hear about the web link", ok)
     views.append({"label": "Firefox (web)", "kind": "web"})
-    await pilot.press("q"); ok = await until(pilot, lambda: isinstance(app.screen, st.ConfirmScreen), 5)
+    await pilot.press("q"); ok = await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 5)
     msg = str(app.screen.query_one("#confirm-message").render()) if ok else ""
     check("quit asks when other views show this slurp, naming them", "2 views" in msg and "Firefox (web)" in msg, msg)
     await pilot.click("#confirm-no"); await pilot.pause(0.3)
@@ -1264,16 +1298,16 @@ async def t_web_access(app, pilot):
     hm.under_holder, hm.control = real
     for l in [l for l in app.link_manager.links if l.kind == "web"]: # (the tests after this one count the links)
       app.link_manager.revoke(l); app.link_manager.links.remove(l)
-    cfg = st.load_config(); cfg.pop("link_relay", None)
-    st.update_config(link_relay="ssh-j.com") # (the relay chosen here is a setting: back to the default)
+    cfg = load_config(); cfg.pop("link_relay", None)
+    update_config(link_relay="ssh-j.com") # (the relay chosen here is a setting: back to the default)
 
 async def t_options(app, pilot):
   await until(pilot, lambda: app.cluster.loader is None, 30)
-  before = dict(st.load_config())
-  st.update_config(drive_mounts={"lab": {"path": "/tmp/x", "read_only": True}}, progress_files={"1": "a"})
+  before = dict(load_config())
+  update_config(drive_mounts={"lab": {"path": "/tmp/x", "read_only": True}}, progress_files={"1": "a"})
   try:
     await pilot.press("f3")
-    ok = await until(pilot, lambda: isinstance(app.screen, st.OptionsScreen), 5)
+    ok = await until(pilot, lambda: isinstance(app.screen, OptionsScreen), 5)
     op = app.screen
     check("F3 opens Options, with the config's values", ok and op.query_one("#op-relay").value == (before.get("link_relay") or "ssh-j.com")
           and "config.json" in str(op.query_one("#op-path").render()))
@@ -1285,8 +1319,8 @@ async def t_options(app, pilot):
         b.press()
     await pilot.pause(0.3)
     await pilot.click("#op-save")
-    ok = await until(pilot, lambda: not isinstance(app.screen, st.OptionsScreen), 5)
-    cfg = st.load_config()
+    ok = await until(pilot, lambda: not isinstance(app.screen, OptionsScreen), 5)
+    cfg = load_config()
     check("Save writes config.json: themes, scrollback, copy, muted rules, the forgotten entries",
           ok and cfg.get("theme") == "nord" and cfg.get("theme_web") == "gruvbox" and cfg.get("terminal_scrollback") == 500
           and cfg.get("copy") == "terminal" and "R07" in cfg.get("checks_muted", []) and cfg.get("drive_mounts") == {}
@@ -1295,22 +1329,22 @@ async def t_options(app, pilot):
     app.active_view_changed("web"); await pilot.pause(0.3)
     check("a browser becomes the active view: its theme", app.theme == "gruvbox", app.theme)
     app.theme = "dracula"; await pilot.pause(0.3)
-    check("a theme chosen while the browser is active is the browser's", st.load_config().get("theme_web") == "dracula"
-          and st.load_config().get("theme") == "nord")
+    check("a theme chosen while the browser is active is the browser's", load_config().get("theme_web") == "dracula"
+          and load_config().get("theme") == "nord")
     app.active_view_changed("terminal"); await pilot.pause(0.3)
-    check("the terminal active again: the terminal's theme", app.theme == "nord" and st.load_config().get("theme_web") == "dracula", app.theme)
-    await pilot.press("f3"); await until(pilot, lambda: isinstance(app.screen, st.OptionsScreen), 5)
+    check("the terminal active again: the terminal's theme", app.theme == "nord" and load_config().get("theme_web") == "dracula", app.theme)
+    await pilot.press("f3"); await until(pilot, lambda: isinstance(app.screen, OptionsScreen), 5)
     op = app.screen
     check("Options shows the saved values again", op.query_one("#op-theme-web").value == "dracula" and op.query_one("#op-scrollback").value == "500"
           and "R07" in op.query_one("#op-muted").selected)
     await pilot.press("escape"); await pilot.pause(0.3)
   finally:
     import json
-    cfg = st.load_config()
+    cfg = load_config()
     for k in ("theme", "theme_web", "terminal_scrollback", "copy", "checks_muted", "drive_mounts", "progress_files", "link_relay"):
       if k in before: cfg[k] = before[k]
       else: cfg.pop(k, None)
-    open(st.config_path(), "w").write(json.dumps(cfg))
+    open(config_path(), "w").write(json.dumps(cfg))
     app.active_view_changed("terminal")
     if before.get("theme"): app.theme = before["theme"]
 
@@ -1318,49 +1352,49 @@ async def t_copy_views(app, pilot):
   await until(pilot, lambda: app.cluster.loader is None, 30)
   import json, importlib
   dialogs = importlib.import_module("slurp.screens.dialogs")
-  before = dict(st.load_config())
+  before = dict(load_config())
   used = []
   real_tool = dialogs.local_clipboard
   try:
-    st.update_config(copy="terminal"); cfg = st.load_config(); cfg.pop("copy_web", None); open(st.config_path(), "w").write(json.dumps(cfg))
+    update_config(copy="terminal"); cfg = load_config(); cfg.pop("copy_web", None); open(config_path(), "w").write(json.dumps(cfg))
     dialogs.local_clipboard = lambda text: used.append(text) or None
     n = len(app._notifications)
     dialogs.copy_text(app, "abc", "the test text"); await pilot.pause(0.3)
-    check("terminal view, \"copy\": \"terminal\": copied without asking", not isinstance(app.screen, st.CopyScreen)
+    check("terminal view, \"copy\": \"terminal\": copied without asking", not isinstance(app.screen, CopyScreen)
           and any("through the terminal" in m for _, m in notes(app)[n:]) and used == ["abc"])
     app.active_view_changed("web"); used.clear()
     dialogs.copy_text(app, "def", "the test text")
-    ok = await until(pilot, lambda: isinstance(app.screen, st.CopyScreen), 5)
+    ok = await until(pilot, lambda: isinstance(app.screen, CopyScreen), 5)
     check("a browser active: it has its own setting (asks), and this machine's clipboard tool is not used", ok and used == [])
     await pilot.click("#copy-arrived"); await pilot.pause(0.3)
-    cfg = st.load_config()
+    cfg = load_config()
     check("It arrived, in a browser: stored as copy_web, the terminal's stays", cfg.get("copy_web") == "terminal" and cfg.get("copy") == "terminal", cfg)
-    st.update_config(copy=None)
+    update_config(copy=None)
     n = len(app._notifications)
     dialogs.copy_text(app, "ghi", "the test text"); await pilot.pause(0.3)
-    check("browser: copied without asking now", not isinstance(app.screen, st.CopyScreen) and any("through the terminal" in m for _, m in notes(app)[n:]))
+    check("browser: copied without asking now", not isinstance(app.screen, CopyScreen) and any("through the terminal" in m for _, m in notes(app)[n:]))
     app.active_view_changed("terminal")
     dialogs.copy_text(app, "jkl", "the test text")
-    ok = await until(pilot, lambda: isinstance(app.screen, st.CopyScreen), 5)
+    ok = await until(pilot, lambda: isinstance(app.screen, CopyScreen), 5)
     check("back in the terminal (its setting cleared): it asks again", ok)
     await pilot.click("#copy-close"); await pilot.pause(0.3)
-    await pilot.press("f3"); await until(pilot, lambda: isinstance(app.screen, st.OptionsScreen), 5)
+    await pilot.press("f3"); await until(pilot, lambda: isinstance(app.screen, OptionsScreen), 5)
     op = app.screen
     check("Options: one copy setting for each kind of view", op.query_one("#op-copy").value == "" and op.query_one("#op-copy-web").value == "terminal")
     await pilot.press("escape"); await pilot.pause(0.3)
   finally:
     dialogs.local_clipboard = real_tool
     app.active_view_changed("terminal")
-    cfg = st.load_config()
+    cfg = load_config()
     for k in ("copy", "copy_web"):
       if k in before: cfg[k] = before[k]
       else: cfg.pop(k, None)
-    open(st.config_path(), "w").write(json.dumps(cfg))
+    open(config_path(), "w").write(json.dumps(cfg))
 
 async def t_array(app, pilot):
   got = []
   states = {"1": "COMPLETED", "2": "RUNNING", "3": "PENDING", "5": "FAILED"}
-  app.push_screen(st.RunArrayScreen("700", ["sbatch", "--array=3", "job.sh"], states, list(range(0, 10))), got.append)
+  app.push_screen(RunArrayScreen("700", ["sbatch", "--array=3", "job.sh"], states, list(range(0, 10))), got.append)
   await pilot.pause(0.3)
   scr = app.screen
   w = lambda: str(scr.query_one("#array-warning").render())
@@ -1375,7 +1409,7 @@ async def t_array(app, pilot):
   await pilot.click("#array-submit"); await pilot.pause(0.3)
   check("submit gives the command", got == [["sbatch", "--array=4-9:2", "job.sh"]], got)
   t = app.screen.query_one("#jobs"); t.focus(); await pilot.press("enter")
-  await until(pilot, lambda: isinstance(app.screen, st.JobScreen))
+  await until(pilot, lambda: isinstance(app.screen, JobScreen))
   await pilot.pause(0.5)
   check("no Run array button for a job that is not an array", not app.screen.query_one("#run-array").display)
   await pilot.press("escape"); await pilot.pause(0.3)
@@ -1404,7 +1438,7 @@ async def t_ij_fields(app, pilot):
   check("the edited command is submitted", "'--account=myown'" in call and "'--mem=10G'" in call and "'--gpus-per-node=4'" in call, call)
 
 async def t_progress(app, pilot):
-  st.JobScreen.PROGRESS_EVERY = 2 # (10 s in use)
+  JobScreen.PROGRESS_EVERY = 2 # (10 s in use)
   from datetime import datetime, timedelta
   t = app.screen.query_one("#jobs")
   col = [k.value for k in t.columns].index("eta")
@@ -1413,7 +1447,7 @@ async def t_progress(app, pilot):
   labels = [str(c.label) for c in t.columns.values()]
   check("job list: the columns are named by pace", "Done: same pace" in labels and "Done: current pace" in labels, labels)
   t.focus(); t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.JobScreen) and "on same pace (since the start)" in str(app.screen.query_one("#progress-line").render()), 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen) and "on same pace (since the start)" in str(app.screen.query_one("#progress-line").render()), 10)
   line = lambda: str(app.screen.query_one("#progress-line").render())
   check("job window: estimate since the start, the file", ok and "done in" in line() and "slurm-9001.out" in line(), line())
   wd = app.jobs["9001"].rec["WorkDir"]
@@ -1423,7 +1457,7 @@ async def t_progress(app, pilot):
       f.write(f"{(now - timedelta(minutes=minutes)).isoformat()} INFO iteration {k}/100\n")
   js = app.screen
   await pilot.click("#progress-file")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.DirScreen) and app.screen.entries, 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, DirScreen) and app.screen.entries, 10)
   ds = app.screen
   check("Progress file… opens the directory of the output in pick mode", ok and ds.pick is not None and ds.path == wd
         and "choose a file" in str(ds.query_one("#dstatus").render()))
@@ -1437,9 +1471,9 @@ async def t_progress(app, pilot):
         and "on current pace (last 4 updates): 1/min" in line() and ("~49 min" in line() or "~50 min" in line()) and "chosen for this job" in line(), repr(line()))
   with open(os.path.join(wd, "progress.log"), "a") as f:
     f.write(f"{datetime.now().replace(microsecond=0).isoformat()} INFO iteration 55/100\n")
-  ok3 = await until(pilot, lambda: "55/100" in line(), 3 * st.JobScreen.PROGRESS_EVERY + 5)
+  ok3 = await until(pilot, lambda: "55/100" in line(), 3 * JobScreen.PROGRESS_EVERY + 5)
   age = str(js.query_one("#progress-age").render())
-  check("the progress is read again by itself; when is shown, counting up", ok3 and f"updated every {st.JobScreen.PROGRESS_EVERY} s, last" in age
+  check("the progress is read again by itself; when is shown, counting up", ok3 and f"updated every {JobScreen.PROGRESS_EVERY} s, last" in age
         and "s ago" in age, age)
   await pilot.press("escape"); await pilot.pause(0.3)
   await pilot.press("r"); await until(pilot, lambda: app.cluster.loader is None); await pilot.pause(0.3)
@@ -1448,7 +1482,7 @@ async def t_progress(app, pilot):
   same, cur = str(row[keys.index("eta")]).strip(), str(row[keys.index("eta_now")]).strip()
   check("job list: done on same pace and on current pace, both", same not in ("", "-") and cur not in ("", "-"), (same, cur))
   t = app.screen.query_one("#jobs"); t.focus(); t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter")
-  await until(pilot, lambda: isinstance(app.screen, st.JobScreen) and "55/100" in line(), 10)
+  await until(pilot, lambda: isinstance(app.screen, JobScreen) and "55/100" in line(), 10)
   await pilot.click("#progress-stdout")
   ok = await until(pilot, lambda: "slurm-9001.out" in line(), 10)
   check("Use stdout goes back to the output file", ok, line())
@@ -1459,11 +1493,11 @@ def vtabs(app):
 
 async def t_subtabs(app, pilot):
   t = app.screen.query_one("#jobs"); t.focus(); t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.JobScreen) and app.screen.details["files"], 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.details["files"], 10)
   check("a job opens as a subtab", ok and app.current_mode != "_default" and vtabs(app) == ["Jobs", "job 9001"], vtabs(app))
   js = app.screen
   out = next(e for e in js.details["files"] if e.kind == "stdout"); js.open_entry(out)
-  ok = await until(pilot, lambda: isinstance(app.screen, st.FileScreen) and vtabs(app) == ["Jobs", "job 9001"], 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and vtabs(app) == ["Jobs", "job 9001"], 10)
   check("a file of the job opens within its subtab", ok and len(app.screen_stack) == 2 and vtabs(app) == ["Jobs", "job 9001"], vtabs(app))
   await pilot.press("escape"); await pilot.pause(0.3)
   check("Esc: back to the job window", app.screen is js)
@@ -1477,7 +1511,7 @@ async def t_subtabs(app, pilot):
   check("o and e are no shortcuts any more", "o" not in app.active_bindings and "e" not in app.active_bindings and app.screen is app.main
         and len(app.cluster.views) == 1)
   app.open_file(app.jobs["9002"], app.jobs["9002"].stdout_path())
-  ok = await until(pilot, lambda: isinstance(app.screen, st.FileScreen) and len(vtabs(app)) == 3, 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and len(vtabs(app)) == 3, 10)
   check("output file from the job list: a file subtab", ok and len(app.cluster.views) == 2 and "slurm-9002.out" in vtabs(app)[-1], vtabs(app))
   await pilot.press("t"); await pilot.pause(0.3); await pilot.press("enter"); ok = await until(pilot, lambda: "(cluster)" in sterm(app), 15)
   await pilot.click("#view-jobs"); await pilot.pause(0.3)
@@ -1486,14 +1520,14 @@ async def t_subtabs(app, pilot):
   check("two shells, each a subtab", ok and len(shells) == 2 and shells[0].session is not shells[1].session, vtabs(app))
   await pilot.press(*"echo second-$((1+1))", "enter"); await until(pilot, lambda: "second-2" in sterm(app), 5)
   await pilot.click(f"#view-tab-{shells[0].id}"); await pilot.pause(0.5)
-  check("clicking a shell subtab shows it, with the focus", app.screen.session is shells[0].session and isinstance(app.focused, st.TerminalView)
+  check("clicking a shell subtab shows it, with the focus", app.screen.session is shells[0].session and isinstance(app.focused, TerminalView)
         and "second-2" not in sterm(app))
   await pilot.press(*"echo first-$((0+1))", "enter")
   check("typing goes to that shell", await until(pilot, lambda: "first-1" in sterm(app), 5))
   app.select_cluster(0); await pilot.pause(0.5)
   check("another tab: its job list", app.screen is app.main and vtabs(app) == ["Jobs"], vtabs(app))
   app.select_cluster(1); await pilot.pause(0.5)
-  check("back: the subtab shown before", isinstance(app.screen, st.TerminalScreen) and app.screen.session is shells[0].session)
+  check("back: the subtab shown before", isinstance(app.screen, TerminalScreen) and app.screen.session is shells[0].session)
   proc = shells[0].session.proc
   await pilot.click(f"#view-close-{shells[0].id}"); await pilot.pause(0.8)
   check("✕ closes a shell subtab and ends the shell", shells[0] not in app.cluster.views and proc.poll() is not None
@@ -1534,9 +1568,9 @@ async def t_array_sort(app, pilot):
 async def t_conn_health(app, pilot):
   app.show_view(None); await pilot.pause(0.3); app.main.query_one("#jobs").focus()
   await pilot.press("c"); await pilot.pause(0.3)
-  check("c no longer opens the connection window (the footer is clicked; c categorizes)", not isinstance(app.screen, st.ConnectionScreen)
-        and isinstance(app.screen, st.CategorizeScreen), type(app.screen).__name__)
-  if isinstance(app.screen, st.CategorizeScreen):
+  check("c no longer opens the connection window (the footer is clicked; c categorizes)", not isinstance(app.screen, ConnectionScreen)
+        and isinstance(app.screen, CategorizeScreen), type(app.screen).__name__)
+  if isinstance(app.screen, CategorizeScreen):
     await pilot.press("escape"); await pilot.pause(0.3)
   import signal
   app.show_view(None); await pilot.pause(0.3)
@@ -1546,7 +1580,7 @@ async def t_conn_health(app, pilot):
   title = str(app.screen.query_one("#conn-title").render())
   check("connection window: ● healthy in the title, green border", "● healthy" in title and app.screen.query_one("#conn-dialog").has_class("-good"), title)
   await pilot.press("escape"); await pilot.pause(0.3)
-  st.PING_INTERVAL, st.PING_SLOW = 1, 2
+  remote.PING_INTERVAL, remote.PING_SLOW = 1, 2
   os.kill(app.ssh.proc.pid, signal.SIGSTOP)
   ok = await until(pilot, lambda: cs.has_class("-bad"), 15)
   check("frozen: footer red with 'no answer'", ok and "no answer" in str(cs.render()), str(cs.render()))
@@ -1555,7 +1589,7 @@ async def t_conn_health(app, pilot):
   check("connection window: red with no answer", "no answer" in title and app.screen.query_one("#conn-dialog").has_class("-bad"), title)
   await pilot.press("escape")
   os.kill(app.ssh.proc.pid, signal.SIGCONT)
-  st.PING_INTERVAL, st.PING_SLOW = 15, 5
+  remote.PING_INTERVAL, remote.PING_SLOW = 15, 5
   await until(pilot, lambda: cs.has_class("-good"), 15)
 
 async def t_restart_env(app, pilot):
@@ -1565,9 +1599,9 @@ async def t_restart_env(app, pilot):
   open(os.path.join(wd, "job10.sh"), "w").write("#!/bin/bash\necho changed on disk\n")
   app.show_view(None); await pilot.pause(0.3)
   t = app.main.query_one("#jobs"); t.focus(); t.move_cursor(row=t.get_row_index("9010")); await pilot.press("enter")
-  await until(pilot, lambda: isinstance(app.screen, st.JobScreen) and app.screen.details["files"], 10)
+  await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.details["files"], 10)
   await pilot.click("#restart-job")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.RestartScreen), 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, RestartScreen), 10)
   scr = app.screen
   env_cb, script_cb = scr.query_one("#restart-same-env"), scr.query_one("#restart-same-script")
   label = str(env_cb.label)
@@ -1592,7 +1626,7 @@ async def t_quota(app, pilot):
   app.show_view(None); await pilot.pause(0.3)
   lab_quota_delay = os.path.join(LAB, "delay"); open(lab_quota_delay, "w").write("0")
   await pilot.press("Q"); await pilot.pause(0.3)
-  check("quota opens as a subtab", isinstance(app.screen, st.QuotaScreen) and "quota" in [v.title for v in app.cluster.views])
+  check("quota opens as a subtab", isinstance(app.screen, QuotaScreen) and "quota" in [v.title for v in app.cluster.views])
   await pilot.click("#view-jobs"); await pilot.pause(0.3)
   check("while it loads the job list can be used", app.screen is app.main)
   app.show_view(next(v for v in app.cluster.views if v.key == "quota")); await pilot.pause(0.3)
@@ -1613,7 +1647,7 @@ async def t_scratch(app, pilot):
     p = os.path.join(d, name); open(p, "w").write("x" * 1000); os.utime(p, (now - days * 86400, now - days * 86400))
   app.show_view(None); await pilot.pause(0.3)
   await pilot.press("X")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ScratchScreen) and app.screen.result is not None, 30)
+  ok = await until(pilot, lambda: isinstance(app.screen, ScratchScreen) and app.screen.result is not None, 30)
   scr = app.screen
   status = str(scr.query_one("#scratch-status").render())
   paths = [str(scr.query_one("#scratch-files").get_row_at(i)[5]) for i in range(scr.query_one("#scratch-files").row_count)]
@@ -1622,7 +1656,7 @@ async def t_scratch(app, pilot):
         and "3 files" in status and "2 not used for more than 30 days" in status, (paths, status))
   scr.query_one("#scratch-files").focus(); await pilot.press("space")
   await pilot.click("#touch-selected"); await pilot.pause(0.3)
-  check("touch asks first and warns about site policies", isinstance(app.screen, st.ConfirmScreen) and "policy" in str(app.screen.dialog_message))
+  check("touch asks first and warns about site policies", isinstance(app.screen, ConfirmScreen) and "policy" in str(app.screen.dialog_message))
   await pilot.click("#confirm-yes")
   ok = await until(pilot, lambda: os.stat(os.path.join(d, "old1.dat")).st_atime > now - 60, 15)
   check("touch selected: only that file got a new access time, its modification time stays", ok
@@ -1672,7 +1706,7 @@ async def t_since(app, pilot):
 async def open_job(app, pilot, jid):
   app.show_view(None); await pilot.pause(0.3)
   t = app.main.query_one("#jobs"); t.focus(); t.move_cursor(row=t.get_row_index(jid)); await pilot.press("enter")
-  await until(pilot, lambda: isinstance(app.screen, st.JobScreen) and app.screen.details["files"], 10)
+  await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.details["files"], 10)
   return app.screen
 
 async def t_memory(app, pilot):
@@ -1738,7 +1772,7 @@ async def t_scratch_exclude(app, pilot):
     p = os.path.join(d, name); open(p, "w").write("x"); os.utime(p, (now - days * 86400, now - days * 86400))
   app.show_view(None); await pilot.pause(0.3)
   await pilot.press("X")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ScratchScreen) and app.screen.result is not None, 30)
+  ok = await until(pilot, lambda: isinstance(app.screen, ScratchScreen) and app.screen.result is not None, 30)
   scr = app.screen
   table = scr.query_one("#scratch-files")
   rows = lambda: [(os.path.relpath(str(table.get_row_at(i)[5]), d), table.get_row_at(i)[5].style) for i in range(table.row_count)]
@@ -1778,10 +1812,10 @@ async def t_array_progress(app, pilot):
   await reload(app, pilot)
   js = await open_job(app, pilot, "9500_1")
   js.choose_progress_file(type("E", (), {"stop": lambda self: None})())
-  await until(pilot, lambda: isinstance(app.screen, st.DirScreen) and app.screen.entries, 10)
+  await until(pilot, lambda: isinstance(app.screen, DirScreen) and app.screen.entries, 10)
   dt = app.screen.query_one("#dir"); dt.focus(); dt.move_cursor(row=dt.get_row_index("train_task1_2026-11-13T10-01-07.log")); await pilot.press("enter")
   ok = await until(pilot, lambda: any("array 9500" in m for _, m in notes(app)), 15)
-  files = {j: os.path.basename(st.progress_state(j)["file"] or "") for j in ("9500_2", "9500_3", "9500_4")}
+  files = {j: os.path.basename(progress_state(j)["file"] or "") for j in ("9500_2", "9500_3", "9500_4")}
   check("an array task's progress file: the files of the other running tasks guessed (datetime differs, zero padding)",
         ok and files["9500_2"] == "train_task2_2026-11-13T10-02-41.log" and files["9500_3"] == "train_task03_2026-11-13T09-59-13.log"
         and files["9500_4"] == "", (files, [m for _, m in notes(app)][-1:]))
@@ -1801,7 +1835,7 @@ async def t_collapse(app, pilot):
   arrays(True)
   await reload(app, pilot)
   t = app.main.query_one("#jobs")
-  keys = lambda: [str(t.coordinate_to_cell_key(st.Coordinate(i, 0)).row_key.value) for i in range(t.row_count)]
+  keys = lambda: [str(t.coordinate_to_cell_key(Coordinate(i, 0)).row_key.value) for i in range(t.row_count)]
   groups = [k for k in keys() if k.startswith("group|")]
   cell = lambda key, c: t.get_row_at(t.get_row_index(key))[c]
   check("a big array is one row; a small one (6 tasks) is not collapsed", sorted(groups) == ["group|9600", "group|9700"]
@@ -1813,7 +1847,7 @@ async def t_collapse(app, pilot):
   rows_before = t.row_count
   t.focus(); t.move_cursor(row=t.get_row_index("group|9600")); await pilot.press("space"); await pilot.pause(0.3)
   check("Space opens it: every task below the row", t.row_count == rows_before + 150 and "9600_17" in keys()
-        and str(cell("group|9600", 0)).endswith("▾ 150 tasks") and isinstance(app.screen, st.MainScreen), t.row_count)
+        and str(cell("group|9600", 0)).endswith("▾ 150 tasks") and isinstance(app.screen, MainScreen), t.row_count)
   check("the tasks of an opened array are indented, other jobs not", str(cell("9600_17", 0)) == "  9600_17"
         and str(cell("9500_1", 0)) == "9500_1" and str(cell("9001", 0)) == "9001", (str(cell("9600_17", 0)), str(cell("9500_1", 0))))
   await reload(app, pilot)
@@ -1827,7 +1861,7 @@ async def t_collapse(app, pilot):
   t.focus(); await pilot.press("g"); await pilot.pause(0.3)
   check("g switches back", cb.value and "group|9600" in keys() and t.row_count == rows_before)
   t.move_cursor(row=t.get_row_index("9500_1")); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.JobScreen), 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10)
   check("other rows open their job as before", ok and app.screen.job.jid == "9500_1")
   for v in list(app.cluster.views): app.close_view(v)
   arrays(False)
@@ -1840,7 +1874,7 @@ async def t_array_window(app, pilot):
   await reload(app, pilot)
   t = app.main.query_one("#jobs")
   t.focus(); t.move_cursor(row=t.get_row_index("group|9600")); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ArrayScreen) and app.screen.groups, 20)
+  ok = await until(pilot, lambda: isinstance(app.screen, ArrayScreen) and app.screen.groups, 20)
   scr = app.screen
   groups = {g: len(ids) for g, ids in scr.groups.items()} if ok else {}
   check("Enter on a collapsed array: its window (a subtab) with every task by state and exit code", ok and groups == {
@@ -1865,7 +1899,7 @@ async def t_array_window(app, pilot):
   import base64
   osc = "\x1b]52;c;" + base64.b64encode(b"132,134,136,138,140").decode() + "\x07"
   check("Copy ids without a clipboard tool: sent to the terminal (OSC 52), a window with ways to get it by hand",
-        osc in writes and isinstance(app.screen, st.CopyScreen) and app.screen.query_one("#copy-text").text == "132,134,136,138,140"
+        osc in writes and isinstance(app.screen, CopyScreen) and app.screen.query_one("#copy-text").text == "132,134,136,138,140"
         and app.screen.query_one("#copy-plain").display, [w for w in writes if "]52" in w])
   os.environ["TMUX"] = "/tmp/x,1,0"
   check("in tmux the OSC 52 is wrapped for passthrough", dlg.osc52("a").startswith("\x1bPtmux;\x1b\x1b]52;c;"))
@@ -1875,15 +1909,15 @@ async def t_array_window(app, pilot):
   await pilot.click("#copy-save"); await pilot.pause(0.3)
   check("Save to a file", open(dlg.COPIED_FILE).read() == "132,134,136,138,140\n" and any(dlg.COPIED_FILE in m for _, m in notes(app)))
   await pilot.click("#copy-arrived"); await pilot.pause(0.3)
-  check("It arrived: stored, the window closes", not isinstance(app.screen, st.CopyScreen) and st.load_config().get("copy") == "terminal")
+  check("It arrived: stored, the window closes", not isinstance(app.screen, CopyScreen) and load_config().get("copy") == "terminal")
   button.scroll_visible(); await pilot.pause(0.2); await pilot.click(button); await pilot.pause(0.5)
-  check("after that: only a notice", not isinstance(app.screen, st.CopyScreen) and any("through the terminal" in m for _, m in notes(app)))
-  st.update_config(copy=None)
+  check("after that: only a notice", not isinstance(app.screen, CopyScreen) and any("through the terminal" in m for _, m in notes(app)))
+  update_config(copy=None)
   clip = os.path.join(HERE, "clipbin")
   os.environ["PATH"] = clip + ":" + os.environ["PATH"]; os.environ["SSH_CONNECTION"] = "1.2.3.4 5 6.7.8.9 22"
   if os.path.exists(os.path.join(clip, "clipboard.txt")): os.unlink(os.path.join(clip, "clipboard.txt"))
   button.scroll_visible(); await pilot.pause(0.2); await pilot.click(button); await pilot.pause(0.5)
-  check("over SSH, pbcopy of the remote machine is not used", isinstance(app.screen, st.CopyScreen)
+  check("over SSH, pbcopy of the remote machine is not used", isinstance(app.screen, CopyScreen)
         and not os.path.exists(os.path.join(clip, "clipboard.txt")))
   await pilot.press("escape"); await pilot.pause(0.3)
   os.environ["PATH"] = os.environ["PATH"].split(":", 1)[1]; os.environ.pop("SSH_CONNECTION")
@@ -1892,7 +1926,7 @@ async def t_array_window(app, pilot):
   await pilot.click("#arr-copy-all"); await pilot.pause(0.5)
   got = open(os.path.join(clip, "clipboard.txt")).read() if os.path.exists(os.path.join(clip, "clipboard.txt")) else ""
   check("with a clipboard tool (xclip): the ids are on the clipboard, no window", got.startswith("1,2,3") and got.count(",") == 149
-        and not isinstance(app.screen, st.CopyScreen) and any("(xclip)" in m for _, m in notes(app)), got[:30])
+        and not isinstance(app.screen, CopyScreen) and any("(xclip)" in m for _, m in notes(app)), got[:30])
   os.environ["PATH"] = os.environ["PATH"].split(":", 1)[1]; os.environ.pop("DISPLAY")
   scr.query_one("#arr-tabs").active = "arr-tab-tasks"; await pilot.pause(0.3)
   tt = scr.query_one("#arr-tasks")
@@ -1905,7 +1939,7 @@ async def t_array_window(app, pilot):
         bar("100").completed == bar("100").total and bar("132").completed == 0 and bar("145") == "", (bar("100"), bar("132"), bar("145")))
   task17 = app.cluster.jobs["9600_17"]
   saved = task17.progress
-  task17.progress = st.JobProgress(37, 100, "37/100")
+  task17.progress = JobProgress(37, 100, "37/100")
   scr.refresh_task_progress()
   check("a running task: its n/N progress from the job list, refreshed", bar("17").completed == 37 and bar("17").total == 100, bar("17"))
   task17.progress = saved
@@ -1921,24 +1955,24 @@ async def t_array_window(app, pilot):
       if str(c.label).startswith(name): return x + 2
       x += c.get_render_width(tt)
   await pilot.click(tt, offset=(header_x("Start"), 0)); await pilot.pause(0.3)
-  starts = [st.epoch(scr.overview["tasks"][int(k)].get("start")) or 0 for k in order()]
+  starts = [epoch(scr.overview["tasks"][int(k)].get("start")) or 0 for k in order()]
   check("clicking Start sorts by start time, latest first (▼), by value", starts == sorted(starts, reverse=True)
         and any(l == "Start ▼" for l in labels()) and labels()[0] == "Task", labels())
   await pilot.click(tt, offset=(header_x("Start"), 0)); await pilot.pause(0.3)
-  starts = [st.epoch(scr.overview["tasks"][int(k)].get("start")) or 0 for k in order()]
+  starts = [epoch(scr.overview["tasks"][int(k)].get("start")) or 0 for k in order()]
   check("…again: earliest first (▲)", starts == sorted(starts) and any(l == "Start ▲" for l in labels()))
   await pilot.click(tt, offset=(header_x("State"), 0)); await pilot.pause(0.3)
   states = [scr.overview["tasks"][int(k)]["state"] for k in order()]
   check("clicking State groups the tasks by state", states == sorted(states), states[:3])
   await pilot.click(tt, offset=(2, 0)); await pilot.pause(0.3)
   tt.focus(); tt.move_cursor(row=tt.get_row_index("17")); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.JobScreen), 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10)
   check("a task opens its job window (on top of the array window)", ok and app.screen.job.jid == "9600_17")
   await pilot.press("escape"); await pilot.pause(0.3)
   check("← back to the array window", app.screen is scr)
   gone = app.cluster.jobs.pop("9600_120") # a task that is not in the job list: loaded from Slurm
   tt.focus(); tt.move_cursor(row=tt.get_row_index("120")); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.JobScreen), 15)
+  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 15)
   check("a task that is not in the job list is loaded first", ok and app.screen.job.jid == "9600_120")
   app.cluster.jobs["9600_120"] = gone
   await pilot.press("escape"); await pilot.pause(0.3)
@@ -1949,21 +1983,21 @@ async def t_array_window(app, pilot):
   ids.scroll_visible(); await pilot.pause(0.3)
   text = str(ids.render()).split("\n")[0]
   await pilot.click(ids, offset=(text.index("134") + 1, 0))
-  ok = await until(pilot, lambda: isinstance(app.screen, st.JobScreen), 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10)
   check("By state: clicking an id opens the job window of that task", ok and app.screen.job.jid == "9600_134", text)
   await pilot.press("escape"); await pilot.pause(0.3)
   check("← back to the array window", app.screen is scr)
   await pilot.click("#arr-cancel-pending"); await pilot.pause(0.3)
-  msg = str(app.screen.dialog_message) if isinstance(app.screen, st.ConfirmScreen) else ""
+  msg = str(app.screen.dialog_message) if isinstance(app.screen, ConfirmScreen) else ""
   check("cancelling the pending tasks asks first, with what and the command", "10 tasks (141-150)" in msg and "scancel --state=PENDING 9600" in msg, msg)
   await pilot.click("#confirm-yes")
   ok = await until(pilot, lambda: os.path.exists(calls), 10)
   check("and runs scancel --state=PENDING", ok and open(calls).read().strip() == "--state=PENDING 9600")
   for _ in range(3): # (the window may still be settling after the dialog before: click again)
     await pilot.click("#arr-cancel")
-    if await until(pilot, lambda: isinstance(app.screen, st.ConfirmScreen), 3):
+    if await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 3):
       break
-  msg = str(app.screen.dialog_message) if isinstance(app.screen, st.ConfirmScreen) else ""
+  msg = str(app.screen.dialog_message) if isinstance(app.screen, ConfirmScreen) else ""
   check("cancelling the whole array asks first", "running tasks included" in msg and "scancel 9600" in msg, msg)
   await pilot.click("#confirm-no"); await pilot.pause(0.3)
   check("No: nothing cancelled", open(calls).read().count("\n") == 1)
@@ -1973,7 +2007,7 @@ async def t_array_window(app, pilot):
   jinfo = rendered(js.query_one("#info").content)
   check("the job window: total node hours, so far for a running job", re.search(r"Node hours \(total\) +[0-9.]+ +\d+ nodes? × [0-9.]+ h +so far", jinfo), jinfo)
   b.scroll_visible(); await pilot.pause(0.2); await pilot.click("#array-window")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ArrayScreen) and app.screen.groups, 20)
+  ok = await until(pilot, lambda: isinstance(app.screen, ArrayScreen) and app.screen.groups, 20)
   check("it opens the window of its array (on top, ← back)", ok and app.screen.array_id == "9500" and len(app.screen_stack) == 2
         and {g: len(i) for g, i in app.screen.groups.items()} == {"RUNNING": 4, "COMPLETED (exit 0:0)": 1, "PENDING (Priority)": 1},
         app.screen.groups if ok else None)
@@ -1989,7 +2023,7 @@ async def t_array_done(app, pilot):
   arrays(True)
   await reload(app, pilot)
   app.open_array("9700")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ArrayScreen) and app.screen.groups, 20)
+  ok = await until(pilot, lambda: isinstance(app.screen, ArrayScreen) and app.screen.groups, 20)
   info = rendered(app.screen.info_table) if ok else ""
   check("an array with no queued task: no squeue error, its tasks listed", ok and "Invalid job id" not in info and "error" not in info
         and {g: len(i) for g, i in app.screen.groups.items()} == {"COMPLETED (exit 0:0)": 12}, info[-300:])
@@ -2014,7 +2048,7 @@ async def t_array_reload(app, pilot):
   arrays(True)
   await reload(app, pilot)
   app.open_array("9600")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.ArrayScreen) and app.screen.groups, 20)
+  ok = await until(pilot, lambda: isinstance(app.screen, ArrayScreen) and app.screen.groups, 20)
   scr = app.screen
   check("array window loads", ok)
   for i in range(3):
@@ -2030,7 +2064,7 @@ async def t_array_reload(app, pilot):
   ok = await until(pilot, lambda: not scr.loading and len(scr.query(".arr-group")) == 5 and "as of" in rendered(scr.info_table), 30)
   open(os.path.join(LAB, "delay"), "w").write("0")
   check("then the new content", ok, (scr.loading, len(scr.query(".arr-group")), rendered(scr.info_table)[-150:]))
-  orig = st.array_overview
+  orig = array_overview
   import slurp.screens.array as arrmod
   arrmod.array_overview = lambda array_id: (_ for _ in ()).throw(RuntimeError("sacct timed out"))
   scr.action_reload()
@@ -2076,7 +2110,7 @@ async def t_lazy(app, pilot):
   known_cmd = str(cell("9001", "cmd"))
   open(delay, "w").write("4")
   try:
-    app.cluster.jobs = {}; st.ERR_SIZES.clear() # as at the first load: nothing known
+    app.cluster.jobs = {}; ERR_SIZES.clear() # as at the first load: nothing known
     app.populate(); app.show_view(None); await pilot.pause(0.2)
     t0 = time.time(); app.action_reload()
     ok = await until(pilot, lambda: t.row_count >= 40, 10)
@@ -2084,8 +2118,8 @@ async def t_lazy(app, pilot):
     loading = app.cluster.loader is not None
     check("the list shows before the files of the jobs are read", ok and loading and shown < 3.5, f"{shown:.1f} s, loading {loading}")
     check("cells still coming: spinners (error file, command, progress of a running job)",
-          all(isinstance(cell("9001", k), st.Spinning) for k in ("err", "cmd", "progress", "eta", "eta_now"))
-          and isinstance(cell("9020", "err"), st.Spinning) and not isinstance(cell("9005", "progress"), st.Spinning),
+          all(isinstance(cell("9001", k), Spinning) for k in ("err", "cmd", "progress", "eta", "eta_now"))
+          and isinstance(cell("9020", "err"), Spinning) and not isinstance(cell("9005", "progress"), Spinning),
           [type(cell("9001", k)).__name__ for k in ("err", "cmd", "progress")])
     import re as _re
     def frames(): # the row of 9001 as the table draws it
@@ -2097,18 +2131,18 @@ async def t_lazy(app, pilot):
     check("the status says the files are being read", "reading the files of the jobs" in status, status)
     await until(pilot, lambda: app.cluster.loader is None, 20); await pilot.pause(0.3)
     check("then the values replace the spinners", str(cell("9001", "cmd")) == known_cmd and "!" in str(cell("9000", "err"))
-          and not any(isinstance(cell("9001", k), st.Spinning) for k in ("err", "cmd", "progress")), (str(cell("9000", "err")), str(cell("9001", "cmd"))))
+          and not any(isinstance(cell("9001", k), Spinning) for k in ("err", "cmd", "progress")), (str(cell("9000", "err")), str(cell("9001", "cmd"))))
     app.action_reload()
     await until(pilot, lambda: app.cluster.listed, 10)
     check("a reload keeps the values of the last load meanwhile, no spinners", app.cluster.loader is not None
-          and str(cell("9001", "cmd")) == known_cmd and not isinstance(cell("9001", "err"), st.Spinning))
+          and str(cell("9001", "cmd")) == known_cmd and not isinstance(cell("9001", "err"), Spinning))
     await until(pilot, lambda: app.cluster.loader is None, 20)
-    app.cluster.jobs = {}; st.ERR_SIZES.clear(); app.populate()
+    app.cluster.jobs = {}; ERR_SIZES.clear(); app.populate()
     app.action_reload()
     await until(pilot, lambda: app.cluster.listed, 10)
     app.action_abort_load(); await pilot.pause(0.5)
     check("aborting while the files are read: the list stays, no spinners left", t.row_count >= 40 and app.cluster.loader is None
-          and not any(isinstance(cell("9001", k), st.Spinning) for k in ("err", "cmd", "progress"))
+          and not any(isinstance(cell("9001", k), Spinning) for k in ("err", "cmd", "progress"))
           and any("reading the files of the jobs aborted" in m for _, m in notes(app)), (t.row_count, app.cluster.loader, [type(cell("9001", k)).__name__ for k in ("err", "cmd", "progress")], notes(app)[-3:]))
   finally:
     os.unlink(delay)
@@ -2150,7 +2184,7 @@ class LinkClient:
 
 def link_client_argv(link, known):
   import shlex
-  argv = shlex.split(st.client_commands(link)[0][1])
+  argv = shlex.split(client_commands(link)[0][1])
   return [argv[0], "-tt", "-o", f"UserKnownHostsFile={known}", "-o", "StrictHostKeyChecking=accept-new", *argv[1:]]
 
 async def t_links(app, pilot):
@@ -2159,12 +2193,12 @@ async def t_links(app, pilot):
   app.show_view(None); await pilot.pause(0.2)
   # Shell asks where, every time
   await pilot.click("#cluster-shell"); await pilot.pause(0.4)
-  check("Shell asks: in slurp or from your own terminal", isinstance(app.screen, st.ShellChoiceScreen)
+  check("Shell asks: in slurp or from your own terminal", isinstance(app.screen, ShellChoiceScreen)
         and not app.screen.query_one("#choice-own").disabled)
   await pilot.click("#choice-own"); await pilot.pause(0.5)
   scr = app.screen
-  warning = str(scr.query_one("#setup-warning").render()) if isinstance(scr, st.LinkSetupScreen) else ""
-  check("From your own terminal: the setup panel, with the public relay and its warning", isinstance(scr, st.LinkSetupScreen)
+  warning = str(scr.query_one("#setup-warning").render()) if isinstance(scr, LinkSetupScreen) else ""
+  check("From your own terminal: the setup panel, with the public relay and its warning", isinstance(scr, LinkSetupScreen)
         and scr.chosen() == "sshj" and scr.query_one("#setup-relay-sshj").value and "PUBLIC relay" in warning and "third party" in warning, warning[:120])
   check("the relays to choose from: direct, ssh-j.com, serveo.net, pinggy.io, sshreach.me, custom; each with a line on what it is",
         [b.id for b in scr.query("#setup-relays RadioButton")] == [f"setup-relay-{r}" for r in ("direct", "sshj", "serveo", "pinggy", "sshreach", "custom")]
@@ -2191,17 +2225,17 @@ async def t_links(app, pilot):
   warning = str(scr.query_one("#setup-warning").render())
   check("an own relay: no public warning, a note", "PUBLIC" not in warning and "Relay lab-relay: a plain OpenSSH jump host" in warning, warning[:100])
   await pilot.click("#setup-create")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.LinkScreen), 5)
+  ok = await until(pilot, lambda: isinstance(app.screen, LinkScreen), 5)
   view = app.screen
   link = view.link if ok else None
   ok = ok and await until(pilot, lambda: link.ready() and view.query(".lv-copy"), 20)
   check("Create: the link window; when the relay is ready, the commands with copy buttons", ok and len(view.query(".lv-copy")) >= 4,
         (link.relay_state, link.relay_error) if link else None)
   app.save_screenshot(filename="links_view.svg", path=OUT)
-  check("the relay is remembered as a setting", st.load_config().get("link_relay") == "lab-relay")
+  check("the relay is remembered as a setting", load_config().get("link_relay") == "lab-relay")
   state = rendered(view.query_one("#lv-state").content) if ok else ""
   check("the window shows relay, logins, password, host key", "ready, via lab-relay" in state and "takes logins: once" in state
-        and link.password in state and st.host_fingerprint() in state, state)
+        and link.password in state and host_fingerprint() in state, state)
   client = LinkClient(link_client_argv(link, known), link.password)
   ok = await client.read_until(pilot, r"\(cluster\)", 30)
   check("the user's ssh gets the login shell of the cluster (over the tab's session)", ok, client.out[-200:])
@@ -2215,17 +2249,17 @@ async def t_links(app, pilot):
   await pilot.press("escape"); await pilot.pause(0.3)
   await pilot.click("#connstatus"); await pilot.pause(0.8)
   cs = app.screen
-  table = cs.query_one("#conn-links") if isinstance(cs, st.ConnectionScreen) else None
+  table = cs.query_one("#conn-links") if isinstance(cs, ConnectionScreen) else None
   keys = [r.value for r in table.rows] if table else []
   check("the connection window lists the link and its session", f"link|{link.id}" in keys and any(k.startswith(f"session|{link.id}|") for k in keys), keys)
   session_key = next(k for k in keys if k.startswith("session|"))
   table.focus(); table.move_cursor(row=table.get_row_index(session_key)); await pilot.press("enter"); await pilot.pause(0.4)
-  check("clicking a session asks to disconnect it", isinstance(app.screen, st.ConfirmScreen) and "Disconnect" in app.screen.dialog_title)
+  check("clicking a session asks to disconnect it", isinstance(app.screen, ConfirmScreen) and "Disconnect" in app.screen.dialog_title)
   await pilot.click("#confirm-yes")
   code = await client.wait(pilot, 10)
   check("Disconnect ends the user's ssh", code is not None and not link.live_sessions, code)
   table.move_cursor(row=table.get_row_index(f"link|{link.id}")); await pilot.press("enter"); await pilot.pause(0.5)
-  check("clicking the link opens its window", isinstance(app.screen, st.LinkScreen) and app.screen.link is link)
+  check("clicking the link opens its window", isinstance(app.screen, LinkScreen) and app.screen.link is link)
   check("a used one-time link takes no more logins", not link.open() and link.why_closed() == "used")
   await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.3)
 
@@ -2236,13 +2270,13 @@ async def t_links(app, pilot):
   calls = os.path.join(LAB, "srun_calls")
   if os.path.exists(calls): os.unlink(calls)
   await pilot.press("s"); await pilot.pause(0.4)
-  check("a node shell asks too", isinstance(app.screen, st.ShellChoiceScreen) and node in str(app.screen.query_one("#choice-title").render()))
+  check("a node shell asks too", isinstance(app.screen, ShellChoiceScreen) and node in str(app.screen.query_one("#choice-title").render()))
   await pilot.click("#choice-own"); await pilot.pause(0.5)
   scr = app.screen
-  check("its setup panel: a shell (no drive options)", isinstance(scr, st.LinkSetupScreen) and scr.kind == "shell" and not scr.query("#setup-ro")
+  check("its setup panel: a shell (no drive options)", isinstance(scr, LinkSetupScreen) and scr.kind == "shell" and not scr.query("#setup-ro")
         and scr.query_one("#setup-relay").value == "lab-relay")
   await pilot.click("#setup-create")
-  await until(pilot, lambda: isinstance(app.screen, st.LinkScreen) and app.screen.link.ready(), 20)
+  await until(pilot, lambda: isinstance(app.screen, LinkScreen) and app.screen.link.ready(), 20)
   link = app.screen.link
   client = LinkClient(link_client_argv(link, known), link.password)
   await pilot.pause(2)
@@ -2258,11 +2292,11 @@ async def t_links(app, pilot):
   # the login directory as a drive (read only, so the test never writes into it)
   app.show_view(None); await pilot.pause(0.3)
   await pilot.click("#cluster-drive")
-  await until(pilot, lambda: isinstance(app.screen, st.DriveScreen), 10)
+  await until(pilot, lambda: isinstance(app.screen, DriveScreen), 10)
   for _ in range(3): # (the drive window may still be settling: click again)
     await pilot.click("#drive-link") # (the drive on your own machine)
-    ok = await until(pilot, lambda: isinstance(app.screen, st.LinkSetupScreen), 5)
-    if ok or not isinstance(app.screen, st.DriveScreen):
+    ok = await until(pilot, lambda: isinstance(app.screen, LinkSetupScreen), 5)
+    if ok or not isinstance(app.screen, DriveScreen):
       break
   scr = app.screen
   home = app.cluster.connection.home
@@ -2270,16 +2304,16 @@ async def t_links(app, pilot):
         and scr.path == home and not scr.query_one("#setup-ro").disabled and scr.query_one("#setup-uses").value == 0, (home, type(scr).__name__, [type(s).__name__ for s in app.screen_stack], getattr(scr, "path", None)))
   scr.query_one("#setup-ro").value = True; await pilot.pause(0.2)
   await pilot.click("#setup-create")
-  await until(pilot, lambda: isinstance(app.screen, st.LinkScreen) and app.screen.link.ready(), 20)
+  await until(pilot, lambda: isinstance(app.screen, LinkScreen) and app.screen.link.ready(), 20)
   link = app.screen.link
   from slurp import winhelper as wh
   check("drive link: the folders for the Windows helper, $HOME (the login directory) first, in its URL",
         link.dirs[:1] == [("HOME", home)] and all(p.startswith("/") for _, p in link.dirs)
         and urllib.parse.quote(f"HOME={home}", safe="") in wh.link_url(link), link.dirs)
-  titles = [t for t, _, _ in st.client_commands(link)]
+  titles = [t for t, _, _ in client_commands(link)]
   check("drive commands: sshfs, SSHFS-Win (two steps), PuTTY/WinSCP, ssh config", any("sshfs" in t for t in titles)
         and sum("SSHFS-Win" in t for t in titles) == 2 and any("WinSCP" in t for t in titles) and any("config" in t for t in titles), titles)
-  sshfs = dict((t, c) for t, c, _ in st.client_commands(link))["Linux, macOS (sshfs): one command"]
+  sshfs = dict((t, c) for t, c, _ in client_commands(link))["Linux, macOS (sshfs): one command"]
   mnt = os.path.join(HERE, "share", "uimnt"); os.makedirs(mnt, exist_ok=True)
   subprocess.run(["fusermount", "-u", mnt], capture_output=True)
   opts = re.search(r"-o (\S+)", sshfs).group(1) + f",UserKnownHostsFile={known},StrictHostKeyChecking=accept-new,password_stdin"
@@ -2304,7 +2338,7 @@ async def t_links(app, pilot):
   # quitting with an open session asks first
   await pilot.press("escape"); await pilot.pause(0.3)
   await app.action_quit(); await pilot.pause(0.4)
-  check("quitting with open sessions asks first", isinstance(app.screen, st.ConfirmScreen) and "Quit slurp" in app.screen.dialog_title)
+  check("quitting with open sessions asks first", isinstance(app.screen, ConfirmScreen) and "Quit slurp" in app.screen.dialog_title)
   await pilot.click("#confirm-no"); await pilot.pause(0.3)
   await loop.run_in_executor(None, lambda: subprocess.run(["fusermount", "-u", mnt], capture_output=True))
   await until(pilot, lambda: not link.live_sessions, 10)
@@ -2313,7 +2347,7 @@ async def t_links(app, pilot):
   await until(pilot, lambda: all(l.relay_state == "closed" for l in app.link_manager.links), 15)
   check("revoked links close their relay tunnels", all(l.relay_state == "closed" for l in app.link_manager.links),
         [l.relay_state for l in app.link_manager.links])
-  st.update_config(link_relay=None)
+  update_config(link_relay=None)
 
 async def t_drive(app, pilot):
   app.show_view(None); await pilot.pause(0.2)
@@ -2322,7 +2356,7 @@ async def t_drive(app, pilot):
   mnt = os.path.join(HERE, "share", "drivemnt"); subprocess.run(["fusermount", "-u", mnt], capture_output=True)
   shutil.rmtree(mnt, ignore_errors=True)
   await pilot.press("F")
-  ok = await until(pilot, lambda: isinstance(app.screen, st.DriveScreen), 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, DriveScreen), 10)
   scr = app.screen
   check("Drive asks where: this machine (path, read only) or your own machine (a link)", ok and scr.query_one("#drive-path").value == os.path.expanduser("~/mnt/lab")
         and not scr.query_one("#drive-mount").disabled and not scr.query_one("#drive-link").disabled, scr.query_one("#drive-path").value if ok else None)
@@ -2336,7 +2370,7 @@ async def t_drive(app, pilot):
   listing = await asyncio.get_running_loop().run_in_executor(None, lambda: sorted(os.listdir(mnt)) if ok else [])
   check("Mount here: sshfs through the tab's session, the login directory at the path", ok and listing == sorted(os.listdir(home)),
         (drive.state if drive else None, drive.error if drive else None, drive.messages if drive else None))
-  check("the path and read only are remembered for the tab", (st.load_config().get("drive_mounts") or {}).get("lab") == {"path": mnt, "read_only": True})
+  check("the path and read only are remembered for the tab", (load_config().get("drive_mounts") or {}).get("lab") == {"path": mnt, "read_only": True})
   await until(pilot, lambda: "mounted at" in str(scr.query_one("#drive-state").render()), 5) # (the dialog refreshes on a timer)
   state = str(scr.query_one("#drive-state").render())
   check("the dialog shows the state, Unmount instead of Mount", "mounted at" in state and scr.query_one("#drive-unmount").display
@@ -2350,7 +2384,7 @@ async def t_drive(app, pilot):
   await pilot.press("escape"); await pilot.pause(0.3)
   await pilot.click("#connstatus"); await pilot.pause(0.8)
   cs = app.screen
-  info = rendered(cs.query_one("#conn-drive").content) if isinstance(cs, st.ConnectionScreen) else ""
+  info = rendered(cs.query_one("#conn-drive").content) if isinstance(cs, ConnectionScreen) else ""
   check("the connection window: the drive, its state and details", "mounted at" in info and f"lab:{home}" in info and "sshfs" in info, info)
   buttons = {b: cs.query_one(f"#conn-drive-{b}").display for b in ("mount", "unmount", "remount", "force")}
   check("…with Unmount, Remount, Force unmount (no Mount)", buttons == {"mount": False, "unmount": True, "remount": True, "force": True}, buttons)
@@ -2362,7 +2396,7 @@ async def t_drive(app, pilot):
   app.disconnect(cluster); await pilot.pause(0.5)
   ok = await until(pilot, lambda: drive.state in ("broken", "failed"), 20)
   check("the session of the tab ends: the drive is shown as not answering", ok, drive.state)
-  while not isinstance(app.screen, st.MainScreen) and len(app.screen_stack) > 1:
+  while not isinstance(app.screen, MainScreen) and len(app.screen_stack) > 1:
     await pilot.press("escape"); await pilot.pause(0.2)
   app.screen.query_one("#jobs").focus()
   await pilot.click("#connstatus"); await pilot.pause(0.5)
@@ -2382,10 +2416,10 @@ async def t_drive(app, pilot):
   listing = await asyncio.get_running_loop().run_in_executor(None, lambda: sorted(os.listdir(mnt)) if ok else [])
   check("…the dead mount point is cleared and it is mounted again", ok and listing == sorted(os.listdir(home)), drive.state)
   app.show_view(None); await pilot.pause(0.3)
-  while not isinstance(app.screen, st.MainScreen) and len(app.screen_stack) > 1:
+  while not isinstance(app.screen, MainScreen) and len(app.screen_stack) > 1:
     await pilot.press("escape"); await pilot.pause(0.2)
   await app.action_quit(); await pilot.pause(0.4)
-  check("quitting with a mounted drive asks first, saying it is unmounted", isinstance(app.screen, st.ConfirmScreen)
+  check("quitting with a mounted drive asks first, saying it is unmounted", isinstance(app.screen, ConfirmScreen)
         and f"The drive at {mnt} is unmounted" in app.screen.dialog_message, getattr(app.screen, "dialog_message", ""))
   await pilot.click("#confirm-no"); await pilot.pause(0.3)
   await pilot.click("#connstatus"); await pilot.pause(0.8)
@@ -2394,13 +2428,13 @@ async def t_drive(app, pilot):
   check("Unmount: unmounted, sshfs ended", ok and not os.path.ismount(mnt), drive.state)
   await pilot.pause(0.8)
   cs = app.screen
-  check("…then Mount… is offered again", isinstance(cs, st.ConnectionScreen) and cs.query_one("#conn-drive-mount").display)
+  check("…then Mount… is offered again", isinstance(cs, ConnectionScreen) and cs.query_one("#conn-drive-mount").display)
   await pilot.press("escape"); await pilot.pause(0.3)
   # a path that is not empty is refused
   busy = os.path.join(HERE, "share", "drivebusy"); os.makedirs(busy, exist_ok=True); open(os.path.join(busy, "x"), "w").write("x")
   app.mount_drive(cluster, busy, False); await pilot.pause(1)
   check("a directory that is not empty is refused", drive.state != "mounted" and any("not empty" in m for _, m in notes(app)))
-  st.update_config(drive_mounts=None)
+  update_config(drive_mounts=None)
 
 TESTS_ALL = [t_about, t_categories, t_offline, t_status_page, t_copy_views, t_options, t_web_access, t_chdir, t_script_edit, t_links_scroll, t_links_health, t_this_view, t_cloudflare_ask, t_web_cloudflare, t_scrollback, t_view_help, t_checks_ui, t_checks_more, t_term_help, t_drive, t_links, t_lazy, t_array_reload, t_array_done, t_array_window, t_collapse, t_array_progress, t_scratch_exclude, t_memory_watch, t_memory, t_since, t_quota, t_scratch, t_restart_env, t_conn_health, t_array_sort, t_subtabs, t_progress, t_ij_fields, t_array, t_border, t_ci_noconn, t_sort, t_accounts, t_zebra, t_titles, t_reconnect, t_restart, t_interactive, t_cluster_info, t_close]
 TESTS = [globals()[n] for n in os.environ["ONLY"].split(",")] if os.environ.get("ONLY") else TESTS_ALL
