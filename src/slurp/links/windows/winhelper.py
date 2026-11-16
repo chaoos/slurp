@@ -12,7 +12,6 @@ the helper into %LOCALAPPDATA%\\slurp-helper, compiles its small launcher (winhe
 binary is shipped), registers slurp:// for the user (no admin), starts it with Windows and remembers the host key
 of this slurp (a link of another slurp asks first)."""
 
-import os
 from importlib import resources
 import urllib.parse
 

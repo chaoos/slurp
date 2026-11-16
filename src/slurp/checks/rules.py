@@ -1,4 +1,4 @@
-"""The rules of the checks (see checks.py). Each rule documents itself for the rule catalogue."""
+"""The rules of the checks (see engine.py). Each rule documents itself for the rule catalogue."""
 
 import difflib
 import math

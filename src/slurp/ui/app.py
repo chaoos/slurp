@@ -1089,7 +1089,7 @@ class Slurp(App):
     event.stop()
     self.action_web_access()
 
-  # ---- remote web access: this slurp in a browser, through a web link (see holder.py)
+  # ---- remote web access: this slurp in a browser, through a web link (see links/holder.py)
   web_port = None # the web view of the session holder, while one runs
   web_setup_open = False # the Web dialog is open: its web view must not stop before the link exists
 

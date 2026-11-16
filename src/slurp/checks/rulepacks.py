@@ -1,6 +1,6 @@
 """Site rule packs: what the checks should know about a cluster that Slurm does not tell.
 
-A pack is a TOML file. The built-in ones are in rules/ next to this module, the user's own in
+A pack is a TOML file. The built-in ones are in packs/ next to this module, the user's own in
 ~/.config/slurp/rules/ (they take precedence). A pack applies when one of its "match" patterns (fnmatch) matches the
 tab's name, its SSH destination, or the login node's host name.
 

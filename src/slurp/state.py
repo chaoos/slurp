@@ -29,7 +29,7 @@ PRESETS = {
 # logging: never write to the terminal, collect warnings to show them in the UI
 
 class Collector(logging.Handler):
-  """The warnings, with the tab of the thread that logs each; tab_of() names that tab (remote.py sets it: it knows the
+  """The warnings, with the tab of the thread that logs each; tab_of() names that tab (cluster/remote.py sets it: it knows the
   connections, this module is below it)"""
   def __init__(self):
     super().__init__(logging.WARNING)

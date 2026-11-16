@@ -45,7 +45,7 @@ RESET_TERMINAL = ("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?
 ALT_MODES = (47, 1047, 1049)
 
 def _logo_lines():
-  """The logo in 5 rows of terminal output (see logo.py; the holder does not import the app, logo.py is small)"""
+  """The logo in 5 rows of terminal output (see ui/logo.py; the holder does not import the app, logo.py is small)"""
   try:
     from ..ui import logo
   except ImportError:

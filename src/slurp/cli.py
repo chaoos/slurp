@@ -1,4 +1,4 @@
-"""The command line: slurp [options] runs the app (under the session holder, see holder.py), slurp check FILE...
+"""The command line: slurp [options] runs the app (under the session holder, see links/holder.py), slurp check FILE...
 checks batch scripts without it, slurp --holder is the holder process itself. The `slurp` command and
 `python -m slurp` both come here."""
 
@@ -90,7 +90,7 @@ def main():
     return
 
   if not os.environ.get("SLURP_INNER") and not args.no_holder and sys.stdin.isatty() and sys.stdout.isatty():
-    # the session holder runs the app; this terminal is a view of it (see holder.py)
+    # the session holder runs the app; this terminal is a view of it (see links/holder.py)
     from .links import holder
     app_args = [a for a in sys.argv[1:] if a not in ("--new", "--no-holder")]
     path = holder.socket_path(f"s{os.getpid()}" if args.new else "default")

@@ -373,5 +373,3 @@ def peak_job_memory(job):
       if sep and key.strip().lower().endswith("gpumem"):
         gpu_peaks.append(sl.sacct_bytes(value.strip()))
   return cpu_peak, max(gpu_peaks, default=0)
-
-

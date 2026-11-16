@@ -6,7 +6,6 @@ The command has no $ and no double quotes inside its argument, so it is the same
 expand $... in a double-quoted string) and into cmd."""
 
 import base64
-import os
 from importlib import resources
 import time
 import zlib

@@ -1,4 +1,4 @@
-"""Categories of jobs (see categories.py): the dialog that puts the marked jobs in one, and the window that browses
+"""Categories of jobs (see cluster/categories.py): the dialog that puts the marked jobs in one, and the window that browses
 them as a tree, with the numbers and the jobs of the one selected"""
 
 import time

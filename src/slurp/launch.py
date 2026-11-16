@@ -1,4 +1,4 @@
-"""How slurp starts itself again: the session holder, the app under it, the app of --serve (see holder.py, cli.py)"""
+"""How slurp starts itself again: the session holder, the app under it, the app of --serve (see links/holder.py, cli.py)"""
 
 import os
 import sys
