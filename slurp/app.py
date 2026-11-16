@@ -263,6 +263,9 @@ class Slurp(App):
         found = len(self.clusters) - 1
       if destination == next(d for d in state.initial_ssh_destinations if not is_local_destination(d)):
         self.cluster_index = found # the first one given is shown
+    from . import jobcache
+    for cluster in self.clusters: # (the list of the last load at once: until the cluster answers, or if it does not)
+      jobcache.load(cluster)
     self.shell = None # TerminalSession shown on the right of every window
     self.sort_column, self.sort_reverse = "jobid", True
     self.job_filter = ""
@@ -610,6 +613,8 @@ class Slurp(App):
       self.clusters.append(ClusterSession("Local" if not destination else destination))
     else:
       self.clusters.append(ClusterSession(destination, destination))
+    from . import jobcache
+    jobcache.load(self.clusters[-1])
     self.refresh_cluster_tabs()
     self.select_cluster(len(self.clusters) - 1)
     self.save_tabs()
@@ -858,7 +863,8 @@ class Slurp(App):
         for other in HEALTH_STYLES:
           widget.set_class(other == level and bool(cluster.destination), f"-{other}")
       if isinstance(screen, MainScreen) and screen.query("#reload"):
-        screen.query_one("#status", Static).update(Text(cluster.summary))
+        stale = self.stale_text(cluster)
+        screen.query_one("#status", Static).update(Text.assemble(stale, cluster.summary) if stale is not None else Text(cluster.summary))
         button = screen.query_one("#reload", Button)
         label, variant = ("Abort", "error") if cluster.loader is not None else ("Reload", "primary")
         if str(button.label) != label:
@@ -1415,6 +1421,7 @@ class Slurp(App):
     try:
       if cluster.slurm_cluster is None:
         cluster.slurm_cluster = categories.cluster_name()
+      self.write_pending_categories(cluster)
       cluster.categories = categories.load(cluster.slurm_cluster)
     except (OSError, ValueError) as e:
       log.warning(f"categories of {cluster.name}: {e}")
@@ -1423,6 +1430,50 @@ class Slurp(App):
       if not getattr(cluster, "told_categories", False):
         cluster.told_categories = True
         self.call_from_thread(self.notify, f"the categories cannot be read: {e}", title=cluster.name, severity="warning", timeout=12)
+
+  def write_pending_categories(self, cluster):
+    """(in a worker of the tab) the changes to the categories made while the cluster could not be reached: on the
+    cluster now, in their order (one that no longer fits, e.g. a rename of a category deleted meanwhile: skipped)"""
+    from . import categories
+    ops = list(cluster.pending_categories)
+    if not ops:
+      return
+    def replay(store):
+      skipped = []
+      for op in ops:
+        try:
+          categories.apply_op(store, op)
+        except (ValueError, TypeError, AttributeError) as e:
+          skipped.append(f"{op[0]}: {e}")
+      return skipped
+    store, skipped = categories.change(cluster.slurm_cluster, replay) # (OSError, ValueError: tried again next load)
+    cluster.pending_categories = [p for p in cluster.pending_categories if p not in ops]
+    cluster.categories = store
+    from . import jobcache
+    jobcache.save_pending(cluster)
+    done = len(ops) - len(skipped)
+    text = (f"{done} change{'s' if done != 1 else ''} to the categories made while the cluster could not be reached: "
+            "written to it now" + (f"; skipped (no longer possible): {'; '.join(skipped)}" if skipped else ""))
+    self.call_from_thread(self.notify, text, title=cluster.name, severity="warning" if skipped else "information", timeout=12)
+
+  def offline(self, cluster):
+    """An SSH tab whose cluster cannot be reached now (not logged in, lost, closed)"""
+    return bool(cluster.destination) and (cluster.connection is None or not cluster.connection.ready)
+
+  def stale_text(self, cluster):
+    """The job list may be outdated: kept from an earlier load, or the cluster cannot be reached (None: it is current)"""
+    if not cluster.loaded or cluster.updated is None:
+      return None
+    when = f"{cluster.updated:%m-%d %H:%M}" if cluster.updated.date() != datetime.now().date() else f"{cluster.updated:%H:%M}"
+    c = cluster.connection
+    if self.offline(cluster):
+      why = ("the cluster has not answered yet" if c is not None and c.state in ("new", "connecting") else
+             "not logged in" if c is None or c.state in ("new", "closed") else "the cluster cannot be reached")
+      return Text(f"⚠ the list from {when} ({why}): it may be outdated · ", style="bold yellow")
+    if cluster.from_cache:
+      return Text(f"⚠ the list kept from {when}" + (": loading the current one · " if cluster.loader is not None else
+                  ": it may be outdated, the current one did not load (r: reload) · "), style="bold yellow")
+    return None
 
   def jobs_listed(self, cluster, worker, jobs, since, accounts):
     """The jobs from Slurm, before their files are read"""
@@ -1434,7 +1485,7 @@ class Slurp(App):
       return
     cluster.jobs = {job.jid: job for job in jobs}
     cluster.since, cluster.loaded, cluster.updated = since, True, datetime.now()
-    cluster.listed = True
+    cluster.listed, cluster.from_cache = True, False
     if cluster is self.cluster:
       self.populate()
     self.refresh_status()
@@ -1453,9 +1504,12 @@ class Slurp(App):
         job.annotated = True # (also when reading the files failed: what is known stays)
       cluster.jobs = {job.jid: job for job in jobs}
       cluster.since, cluster.loaded, cluster.updated = since, True, datetime.now()
+      cluster.from_cache = False
       if cluster is self.cluster:
         self.populate()
       self.check_jobs_later(cluster, jobs)
+      from . import jobcache
+      threading.Thread(target=jobcache.save, args=(cluster, jobs), daemon=True, name="keeping the job list").start()
     self.show_warnings()
     self.refresh_status()
 
@@ -2065,8 +2119,8 @@ class Slurp(App):
           after()
         n = f"{len(jids)} job{'s' if len(jids) != 1 else ''}"
         self.notify(f"{n} put in {path}" if what == "assign" else f"{n} taken out of their category", title=cluster.name)
-      fn = (lambda st: st.assign(jids, path, names)) if what == "assign" else (lambda st: st.unassign(jids))
-      change_categories(self, cluster, fn, done, "categorizing jobs")
+      op = ["assign", list(jids), path, names] if what == "assign" else ["unassign", list(jids)]
+      change_categories(self, cluster, op, done, "categorizing jobs")
     self.push_screen(CategorizeScreen(cluster.categories, jids, describe), answered)
 
   def action_categories(self):

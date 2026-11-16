@@ -115,6 +115,9 @@ class ClusterSession:
   categories: object | None = None     # categories.Store of its Slurm cluster (None: not read yet)
   slurm_cluster: str | None = None     # Slurm's name of the cluster (ClusterName; the categories are kept by it)
   marked: set = field(default_factory=set) # rows of the job list marked (m): job ids, "group|<array>" for an array
+  from_cache: bool = False             # the job list is the one kept from an earlier load (jobcache.py), not loaded now
+  pending_categories: list = field(default_factory=list) # changes to the categories made while the cluster could not
+                                                         # be reached: [op, args...], written to it with the next load
 
 @dataclass
 class View:

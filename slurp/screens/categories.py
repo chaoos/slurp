@@ -48,16 +48,38 @@ def find_node(tree, path):
     stack.extend(node.children)
   return None
 
-def change_categories(app, cluster, fn, done, what="changing the categories"):
-  """fn(store) on the file of the tab's cluster (in a worker), then done(store, result) on the UI thread"""
+def change_categories(app, cluster, op, done, what="changing the categories"):
+  """A change ([name, args...], see categories.OPS) on the file of the tab's cluster (in a worker), then
+  done(store, result) on the UI thread. The cluster cannot be reached: done here (the categories kept with the job
+  list) and remembered, the next load writes it to the cluster."""
+  import threading
+  from .. import jobcache
+  if app.offline(cluster) and cluster.categories is None: # (no connection: the commands would run on this machine)
+    app.notify("the cluster cannot be reached, and no categories of it are kept here yet", severity="error")
+    return
+  if app.offline(cluster):
+    store = cat.Store(cluster.categories.cluster, cluster.categories.to_data())
+    try:
+      result = cat.apply_op(store, op)
+    except ValueError as e:
+      app.notify(str(e), severity="error")
+      return
+    cluster.categories = store
+    cluster.pending_categories.append(list(op))
+    threading.Thread(target=jobcache.save_pending, args=(cluster,), daemon=True, name="keeping the categories").start()
+    app.notify("the cluster cannot be reached: the change is kept here and written to the cluster with the next load",
+               title=cluster.name, severity="warning", timeout=8)
+    done(store, result)
+    return
   def work():
     if cluster.slurm_cluster is None:
       cluster.slurm_cluster = cat.cluster_name()
-    return cat.change(cluster.slurm_cluster, fn)
+    return cat.change(cluster.slurm_cluster, lambda st: cat.apply_op(st, op))
   def changed(res):
     if res is None:
       return
     cluster.categories = res[0]
+    threading.Thread(target=jobcache.save_pending, args=(cluster,), daemon=True, name="keeping the categories").start()
     done(*res)
   in_background(app, work, changed, group="categories", name=what, connection=cluster.connection)
 
@@ -316,7 +338,7 @@ class CategoriesScreen(SplitScreen):
       return
     ids = store.job_ids(self.path)
     missing = [j for j in ids if j not in self.asked]
-    if missing and not self.loading:
+    if missing and not self.loading and not self.app.offline(self.cluster):
       self.load(missing)
     self.show_info(ids)
     self.show_jobs(ids)
@@ -345,6 +367,8 @@ class CategoriesScreen(SplitScreen):
     jobs = self.known.get(jid)
     if jobs is None and "_" in jid: # a single task of an array
       jobs = [j for j in self.known.get(cat.array_of(jid), []) if j.jid == jid]
+    if not jobs and jid not in self.asked: # (not asked yet, or the cluster cannot be reached: those of the job list)
+      jobs = [j for j in self.cluster.jobs.values() if j.jid == jid or "_" not in jid and cat.array_of(j.jid) == jid]
     return jobs or []
 
   def show_info(self, ids):
@@ -369,6 +393,9 @@ class CategoriesScreen(SplitScreen):
                + (f", {m['tasks']} with their array tasks" if m["tasks"] > m["jobs"] else "") + "\n")
     if self.loading:
       out.append(f"asking Slurm … {time.monotonic() - self.load_started:.0f} s\n", style="yellow")
+    elif self.app.offline(self.cluster) and not none:
+      out.append("the cluster cannot be reached: the numbers are of the jobs kept with the job list; the others when it "
+                 "is back (r)\n", style="bold yellow")
     unknown = [j for j in ids if j in self.asked and not self.jobs_of(j)]
     states = m["states"]
     if jobs:
@@ -429,7 +456,8 @@ class CategoriesScreen(SplitScreen):
       where = store.jobs[jid]["category"] if jid in store.jobs else ""
       rel = "" if self.path == NONE else where[len(self.path) + 1:] if self.path and where != self.path else "" if self.path else where
       if not jobs:
-        state = Text("asking Slurm …", style="yellow") if jid not in self.asked else Text("not known to Slurm", style="dim")
+        state = (Text("not known to Slurm", style="dim") if jid in self.asked else Text("cluster not reachable", style="yellow")
+                 if self.app.offline(self.cluster) else Text("asking Slurm …", style="yellow"))
         table.add_row(jid, store.jobs[jid].get("name") or "", category_text(rel), state, "", "", "", "", "", "", key=jid)
         continue
       array = len(jobs) > 1 or "_" in jobs[0].jid and "_" not in jid
@@ -489,7 +517,7 @@ class CategoriesScreen(SplitScreen):
     base = "" if self.path == NONE else self.path
     def made(path):
       if path:
-        change_categories(self.app, self.cluster, lambda st: st.add(path), lambda st, p: self.changed(p), "making a category")
+        change_categories(self.app, self.cluster, ["add", path], lambda st, p: self.changed(p), "making a category")
     self.app.push_screen(NameScreen(f"New category" + (f" in {base}" if base else ""), base + "/" if base else "",
                                     "a/b: b in the category a (made too, if it is new)", "Make it"), made)
 
@@ -501,7 +529,7 @@ class CategoriesScreen(SplitScreen):
       return
     def renamed(new):
       if new and new != old:
-        change_categories(self.app, self.cluster, lambda st: st.rename(old, new), lambda st, p: self.changed(p), "renaming a category")
+        change_categories(self.app, self.cluster, ["rename", old, new], lambda st, p: self.changed(p), "renaming a category")
     self.app.push_screen(NameScreen(f"Rename or move {old}", old, "With all it has (jobs, categories). Another path moves it "
                                     "(into a category that exists: they are merged).", "Rename"), renamed)
 
@@ -517,7 +545,7 @@ class CategoriesScreen(SplitScreen):
     inner = len([p for p in store.paths if cat.within(p, path) and p != path])
     def done(yes):
       if yes:
-        change_categories(self.app, self.cluster, lambda st: st.delete(path), lambda st, p: self.changed(p), "deleting a category")
+        change_categories(self.app, self.cluster, ["delete", path], lambda st, p: self.changed(p), "deleting a category")
     self.app.push_screen(ConfirmScreen(f"Delete the category {path}?",
                                        (f"The {inner} categories in it go too. " if inner else "")
                                        + (f"Its {n} job{'s' if n != 1 else ''} go to {up}." if n and up else
@@ -529,7 +557,7 @@ class CategoriesScreen(SplitScreen):
     jid = self.selected_job()
     if jid is None or self.path == NONE:
       return
-    change_categories(self.app, self.cluster, lambda st: st.unassign([jid]), lambda st, r: self.changed(), "taking a job out")
+    change_categories(self.app, self.cluster, ["unassign", [jid]], lambda st, r: self.changed(), "taking a job out")
 
   @on(Button.Pressed, "#cat-list")
   def action_in_list(self, event=None):
@@ -551,6 +579,11 @@ class CategoriesScreen(SplitScreen):
   def action_reload(self, event=None):
     """The categories from the file again (another slurp may have changed them), and the jobs from Slurm"""
     cluster = self.cluster
+    if self.app.offline(cluster): # (no connection: the commands would run on this machine, not the cluster)
+      self.notify("the cluster cannot be reached: showing what is kept here", severity="warning")
+      self.refresh_tree()
+      self.show_category()
+      return
     def work():
       self.app.load_categories(cluster)
       return True

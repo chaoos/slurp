@@ -212,6 +212,24 @@ def cluster_name():
 def load(cluster):
   return Store(cluster, read_all()["clusters"].get(cluster))
 
+OPS = ("add", "assign", "unassign", "rename", "delete") # (the changes, by name: kept to be done later, see jobcache)
+
+def apply_op(store, op):
+  """[name, args...] on a store; its result"""
+  name, *args = op
+  if name not in OPS:
+    raise ValueError(f"no change {name!r}")
+  return getattr(store, name)(*args)
+
+def change(cluster, fn):
+  """Apply fn(store) to the categories as the file has them now and write them back; returns (store, fn's result)"""
+  data = read_all()
+  store = Store(cluster, data["clusters"].get(cluster))
+  result = fn(store)
+  data["clusters"][cluster] = store.to_data()
+  write_all(data)
+  log.info(f"categories of {cluster}: {len(store.paths)} categories, {len(store.jobs)} jobs")
+  return store, result
 
 # ---- what a category shows
 def gpus(rec):

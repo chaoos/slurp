@@ -35,6 +35,9 @@ Your queued and running jobs and those that ended recently, of the active tab's 
   **Category** column shows it (sort by it with a click); `/` with `cat:project X` lists only that category
   (`cat:-`: the jobs in none). The
   Categories window (`K`) has the tree, the numbers of each (node hours, …) and its jobs, also old ones.
+- **Kept list:** the list of the last load is kept on this machine. When the cluster cannot be reached (or before it
+  answers after a start) that one is shown, and the status line says it may be outdated; categorizing still works,
+  the changes go to the cluster with the next load.
 - `n` writes a new job script from a template; `!` shows only the jobs with problems; `/` filters by any text.
 """),
   "JobScreen": ("Job window", """

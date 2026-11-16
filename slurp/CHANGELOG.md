@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The job list is kept on this machine after each load: a start shows it at
+  once, and when the cluster cannot be reached it can still be browsed and
+  categorized (the changes reach the cluster with the next load); the status
+  line says it may be outdated.
 
 - When the login to a cluster fails (or the connection is lost), slurp says to
   check its site's status page, as a link: for CSCS https://status.cscs.ch,

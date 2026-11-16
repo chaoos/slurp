@@ -50,6 +50,16 @@ for it.
 
 ![Illustrative slurp job list with status and progress columns](docs/jobs.svg)
 
+**The list is kept** on this machine after each load (`~/.cache/slurp/joblists/`,
+only for you), so it is there when the cluster is not: slurp starts with the
+last list of each tab at once, and when the cluster cannot be reached (down,
+in maintenance, no network) you can still browse it, open what is kept of a
+job, and categorize. The status line then says so: *⚠ the list from 09:12 (the
+cluster cannot be reached): it may be outdated*. Changes to the categories
+made meanwhile are kept here too and written to the cluster with the next
+load (one that no longer fits, e.g. a rename of a category someone deleted
+meanwhile, is skipped and named).
+
 ### Categories
 
 Put your jobs in **categories**, like folders: `project X/production runs`,
