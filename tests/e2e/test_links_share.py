@@ -1,92 +1,15 @@
-"""Lab test of slurp/links/share.py with real clients: the lab sshd is the relay (an own OpenSSH relay), a real ssh in a
-pseudo terminal is the user's terminal, a real sshfs mounts the drive. Usage: SLURP_TEST_WORK=<lab dir> python tests/scenarios/share.py (the lab sshd runs)"""
-import asyncio, os, pty, re, select, shutil, subprocess, sys, time, fcntl, struct, termios
-HERE = os.environ.get("SLURP_TEST_WORK") or sys.exit("SLURP_TEST_WORK: the lab directory (see tests/lab)"); LAB = os.path.join(HERE, "sshlab"); S = os.path.join(HERE, "share")
-os.environ["PATH"] = os.path.join(LAB, "bin") + ":" + os.environ["PATH"]
-for k in ("XDG_CONFIG_HOME", "XDG_STATE_HOME"):
-  os.environ[k] = os.path.join(S, k.lower())
+"""Links (slurp/links/share.py) with real clients: the lab sshd is the relay (an own OpenSSH relay), a real ssh in a
+pseudo terminal is the user's terminal, a real sshfs mounts the drive."""
+import asyncio
+import os
+import re
+import shutil
+import subprocess
+
 from slurp.links import share as sh
+from linkkit import blocking, client_env, mount, read, ssh_argv, Term, until, write
 
-results = []
-def check(name, cond, info=""):
-  results.append(bool(cond)); print(f"{'PASS' if cond else 'FAIL'}  {name}  {info}", flush=True)
-
-events = []
-mgr = sh.ShareManager(lambda kind, link, session, msg: events.append((kind, link.id, msg)))
-
-async def blocking(fn, *a, **k):
-  """run fn in a thread (the server lives on this event loop: a blocking call here would stall it)"""
-  import functools
-  return await asyncio.get_running_loop().run_in_executor(None, functools.partial(fn, *a, **k))
-def read(p): return open(p).read()
-def mount(opts, remote, mnt, password):
-  """sshfs (it stays in the background with the output it inherits: not to pipes, which would never close)"""
-  errf = os.path.join(S, "sshfs.err")
-  with open(errf, "w") as err:
-    r = subprocess.run(["sshfs", "-o", opts, remote, mnt], input=(password + "\n").encode(), stdout=subprocess.DEVNULL, stderr=err, timeout=30)
-  r.stderr = open(errf).read()
-  return r
-def write(p, text): open(p, "w").write(text)
-
-async def until(cond, t=20):
-  t0 = time.time()
-  while time.time() - t0 < t:
-    if cond(): return True
-    await asyncio.sleep(0.05)
-  return False
-
-def client_env(password):
-  pw = os.path.join(S, "pw"); open(pw, "w").write(password)
-  return os.environ | {"SSH_ASKPASS": os.path.join(S, "askpass.sh"), "SSH_ASKPASS_REQUIRE": "force", "DISPLAY": ":0",
-                       "SHARE_PW_FILE": pw}
-
-KNOWN = os.path.join(S, "client_known_hosts")
-def ssh_argv(link):
-  """the shell command of the link, as the user would paste it (plus test settings for known hosts)"""
-  import shlex
-  if link.kind == "shell":
-    argv = shlex.split(sh.client_commands(link)[0][1])
-  else: # (a drive has no ssh command: the same login, by hand)
-    host, port = link.target()
-    argv = ["ssh", "-J", link.jump(), "-p", str(port), "-o", f"HostKeyAlias={sh.host_alias()}", f"slurp@{host}"]
-  return [argv[0], "-tt", "-o", f"UserKnownHostsFile={KNOWN}", "-o", "StrictHostKeyChecking=accept-new", *argv[1:]]
-
-class Term:
-  """ssh in a pseudo terminal"""
-  def __init__(self, argv, env, cols=100, rows=30):
-    self.pid, self.fd = pty.fork()
-    if self.pid == 0:
-      os.execvpe(argv[0], argv, env)
-    self.resize(cols, rows)
-    self.out = b""
-  def resize(self, cols, rows):
-    fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
-  def send(self, text):
-    os.write(self.fd, text.encode())
-  async def read_until(self, pattern, t=15):
-    t0 = time.time()
-    while time.time() - t0 < t:
-      r, _, _ = select.select([self.fd], [], [], 0)
-      if r:
-        try:
-          chunk = os.read(self.fd, 65536)
-        except OSError:
-          break
-        if not chunk: break
-        self.out += chunk
-        if re.search(pattern, self.out.decode(errors="replace")): return True
-      else:
-        await asyncio.sleep(0.05)
-    return False
-  def wait(self, t=10):
-    t0 = time.time()
-    while time.time() - t0 < t:
-      pid, status = os.waitpid(self.pid, os.WNOHANG)
-      if pid: return os.waitstatus_to_exitcode(status)
-      time.sleep(0.05)
-    return None
-
-async def main():
+async def share_links(check, mgr, events, S, KNOWN):
   if os.environ.get("LAZY_TASKS") != "1": # as in the real app: Textual runs the loop with eager tasks
     asyncio.get_running_loop().set_task_factory(asyncio.eager_task_factory)
   shutil.rmtree(S + "/xdg_config_home", ignore_errors=True); shutil.rmtree(S + "/xdg_state_home", ignore_errors=True)
@@ -175,7 +98,7 @@ async def main():
   await until(lambda: link.ready(), 20)
   cmds = dict((title, text) for title, text, _ in sh.client_commands(link))
   sshfs = cmds["Linux, macOS (sshfs): one command"]
-  check("the sshfs command", f"sshfs -o ProxyJump=lab-relay,HostKeyAlias=slurp-" in sshfs and f"port={link.relay_port}" in sshfs and f"slurp@localhost:{d}" in sshfs, sshfs)
+  check("the sshfs command", "sshfs -o ProxyJump=lab-relay,HostKeyAlias=slurp-" in sshfs and f"port={link.relay_port}" in sshfs and f"slurp@localhost:{d}" in sshfs, sshfs)
   mnt = os.path.join(S, "mnt"); os.makedirs(mnt, exist_ok=True)
   subprocess.run(["fusermount", "-u", mnt], capture_output=True)
   opts = re.search(r"-o (\S+)", sshfs).group(1) + f",UserKnownHostsFile={KNOWN},StrictHostKeyChecking=accept-new,password_stdin"
@@ -232,7 +155,8 @@ async def main():
   log = open(os.path.join(sh.state_dir(), "links.log")).read()
   check("the log of links has links and sessions, no password", "created" in log and "session" in log and "locked" in log
         and all(l.password not in log for l in mgr.links), log.count("\n"))
-  print(f"\n{sum(results)}/{len(results)} passed")
 
-asyncio.run(main())
-sys.exit(0 if results and all(results) else 1)
+
+def test_share_links(check, links, link_manager):
+  mgr, events = link_manager
+  asyncio.run(share_links(check, mgr, events, links.S, links.KNOWN))

@@ -1,14 +1,15 @@
 """A web link through the lab relay: a real ssh -N -L with the password reaches the web view (a test web server here);
-forwarding anywhere else and a shell are refused. Usage: SLURP_TEST_WORK=<lab dir> python tests/scenarios/weblink.py (the lab sshd runs)"""
-import asyncio, os, shlex, socket
-src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "share.py")).read() # (its setup: the lab, check, the link manager)
-exec(src.split("async def main():")[0])
+forwarding anywhere else and a shell are refused."""
+import asyncio
+import os
+import shlex
+
 from aiohttp import web
 
-def free_port():
-  s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+from slurp.links import share as sh
+from linkkit import blocking, client_env, free_port, Term, until
 
-async def main():
+async def web_link(check, mgr, events, KNOWN):
   pass # (the test web servers: aiohttp does not run with eager tasks; the holder does not use them either)
   peers = []
   async def page(request):
@@ -17,7 +18,8 @@ async def main():
   app = web.Application(); app.add_routes([web.get("/", page)])
   runner = web.AppRunner(app); await runner.setup(); site = web.TCPSite(runner, "127.0.0.1", 0); await site.start()
   view_port = site._server.sockets[0].getsockname()[1]
-  other = web.Application(); other.add_routes([web.get("/", lambda r: web.Response(text="secret"))])
+  async def secret(request): return web.Response(text="secret")
+  other = web.Application(); other.add_routes([web.get("/", secret)])
   orun = web.AppRunner(other); await orun.setup(); osite = web.TCPSite(orun, "127.0.0.1", 0); await osite.start()
   other_port = osite._server.sockets[0].getsockname()[1]
   link = mgr.create(sh.Link("web", "this slurp (test)", "lab", lambda: [], relay="lab-relay", uses=None,
@@ -89,5 +91,8 @@ async def main():
     except OSError:
       pass
   mgr.shutdown(); await runner.cleanup(); await orun.cleanup()
-  print(f"\n{sum(results)}/{len(results)} passed")
-asyncio.run(main())
+
+
+def test_web_link(check, links, link_manager):
+  mgr, events = link_manager
+  asyncio.run(web_link(check, mgr, events, links.KNOWN))

@@ -1,0 +1,14 @@
+"""slurp's UI against the lab: categories, the job list kept for offline use, the status page of a site (the scenarios are in ui_scenarios.py)"""
+from ui_scenarios import t_categories, t_offline, t_status_page
+
+
+def test_categories(ui, check):
+  ui(t_categories, check)
+
+
+def test_offline(ui, check):
+  ui(t_offline, check)
+
+
+def test_status_page(ui, check):
+  ui(t_status_page, check)

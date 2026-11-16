@@ -34,7 +34,7 @@ async def main(check, copied):
     check("Download is off in a terminal", hs.query_one("#hs-download").disabled)
     await pilot.click("#hs-copy"); await pilot.pause(0.2)
     check("Copy the setup command", copied[-1][0] == winhelper.setup_command())
-    md = hs.query_one("Markdown")
+    hs.query_one("Markdown")
     await pilot.press("escape"); await pilot.pause(0.2)
     check("Escape closes it", type(app.screen).__name__ == "LinkScreen")
     key = sh.Link("shell", "k", "t", lambda: [], auth="key", public_key="ssh-ed25519 AAAA"); key.relay_state = "ready"

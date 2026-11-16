@@ -1,9 +1,12 @@
 """slurp's logo: one pixel map, every form of it consistent; the files in docs/images/ current"""
-import os, re, struct, xml.dom.minidom
+import os
+import re
+import struct
+import xml.dom.minidom
 from slurp.ui import logo
 from slurp.links.windows import winhelper
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def test_logo(check, tmp_path, monkeypatch):
@@ -16,7 +19,7 @@ def test_logo(check, tmp_path, monkeypatch):
   for name in ("svg", "boxed", "wordmark"):
     text = logo.wordmark_svg() if name == "wordmark" else logo.svg(boxed=(name == "boxed"))
     try: xml.dom.minidom.parseString(text); ok = True
-    except Exception as e: ok = False
+    except Exception: ok = False
     check(f"{name}: valid SVG", ok)
   data = logo.ico()
   n = struct.unpack("<HHH", data[:6])[2]

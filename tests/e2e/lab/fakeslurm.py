@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Fake squeue/sacct/scontrol for the TUI tests: 40 jobs (5 running, 3 pending, 32 finished).
 The file 'delay' next to this script holds seconds to sleep per call (simulates a slow controller)."""
-import os, sys, time
+import os
+import sys
+import time
 from datetime import datetime, timedelta
 S = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 try:

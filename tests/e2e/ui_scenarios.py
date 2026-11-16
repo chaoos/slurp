@@ -1,19 +1,23 @@
-"""slurp's UI against the lab cluster (Textual run_test, one session through all scenarios t_*).
+"""slurp's UI against the lab: the scenarios t_* (Textual's run_test of the app, logged in to the lab cluster over
+SSH), and UISession, which runs them in one logged-in app, one at a time, each in that app's task (test_ui_*.py: a
+session per test module).
 
-Usage: SLURP_TEST_WORK=<lab dir> python tests/scenarios/tui.py; normally run by tests/test_scenarios.py.
-ONLY=t_a,t_b runs just those; SKIP=t_drive leaves those out; SLURP_TEST_OUT is where screenshots and the log go."""
+A scenario uses the module's globals HERE (the lab directory), LAB (its sshlab/) and OUT (screenshots and the log),
+set by configure() before a session starts, and check() (a soft check of the current test)."""
 import urllib.parse
-import asyncio, getpass, os, re, shutil, subprocess, sys, time
+import asyncio
+import getpass
+import logging
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
 from datetime import datetime, timedelta
-HERE = os.environ.get("SLURP_TEST_WORK") or sys.exit("SLURP_TEST_WORK: the lab directory (see tests/lab)"); LAB = os.path.join(HERE, "sshlab")
-os.environ["PATH"] = os.path.join(LAB, "bin") + ":" + os.environ["PATH"]
-os.environ.pop("SSH_AUTH_SOCK", None); os.environ.pop("DISPLAY", None)
-os.environ["XDG_CACHE_HOME"] = os.path.join(HERE, "xdgcache") # (never the user's cache)
-for var, sub in (("XDG_STATE_HOME", "xdgstate"), ("XDG_CONFIG_HOME", "xdgtest"), ("XDG_DATA_HOME", "xdgdata")):
-  if var not in os.environ: # (never the user's: an empty config for every run; the log of links, cloudflared)
-    os.environ[var] = os.path.join(HERE, sub)
-    if var == "XDG_CONFIG_HOME": shutil.rmtree(os.environ[var], ignore_errors=True)
-import collections, importlib, pkgutil
+import collections
+import importlib
+import pkgutil
 import slurp
 from slurp.checks import engine as checks, environment
 from slurp.cluster import remote
@@ -46,14 +50,31 @@ from slurp.links.share import client_commands, host_fingerprint, is_public, Link
 from slurp.state import setup_logging
 from slurp.ui.terminal import TerminalView
 from slurp.ui.widgets import ClickTable, ConnectionStatus, Spinning
-import slurp.cluster.categories as _categories # (the lab's "cluster" is this machine: never the real ~/.config/slurp/categories.json)
-CATEGORIES_FILE = _categories.FILE = os.path.join(HERE, "xdgcat", "categories.json")
-shutil.rmtree(os.path.dirname(CATEGORIES_FILE), ignore_errors=True)
-shutil.rmtree(os.path.join(os.environ["XDG_CACHE_HOME"], "slurp", "joblists"), ignore_errors=True) # (each run: no list kept yet)
-OUT = os.environ.get("SLURP_TEST_OUT") or os.path.join(HERE, "out", "tui"); os.makedirs(OUT, exist_ok=True)
-results = []
+import slurp.cluster.categories as _categories
+
+HERE = LAB = OUT = CATEGORIES_FILE = None
+CURRENT = None # (the check of the test that runs a scenario)
+
 def check(name, cond, info=""):
-  results.append(bool(cond)); print(f"{'PASS' if cond else 'FAIL'}  {name}  {info}", flush=True)
+  return CURRENT(name, cond, info)
+
+def configure(work, home, out):
+  """The lab and this machine for a session of the app (the environment is restored by UISession.close)"""
+  global HERE, LAB, OUT, CATEGORIES_FILE
+  HERE, LAB, OUT = work, os.path.join(work, "sshlab"), out
+  os.makedirs(OUT, exist_ok=True); os.makedirs(home, exist_ok=True)
+  os.environ["HOME"] = home # (~/mnt/lab and the like: not the user's home)
+  os.environ["PATH"] = os.path.join(LAB, "bin") + ":" + os.environ["PATH"] # (ssh with the lab's config)
+  os.environ.pop("SSH_AUTH_SOCK", None); os.environ.pop("DISPLAY", None)
+  for var, sub in (("XDG_CACHE_HOME", "xdgcache"), ("XDG_STATE_HOME", "xdgstate"), ("XDG_CONFIG_HOME", "xdgtest"), ("XDG_DATA_HOME", "xdgdata")):
+    os.environ[var] = os.path.join(home, sub) # (never the user's: empty for every session)
+  # the lab's "cluster" is this machine: never the real ~/.config/slurp/categories.json
+  CATEGORIES_FILE = _categories.FILE = os.path.join(home, "xdgcat", "categories.json")
+  # the lab as it is built (a scenario that raised may have left it slow or with arrays)
+  open(os.path.join(LAB, "delay"), "w").write("0")
+  for name in ("arrays", "stat_delay"):
+    if os.path.exists(os.path.join(LAB, name)): os.unlink(os.path.join(LAB, name))
+
 def term(app): s = app.shell; return "\n".join(s.vt.display) if s and s.vt else ""
 def sterm(app):
   """the screen of the shell subtab shown"""
@@ -72,19 +93,113 @@ def notes(app): return [(n.title, n.message) for n in app._notifications]
 def slurp_modules():
   """every module of the slurp package"""
   return [importlib.import_module(m.name) for m in pkgutil.walk_packages(slurp.__path__, "slurp.") if not m.name.endswith("__main__")]
-async def main():
-  setup_logging(os.path.join(OUT, "small.log"))
-  state.initial_ssh_destinations = ["lab"]
-  app = Slurp()
-  async with app.run_test(size=(170, 45)) as pilot:
-    asyncio.get_running_loop().set_task_factory(asyncio.eager_task_factory) # (as App.run does; run_test does not)
-    await until(pilot, lambda: "passphrase" in term(app)); await pilot.pause(0.3)
-    await pilot.press(*"pw123", "enter")
-    await until(pilot, lambda: app.ssh.ready and app.cluster.loaded, 30)
-    for test in TESTS:
-      await test(app, pilot)
-    await pilot.press("q")
-  print(f"\n{sum(results)}/{len(results)} passed")
+class UISession:
+  """slurp's app under run_test in an event loop of its own, logged in to the lab. Its task runs the scenarios given to
+  run(), one at a time, in its own context (as a single run through all of them did); between them the loop waits."""
+  def __init__(self, work, home, out):
+    self.args = (work, home, out)
+    self.broken = None
+
+  def start(self):
+    """Log in (raises if that fails, after cleaning up)"""
+    self.closed = False
+    self.saved_env, self.saved_file = dict(os.environ), _categories.FILE
+    self.saved_modules = {name: dict(vars(m)) for name, m in sys.modules.items() if name == "slurp" or name.startswith("slurp.")}
+    self.loop = None
+    try:
+      return self._start()
+    except BaseException:
+      self.close()
+      raise
+
+  def _start(self):
+    configure(*self.args)
+    setup_logging(os.path.join(OUT, "slurp.log"))
+    state.initial_ssh_destinations = ["lab"]
+    self.loop = asyncio.new_event_loop()
+    self.requests = asyncio.Queue()
+    self.ready = self.loop.create_future()
+    self.task = self.loop.create_task(self.main())
+    self.loop.run_until_complete(asyncio.wait_for(asyncio.shield(self.ready), 120))
+    return self
+
+  async def main(self):
+    app = self.app = Slurp()
+    try:
+      async with app.run_test(size=(170, 45)) as pilot:
+        self.pilot = pilot
+        asyncio.get_running_loop().set_task_factory(asyncio.eager_task_factory) # (as App.run does; run_test does not)
+        await until(pilot, lambda: "passphrase" in term(app), 30); await pilot.pause(0.3)
+        await pilot.press(*"pw123", "enter")
+        if not await until(pilot, lambda: app.ssh.ready and app.cluster.loaded, 30):
+          raise RuntimeError(f"no login to the lab: {term(app)[-500:]}")
+        self.ready.set_result(True)
+        while (item := await self.requests.get()) is not None:
+          scenario, done = item
+          try:
+            await scenario(app, pilot)
+          except BaseException as e: # (to the test; the app may be left half way: the next test gets a new session)
+            self.broken = f"{scenario.__name__} raised {e!r}"
+            if not done.done(): done.set_exception(e)
+            if isinstance(e, asyncio.CancelledError): raise
+          else:
+            if not done.done(): done.set_result(None)
+        await pilot.press("q")
+    except BaseException as e:
+      if not self.ready.done(): self.ready.set_exception(e)
+      raise
+
+  def run(self, scenario, checks, timeout=900):
+    """Run one scenario in the app (its checks go to checks); a scenario that does not end in time breaks the session"""
+    global CURRENT
+    if self.broken:
+      raise RuntimeError(f"the session broke in an earlier test: {self.broken}")
+    CURRENT = checks
+    done = self.loop.create_future()
+    self.requests.put_nowait((scenario, done))
+    try:
+      self.loop.run_until_complete(asyncio.wait_for(asyncio.shield(done), timeout))
+    except TimeoutError:
+      self.broken = f"{scenario.__name__} did not end in {timeout} s"
+      raise
+    finally:
+      CURRENT = None
+
+  def close(self):
+    """End the app, put back the environment and the names of slurp's modules (a scenario that raised may have left
+    a patch); twice is harmless"""
+    if self.closed:
+      return
+    self.closed = True
+    try:
+      if self.loop is None or self.loop.is_closed():
+        return
+      if not self.task.done():
+        if self.broken:
+          self.task.cancel()
+        else:
+          self.requests.put_nowait(None)
+        self.loop.run_until_complete(asyncio.wait({self.task}, timeout=60))
+      for task in asyncio.all_tasks(self.loop):
+        task.cancel()
+      self.loop.run_until_complete(asyncio.sleep(0.1))
+      self.loop.close()
+    finally:
+      os.environ.clear(); os.environ.update(self.saved_env)
+      _categories.FILE = self.saved_file
+      for name in ("slurp", "asyncssh"): # (the log file of this session)
+        lg = logging.getLogger(name)
+        for handler in [h for h in lg.handlers if isinstance(h, logging.FileHandler)]:
+          handler.close(); lg.removeHandler(handler)
+      for name, saved in self.saved_modules.items():
+        module = sys.modules.get(name)
+        if module is None:
+          continue
+        for key in [k for k in vars(module) if k not in saved]:
+          delattr(module, key)
+        for key, value in saved.items():
+          if vars(module).get(key, object()) is not value:
+            setattr(module, key, value)
 
 async def t_titles(app, pilot):
   app.select_cluster(0)
@@ -267,7 +382,7 @@ async def t_sort(app, pilot):
   await pilot.pause(0.3)
   check("click on Name: ▲ there, none on Job ID", "Name ▲" in header() and "Job ID ▼" not in header() and app.sort_column == "name", header()[:80])
   app.sort_column, app.sort_reverse = "name", False
-  t2 = app.screen.query_one("#jobs")
+  app.screen.query_one("#jobs")
   app.sort_by(type("E", (), {"column_key": type("K", (), {"value": "name"})()})()); await pilot.pause(0.3)
   check("again: ▼", "Name ▼" in header(), header()[:80])
   app.sort_by(type("E", (), {"column_key": type("K", (), {"value": "jobid"})()})()); await pilot.pause(0.3)
@@ -327,8 +442,13 @@ async def t_term_help(app, pilot):
   app.action_close_view(); await pilot.pause(0.5)
 
 async def t_pane_help(app, pilot):
-  if app.shell is None:
-    check("pane help: a login pane to test (skipped: none open)", True); return
+  """the ⓘ of the side pane, on a login (Reconnect puts the login of the tab in the pane)"""
+  app.select_cluster(1); await pilot.pause(0.3)
+  app.screen.query_one("#jobs").focus()
+  await pilot.click("#connstatus"); await pilot.pause(0.5)
+  await pilot.click("#conn-reconnect")
+  ok = await until(pilot, lambda: "passphrase" in term(app), 15)
+  check("a login in the pane to test (Reconnect)", ok and app.shell is not None)
   await pilot.click(".tinfo"); await pilot.pause(0.5)
   help = app.screen
   md = "\n".join(m._markdown for m in help.query(Markdown)) if isinstance(help, TerminalHelpScreen) else ""
@@ -336,6 +456,8 @@ async def t_pane_help(app, pilot):
   app.save_screenshot(filename="pane_help.svg", path=OUT)
   await pilot.press("escape"); await pilot.pause(0.3)
   check("Esc: back, the pane has the focus", isinstance(app.focused, TerminalView))
+  await pilot.press(*"pw123", "enter")
+  check("the login in the pane goes on: logged in again", await until(pilot, lambda: app.ssh.ready and app.shell is None, 20))
 
 def fv_ids(screen, sel):
   v = screen.query_one(sel)
@@ -403,7 +525,6 @@ async def t_checks_ui(app, pilot):
   check("Explain annotates the #SBATCH lines", "⟵" in area.text and "8 MB per node" in area.text and "IGNORED" in area.text, area.text[:400])
   await pilot.click("#sc-explain"); await pilot.pause(0.3)
   app.save_screenshot(filename="checks_script.svg", path=OUT)
-  before = len(app._notifications)
   await pilot.click("#sc-test")
   ok = await until(pilot, lambda: any("would start at" in n.message for n in app._notifications), 10)
   check("Test: sbatch --test-only, when it would start", ok, notes(app)[-2:])
@@ -436,7 +557,7 @@ async def t_checks_ui(app, pilot):
   check("then the environment: the setup replayed (the module load fails here: E04), ls checked with ldd",
         ok and "/bin/ls" in (sc.ctx.replay or {}).get("libs", {}) and "checking the environment" not in str(sc.query_one("#sc-findings").query_one(".fv-summary").render()),
         (ids, sc.ctx.replay if sc.ctx else None))
-  open(path, "a").write("#comment\n");
+  open(path, "a").write("#comment\n")
   ok = await until(pilot, lambda: "#comment" in sc.text, 10)
   check("a change of the file is checked again by itself", ok)
   await pilot.press("escape"); await pilot.pause(0.3)
@@ -699,7 +820,8 @@ async def t_this_view(app, pilot):
 async def t_cloudflare_ask(app, pilot):
   """No cloudflared here: Create link asks before downloading it (No: nothing happens); Download: the link's window
   shows downloading cloudflared (with the MB), then installing cloudflared, then the tunnel"""
-  import shutil, slurp.links.cloudflare as cf
+  import shutil
+  import slurp.links.cloudflare as cf
   await until(pilot, lambda: app.cluster.loader is None, 30)
   shutil.rmtree(cf.data_dir(), ignore_errors=True)
   fake = os.path.join(OUT, "fake-cloudflared-dl")
@@ -846,7 +968,8 @@ exec sleep 300
 
 async def t_about(app, pilot):
   """? slurp at the top right: slurp in general, its version, the machine it runs on; Copy details; in the palette"""
-  import socket, slurp
+  import socket
+  import slurp
   await until(pilot, lambda: app.cluster.loader is None, 30)
   app.show_view(None); await pilot.pause(0.3)
   button = app.screen.query("#about")
@@ -1084,7 +1207,8 @@ async def t_status_page(app, pilot):
 async def t_offline(app, pilot):
   """The job list is kept: a tab whose cluster cannot be reached shows the last list at once, marked as possibly
   outdated; categorizing there is kept here and written to the cluster with the next load"""
-  import json, types
+  import json
+  import types
   from slurp.cluster import jobcache
   await until(pilot, lambda: app.cluster.loader is None, 30)
   lab = app.cluster
@@ -1351,7 +1475,8 @@ async def t_options(app, pilot):
 
 async def t_copy_views(app, pilot):
   await until(pilot, lambda: app.cluster.loader is None, 30)
-  import json, importlib
+  import json
+  import importlib
   dialogs = importlib.import_module("slurp.ui.screens.dialogs")
   before = dict(load_config())
   used = []
@@ -1765,7 +1890,8 @@ async def t_memory_watch(app, pilot):
   await pilot.pause(0.3)
 
 async def t_scratch_exclude(app, pilot):
-  import time as _t, shutil as _sh
+  import time as _t
+  import shutil as _sh
   d = os.path.join(LAB, "scratch")
   _sh.rmtree(d, ignore_errors=True); os.makedirs(os.path.join(d, "keep"))
   now = _t.time()
@@ -1891,7 +2017,6 @@ async def t_array_window(app, pilot):
   m = re.search(r"Node hours \(total\) +([0-9.]+) +over (\d+) tasks that ran, ([0-9.]+) of them by running", info)
   check("the array's total node hours, with the running part", m and float(m.group(1)) > float(m.group(3)) > 0 and int(m.group(2)) == 140, m and m.groups())
   import slurp.ui.screens.dialogs as dlg
-  copied = []
   writes = []
   real_write = app._driver.write
   app._driver.write = lambda data: (writes.append(data), real_write(data))[1]
@@ -2152,7 +2277,10 @@ async def t_lazy(app, pilot):
 class LinkClient:
   """the user's terminal: a real ssh in a pseudo terminal, the password from askpass"""
   def __init__(self, argv, password):
-    import pty, struct, fcntl, termios
+    import pty
+    import struct
+    import fcntl
+    import termios
     pw = os.path.join(HERE, "share", "pw"); open(pw, "w").write(password)
     env = os.environ | {"SSH_ASKPASS": os.path.join(HERE, "share", "askpass.sh"), "SSH_ASKPASS_REQUIRE": "force", "DISPLAY": ":0",
                         "SHARE_PW_FILE": pw, "TERM": "xterm-256color"}
@@ -2284,7 +2412,7 @@ async def t_links(app, pilot):
   client.send("echo $((7*6)); exit\r")
   ok = await client.read_until(pilot, r"42", 30)
   srun = open(calls).read() if os.path.exists(calls) else ""
-  check("the user's ssh gets a shell on the node (srun --overlap --pty in the job)", ok and f"--jobid=9001 --overlap --pty" in srun and f"-w {node}" in srun, (client.out[-200:], srun))
+  check("the user's ssh gets a shell on the node (srun --overlap --pty in the job)", ok and "--jobid=9001 --overlap --pty" in srun and f"-w {node}" in srun, (client.out[-200:], srun))
   await client.wait(pilot, 10)
   await pilot.press("escape"); await pilot.pause(0.3)
   check("the job window has no drive", not js.query("#cluster-drive"))
@@ -2436,9 +2564,3 @@ async def t_drive(app, pilot):
   app.mount_drive(cluster, busy, False); await pilot.pause(1)
   check("a directory that is not empty is refused", drive.state != "mounted" and any("not empty" in m for _, m in notes(app)))
   update_config(drive_mounts=None)
-
-TESTS_ALL = [t_about, t_categories, t_offline, t_status_page, t_copy_views, t_options, t_web_access, t_chdir, t_script_edit, t_links_scroll, t_links_health, t_this_view, t_cloudflare_ask, t_web_cloudflare, t_scrollback, t_view_help, t_checks_ui, t_checks_more, t_term_help, t_drive, t_links, t_lazy, t_array_reload, t_array_done, t_array_window, t_collapse, t_array_progress, t_scratch_exclude, t_memory_watch, t_memory, t_since, t_quota, t_scratch, t_restart_env, t_conn_health, t_array_sort, t_subtabs, t_progress, t_ij_fields, t_array, t_border, t_ci_noconn, t_sort, t_accounts, t_zebra, t_titles, t_reconnect, t_restart, t_interactive, t_cluster_info, t_close]
-TESTS = [globals()[n] for n in os.environ["ONLY"].split(",")] if os.environ.get("ONLY") else TESTS_ALL
-TESTS = [t for t in TESTS if t.__name__ not in os.environ.get("SKIP", "").split(",")]
-asyncio.run(main())
-sys.exit(0 if results and all(results) else 1)

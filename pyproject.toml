@@ -61,10 +61,15 @@ include = ["src", "tests", "docs", "tools", "README.md", "CHANGELOG.md", "LICENS
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests"]
+testpaths = ["tests/unit", "tests/ui", "tests/e2e"] # (in this order: the quick ones first)
 addopts = ["-ra", "--strict-markers"]
+filterwarnings = [
+    # the e2e tests start ssh, sshfs and slurp in pseudo terminals from pytest's process, which has threads: the child
+    # execs at once, which is the safe case of fork in a threaded process
+    "ignore:This process .* is multi-threaded, use of forkpty\\(\\) may lead to deadlocks:DeprecationWarning",
+]
 markers = [
-    "lab: needs the lab (a local sshd with a fake Slurm, see tests/lab); skipped without sshd unless SLURP_REQUIRE_LAB=1",
+    "lab: needs the lab (a local sshd with a fake Slurm, tests/e2e/lab); every test in tests/e2e has it. Skipped without sshd unless SLURP_REQUIRE_LAB=1",
 ]
 
 [tool.ruff]

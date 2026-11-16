@@ -125,7 +125,6 @@ srun --cpu-bind=cores ./app input.dat
   check("replay parse: missing libs, cuda archs, module errors", r["missing"]["./sim"] == ["libmpi.so.40"] and r["cuda"]["./sim"] == {"sm_80"}
         and r["module_errors"] and r["libs"]["./serial"] == ["libc.so.6"], r)
   script = GOOD.replace("srun --cpu-bind=cores ./app", "srun --cpu-bind=cores ./sim\nsrun -n 8 ./serial")
-  fs = dict(facts.__dict__);
   got, f = ids(script, replay=r)
   check("P05 E04 B02 from the replay", {"P05", "E04", "B02"} <= got, sorted(got))
   facts.site["cuda_arch"] = "sm_90"

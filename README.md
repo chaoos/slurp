@@ -43,7 +43,7 @@ src/slurp/            the package (installed with pip; `slurp` is slurp.cli:main
   links/                shells, drives and web views on your own machine, the session holder, sshfs (windows/: the helper)
   ui/                   the Textual app, its widgets, terminals and logo; screens/: the windows
   scripts/              shell scripts slurp runs on the nodes of a job
-tests/                pytest: unit tests; lab/ (a fake Slurm behind a local sshd) and scenarios/ (slurp against it)
+tests/                pytest: unit/ (no app), ui/ (Textual windows), e2e/ (slurp against lab/: a fake Slurm behind a local sshd)
 docs/                 the manual and its images
 tools/                maintenance scripts (the logo files)
 ```
@@ -52,21 +52,29 @@ tools/                maintenance scripts (the logo files)
 
 ```bash
 python -m pip install -e ".[all,dev]"
-python -m pytest -m "not lab"   # unit tests: seconds, nothing needed beyond pip
-python -m pytest -m lab         # the lab: slurp against a fake Slurm over SSH (~10 min)
-python -m pytest                # both
+python -m pytest tests/unit tests/ui   # seconds: nothing needed beyond pip
+python -m pytest tests/e2e             # slurp against a fake Slurm over SSH (~10 min)
+python -m pytest                       # all of them
+pre-commit run --all-files             # the lint (ruff) and file checks; pre-commit install: before each commit
 ```
 
-The lab tests start their own `sshd` on a free port of 127.0.0.1, with a fake
-Slurm and fresh keys in pytest's temporary directory. They need OpenSSH
-(`ssh`, `sshd`, `ssh-keygen`) and `sshfs` (Debian/Ubuntu: `apt install
-openssh-server sshfs`); without `sshd` they are skipped. They never touch
-your `~/.ssh` or slurp's settings. Each scenario writes its output, log and
-screenshots to `<basetemp>/lab0/out/<scenario>/` (set the place with
-`--basetemp=DIR`). Parts of the long UI scenario can be run on their own:
-`ONLY=t_categories,t_sort python -m pytest -k "tui and not drive"`, or left
-out with `SKIP=t_sort`. See [tests/conftest.py](tests/conftest.py) and
-[tests/lab](tests/lab/__init__.py).
+- `tests/unit/`: no app, no cluster. `tests/ui/`: windows of the Textual app,
+  no cluster.
+- `tests/e2e/` (Python 3.12+): slurp against the lab (`tests/e2e/lab/`), its own `sshd` on a
+  free port of 127.0.0.1 with a fake Slurm and fresh keys, in pytest's
+  temporary directory. It needs OpenSSH (`ssh`, `sshd`, `ssh-keygen`) and
+  `sshfs` (Debian/Ubuntu: `apt install openssh-server sshfs`); without `sshd`
+  these tests are skipped. They never touch your `~/.ssh` or slurp's
+  settings.
+  - The UI tests (`test_ui_*.py`, the scenarios in `ui_scenarios.py`) run in a
+    logged-in app per module.
+  - Logs and screenshots go to `<basetemp>/lab0/out/` (`--basetemp=DIR` sets
+    the place).
+  - One test: `python -m pytest tests/e2e/test_ui_arrays.py -k collapse`.
+- The tests use the installed slurp and stop if it is not this checkout's
+  (another checkout or worktree: install that one, or `PYTHONPATH=src`).
+  See [tests/conftest.py](tests/conftest.py) and
+  [tests/e2e/conftest.py](tests/e2e/conftest.py).
 
 The same runs on GitHub Actions ([.github/workflows/tests.yml](.github/workflows/tests.yml)):
 the unit tests on Python 3.11 to 3.13, the lab on 3.12.

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """fake srun: one task; runs the command after the options with the stdin it got, output labelled like --label"""
-import os, subprocess, sys
+import os
+import subprocess
+import sys
 args, i, label = sys.argv[1:], 0, False
 with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "srun_calls"), "a") as f:
   f.write(" ".join(args) + "\n")
