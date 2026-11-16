@@ -56,6 +56,10 @@ class OptionsScreen(ModalScreen):
                        value=c.get("theme_web") if c.get("theme_web") in themes else "", allow_blank=False, id="op-theme-web")
         yield Static(f"The theme follows the view that is active (now: {'a browser' if active == 'web' else 'a terminal'}).",
                      classes="op-note")
+        with Horizontal(classes="op-row"):
+          yield Label("A tab opens on")
+          yield Select([("its overview", ""), ("its job list", "jobs")], value="jobs" if c.get("start_page") == "jobs" else "",
+                       allow_blank=False, id="op-start-page")
         yield Static("Shells", classes="op-section")
         with Horizontal(classes="op-row"):
           yield Label("Scrollback (lines)")
@@ -130,7 +134,8 @@ class OptionsScreen(ModalScreen):
                "copy": self.query_one("#op-copy", Select).value or None,
                "copy_web": self.query_one("#op-copy-web", Select).value or None,
                "link_relay": self.query_one("#op-relay", Input).value.strip() or None,
-               "checks_muted": sorted(self.query_one("#op-muted", SelectionList).selected)}
+               "checks_muted": sorted(self.query_one("#op-muted", SelectionList).selected),
+               "start_page": self.query_one("#op-start-page", Select).value or None}
     drives = dict(self.config.get("drive_mounts") or {})
     for item in self.forget:
       if item.startswith("drive:"):

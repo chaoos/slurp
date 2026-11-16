@@ -115,6 +115,8 @@ elif prog == "sacctmgr":
 elif prog == "scancel":
   with open(os.path.join(S, "scancel_calls"), "a") as f:
     f.write(" ".join(args) + "\n")
+elif prog == "sinfo" and "--version" in args:
+  print("slurm 23.11.4")
 elif prog == "sinfo":
   states = ["allocated"] * 10 + ["mixed"] * 3 + ["idle"] * 4 + ["down*", "drained", "idle$"]
   fmt = args[args.index("-o") + 1]

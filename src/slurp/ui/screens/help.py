@@ -147,11 +147,20 @@ directory (`d`) and the login directory as a drive (`F`), an interactive job (`i
 categories (`K`), this slurp in your browser (`W`), the guides (`F1`), the rule catalogue (`F2`), the options (`F3`),
 about slurp, and quit (`q`). Enter or a click does the item; `Esc` or a click elsewhere closes the menu.
 """),
-  "ClusterInfoScreen": ("Cluster info", """
-The state of the cluster: health (nodes down, drained, in maintenance, with the reasons), reservations, occupancy
-(busy and idle nodes, running and pending jobs and why they wait), the partitions, and the node topology of every
-partition (CPUs, sockets × cores × threads, NUMA domains, GPUs, memory). The title says healthy, degraded or
-unhealthy and why. Reload asks again.
+  "OverviewScreen": ("Overview", """
+The first subtab of every tab: the cluster at a glance. The title says whether it is healthy, degraded or unhealthy
+and why, who you are logged in as (and the round trip), and the Slurm version.
+
+- **Your jobs**: running (on how many nodes), pending (and why), those finished within the job list's *finished
+  since* by state, with their node hours, and how many have problems. `j` (or **Jobs**) opens the job list.
+- **The cluster**: health (nodes down, drained, in maintenance, not responding, with the reasons), reservations,
+  occupancy (busy and idle nodes, running and pending jobs and why they wait).
+- **Your quotas**: space and files on each filesystem, with a bar (the full list: **Quota**, `Q`).
+- **Partitions** and the **node topology** of each (CPUs, sockets × cores × threads, NUMA domains, GPUs, memory).
+- **The site**, when a rule pack knows it: its status page and documentation (a click opens them), the scratch purge.
+
+Each part loads in the background when the overview is shown (again after 5 minutes); `r` (**Reload**) asks again.
+A tab without a session shows **Connect**. *A tab opens on* in **Options** (`F3`) chooses the job list instead.
 """),
   "ConnectionScreen": ("Connection window", """
 The SSH session of the tab: its state and the course of a (re)connect, the logged-in user and login node, the
@@ -279,7 +288,8 @@ The text was sent to your terminal's clipboard (OSC 52), which only some termina
 The settings slurp keeps in `config.json` (the path is shown at the bottom), to see and change; **Save** writes them.
 
 - **Appearance:** the theme in a terminal and the one in a browser (or the same). The theme follows the view that is
-  active: when a browser takes over, its theme is used, when a terminal does, the terminal's.
+  active: when a browser takes over, its theme is used, when a terminal does, the terminal's. **A tab opens on** its
+  overview (the cluster at a glance) or its job list.
 - **Shells:** how many lines a shell keeps above its screen (scrolled back with the mouse wheel).
 - **Copying:** for a terminal and for a browser: when copying cannot be confirmed (no clipboard tool here; in a
   browser always), ask how to get the text, or only send it (OSC 52) without asking.

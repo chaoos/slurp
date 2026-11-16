@@ -26,6 +26,7 @@ class SplitScreen(Screen):
       yield Button("+", id="cluster-add", tooltip="Add a local or SSH cluster", compact=True)
       yield Button("? slurp", id="about", compact=True, tooltip="about slurp: how it works, its version, the machine it runs on")
     with Horizontal(id="view-tabs"):
+      yield Button("Overview", id="view-overview", classes="view-tab", compact=True, tooltip="the cluster at a glance: health, your jobs and quotas, partitions")
       yield Button("Jobs", id="view-jobs", classes="view-tab", compact=True, tooltip="the job list")
     with Horizontal(id="topbar"):
       if self.SHOW_BACK:
@@ -72,6 +73,10 @@ class SplitScreen(Screen):
     if event.button.id == "view-jobs":
       event.stop()
       self.app.show_view(None)
+      return
+    if event.button.id == "view-overview":
+      event.stop()
+      self.app.show_overview()
       return
     if event.button.id and event.button.id.startswith(("view-tab-", "view-close-")):
       event.stop()

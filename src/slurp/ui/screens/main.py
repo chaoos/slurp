@@ -104,6 +104,8 @@ class MainScreen(SplitScreen):
     self.app.main = self
     # the job list is the default mode; Textual does not register that one, so it could not be switched back to
     self.app._modes.setdefault(self.app.DEFAULT_MODE, lambda: self)
+    from .overview import OverviewScreen
+    self.app._modes.setdefault("overview", OverviewScreen) # (the first subtab of every tab: one screen for all of them)
     self.app.setup_job_columns()
     table = self.query_one("#jobs", ClickTable)
     table.focus()

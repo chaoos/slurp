@@ -10,8 +10,16 @@ version may need the helper of the same version).
   in its middle, with what to do (a tab for a cluster with `+`, or
   `slurp --ssh`), instead of an error notification for every Slurm command at
   each load. `r` looks again.
+- Every tab opens on an **Overview** of its cluster, a new first subtab
+  before **Jobs**: health (nodes down, drained, in maintenance), reservations,
+  occupancy and why jobs wait, your jobs (running, pending, finished by state,
+  node hours, problems), your quotas with bars, the partitions and their node
+  topology, the Slurm version, and the site's status page and docs. It loads in
+  the background, `r` asks again, `j` opens the job list. It replaces the
+  Cluster info window (`C` shows the overview). `"start_page": "jobs"` keeps
+  the job list as the first page.
 - The buttons of the job list's toolbar are a menu now: **☰ Menu** (`F10`)
-  has cluster info, quota, scratch, shells, the login directory and drive,
+  has cluster overview, quota, scratch, shells, the login directory and drive,
   interactive job, new job script, categories, web access, guides, rule
   catalogue, options, about and quit, each with its key. The toolbar keeps
   Reload and the choices of the list. Textual's command palette (and its ⭘ at

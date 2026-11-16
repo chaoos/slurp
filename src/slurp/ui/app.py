@@ -43,7 +43,6 @@ from .screens.shell import TerminalHelpScreen, TerminalScreen
 from .screens.job import JobScreen
 from .screens.main import COLUMNS, MainScreen, SINCE_CHOICES, SORT_KEYS
 from .screens.connection import ConnectionScreen
-from .screens.clusterinfo import ClusterInfoScreen
 from .screens.array import ArrayScreen
 from .screens.storage import QuotaScreen, ScratchScreen
 from ..cluster import remote
@@ -388,8 +387,12 @@ class Slurp(App):
       cluster.connection = RemoteSSH(cluster.destination) # (not started: the tab's commands wait for Connect, never run here)
     self.cluster_index = index
     remote.ssh_connection = cluster.connection
+    if not cluster.opened:
+      cluster.opened = True
+      cluster.current_view = self.start_page()
     if self.current_mode != cluster.current_view:
-      self.switch_mode(cluster.current_view if any(v.mode == cluster.current_view for v in cluster.views) else "_default")
+      self.switch_mode(cluster.current_view if cluster.current_view == "overview" or any(v.mode == cluster.current_view for v in cluster.views)
+                       else "_default")
     self.show_tab_shell()
     self.update_scope_select()
     self.update_since_widgets()
@@ -488,6 +491,19 @@ class Slurp(App):
     else:
       self.push_screen(screen)
 
+  def start_page(self):
+    """The subtab a tab opens on the first time: "overview" (default) or "_default" (the job list)"""
+    return "_default" if load_config().get("start_page") == "jobs" else "overview"
+
+  def show_overview(self):
+    """The overview of the active tab: its first subtab"""
+    if not self.clusters:
+      return
+    self.cluster.current_view = "overview"
+    if self.current_mode != "overview":
+      self.switch_mode("overview")
+    self.call_after_refresh(self.refresh_status)
+
   def show_view(self, view):
     """Show a subtab of the active tab (None: the job list)"""
     mode = view.mode if view is not None else "_default"
@@ -545,10 +561,12 @@ class Slurp(App):
     if not jobs:
       return
     jobs.first().variant = "primary" if self.current_mode == "_default" else "default"
+    for b in bar.query("#view-overview"):
+      b.variant = "primary" if self.current_mode == "overview" else "default"
     wanted = {str(v.id) for v in self.cluster.views}
     have = set()
     for b in bar.query("Button.view-tab, Button.view-close"): # remove only the buttons of closed subtabs (ids stay unique)
-      if b.id == "view-jobs":
+      if b.id in ("view-jobs", "view-overview"):
         continue
       vid = b.id.rsplit("-", 1)[1]
       if vid not in wanted or getattr(b, "removing", False):
@@ -1132,9 +1150,11 @@ class Slurp(App):
   def action_menu(self):
     """The menu of the job list, under its button: what slurp does for the tab"""
     from .screens.menu import MenuScreen
-    if self.screen is not self.main:
+    if self.screen is not self.main and self.current_mode != "overview":
       return
-    button = self.main.query_one("#menu", Button)
+    if not self.screen.query("#menu"):
+      return
+    button = self.screen.query_one("#menu", Button)
     at = (button.region.x, button.region.y + 1)
     def chosen(action):
       if action:
@@ -1964,9 +1984,12 @@ class Slurp(App):
     self.open_view("old files in scratch", lambda: ScratchScreen(cluster), key="scratch")
 
   def action_cluster_info(self):
-    cluster = self.cluster
-    if not isinstance(self.screen, ClusterInfoScreen):
-      self.push_screen(ClusterInfoScreen(cluster))
+    """The overview of the tab (health, occupancy, partitions, …), asked again"""
+    self.show_overview()
+    def reload():
+      if self.current_mode == "overview":
+        self.screen.refresh_overview(force=True)
+    self.call_after_refresh(reload)
 
   def action_interactive_job(self):
     """Submit a job that only holds its nodes; once it runs, its job window opens shells on them"""

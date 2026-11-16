@@ -65,7 +65,9 @@ class ClusterSession:
   expanded: set = field(default_factory=set) # collapsed array rows that are open ("array id|state")
   scope: str = "me"                    # whose jobs are listed: "me", "all" (all accounts) or an account
   views: list = field(default_factory=list) # the subtabs besides the job list
-  current_view: str = "_default"       # mode of the subtab shown ("_default": the job list)
+  current_view: str = "_default"       # mode of the subtab shown ("_default": the job list, "overview": the overview)
+  opened: bool = False                 # shown once (the first time it opens on the start page: the overview)
+  overview: dict = field(default_factory=dict) # what the overview loaded of its cluster (screens/overview.py)
   load_started: float = 0.0
   updated: object | None = None        # when the list was loaded
   show_login: bool = False             # the login is shown in the pane (until it is done)

@@ -1,4 +1,4 @@
-"""The cluster info window"""
+"""What the overview of a tab shows of its cluster: health, reservations, occupancy, partitions, node topology"""
 
 import collections
 import re
@@ -7,16 +7,10 @@ from datetime import datetime
 
 from rich.table import Table
 from rich.text import Text
-from textual import on
-from textual.app import ComposeResult
-from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.screen import ModalScreen
-from textual.widgets import Button, Static
 
 
 from ...state import log
-from ...cluster.remote import in_background, run_many
+from ...cluster.remote import run_many
 from ...checks.engine import mem_text
 
 NODE_FLAGS = {"*": "not responding", "~": "powered off", "#": "powering up", "!": "powering down", "%": "powering down",
@@ -28,7 +22,8 @@ def cluster_info():
           ["sinfo", "-h", "-o", "%P|%a|%F|%l|%D"],
           ["sinfo", "-h", "-R", "-o", "%E|%T|%D|%N|%H"],
           ["squeue", "-h", "-a", "-r", "--format=%T|%D|%r"],
-          ["scontrol", "show", "reservation", "-o"]]
+          ["scontrol", "show", "reservation", "-o"],
+          ["sinfo", "--version"]]
   res = run_many(cmds)
   try:
     from ...checks.engine import gather_facts
@@ -36,9 +31,10 @@ def cluster_info():
   except Exception as e:
     log.debug(f"facts for the node topology: {e!r}")
     facts = None
-  info = {"facts": facts, "errors": [f"{shlex.join(c[:3])}: {(r.stderr or '').strip()[:200]}" for c, r in zip(cmds, res) if r.returncode
+  info = {"facts": facts, "errors": [f"{shlex.join(c[:3])}: {(r.stderr or '').strip()[:200]}" for c, r in zip(cmds[:5], res[:5]) if r.returncode
                      and "No reservations" not in (r.stdout + r.stderr)],
-          "time": datetime.now(), "failed": all(r.returncode for r in res[:4])}
+          "time": datetime.now(), "failed": all(r.returncode for r in res[:4]),
+          "slurm": res[5].stdout.strip().removeprefix("slurm ") if len(res) > 5 and not res[5].returncode else ""}
   nodes = {}
   for line in res[0].stdout.splitlines():
     name, _, state = line.partition("|")
@@ -110,106 +106,19 @@ def cluster_health(info):
 def nodes_text(n):
   return f"{n} node" if n == 1 else f"{n} nodes"
 
-class ClusterInfoScreen(ModalScreen):
-  """Health and occupancy of the cluster of a tab"""
-  DEFAULT_CSS = """
-  ClusterInfoScreen { align: center middle; }
-  #ci-dialog { width: 120; max-width: 98%; height: 90%; border: thick $accent; background: $surface; padding: 0 1; }
-  #ci-title { text-style: bold; height: auto; margin-bottom: 1; }
-  #ci-dialog.-good { border: thick $success; }
-  #ci-dialog.-warn { border: thick $warning; }
-  #ci-dialog.-bad { border: thick $error; }
-  #ci-body { height: 1fr; }
-  #ci-buttons { height: auto; align-horizontal: right; margin-top: 1; }
-  #ci-buttons Button { margin-left: 1; }
-  """
-  BINDINGS = [Binding("escape", "close", "Close"), Binding("r", "reload", "Reload")]
+SECTIONS = ("health", "reservations", "occupancy", "partitions", "topology")
 
-  def __init__(self, cluster):
-    super().__init__()
-    self.cluster = cluster
-    self.info = None
-    self.loading = False
-
-  def compose(self) -> ComposeResult:
-    with Vertical(id="ci-dialog"):
-      yield Static(id="ci-title")
-      with VerticalScroll(id="ci-body"):
-        yield Static(id="ci-info")
-      with Horizontal(id="ci-buttons"):
-        yield Button("Reload", id="ci-reload", variant="primary", compact=True)
-        if self.cluster.destination:
-          yield Button("Reconnect", id="ci-reconnect", compact=True)
-        yield Button("Close", id="ci-close", compact=True)
-
-  def on_mount(self):
-    self.action_reload()
-
-  def title_text(self):
-    state = "loading …" if self.loading else f"as of {self.info['time']:%H:%M:%S}" if self.info else ""
-    text = Text(f"Cluster {self.cluster.name} · ")
-    dialog = self.query_one("#ci-dialog")
-    for level in HEALTH_STYLES:
-      dialog.remove_class(f"-{level}")
-    if self.info is not None:
-      level, why = cluster_health(self.info)
-      dialog.add_class(f"-{level}")
-      text.append(f"● {dict(good='healthy', warn='degraded', bad='unhealthy')[level]}: {why}", style=HEALTH_STYLES[level])
-      text.append(" · ")
-    text.append(state)
-    return text
-
-  def not_connected(self):
-    """Why the tab cannot be asked now (None: it can)"""
-    c = self.cluster.connection
-    if not self.cluster.destination:
-      return None if self.cluster.name else "no tab"
-    if c is None or not c.ready:
-      state = "not connected" if c is None or c.state in ("new", "closed") else \
-              "connecting" if c.state == "connecting" else f"connection lost ({c.error or 'the session ended'})"
-      return f"No connection to {self.cluster.destination}: {state}. Reconnect logs in again, Reload asks once connected."
-    return None
-
-  @on(Button.Pressed, "#ci-reconnect")
-  def reconnect_pressed(self):
-    self.app.reconnect(self.cluster)
-    self.dismiss()
-
-  @on(Button.Pressed, "#ci-reload")
-  def action_reload(self):
-    if self.loading:
-      return
-    why = self.not_connected()
-    if why:
-      self.query_one("#ci-title", Static).update(Text(f"Cluster {self.cluster.name}"))
-      self.query_one("#ci-info", Static).update(Text(why, style="bold yellow"))
-      return
-    self.loading = True
-    self.query_one("#ci-title", Static).update(self.title_text())
-    def loaded(info):
-      self.loading = False
-      if info is not None:
-        self.info = info
-      self.show()
-    in_background(self, cluster_info, loaded, group="cluster-info",
-                  connection=self.cluster.connection if self.cluster.destination else None)
-
-  def show(self):
-    self.query_one("#ci-title", Static).update(self.title_text())
-    info = self.info
-    if info is None:
-      return
-    if info["failed"]:
-      self.query_one("#ci-info", Static).update(Text("Could not query the cluster:\n" + "\n".join(info["errors"]), style="red"))
-      self.shown = Text("failed")
-      return
-    grid = Table.grid(padding=(0, 2))
-    grid.add_column(style="bold", no_wrap=True)
-    grid.add_column()
-    def section(title):
+def info_grid(info, parts=SECTIONS):
+  """The sections of cluster_info() asked for, as one grid (a title row each)"""
+  grid = Table.grid(padding=(0, 2))
+  grid.add_column(style="bold", no_wrap=True)
+  grid.add_column()
+  def section(title):
+    if grid.row_count:
       grid.add_row("", "")
-      grid.add_row(Text(title, style="bold underline"), "")
-    s, total = info["states"], info["nodes"]
+    grid.add_row(Text(title, style="bold underline"), "")
+  s, total = info["states"], info["nodes"]
+  if "health" in parts:
     unhealthy = {k: v for k, v in s.items() if k in ("down", "drained", "draining", "fail", "failing", "maint", "unknown",
                                                     "inval", "future", "reboot_requested", "planned", "power_down")}
     section("Health")
@@ -222,14 +131,15 @@ class ClusterInfoScreen(ModalScreen):
       grid.add_row("", Text("all nodes are up", style="green"))
     for r in info["reasons"][:25]:
       grid.add_row(Text(r["state"], style="yellow"), Text(f"{nodes_text(int(r['count']) if r['count'].isdigit() else r['count'])} ({r['nodes']}): {r['reason']}  since {r['since'].replace('T', ' ')}"))
-    if info["reservations"]:
-      section("Reservations")
-      for r in info["reservations"]:
-        flags = r.get("Flags", "")
-        style = "bold yellow" if "MAINT" in flags else ""
-        grid.add_row(Text(r["ReservationName"], style=style),
-                     f"{r.get('StartTime', '?').replace('T', ' ')} – {r.get('EndTime', '?').replace('T', ' ')}, "
-                     f"{r.get('NodeCnt', '?')} nodes, {r.get('State', '')} {flags}")
+  if "reservations" in parts and info["reservations"]:
+    section("Reservations")
+    for r in info["reservations"]:
+      flags = r.get("Flags", "")
+      style = "bold yellow" if "MAINT" in flags else ""
+      grid.add_row(Text(r["ReservationName"], style=style),
+                   f"{r.get('StartTime', '?').replace('T', ' ')} – {r.get('EndTime', '?').replace('T', ' ')}, "
+                   f"{r.get('NodeCnt', '?')} nodes, {r.get('State', '')} {flags}")
+  if "occupancy" in parts:
     section("Occupancy")
     busy = s.get("allocated", 0) + s.get("mixed", 0) + s.get("completing", 0)
     grid.add_row("Nodes", f"{total} in total")
@@ -245,33 +155,28 @@ class ClusterInfoScreen(ModalScreen):
                  + "".join(f", {n} {st.lower()}" for st, n in jobs.items() if st not in ("RUNNING", "PENDING")))
     if info["pending_reasons"]:
       grid.add_row("pending because", ", ".join(f"{reason} {n}" for reason, n in info["pending_reasons"].most_common(6)))
-    if info["partitions"]:
-      section("Partitions")
-      table = Table(box=None, padding=(0, 1), header_style="bold")
-      for col in ("partition", "avail", "allocated", "idle", "other", "total", "time limit"):
-        table.add_column(col, justify="right" if col in ("allocated", "idle", "other", "total") else "left")
-      for p in info["partitions"]:
-        table.add_row(p["name"], Text(p["avail"], style="" if p["avail"] == "up" else "red"), p["alloc"], p["idle"],
-                      p["other"], p["total"], p["limit"])
-      grid.add_row("", table)
-    facts = info.get("facts")
-    if facts is not None and facts.partitions:
-      section("Node topology")
-      table = Table(box=None, padding=(0, 1), header_style="bold")
-      for col in ("partition", "CPUs", "sockets × cores × threads", "NUMA domains", "GPUs", "memory", "whole nodes"):
-        table.add_column(col, justify="left" if col == "partition" else "right")
-      domains = facts.site.get("numa_domains")
-      for p in sorted(facts.partitions.values(), key=lambda p: (not p.default, p.name)):
-        table.add_row(p.name, str(p.cpus), f"{p.sockets or '?'} × {p.cores or '?'} × {p.threads}",
-                      str(domains or p.sockets or "?"), str(p.gpus or "-"), mem_text(p.mem_mb) if p.mem_mb else "?",
-                      "yes" if p.exclusive else "no")
-      grid.add_row("", table)
-      grid.add_row("", Text("NUMA placement: the guides (F1)", style="dim"))
-    for err in info["errors"]:
-      grid.add_row(Text("error", style="red"), err)
-    self.query_one("#ci-info", Static).update(grid)
-    self.shown = grid
-
-  @on(Button.Pressed, "#ci-close")
-  def action_close(self):
-    self.dismiss()
+  if "partitions" in parts and info["partitions"]:
+    section("Partitions")
+    table = Table(box=None, padding=(0, 1), header_style="bold")
+    for col in ("partition", "avail", "allocated", "idle", "other", "total", "time limit"):
+      table.add_column(col, justify="right" if col in ("allocated", "idle", "other", "total") else "left")
+    for p in info["partitions"]:
+      table.add_row(p["name"], Text(p["avail"], style="" if p["avail"] == "up" else "red"), p["alloc"], p["idle"],
+                    p["other"], p["total"], p["limit"])
+    grid.add_row("", table)
+  facts = info.get("facts")
+  if "topology" in parts and facts is not None and facts.partitions:
+    section("Node topology")
+    table = Table(box=None, padding=(0, 1), header_style="bold")
+    for col in ("partition", "CPUs", "sockets × cores × threads", "NUMA domains", "GPUs", "memory", "whole nodes"):
+      table.add_column(col, justify="left" if col == "partition" else "right")
+    domains = facts.site.get("numa_domains")
+    for p in sorted(facts.partitions.values(), key=lambda p: (not p.default, p.name)):
+      table.add_row(p.name, str(p.cpus), f"{p.sockets or '?'} × {p.cores or '?'} × {p.threads}",
+                    str(domains or p.sockets or "?"), str(p.gpus or "-"), mem_text(p.mem_mb) if p.mem_mb else "?",
+                    "yes" if p.exclusive else "no")
+    grid.add_row("", table)
+    grid.add_row("", Text("NUMA placement: the guides (F1)", style="dim"))
+  for err in info["errors"]:
+    grid.add_row(Text("error", style="red"), err)
+  return grid

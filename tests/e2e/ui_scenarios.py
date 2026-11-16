@@ -33,7 +33,8 @@ from slurp.cluster.remote import HEALTH_STYLES
 from slurp.ui.screens.array import ArrayScreen, epoch
 from slurp.ui.screens.categories import CategoriesScreen, CategorizeScreen, NONE
 from slurp.ui.screens.checks import FixPreviewScreen, GuidesScreen, RuleCatalogueScreen
-from slurp.ui.screens.clusterinfo import cluster_health, ClusterInfoScreen
+from slurp.ui.screens.clusterinfo import cluster_health
+from slurp.ui.screens.overview import OverviewScreen
 from slurp.ui.screens.connection import ConnectionScreen
 from slurp.ui.screens.dialogs import CommandScreen, ConfirmScreen, CopyScreen, RestartScreen, RunArrayScreen
 from slurp.ui.screens.files import DirScreen, FileScreen, open_path
@@ -139,6 +140,7 @@ class UISession:
     return self
 
   async def main(self):
+    update_config(start_page="jobs") # (the scenarios start on the job list; the overview has its own)
     app = self.app = Slurp()
     try:
       async with app.run_test(size=self.size) as pilot:
@@ -360,37 +362,49 @@ async def t_interactive(app, pilot):
   await pilot.press("escape"); await pilot.pause(0.3)
   check("i opens it too, Esc cancels", not isinstance(app.screen, CommandScreen) and open(calls).read().count("sbatch") <= 1)
 
-async def t_cluster_info(app, pilot):
+def overview_text(app):
+  """what the overview shows (as text), "" if it is not shown"""
   from rich.console import Console
-  def text():
-    scr = app.screen
-    if not isinstance(scr, ClusterInfoScreen) or not hasattr(scr, "shown"): return ""
-    c = Console(width=200, record=True, file=open(os.devnull, "w")); c.print(scr.shown); return c.export_text()
+  scr = app.screen
+  if not isinstance(scr, OverviewScreen) or not hasattr(scr, "shown"): return ""
+  c = Console(width=200, record=True, file=open(os.devnull, "w")); c.print(scr.shown); return c.export_text()
+
+async def t_cluster_info(app, pilot):
+  """The overview of a tab: the cluster's health, occupancy, partitions, node topology (what Cluster info showed), your
+  jobs and quotas, the system; C (Cluster info in the menu) shows it and asks again"""
   app.select_cluster(1); await pilot.pause(0.3)
   await menu(app, pilot, "cluster_info")
-  ok = await until(pilot, lambda: "Occupancy" in text(), 15)
-  t = text()
+  ok = await until(pilot, lambda: "Occupancy" in overview_text(app) and "loading" not in str(app.screen.query_one("#ov-title").render()), 30)
+  t = overview_text(app)
   print(t)
-  check("cluster info: health", ok and "down" in t and "drained" in t and "not responding" in t and "maintenance" in t
+  check("Cluster info in the menu shows the overview", isinstance(app.screen, OverviewScreen) and app.current_mode == "overview")
+  check("overview: health", ok and "down" in t and "drained" in t and "not responding" in t and "maintenance" in t
         and "bad gpu" in t and "maint1" in t)
-  check("cluster info: occupancy", "20 in total" in t and "13 (65%)" in t and "5 idle" in t and "5 running on 10 nodes" in t
+  check("overview: occupancy", "20 in total" in t and "13 (65%)" in t and "5 idle" in t and "5 running on 10 nodes" in t
         and "3 pending" in t and "Priority 3" in t)
-  check("cluster info: partitions", "normal*" in t and "debug" in t)
-  title = str(app.screen.query_one("#ci-title").render())
-  check("health in the title, coloured: 1 of 20 down is degraded (yellow)", "● degraded" in title and "3 of 20 nodes not usable" in title
-        and app.screen.query_one("#ci-dialog").has_class("-warn"), title)
-  info = dict(app.screen.info); info["states"] = dict(info["states"], down=5)
+  check("overview: partitions", "normal*" in t and "debug" in t)
+  check("overview: your jobs (from the job list)", "Your jobs" in t and "running" in t and "pending" in t and "finished since" in t, t[:600])
+  check("overview: your quotas", "Your quotas" in t and ("of" in t.split("Your quotas")[1][:400]), t.split("Your quotas")[-1][:400])
+  title = str(app.screen.query_one("#ov-title").render())
+  check("health in the title, coloured: 1 of 20 down is degraded (yellow); the Slurm version", "● degraded" in title
+        and "3 of 20 nodes not usable" in title and "Slurm 23.11.4" in title, title)
+  info = dict(app.cluster.overview["info"]); info["states"] = dict(info["states"], down=5)
   check("5 of 20 down: unhealthy (red)", cluster_health(info)[0] == "bad")
   info["states"] = {"allocated": 20}; info["flags"] = collections.Counter(); info["reservations"] = []
   check("all up: healthy (green)", cluster_health(info) == ("good", "all 20 nodes usable"))
-  app.save_screenshot(filename="cluster_info.svg", path=OUT)
-  first = app.screen.info["time"]; await pilot.pause(1.1)
-  await pilot.press("r"); await until(pilot, lambda: app.screen.info["time"] != first, 10)
-  check("its own reload", app.screen.info["time"] != first)
-  await pilot.press("escape"); await pilot.pause(0.3)
-  await pilot.press("C"); await pilot.pause(0.3)
-  check("C opens it", isinstance(app.screen, ClusterInfoScreen))
-  await pilot.press("escape")
+  app.save_screenshot(filename="overview.svg", path=OUT)
+  first = app.cluster.overview["info"]["time"]; await pilot.pause(1.1)
+  await pilot.press("r"); await until(pilot, lambda: app.cluster.overview["info"]["time"] != first, 10)
+  check("r asks again", app.cluster.overview["info"]["time"] != first)
+  view_tabs = [str(b.label) for b in app.screen.query("#view-tabs Button.view-tab")]
+  check("the subtabs: Overview first, then Jobs", view_tabs[:2] == ["Overview", "Jobs"], view_tabs)
+  await pilot.press("j"); await pilot.pause(0.3)
+  check("j: the job list", app.screen is app.main)
+  await pilot.click("#view-overview"); await pilot.pause(0.3)
+  check("the Overview subtab", isinstance(app.screen, OverviewScreen))
+  app.select_cluster(0); await pilot.pause(0.3); app.select_cluster(1); await pilot.pause(0.3)
+  check("switching tabs keeps the subtab shown", isinstance(app.screen, OverviewScreen))
+  app.show_view(None); await pilot.pause(0.3)
 
 def slurm_calls():
   f = os.path.join(LAB, "slurm_calls")
@@ -430,23 +444,27 @@ async def t_sort(app, pilot):
   app.sort_by(type("E", (), {"column_key": type("K", (), {"value": "jobid"})()})()); await pilot.pause(0.3)
 
 async def t_ci_noconn(app, pilot):
+  """The overview of a tab without a session says so, with Connect; a tab without Slurm says that"""
   app.disconnect(app.cluster); await pilot.pause(0.5)
   await pilot.press("C"); await pilot.pause(0.5)
   scr = app.screen
-  txt = str(scr.query_one("#ci-info").render()) if isinstance(scr, ClusterInfoScreen) else ""
-  check("cluster info without connection says so at once, with Reload, Reconnect, Close", "No connection to lab: not connected" in txt
-        and all(scr.query(b) for b in ("#ci-reload", "#ci-reconnect", "#ci-close")), txt)
-  await pilot.click("#ci-reconnect")
+  note = str(scr.query_one("#ov-connect-note").render()) if isinstance(scr, OverviewScreen) else ""
+  check("the overview without connection says so at once, with Connect", "Not connected to lab" in note
+        and scr.query_one("#ov-connect").display and scr.query_one("#ov-connect-button").display, note)
+  await pilot.click("#ov-connect-button")
   ok = await until(pilot, lambda: "passphrase" in term(app), 15); await pilot.pause(0.3)
-  check("Reconnect there: the window closes, the login is in front", ok and not isinstance(app.screen, ClusterInfoScreen))
+  check("Connect there: the login is in front", ok and app.shell is app.cluster.login_terminal)
   await pilot.press(*"pw123", "enter")
   await until(pilot, lambda: app.ssh.ready, 20)
+  ok = await until(pilot, lambda: "Occupancy" in overview_text(app), 20)
+  check("…logged in: the overview loads", ok)
   app.select_cluster(0); await pilot.pause(0.3)
-  await pilot.press("C"); await until(pilot, lambda: hasattr(app.screen, "shown"), 10)
-  txt = str(app.screen.query_one("#ci-info").render())
-  check("a cluster without Slurm (local): could not query, no made-up numbers", "Could not query the cluster" in txt and "nodes" not in txt, txt[:200])
-  await pilot.press("escape"); await pilot.pause(0.3)
+  app.show_overview(); ok = await until(pilot, lambda: "No Slurm" in overview_text(app), 10)
+  t = overview_text(app)
+  check("a tab without Slurm (local): says so, no made-up numbers", ok and "No Slurm" in t and "nodes" not in t, t[:300])
+  app.show_view(None); await pilot.pause(0.2)
   app.select_cluster(1); await pilot.pause(0.3)
+  app.show_view(None); await pilot.pause(0.3)
 
 async def t_border(app, pilot):
   await pilot.press("t"); await pilot.pause(0.3); await pilot.press("enter") # (the choice: In slurp)
@@ -692,13 +710,12 @@ async def t_checks_more(app, pilot):
   ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and "What changed" in app.screen.query_one("#text").text, 15)
   check("What changed compares with the last run that worked", ok, app.screen.query_one("#text").text[:300] if ok else type(app.screen))
   await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.3)
-  # node topology in Cluster info
+  # node topology in the overview
   await pilot.press("C")
-  ok = await until(pilot, lambda: getattr(app.screen, "info", None) is not None, 20)
-  await pilot.pause(0.5)
-  shot = app.export_screenshot(); open(os.path.join(OUT, "ci.svg"), "w").write(shot)
-  check("Cluster info shows the node topology", ok and app.screen.info.get("facts") and "topology" in shot and app.screen.info["facts"].partitions["normal"].cores == 64)
-  await pilot.press("escape"); await pilot.pause(0.3)
+  ok = await until(pilot, lambda: "Node topology" in overview_text(app) and "loading" not in str(app.screen.query_one("#ov-title").render()), 30)
+  info = app.cluster.overview.get("info") or {}
+  check("the overview shows the node topology", ok and info.get("facts") and info["facts"].partitions["normal"].cores == 64)
+  app.show_view(None); await pilot.pause(0.3)
   # B09: heavy processes on the login node (said once)
   real = checks.login_hogs
   checks.login_hogs = lambda: [(4242, 99.0, 20, "heavy_sim")]
@@ -736,13 +753,13 @@ async def t_view_help(app, pilot):
   await pilot.click("#view-help"); ok = await until(pilot, lambda: isinstance(app.screen, ViewHelpScreen), 5)
   check("the job window's ? explains the job window", ok and "# Job window" in app.screen.markdown and "Shell on node" in app.screen.markdown)
   await pilot.press("escape"); await pilot.pause(0.2); await pilot.press("escape"); await pilot.pause(0.3)
-  await pilot.press("C")
-  ok = await until(pilot, lambda: isinstance(app.screen, ClusterInfoScreen) and app.screen.query(".help-corner"), 10)
-  check("a dialog (Cluster info) has a ? in its corner", ok)
+  await pilot.press("f3")
+  ok = await until(pilot, lambda: isinstance(app.screen, OptionsScreen) and app.screen.query(".help-corner"), 10)
+  check("a dialog (Options) has a ? in its corner", ok)
   if ok:
     app.screen.query_one(".help-corner").press()
     ok = await until(pilot, lambda: isinstance(app.screen, ViewHelpScreen), 5)
-    check("its ? explains it", ok and "# Cluster info" in app.screen.markdown, app.screen.markdown[:100] if ok else "")
+    check("its ? explains it", ok and "# Options" in app.screen.markdown, app.screen.markdown[:100] if ok else "")
     app.save_screenshot(filename="help_ci.svg", path=OUT)
     await pilot.press("escape"); await pilot.pause(0.2)
   await pilot.press("escape"); await pilot.pause(0.3)
@@ -1684,7 +1701,8 @@ async def t_progress(app, pilot):
   await pilot.press("escape"); await pilot.pause(0.3)
 
 def vtabs(app):
-  return [str(b.label) for b in app.screen.query("#view-tabs Button.view-tab")]
+  """the subtabs after the Overview (which is always there; t_cluster_info checks it)"""
+  return [str(b.label) for b in app.screen.query("#view-tabs Button.view-tab") if b.id != "view-overview"]
 
 async def t_subtabs(app, pilot):
   t = app.screen.query_one("#jobs"); t.focus(); t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter")

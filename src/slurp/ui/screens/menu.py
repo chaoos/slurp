@@ -10,7 +10,7 @@ from textual.widgets.option_list import Option
 
 # (action of the app, label, key shown); None: a line between groups
 ITEMS = [
-  ("cluster_info", "Cluster info", "C"),
+  ("cluster_info", "Overview of the cluster", "C"),
   ("quota", "Quota", "Q"),
   ("scratch", "Old files in scratch", "X"),
   None,

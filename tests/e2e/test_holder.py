@@ -98,7 +98,7 @@ def test_holder(check, lab):
     check("closing the terminal leaves slurp running", os.path.exists(sock) and subprocess.run(["pgrep", "-f", "--", f"--holder {sock}"], capture_output=True).returncode == 0)
     c = Term(110, 32)
     ok = c.wait(r"Jobs", 15)
-    check("slurp again attaches to it, active at once (no other view)", ok and "in use" not in c.text(), c.text()[-300:])
+    check("slurp again attaches to it, active at once (no other view)", ok and "in use in another view" not in c.text(), c.text()[-300:])
     # the web view, through the app's request
     env = ENV | {"SLURP_HOLDER": sock}
     r = subprocess.run([PY, "-c", "import json, slurp.links.holder as h; print(json.dumps(h.control('web_start')))"], cwd=T, env=env, capture_output=True, text=True)
@@ -170,7 +170,7 @@ def test_holder(check, lab):
           took = False
         check("nor a websocket", not took)
       async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as s:
-        ok = c.wait(r"Jobs", 10) and "in use" not in c.text()
+        ok = c.wait(r"Jobs", 10) and "in use in another view" not in c.text()
         check("the browser goes away: the terminal becomes active by itself", ok, c.text()[:300])
         end = time.time() + 10
         while time.time() < end and NORD not in c.raw[-400000:]:

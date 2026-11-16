@@ -172,8 +172,10 @@ on its allocated nodes. Shells on its node and GDB sessions open as subtabs.
 
 ## Tabs and subtabs
 
+Every tab opens on its **Overview** (the cluster at a glance, see
+[Clusters over SSH](#connect-to-slurm-over-ssh)); **Jobs** is the job list.
 The toolbar of the job list has **☰ Menu** (`F10`) with what slurp does for
-the tab, each with its key (cluster info, quota, old files in scratch, shells,
+the tab, each with its key (the overview, quota, old files in scratch, shells,
 the login directory and the drive, interactive job, new job script,
 categories, this slurp in your browser, the guides, the rule catalogue,
 options, about), and **Reload**, the time window of finished jobs, whose jobs
@@ -336,12 +338,21 @@ that closes it (after asking). Notifications name the tab they belong to.
 holds a node (`sleep infinity`) in a bash editor, with fields for the account
 (one of yours or typed), the partition, the time limit, nodes, GPUs and the job
 name; the fields write the command, which stays editable. Once the job runs, its job
-window opens shells on its node. **Cluster info** (in the menu, or `C`) shows the health
-of the cluster (nodes down, drained, in maintenance, not responding, with
-the reasons; reservations), its occupancy (busy and idle nodes, running and
-pending jobs and why they wait) and the partitions, with its own Reload; its
-title says healthy (green), degraded (yellow) or unhealthy (red) and why;
-without a connection it says so, with Reconnect.
+window opens shells on its node.
+
+**The overview** is the first subtab of every tab, and a tab opens on it (the
+**Overview** button before **Jobs**; `C`, or *Overview of the cluster* in the
+menu, shows it and asks again). Its title says whether the cluster is healthy
+(green), degraded (yellow) or unhealthy (red) and why, who you are logged in
+as and the Slurm version. It shows your jobs (running, pending and why,
+finished by state with their node hours, those with problems; `j` opens the
+job list), the health of the cluster (nodes down, drained, in maintenance, not
+responding, with the reasons; reservations), its occupancy (busy and idle
+nodes, running and pending jobs and why they wait), your quotas with bars, the
+partitions and the node topology of each, and for a known site its status
+page, documentation and scratch purge. Each part loads in the background, `r`
+asks again; without a session it shows **Connect**. `"start_page": "jobs"` in
+the settings opens tabs on the job list instead.
 
 ## Copying
 
@@ -632,7 +643,7 @@ in the script view.
 Slurm in five minutes, writing a job script, common mistakes, arrays and
 dependencies, software, filesystems and quotas, NUMA placement (a recipe
 table for the node), GPUs, failed jobs. Their rule links open the catalogue.
-**Cluster info** shows the node topology of every partition.
+**The overview** shows the node topology of every partition.
 
 **Muting**: a finding's *Mute everywhere* stores the rule in
 `"checks_muted"` in the config; *Mute in this script* (script view) adds
