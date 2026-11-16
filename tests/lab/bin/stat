@@ -1,0 +1,5 @@
+#!/bin/sh
+# the real stat, slowed down while the file stat_delay is there (a slow file system)
+d="$(dirname "$(dirname "$(readlink -f "$0")")")"
+[ -f "$d/stat_delay" ] && sleep "$(cat "$d/stat_delay")"
+exec /usr/bin/stat "$@"

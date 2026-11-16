@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""fake srun: one task; runs the command after the options with the stdin it got, output labelled like --label"""
+import os, subprocess, sys
+args, i, label = sys.argv[1:], 0, False
+with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "srun_calls"), "a") as f:
+  f.write(" ".join(args) + "\n")
+while i < len(args) and args[i].startswith("-"):
+  label = label or args[i] == "--label"
+  i += 2 if args[i] in ("-w", "-N", "-n") else 1
+res = subprocess.run(args[i:], stdin=sys.stdin, capture_output=True, text=True, env=os.environ | {"SLURM_STEP_ID": "7"})
+for line in res.stdout.splitlines():
+  print(("0: " if label else "") + line)
+sys.stderr.write(res.stderr)
+sys.exit(res.returncode)

@@ -1,0 +1,9 @@
+#!/bin/sh
+# fake lfs quota: 50 GiB of 100 GiB (soft 80) and 600000 of 1000000 files for the user, nothing for groups
+[ "$1" = quota ] || exit 1
+kind=$2; name=$3; path=$4
+if [ "$kind" = -u ]; then
+  printf 'Disk quotas for usr %s (uid 1000):\n     Filesystem  kbytes   quota   limit   grace   files   quota   limit   grace\n%s\n                 52428800  83886080 104857600       -  600000       0 1000000       -\n' "$name" "$path"
+else
+  printf 'Disk quotas for grp %s (gid 1000):\n     Filesystem  kbytes   quota   limit   grace   files   quota   limit   grace\n%s\n                 0       0       0       -       0       0       0       -\n' "$name" "$path"
+fi
