@@ -14,38 +14,39 @@ for var, sub in (("XDG_STATE_HOME", "xdgstate"), ("XDG_CONFIG_HOME", "xdgtest"),
     os.environ[var] = os.path.join(HERE, sub)
     if var == "XDG_CONFIG_HOME": shutil.rmtree(os.environ[var], ignore_errors=True)
 import collections, importlib, pkgutil
-sys.path.insert(0, os.environ.get("SLURP_REPO") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))) # (this checkout's slurp)
 import slurp
-from slurp import checks, environment, remote, state
-from slurp.screens import dialogs
+from slurp.checks import engine as checks, environment
+from slurp.cluster import remote
+from slurp import state
+from slurp.ui.screens import dialogs
 from textual.coordinate import Coordinate
 from textual.screen import Screen
 from textual.widgets import Markdown, RadioButton, TextArea
-from slurp.app import Slurp
+from slurp.ui.app import Slurp
 from slurp.config import config_path, load_config, update_config
-from slurp.jobs import array_overview, ERR_SIZES, JobProgress, progress_state
-from slurp.remote import HEALTH_STYLES
-from slurp.screens.array import ArrayScreen, epoch
-from slurp.screens.categories import CategoriesScreen, CategorizeScreen, NONE
-from slurp.screens.checks import FixPreviewScreen, GuidesScreen, RuleCatalogueScreen
-from slurp.screens.clusterinfo import cluster_health, ClusterInfoScreen
-from slurp.screens.connection import ConnectionScreen
-from slurp.screens.dialogs import CommandScreen, ConfirmScreen, CopyScreen, RestartScreen, RunArrayScreen
-from slurp.screens.files import DirScreen, FileScreen, open_path
-from slurp.screens.help import AboutScreen, VIEW_HELP, ViewHelpScreen
-from slurp.screens.job import JobScreen
-from slurp.screens.links import DriveScreen, link_state, LinkScreen, LinkSetupScreen, ShellChoiceScreen
-from slurp.screens.main import MainScreen
-from slurp.screens.options import OptionsScreen
-from slurp.screens.script import ScriptScreen
-from slurp.screens.shell import screen_text, TerminalHelpScreen, TerminalScreen
-from slurp.screens.storage import QuotaScreen, ScratchScreen
-from slurp.screens.wizard import NewScriptScreen
-from slurp.share import client_commands, host_fingerprint, is_public, Link, link_health, parse_relay, Session
+from slurp.cluster.jobs import array_overview, ERR_SIZES, JobProgress, progress_state
+from slurp.cluster.remote import HEALTH_STYLES
+from slurp.ui.screens.array import ArrayScreen, epoch
+from slurp.ui.screens.categories import CategoriesScreen, CategorizeScreen, NONE
+from slurp.ui.screens.checks import FixPreviewScreen, GuidesScreen, RuleCatalogueScreen
+from slurp.ui.screens.clusterinfo import cluster_health, ClusterInfoScreen
+from slurp.ui.screens.connection import ConnectionScreen
+from slurp.ui.screens.dialogs import CommandScreen, ConfirmScreen, CopyScreen, RestartScreen, RunArrayScreen
+from slurp.ui.screens.files import DirScreen, FileScreen, open_path
+from slurp.ui.screens.help import AboutScreen, VIEW_HELP, ViewHelpScreen
+from slurp.ui.screens.job import JobScreen
+from slurp.ui.screens.links import DriveScreen, link_state, LinkScreen, LinkSetupScreen, ShellChoiceScreen
+from slurp.ui.screens.main import MainScreen
+from slurp.ui.screens.options import OptionsScreen
+from slurp.ui.screens.script import ScriptScreen
+from slurp.ui.screens.shell import screen_text, TerminalHelpScreen, TerminalScreen
+from slurp.ui.screens.storage import QuotaScreen, ScratchScreen
+from slurp.ui.screens.wizard import NewScriptScreen
+from slurp.links.share import client_commands, host_fingerprint, is_public, Link, link_health, parse_relay, Session
 from slurp.state import setup_logging
-from slurp.terminal import TerminalView
-from slurp.widgets import ClickTable, ConnectionStatus, Spinning
-import slurp.categories as _categories # (the lab's "cluster" is this machine: never the real ~/.config/slurp/categories.json)
+from slurp.ui.terminal import TerminalView
+from slurp.ui.widgets import ClickTable, ConnectionStatus, Spinning
+import slurp.cluster.categories as _categories # (the lab's "cluster" is this machine: never the real ~/.config/slurp/categories.json)
 CATEGORIES_FILE = _categories.FILE = os.path.join(HERE, "xdgcat", "categories.json")
 shutil.rmtree(os.path.dirname(CATEGORIES_FILE), ignore_errors=True)
 shutil.rmtree(os.path.join(os.environ["XDG_CACHE_HOME"], "slurp", "joblists"), ignore_errors=True) # (each run: no list kept yet)
@@ -698,7 +699,7 @@ async def t_this_view(app, pilot):
 async def t_cloudflare_ask(app, pilot):
   """No cloudflared here: Create link asks before downloading it (No: nothing happens); Download: the link's window
   shows downloading cloudflared (with the MB), then installing cloudflared, then the tunnel"""
-  import shutil, slurp.cloudflare as cf
+  import shutil, slurp.links.cloudflare as cf
   await until(pilot, lambda: app.cluster.loader is None, 30)
   shutil.rmtree(cf.data_dir(), ignore_errors=True)
   fake = os.path.join(OUT, "fake-cloudflared-dl")
@@ -767,7 +768,7 @@ exec sleep 300
 async def t_web_cloudflare(app, pilot):
   """A web link through Cloudflare: the choice (web links only), its panel (no logins, no password), the quick tunnel
   (a fake cloudflared), the link window (the https address, no password, no helper), its own setting; Revoke ends it"""
-  import slurp.cloudflare as cf
+  import slurp.links.cloudflare as cf
   await until(pilot, lambda: app.cluster.loader is None, 30)
   fake = os.path.join(OUT, "fake-cloudflared")
   marker = os.path.join(OUT, "fake-cloudflared.args")
@@ -1084,7 +1085,7 @@ async def t_offline(app, pilot):
   """The job list is kept: a tab whose cluster cannot be reached shows the last list at once, marked as possibly
   outdated; categorizing there is kept here and written to the cluster with the next load"""
   import json, types
-  from slurp import jobcache
+  from slurp.cluster import jobcache
   await until(pilot, lambda: app.cluster.loader is None, 30)
   lab = app.cluster
   kept = jobcache.path_of(lab)
@@ -1249,7 +1250,7 @@ async def t_chdir(app, pilot):
 
 async def t_web_access(app, pilot):
   await until(pilot, lambda: app.cluster.loader is None, 30)
-  import slurp.holder as hm
+  import slurp.links.holder as hm
   calls = []
   views = [{"label": "the terminal on host (pts/1)", "kind": "terminal"}]
   def fake(cmd, timeout=5, **kw):
@@ -1351,7 +1352,7 @@ async def t_options(app, pilot):
 async def t_copy_views(app, pilot):
   await until(pilot, lambda: app.cluster.loader is None, 30)
   import json, importlib
-  dialogs = importlib.import_module("slurp.screens.dialogs")
+  dialogs = importlib.import_module("slurp.ui.screens.dialogs")
   before = dict(load_config())
   used = []
   real_tool = dialogs.local_clipboard
@@ -1889,7 +1890,7 @@ async def t_array_window(app, pilot):
         and "Run time (completed)" in info and "Running for (running)" in info and "Waiting so far (pending)" in info, info)
   m = re.search(r"Node hours \(total\) +([0-9.]+) +over (\d+) tasks that ran, ([0-9.]+) of them by running", info)
   check("the array's total node hours, with the running part", m and float(m.group(1)) > float(m.group(3)) > 0 and int(m.group(2)) == 140, m and m.groups())
-  import slurp.screens.dialogs as dlg
+  import slurp.ui.screens.dialogs as dlg
   copied = []
   writes = []
   real_write = app._driver.write
@@ -2065,7 +2066,7 @@ async def t_array_reload(app, pilot):
   open(os.path.join(LAB, "delay"), "w").write("0")
   check("then the new content", ok, (scr.loading, len(scr.query(".arr-group")), rendered(scr.info_table)[-150:]))
   orig = array_overview
-  import slurp.screens.array as arrmod
+  import slurp.ui.screens.array as arrmod
   arrmod.array_overview = lambda array_id: (_ for _ in ()).throw(RuntimeError("sacct timed out"))
   scr.action_reload()
   ok = await until(pilot, lambda: not scr.loading, 10)
@@ -2095,7 +2096,7 @@ async def t_lazy(app, pilot):
   def cell(jid, key):
     keys = [k.value for k in t.columns]
     return t.get_row(jid)[keys.index(key)]
-  import slurp.jobs as sj
+  import slurp.cluster.jobs as sj
   real_run_many, seen = sj.run_many, []
   sj.run_many = lambda cmds, *a, **k: (seen.extend(cmds), real_run_many(cmds, *a, **k))[1]
   try:
@@ -2306,7 +2307,7 @@ async def t_links(app, pilot):
   await pilot.click("#setup-create")
   await until(pilot, lambda: isinstance(app.screen, LinkScreen) and app.screen.link.ready(), 20)
   link = app.screen.link
-  from slurp import winhelper as wh
+  from slurp.links.windows import winhelper as wh
   check("drive link: the folders for the Windows helper, $HOME (the login directory) first, in its URL",
         link.dirs[:1] == [("HOME", home)] and all(p.startswith("/") for _, p in link.dirs)
         and urllib.parse.quote(f"HOME={home}", safe="") in wh.link_url(link), link.dirs)

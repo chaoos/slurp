@@ -24,6 +24,11 @@ version may need the helper of the same version).
   is `docs/manual.md` and its images are in `docs/images/` (they were in the
   package directory); `python tools/make_logo_files.py` writes the logo files
   (was `python -m slurp.logo`). The About window links both.
+- The code is in `src/slurp/`, in subpackages by what it does: `cluster/`
+  (Slurm, the jobs and their files), `checks/` (the checks of batch scripts;
+  the built-in rule packs are `checks/packs/`), `links/` (shells, drives and
+  web views on your own machine, the session holder) and `ui/` (the app and
+  its windows). Your own rule packs stay in `~/.config/slurp/rules/`.
 - The tests are in the repository (`tests/`, run with `pytest`), with a
   GitHub Actions workflow: the unit tests, and the lab tests that drive slurp
   against a fake Slurm cluster behind a local sshd.

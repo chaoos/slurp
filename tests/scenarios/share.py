@@ -1,12 +1,11 @@
-"""Lab test of slurp/share.py with real clients: the lab sshd is the relay (an own OpenSSH relay), a real ssh in a
+"""Lab test of slurp/links/share.py with real clients: the lab sshd is the relay (an own OpenSSH relay), a real ssh in a
 pseudo terminal is the user's terminal, a real sshfs mounts the drive. Usage: SLURP_TEST_WORK=<lab dir> python tests/scenarios/share.py (the lab sshd runs)"""
 import asyncio, os, pty, re, select, shutil, subprocess, sys, time, fcntl, struct, termios
 HERE = os.environ.get("SLURP_TEST_WORK") or sys.exit("SLURP_TEST_WORK: the lab directory (see tests/lab)"); LAB = os.path.join(HERE, "sshlab"); S = os.path.join(HERE, "share")
 os.environ["PATH"] = os.path.join(LAB, "bin") + ":" + os.environ["PATH"]
 for k in ("XDG_CONFIG_HOME", "XDG_STATE_HOME"):
   os.environ[k] = os.path.join(S, k.lower())
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from slurp import share as sh
+from slurp.links import share as sh
 
 results = []
 def check(name, cond, info=""):

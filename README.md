@@ -32,6 +32,22 @@ explain each window and `F1` opens the guides (job scripts, arrays, filesystems,
 GPUs, ...). What changed between versions is in
 [CHANGELOG.md](CHANGELOG.md).
 
+## Layout
+
+```
+src/slurp/            the package (installed with pip; `slurp` is slurp.cli:main)
+  cli.py launch.py      the command line, how slurp starts itself again
+  config.py state.py    settings kept between runs; logging and the data of the tabs
+  cluster/              Slurm here or over SSH: the connection, jobs, their files, storage, categories
+  checks/               the checks of batch scripts: engine, rules, site rule packs (packs/*.toml), fixes, guides
+  links/                shells, drives and web views on your own machine, the session holder, sshfs (windows/: the helper)
+  ui/                   the Textual app, its widgets, terminals and logo; screens/: the windows
+  scripts/              shell scripts slurp runs on the nodes of a job
+tests/                pytest: unit tests; lab/ (a fake Slurm behind a local sshd) and scenarios/ (slurp against it)
+docs/                 the manual and its images
+tools/                maintenance scripts (the logo files)
+```
+
 ## Tests
 
 ```bash

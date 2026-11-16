@@ -1,6 +1,6 @@
 """The rule corpus: scripts with the findings they must (and must not) give, without a cluster (facts made up)"""
-from slurp import checks as c
-from slurp.checks import Facts, Partition, PathInfo
+from slurp.checks import engine as c
+from slurp.checks.engine import Facts, Partition, PathInfo
 
 
 def test_rule_corpus(check, tmp_path, monkeypatch):
@@ -95,7 +95,7 @@ srun --cpu-bind=cores ./app input.dat
   has("P02 mkdir before cd is fine", GOOD.replace('cd "$SCRATCH/run"', "mkdir -p /scratch/me/new\ncd /scratch/me/new"), [], ["P02"], probes={"d:/scratch/me/new": PathInfo(False)})
 
   # --- fixes
-  from slurp import fixes, templates, environment, placement
+  from slurp.checks import fixes, templates, environment, placement
   bad = GOOD.replace("\n", "\r\n").replace("module purge\r\n", "").replace("export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK\r\n", "")
   bad = bad.replace("logs/%x-%j.out", "out.txt") + "#SBATCH --mem=4G\r\nsrun -n1 ./a &\r\n"
   got, f = ids(bad)
@@ -153,7 +153,7 @@ srun --cpu-bind=cores ./app input.dat
   check("Q02 little room left", "Q02" in got and "Q01" not in got, sorted(got))
 
   # --- G: good practice
-  from slurp.jobs import Job, SACCT_FIELDS
+  from slurp.cluster.jobs import Job, SACCT_FIELDS
   def job(jid="123", state="COMPLETED", wd="/scratch/me/run", stdout="", queued=False, steps=(), script=None, submit="sbatch job.sh"):
     rec = dict.fromkeys(SACCT_FIELDS, ""); rec.update(JobID=jid, JobIDRaw=jid, JobName="sim", WorkDir=wd, NNodes="2", NTasks="8",
                                                        State=state, StdOut=stdout, SubmitLine=submit, ExitCode="0:0", Elapsed="00:10:00", Timelimit="01:00:00")

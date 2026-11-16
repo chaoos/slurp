@@ -9,7 +9,8 @@ Usage: SLURP_TEST_WORK=<lab dir> python tests/scenarios/winhelper.py (the lab ss
 import asyncio, base64, getpass, json, os, re, shlex, socket, subprocess, sys, time, zlib, urllib.parse
 src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "share.py")).read() # (its setup: the lab, check, the link manager)
 exec(src.split("async def main():")[0])
-from slurp import winhelper, windrive, holder
+from slurp.links.windows import winhelper, windrive
+from slurp.links import holder
 from aiohttp import web
 import aiohttp
 
@@ -143,7 +144,7 @@ check("reconnect: a drive maps all its folders again; a shell asks first (its te
 dk = ps_function("Disconnect-Keep")
 check("disconnect keeps the connection in the list (Remove takes it out)", "Set-Phase $c 'input'" in dk and "Form.Close" not in dk)
 check("helper window: updated in place, not into itself", "$script:InPanel" in ps_function("Update-Panel") and "Update-Panel" in PS.split("$timer.Add_Tick", 1)[1])
-from slurp.screens import links as _links
+from slurp.ui.screens import links as _links
 wt = str(_links.warning_text("direct://login.example.org:2222", "shell"))
 check("setup panel: direct explains itself (reachable, every interface, the password)", "Direct, no relay" in wt and "login.example.org port 2222" in wt
       and "every" in wt and str(_links.warning_text("direct://a b", "shell")).startswith("direct://a b:"), wt)
@@ -233,7 +234,7 @@ check("drive: a further folder that fails or is slow leaves the mapped ones (eve
       "$extra = ($c.Maps.Count -gt 0 -and -not $c.Remap)" in step_map and len(fails) == 2 and all(g > step_map.index("$extra =") for g in guards), step_map[:400])
 check("drive: reconnecting maps every folder again", "foreach ($m in @($c.Maps)) { [void]$c.Pending.Add(" in PS)
 check("drive: no $c.Drive / $c.Target left (several drives now)", "$c.Drive" not in PS and "$c.Target" not in PS)
-from slurp import storage
+from slurp.cluster import storage
 os.environ.update(SCRATCH="/tmp/scr", PROJECT="/proj/p/"); os.environ.pop("WORK", None); os.environ.pop("STORE", None)
 check("drive_dirs: $HOME (the login directory) and the variables that are set, in order", storage.drive_dirs("/home/me") == [("HOME", "/home/me"), ("SCRATCH", "/tmp/scr"), ("PROJECT", "/proj/p")],
       storage.drive_dirs("/home/me"))

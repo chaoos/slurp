@@ -127,7 +127,7 @@ read (64 kB), every 10 seconds while the job runs (the window shows when it was
 last read); a chosen file is also listed among the job's files as `progress`.
 
 For a running job, press **Query current memory** to request current CPU RSS
-and GPU process memory. The query is the script `slurp/scripts/memory_probe.sh`,
+and GPU process memory. The query is the script `src/slurp/scripts/memory_probe.sh`,
 run on every node of the job as a step (`srun --overlap --input=all … bash -s`)
 with the script on stdin, so nothing is copied to the cluster. Every query is
 kept: the dropdown next to it repeats it every 1, 5, 15, 30 or 60 minutes (also
@@ -589,12 +589,12 @@ table for the node), GPUs, failed jobs. Their rule links open the catalogue.
 **Site rule packs** add what Slurm does not tell: scratch purge days, parallel
 filesystems, NUMA domains per node, the GPU architecture, site plugin options
 of `sbatch`, rules that do not apply, and site advice. A pack is a TOML file
-in `slurp/rules/` (included: CSCS Alps, and JSC's JURECA, JUWELS, JUSUF and
+in `src/slurp/checks/packs/` (included: CSCS Alps, and JSC's JURECA, JUWELS, JUSUF and
 JEDI) or in
 `~/.config/slurp/rules/`; it applies when one of its `match` patterns matches
 the tab, its SSH destination or the login node's host name. It can also name
 the site's documentation (`docs`, for the guides) and its status page
-(`status`, shown when the login fails). See `slurp/rulepacks.py` for the keys.
+(`status`, shown when the login fails). See `src/slurp/checks/rulepacks.py` for the keys.
 
 **Without the UI**, `slurp check job.sh ...` prints the findings of batch
 scripts (on the machine it runs on, e.g. a login node): exit code 1 if a script
@@ -793,7 +793,7 @@ The *prompt meter*: a shell prompt whose cursor became a load meter. It is drawn
 on the terminal grid (a pixel is one column wide and half a row high), so the
 TUI shows it exactly with block characters: `❯▂▄█` in the header (in the
 theme's colours), five rows of `▀▄█` in the help windows and on the lock screen
-of a view. `slurp/logo.py` holds the pixel map and makes every other form from
+of a view. `src/slurp/ui/logo.py` holds the pixel map and makes every other form from
 it: the favicon and the start screen of the web view, the tray icon and start
 menu entry of the slurp helper on Windows (`.ico`), and the files in
 `docs/images/` (`logo.svg`, `logo-plain.svg`, `logo-wordmark.svg`,

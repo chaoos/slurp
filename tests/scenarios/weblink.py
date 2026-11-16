@@ -56,7 +56,7 @@ async def main():
         peers and websess and peers[-1] in websess[0].web_ports, (peers, [s.web_ports for s in websess]))
   class FakeApp:
     active_view_port = peers[-1] if peers else 0
-  from slurp.app import Slurp as SlurpApp
+  from slurp.ui.app import Slurp as SlurpApp
   check("this_view: the session of the active browser, no other", websess and SlurpApp.this_view(FakeApp(), websess[0])
         and not SlurpApp.this_view(FakeApp(), sh.Session(link, "x")), "")
   check("the session is listed as a web session", any(s.kind == "web" for s in link.sessions) and any(e[0] == "login" for e in events), [s.kind for s in link.sessions])

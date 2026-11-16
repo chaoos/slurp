@@ -8,7 +8,6 @@ ENV = os.environ | {"XDG_RUNTIME_DIR": os.path.join(T, "run"), "XDG_STATE_HOME":
                     "PATH": os.path.join(HERE, "sshlab", "fakebin") + ":" + os.environ["PATH"]}
 for k in ("SLURP_INNER", "SLURP_HOLDER"): ENV.pop(k, None)
 os.makedirs(ENV["XDG_RUNTIME_DIR"], mode=0o700)
-sys.path.insert(0, REPO)
 import pyte
 from slurp.launch import slurp_command # (this checkout's slurp, as slurp starts itself)
 results = []
@@ -52,7 +51,7 @@ class Term:
 os.makedirs(os.path.join(ENV["XDG_CONFIG_HOME"], "slurp"), exist_ok=True)
 open(os.path.join(ENV["XDG_CONFIG_HOME"], "slurp", "config.json"), "w").write('{"theme": "nord", "theme_web": "gruvbox"}')
 NORD, GRUVBOX = b"48;2;46;52;64", b"48;2;40;40;40" # (their backgrounds)
-sock = subprocess.run([PY, "-c", "import slurp.holder as h; print(h.socket_path())"], cwd=REPO, env=ENV, capture_output=True, text=True).stdout.strip()
+sock = subprocess.run([PY, "-c", "import slurp.links.holder as h; print(h.socket_path())"], cwd=REPO, env=ENV, capture_output=True, text=True).stdout.strip()
 print("socket", sock)
 a = Term(120, 35)
 ok = a.wait(r"Jobs", 40)
@@ -90,7 +89,7 @@ ok = c.wait(r"Jobs", 15)
 check("slurp again attaches to it, active at once (no other view)", ok and "in use" not in c.text(), c.text()[-300:])
 # the web view, through the app's request
 env = ENV | {"SLURP_HOLDER": sock}
-r = subprocess.run([PY, "-c", "import json, slurp.holder as h; print(json.dumps(h.control('web_start')))"], cwd=REPO, env=env, capture_output=True, text=True)
+r = subprocess.run([PY, "-c", "import json, slurp.links.holder as h; print(json.dumps(h.control('web_start')))"], cwd=REPO, env=env, capture_output=True, text=True)
 web = json.loads(r.stdout or "{}")
 check("the web view starts when asked (127.0.0.1, a random port, a token)", web.get("port") and web.get("token"), r.stderr[-300:])
 async def browser():
@@ -166,10 +165,10 @@ async def browser():
       c.pump(0.2)
     check("…and slurp switches back to the terminal's theme (nord)", NORD in c.raw[-400000:])
 asyncio.run(browser())
-r = subprocess.run([PY, "-c", "import json, slurp.holder as h; print(json.dumps(h.control('status')))"], cwd=REPO, env=env, capture_output=True, text=True)
+r = subprocess.run([PY, "-c", "import json, slurp.links.holder as h; print(json.dumps(h.control('status')))"], cwd=REPO, env=env, capture_output=True, text=True)
 st = json.loads(r.stdout or "{}")
 check("status: the views and the web port", len(st.get("views", [])) == 1 and st.get("web"), st)
-r = subprocess.run([PY, "-c", f"import json, slurp, slurp.holder as h; print(json.dumps([slurp.__version__, h.control('status', path={sock!r})]))"],
+r = subprocess.run([PY, "-c", f"import json, slurp, slurp.links.holder as h; print(json.dumps([slurp.__version__, h.control('status', path={sock!r})]))"],
                    cwd=REPO, env=ENV, capture_output=True, text=True)
 version, st2 = json.loads(r.stdout or '["", {}]')
 check("status: the holder's version, asked by a new slurp by its socket (as before attaching)", version and (st2 or {}).get("version") == version, (version, st2, r.stderr[-200:]))

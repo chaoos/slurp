@@ -1,6 +1,7 @@
 """slurp's logo: one pixel map, every form of it consistent; the files in docs/images/ current"""
 import os, re, struct, xml.dom.minidom
-from slurp import logo, winhelper
+from slurp.ui import logo
+from slurp.links.windows import winhelper
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

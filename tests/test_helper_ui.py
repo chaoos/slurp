@@ -1,9 +1,10 @@
 """The link window's helper section and the setup window (Textual run_test, no lab)"""
 import asyncio
 from textual.app import App
-from slurp import share as sh, winhelper
-from slurp.app import Slurp as SlurpApp
-from slurp.screens import links as L
+from slurp.links import share as sh
+from slurp.links.windows import winhelper
+from slurp.ui.app import Slurp as SlurpApp
+from slurp.ui.screens import links as L
 
 
 class T(App):

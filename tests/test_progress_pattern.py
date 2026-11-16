@@ -1,7 +1,7 @@
 """The progress files of the other tasks of an array, guessed from the file chosen for one task (jobs.progress_pattern)"""
 import pytest
 
-from slurp.jobs import pattern_for, progress_pattern
+from slurp.cluster.jobs import pattern_for, progress_pattern
 
 
 @pytest.mark.parametrize("path, task, raw, want_dir, want_name", [

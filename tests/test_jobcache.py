@@ -1,10 +1,10 @@
-"""The job list kept per tab (slurp/jobcache.py): round trip of the jobs and the categories, only for the user, a
+"""The job list kept per tab (slurp/cluster/jobcache.py): round trip of the jobs and the categories, only for the user, a
 broken or old file is ignored, a load that came first wins; the changes made offline, replayed in order"""
 import json, os, stat
 from datetime import datetime
-from slurp import jobcache, categories as cat
+from slurp.cluster import jobcache, categories as cat
 from slurp.state import ClusterSession
-from slurp.jobs import Job, JobProgress, SACCT_FIELDS
+from slurp.cluster.jobs import Job, JobProgress, SACCT_FIELDS
 
 
 def test_jobcache(check, tmp_path, monkeypatch):
