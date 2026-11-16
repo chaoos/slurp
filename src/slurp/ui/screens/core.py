@@ -45,8 +45,8 @@ class GdbCommandScreen(ModalScreen[list[str] | None]):
       yield Input(self.default_command, id="gdb-command")
       yield Static("Arguments are parsed as a command line; shell operators and expansion are not evaluated.", id="gdb-help")
       with Horizontal(id="gdb-buttons"):
-        yield Button("Cancel", id="gdb-cancel")
-        yield Button("Run in terminal", id="gdb-run", variant="primary")
+        yield Button("Cancel", id="gdb-cancel", compact=True)
+        yield Button("Run in terminal", id="gdb-run", variant="primary", compact=True)
 
   def on_mount(self):
     command = self.query_one("#gdb-command", Input)
@@ -124,7 +124,7 @@ class CoreScreen(SplitScreen):
   def compose_left(self) -> ComposeResult:
     with VerticalScroll(id="core-overview"):
       yield Static(id="core-info")
-      yield Button("Open with GDB", id="open-gdb", variant="primary")
+      yield Button("Open with GDB", id="open-gdb", variant="primary", compact=True)
 
   def on_mount(self):
     self.sub_title = crumb_title(self.crumbs)

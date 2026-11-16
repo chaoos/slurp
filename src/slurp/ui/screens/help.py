@@ -340,10 +340,10 @@ class ViewHelpScreen(ModalScreen):
       yield DocViewer(self.markdown, id="vh-doc", show_table_of_contents=False, open_links=False)
       with Horizontal(id="vh-buttons"):
         if self.details:
-          yield Button("Copy details", id="vh-copy", tooltip="the version and the machine, as text (for a bug report)")
-        yield Button("Guides (F1)", id="vh-guides")
-        yield Button("Rule catalogue (F2)", id="vh-rules")
-        yield Button("Close", id="vh-close", variant="primary")
+          yield Button("Copy details", id="vh-copy", tooltip="the version and the machine, as text (for a bug report)", compact=True)
+        yield Button("Guides (F1)", id="vh-guides", compact=True)
+        yield Button("Rule catalogue (F2)", id="vh-rules", compact=True)
+        yield Button("Close", id="vh-close", variant="primary", compact=True)
 
   def on_mount(self):
     self.query_one("#vh-close", Button).focus()

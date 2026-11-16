@@ -106,8 +106,8 @@ class NameScreen(ModalScreen[str | None]):
       yield Static(self.note, id="nm-note", markup=False)
       yield Static(id="nm-error")
       with Horizontal(id="nm-buttons"):
-        yield Button("Cancel", id="nm-cancel")
-        yield Button(self.ok_label, id="nm-ok", variant="primary")
+        yield Button("Cancel", id="nm-cancel", compact=True)
+        yield Button(self.ok_label, id="nm-ok", variant="primary", compact=True)
 
   def on_mount(self):
     self.query_one("#nm-path", Input).focus()
@@ -166,9 +166,9 @@ class CategorizeScreen(ModalScreen[tuple | None]):
       yield Static("A new name makes the category (a/b: b in a). An array goes in as a whole, with all its tasks.", id="cz-note")
       yield Static(id="cz-error")
       with Horizontal(id="cz-buttons"):
-        yield Button("Cancel", id="cz-cancel")
-        yield Button("Take out of its category", id="cz-remove", variant="warning", disabled=not self.current)
-        yield Button("Put in the category", id="cz-ok", variant="primary")
+        yield Button("Cancel", id="cz-cancel", compact=True)
+        yield Button("Take out of its category", id="cz-remove", variant="warning", disabled=not self.current, compact=True)
+        yield Button("Put in the category", id="cz-ok", variant="primary", compact=True)
 
   def on_mount(self):
     tree = self.query_one("#cz-tree", Tree)
@@ -263,16 +263,16 @@ class CategoriesScreen(SplitScreen):
         tree = Tree("all categories", id="cat-tree")
         yield tree
         with Horizontal(id="cat-side-buttons"):
-          yield Button("New", id="cat-new", tooltip="a new category in the one selected (n)")
-          yield Button("Rename", id="cat-rename", tooltip="rename or move it, with what is in it (e)")
-          yield Button("Delete", id="cat-delete", variant="error", tooltip="its jobs go to the category it is in (Del)")
+          yield Button("New", id="cat-new", tooltip="a new category in the one selected (n)", compact=True)
+          yield Button("Rename", id="cat-rename", tooltip="rename or move it, with what is in it (e)", compact=True)
+          yield Button("Delete", id="cat-delete", variant="error", tooltip="its jobs go to the category it is in (Del)", compact=True)
       with Vertical(id="cat-main"):
         yield Static(id="cat-info")
         with Horizontal(id="cat-main-buttons"):
-          yield Button("Reload", id="cat-reload", variant="primary", tooltip="ask Slurm again (r)")
-          yield Button("In the job list", id="cat-list", tooltip="the job list filtered to this category (l)")
-          yield Button("Categorize…", id="cat-categorize", tooltip="the job selected in a category, another or a new one (c)")
-          yield Button("Take job out", id="cat-take-out", variant="warning", tooltip="the job selected leaves its category (x)")
+          yield Button("Reload", id="cat-reload", variant="primary", tooltip="ask Slurm again (r)", compact=True)
+          yield Button("In the job list", id="cat-list", tooltip="the job list filtered to this category (l)", compact=True)
+          yield Button("Categorize…", id="cat-categorize", tooltip="the job selected in a category, another or a new one (c)", compact=True)
+          yield Button("Take job out", id="cat-take-out", variant="warning", tooltip="the job selected leaves its category (x)", compact=True)
         yield ClickTable(id="cat-jobs", cursor_type="row", zebra_stripes=True)
 
   def on_mount(self):

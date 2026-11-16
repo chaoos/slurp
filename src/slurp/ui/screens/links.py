@@ -172,9 +172,9 @@ class ShellChoiceScreen(ModalScreen):
                    "(OpenSSH, PuTTY, Windows Terminal, …), wherever it is." + (f"\n\n(Own terminal: {missing})" if missing else ""),
                    id="choice-text", markup=False)
       with Horizontal(id="choice-buttons"):
-        yield Button("Cancel", id="choice-cancel")
-        yield Button("From your own terminal…", id="choice-own", disabled=bool(missing))
-        yield Button("In slurp", id="choice-slurp", variant="primary")
+        yield Button("Cancel", id="choice-cancel", compact=True)
+        yield Button("From your own terminal…", id="choice-own", disabled=bool(missing), compact=True)
+        yield Button("In slurp", id="choice-slurp", variant="primary", compact=True)
 
   def on_mount(self):
     self.query_one("#choice-slurp", Button).focus()
@@ -281,8 +281,8 @@ class LinkSetupScreen(ModalScreen):
             yield RadioButton("my public key (paste it below)", id="setup-auth-key")
         yield TextArea("", id="setup-key")
       with Horizontal(id="setup-buttons"):
-        yield Button("Cancel", id="setup-cancel")
-        yield Button("Create link", id="setup-create", variant="primary")
+        yield Button("Cancel", id="setup-cancel", compact=True)
+        yield Button("Create link", id="setup-create", variant="primary", compact=True)
 
   def on_mount(self):
     self.show_warning()
@@ -503,10 +503,10 @@ class LinkScreen(ModalScreen):
         yield Vertical(id="lv-commands")
       with Horizontal(id="lv-buttons"):
         if link.auth == "password":
-          yield Button("New password", id="lv-password", tooltip="the old one stops working")
-        yield Button("Extend 1 h", id="lv-extend")
-        yield Button("Revoke", id="lv-revoke", variant="error", tooltip="no more logins, and its sessions end")
-        yield Button("Close", id="lv-close", variant="primary", tooltip="the link stays (see the connection window)")
+          yield Button("New password", id="lv-password", tooltip="the old one stops working", compact=True)
+        yield Button("Extend 1 h", id="lv-extend", compact=True)
+        yield Button("Revoke", id="lv-revoke", variant="error", tooltip="no more logins, and its sessions end", compact=True)
+        yield Button("Close", id="lv-close", variant="primary", tooltip="the link stays (see the connection window)", compact=True)
 
   def on_mount(self):
     self.refresh_view()
@@ -559,20 +559,20 @@ class LinkScreen(ModalScreen):
         Static(f"It {HELPER_DOES[link.kind]}, and keeps it in its tray icon. In slurp's web view, Open on my computer "
                "hands the link to your browser, which starts the helper; from a terminal, copy the link and open it "
                "with Win+R. Set it up once on your computer: Set up the helper.", classes="lv-command-note"),
-        Horizontal(Button("Open on my computer", id="lv-helper-open", variant="primary"),
-                   Button("Copy helper link", id="lv-helper-copy"),
-                   Button("Set up the helper…", id="lv-helper-setup")),
+        Horizontal(Button("Open on my computer", id="lv-helper-open", variant="primary", compact=True),
+                   Button("Copy helper link", id="lv-helper-copy", compact=True),
+                   Button("Set up the helper…", id="lv-helper-setup", compact=True)),
         id="lv-helper"))
     if link.auth == "password":
       widgets.append(Vertical(Static("Password", classes="lv-command-title"),
                               Horizontal(Static(link.password, classes="lv-command-text", markup=False),
-                                         Button("Copy", classes="lv-copy", name="password")),
+                                         Button("Copy", classes="lv-copy", name="password", compact=True)),
                               classes="lv-command"))
     for i, (title, text, note) in enumerate(share.client_commands(link)):
       shown = text if len(text) <= 400 else f"{text[:90]} … ({len(text)} characters: use Copy)"
       widgets.append(Vertical(Static(title, classes="lv-command-title", markup=False),
                               Horizontal(Static(shown, classes="lv-command-text", markup=False),
-                                         Button("Copy", classes="lv-copy", name=str(i))),
+                                         Button("Copy", classes="lv-copy", name=str(i), compact=True)),
                               Static(note, classes="lv-command-note", markup=False), classes="lv-command"))
     box.mount_all(widgets)
 
@@ -691,10 +691,10 @@ class HelperSetupScreen(ModalScreen):
       with VerticalScroll(id="hs-body"):
         yield Markdown(HELPER_TEXT.replace("{fingerprint}", share.host_fingerprint()).replace("{alias}", share.host_alias()))
       with Horizontal(id="hs-buttons"):
-        yield Button("Close", id="hs-close")
-        yield Button("Copy the setup command", id="hs-copy")
+        yield Button("Close", id="hs-close", compact=True)
+        yield Button("Copy the setup command", id="hs-copy", compact=True)
         yield Button("Download the setup", id="hs-download", variant="primary",
-                     tooltip="slurp-helper-setup.cmd, in the browser that shows slurp now")
+                     tooltip="slurp-helper-setup.cmd, in the browser that shows slurp now", compact=True)
 
   def on_mount(self):
     self.query_one("#hs-download", Button).disabled = not self.app.on_client()
@@ -761,15 +761,15 @@ class DriveScreen(ModalScreen):
         yield Switch(value=drive.read_only, id="drive-ro", disabled=bool(self.local_reason))
       yield Static(id="drive-state")
       with Horizontal(classes="drive-buttons"):
-        yield Button("Unmount", id="drive-unmount", variant="error")
-        yield Button("Mount here", id="drive-mount", variant="primary", disabled=bool(self.local_reason))
+        yield Button("Unmount", id="drive-unmount", variant="error", compact=True)
+        yield Button("Mount here", id="drive-mount", variant="primary", disabled=bool(self.local_reason), compact=True)
       yield Static("On your own machine", classes="drive-section")
       yield Static("A link: sshfs on Linux and macOS, SSHFS-Win on Windows, WinSCP, file managers; wherever your "
                    "machine is (through a relay).", classes="drive-text", markup=False)
       with Horizontal(classes="drive-buttons"):
-        yield Button("Close", id="drive-close")
+        yield Button("Close", id="drive-close", compact=True)
         yield Button("Make a link…", id="drive-link", disabled=share.available() is not None,
-                     tooltip=share.available())
+                     tooltip=share.available(), compact=True)
 
   def on_mount(self):
     self.show_state()

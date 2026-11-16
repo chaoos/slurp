@@ -125,19 +125,19 @@ class ConnectionScreen(ModalScreen):
           yield Static("Drive on this machine", id="conn-drive-title")
           yield Static(id="conn-drive")
           with Horizontal(id="conn-drive-buttons"):
-            yield Button("Mount…", id="conn-drive-mount", variant="primary", tooltip="choose the path and mount (Drive, F)")
-            yield Button("Unmount", id="conn-drive-unmount")
-            yield Button("Remount", id="conn-drive-remount", tooltip="unmount and mount again (e.g. when it does not answer)")
+            yield Button("Mount…", id="conn-drive-mount", variant="primary", tooltip="choose the path and mount (Drive, F)", compact=True)
+            yield Button("Unmount", id="conn-drive-unmount", compact=True)
+            yield Button("Remount", id="conn-drive-remount", tooltip="unmount and mount again (e.g. when it does not answer)", compact=True)
             yield Button("Force unmount", id="conn-drive-force", variant="error",
-                         tooltip="also when files are in use (lazy: it goes when they are closed)")
+                         tooltip="also when files are in use (lazy: it goes when they are closed)", compact=True)
         yield Static(id="conn-links-title")
         yield ClickTable(id="conn-links", cursor_type="row", zebra_stripes=True)
         yield Static(id="conn-info")
       with Horizontal(id="conn-buttons"):
         if self.cluster.destination:
-          yield Button("Reconnect", id="conn-reconnect", variant="primary", tooltip="end the session and log in again (R)")
-          yield Button("Disconnect", id="conn-disconnect", variant="error")
-        yield Button("Close", id="conn-close")
+          yield Button("Reconnect", id="conn-reconnect", variant="primary", tooltip="end the session and log in again (R)", compact=True)
+          yield Button("Disconnect", id="conn-disconnect", variant="error", compact=True)
+        yield Button("Close", id="conn-close", compact=True)
 
   def show_title(self):
     text = Text(f"Connection of the tab {self.cluster.name}" + (f" · ssh {self.cluster.destination}" if self.cluster.destination else ""))

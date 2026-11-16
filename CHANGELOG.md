@@ -10,6 +10,10 @@ version may need the helper of the same version).
   in its middle, with what to do (a tab for a cluster with `+`, or
   `slurp --ssh`), instead of an error notification for every Slurm command at
   each load. `r` looks again.
+- All buttons are compact (one line, as wide as their label): the toolbar of
+  the job list, the job window, the dialogs and the other windows had a mix of
+  three-line and one-line ones. The toolbar of the job list fits in one row
+  with its choices.
 - The tagline is "All of slurm in one slurp" (was "Slurm at a glance").
 - slurp could end right at its start with an error (no attribute "main")
   when its 0.25 s timer came before the job list was shown.

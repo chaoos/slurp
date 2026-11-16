@@ -105,8 +105,8 @@ class OptionsScreen(ModalScreen):
         yield Static("The open tabs are saved by themselves (+ and ✕ change them).", classes="op-note")
       yield Static(f"Stored in {config_path()}", id="op-path")
       with Horizontal(id="op-buttons"):
-        yield Button("Cancel", id="op-cancel")
-        yield Button("Save", id="op-save", variant="primary")
+        yield Button("Cancel", id="op-cancel", compact=True)
+        yield Button("Save", id="op-save", variant="primary", compact=True)
 
   @on(Button.Pressed, ".op-forget")
   def forget_pressed(self, event):

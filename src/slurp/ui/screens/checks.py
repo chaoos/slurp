@@ -259,8 +259,8 @@ class FixPreviewScreen(ModalScreen):
       with VerticalScroll(id="fx-diff"):
         yield Static(code(diff, "diff"), id="fx-diff-text")
       with Horizontal(id="fx-buttons"):
-        yield Button("Cancel", id="fx-cancel")
-        yield Button(f"Write {self.target.rsplit('/', 1)[-1]}", id="fx-write", variant="primary")
+        yield Button("Cancel", id="fx-cancel", compact=True)
+        yield Button(f"Write {self.target.rsplit('/', 1)[-1]}", id="fx-write", variant="primary", compact=True)
 
   @on(Button.Pressed, "#fx-write")
   def write(self, event):

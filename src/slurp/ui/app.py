@@ -82,13 +82,15 @@ def checks_cell(findings):
 class Slurp(App):
   TITLE = "slurp"
   CSS = """
+  Button { min-width: 6; } /* (all buttons are compact: one line, as wide as their label) */
   #toolbar { height: auto; padding: 0 1; }
   #toolbar > * { margin-right: 1; }
-  #toolbar Label { padding-top: 1; }
-  #scope { width: 28; }
-  #collapse-arrays { width: auto; margin-top: 1; }
+  #reload, #scratch-search { width: 8; } /* (Reload/Search and Abort: one width, the row does not move) */
+  #scope { width: 20; }
+  #collapse-arrays { width: auto; }
   #scratch-bar, #scratch-actions { height: auto; padding: 0 1; }
-  #scratch-bar Label { padding: 1 1 0 0; width: auto; }
+  #scratch-bar Label { padding: 0 1 0 0; width: auto; }
+  #scratch-bar Input, #scratch-bar Select { margin-right: 1; }
   #scratch-dir { width: 1fr; }
   #scratch-by { width: 24; }
   #scratch-days { width: 8; }
@@ -100,7 +102,7 @@ class Slurp(App):
   MainScreen.-no-tabs #notabs { display: block; }
   MainScreen.-no-tabs .split, MainScreen.-no-tabs #loadstatus, MainScreen.-no-tabs #connstatus { display: none; }
   #us { width: auto; height: auto; padding: 0; border: none; }
-  #since-choice { width: 18; }
+  #since-choice { width: 15; }
   #since { width: 12; display: none; }
   #since.-custom { display: block; }
   #topbar { height: 1; }
@@ -156,7 +158,7 @@ class Slurp(App):
   #memory-watch { height: auto; margin-bottom: 1; }
   #memory-watch-bar { height: auto; }
   #memory-every { width: 22; margin-right: 1; }
-  #memory-watch-status { width: 1fr; padding-top: 1; }
+  #memory-watch-status { width: 1fr; }
   .memory-plot { height: 6; }
   .memory-plot-label { width: 5; padding-top: 2; }
   .memory-plot TimePlot { width: 1fr; height: 6; }

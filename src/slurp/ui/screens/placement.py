@@ -86,8 +86,8 @@ class PlacementScreen(ModalScreen):
         yield Static(Text("bound: the CPUs a task may run on · now: where its threads are at the moment · "
                           "# several tasks · · none. NUMA guide: F1", style="dim"), id="pl-legend")
       with Horizontal(id="pl-buttons"):
-        yield Button("Refresh", id="pl-refresh")
-        yield Button("Close", id="pl-close", variant="primary")
+        yield Button("Refresh", id="pl-refresh", compact=True)
+        yield Button("Close", id="pl-close", variant="primary", compact=True)
 
   def on_mount(self):
     self.probe()

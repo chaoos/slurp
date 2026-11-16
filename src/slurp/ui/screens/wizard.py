@@ -70,8 +70,8 @@ class NewScriptScreen(ModalScreen):
       yield Static(Text("asking the cluster for its partitions …", style="dim"), id="ns-note")
       yield TextArea(id="ns-preview", read_only=True, show_line_numbers=True, soft_wrap=False)
       with Horizontal(id="ns-buttons"):
-        yield Button("Cancel", id="ns-cancel")
-        yield Button("Create", id="ns-create", variant="primary")
+        yield Button("Cancel", id="ns-cancel", compact=True)
+        yield Button("Create", id="ns-create", variant="primary", compact=True)
 
   def on_mount(self):
     self.load_facts()

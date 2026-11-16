@@ -77,10 +77,10 @@ class JobScreen(SplitScreen):
 
   def compose_left(self):
     with Horizontal(id="job-actions"):
-      yield Button("Cancel job", id="cancel-job", variant="error")
-      yield Button("Restart job", id="restart-job", variant="primary")
-      yield Button("Run array", id="run-array", tooltip="submit the array again with another range")
-      yield Button("Array", id="array-window", tooltip="all tasks of the array by state, to copy or cancel")
+      yield Button("Cancel job", id="cancel-job", variant="error", compact=True)
+      yield Button("Restart job", id="restart-job", variant="primary", compact=True)
+      yield Button("Run array", id="run-array", tooltip="submit the array again with another range", compact=True)
+      yield Button("Array", id="array-window", tooltip="all tasks of the array by state, to copy or cancel", compact=True)
     with VerticalScroll(id="details"):
       yield Static(id="info")
       with Horizontal(id="checks-bar"):
@@ -97,7 +97,7 @@ class JobScreen(SplitScreen):
         yield Button("Rule catalogue", id="checks-catalogue", compact=True)
       yield FindingsView(id="job-checks")
       with Horizontal(id="memory-controls"):
-        yield Button("Query current memory", id="memory-query", variant="primary")
+        yield Button("Query current memory", id="memory-query", variant="primary", compact=True)
         yield Label("CPU:")
         yield Static(id="memory-cpu", markup=False)
         yield Label("GPU:")
@@ -105,7 +105,7 @@ class JobScreen(SplitScreen):
       with Vertical(id="memory-watch"):
         with Horizontal(id="memory-watch-bar"):
           yield Select(MEMORY_EVERY, value=0, allow_blank=False, id="memory-every",
-                       tooltip="query the memory again and again; every query is kept and written to a file")
+                       tooltip="query the memory again and again; every query is kept and written to a file", compact=True)
           yield Static(id="memory-watch-status")
         size = lambda v: humanize.naturalsize(v, format="%.3g")
         with Horizontal(classes="memory-plot"):
@@ -131,13 +131,13 @@ class JobScreen(SplitScreen):
       with Vertical(id="nodes"):
         yield Label("Run on the nodes of the job", classes="section")
         with Horizontal(id="nodebar"):
-          yield Input(id="cmd", placeholder="command, e.g. nvidia-smi")
-          yield Select([], id="node", prompt="all nodes", allow_blank=True)
-          yield Button("Run", id="run", variant="primary")
-          yield Button("Shell", id="shell", tooltip="interactive shell on the node, opens on the right")
+          yield Input(id="cmd", placeholder="command, e.g. nvidia-smi", compact=True)
+          yield Select([], id="node", prompt="all nodes", allow_blank=True, compact=True)
+          yield Button("Run", id="run", variant="primary", compact=True)
+          yield Button("Shell", id="shell", tooltip="interactive shell on the node, opens on the right", compact=True)
         with Horizontal(id="presets"):
           for i, name in enumerate(PRESETS):
-            yield Button(name, id=f"preset{i}", classes="preset")
+            yield Button(name, id=f"preset{i}", classes="preset", compact=True)
 
   def on_mount(self):
     self.sub_title = f"Jobs › {self.job.jid}"

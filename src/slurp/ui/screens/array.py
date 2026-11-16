@@ -101,11 +101,11 @@ class ArrayScreen(SplitScreen):
     with Horizontal(id="arr-bar"):
       yield Static(id="arr-info")
       with Vertical(id="arr-buttons"):
-        yield Button("Reload", id="arr-reload", variant="primary")
-        yield Button("Copy all ids", id="arr-copy-all")
+        yield Button("Reload", id="arr-reload", variant="primary", compact=True)
+        yield Button("Copy all ids", id="arr-copy-all", compact=True)
         yield Button("Cancel pending tasks", id="arr-cancel-pending", variant="warning",
-                     tooltip="scancel --state=PENDING: the tasks that have not started")
-        yield Button("Cancel the whole array", id="arr-cancel", variant="error", tooltip="scancel of the array job")
+                     tooltip="scancel --state=PENDING: the tasks that have not started", compact=True)
+        yield Button("Cancel the whole array", id="arr-cancel", variant="error", tooltip="scancel of the array job", compact=True)
     with TabbedContent(id="arr-tabs"):
       with TabPane("By state", id="arr-tab-states"):
         yield VerticalScroll(id="arr-groups")

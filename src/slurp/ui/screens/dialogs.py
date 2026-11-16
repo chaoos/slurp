@@ -46,8 +46,8 @@ class ConfirmScreen(ModalScreen[bool]):
       yield Static(self.dialog_title, id="confirm-title")
       yield Static(self.dialog_message, id="confirm-message", markup=False)
       with Horizontal(id="confirm-buttons"):
-        yield Button("No", id="confirm-no")
-        yield Button(self.confirm_label, id="confirm-yes", variant=self.variant)
+        yield Button("No", id="confirm-no", compact=True)
+        yield Button(self.confirm_label, id="confirm-yes", variant=self.variant, compact=True)
 
   @on(Button.Pressed, "#confirm-no")
   def no(self, event):
@@ -85,8 +85,8 @@ class CommandScreen(ModalScreen[list[str] | None]):
       yield Static(self.explanation, markup=False)
       yield bash_editor(self.command, "command-text")
       with Horizontal(id="command-buttons"):
-        yield Button("Cancel", id="command-cancel")
-        yield Button(self.submit_label, id="command-submit", variant="primary")
+        yield Button("Cancel", id="command-cancel", compact=True)
+        yield Button(self.submit_label, id="command-submit", variant="primary", compact=True)
 
   def on_mount(self):
     self.query_one("#command-text").focus()
@@ -167,8 +167,8 @@ class InteractiveJobScreen(CommandScreen):
         yield Input("interactive", id="ij-name")
       yield bash_editor(self.command, "command-text")
       with Horizontal(id="command-buttons"):
-        yield Button("Cancel", id="command-cancel")
-        yield Button(self.submit_label, id="command-submit", variant="primary")
+        yield Button("Cancel", id="command-cancel", compact=True)
+        yield Button(self.submit_label, id="command-submit", variant="primary", compact=True)
 
   def on_mount(self):
     self.query_one("#ij-time").focus()
@@ -223,8 +223,8 @@ class RunArrayScreen(ModalScreen[list[str] | None]):
       yield Static(id="array-warning")
       yield bash_editor("", "array-command")
       with Horizontal(id="array-buttons"):
-        yield Button("Cancel", id="array-cancel")
-        yield Button("Submit array", id="array-submit", variant="primary")
+        yield Button("Cancel", id="array-cancel", compact=True)
+        yield Button("Submit array", id="array-submit", variant="primary", compact=True)
 
   def on_mount(self):
     self.update()
@@ -321,15 +321,15 @@ class RestartScreen(ModalScreen[dict | None]):
       env, script = self.original["env"], self.original["script"]
       yield Checkbox("Same environment as the original job" + (f" ({env_summary(env)})" if env else
                      " (not available: this cluster does not store job environments, sacct --env-vars is empty; "
-                     "the environment of the login is used)"), value=bool(env), disabled=not env, id="restart-same-env")
+                     "the environment of the login is used)"), value=bool(env), disabled=not env, id="restart-same-env", compact=True)
       usable = bool(script) and self.original["script_arg"] is not None
       yield Checkbox("Same batch script as submitted" + (" (from Slurm; the file on disk may have changed)" if usable else
                      " (not available: Slurm has not kept it, or the script is not an argument of the command)"
                      if not script else " (kept by Slurm, but the script argument of the command is not clear)"),
-                     value=usable, disabled=not usable, id="restart-same-script")
+                     value=usable, disabled=not usable, id="restart-same-script", compact=True)
       with Horizontal(id="restart-buttons"):
-        yield Button("Cancel", id="restart-cancel")
-        yield Button("Submit job", id="restart-submit", variant="primary")
+        yield Button("Cancel", id="restart-cancel", compact=True)
+        yield Button("Submit job", id="restart-submit", variant="primary", compact=True)
 
   def on_mount(self):
     self.query_one("#restart-options", RadioSet).focus()
@@ -396,8 +396,8 @@ class AddClusterScreen(ModalScreen[str | None]):
       yield Label("SSH destination (blank for local machine)")
       yield Input(placeholder="user@host or ~/.ssh/config alias", id="cluster-destination")
       with Horizontal(id="cluster-actions"):
-        yield Button("Cancel", id="cluster-cancel")
-        yield Button("Add", id="cluster-confirm", variant="primary")
+        yield Button("Cancel", id="cluster-cancel", compact=True)
+        yield Button("Add", id="cluster-confirm", variant="primary", compact=True)
 
   def on_mount(self):
     self.query_one("#cluster-destination", Input).focus()
@@ -481,10 +481,10 @@ class CopyScreen(ModalScreen):
                    "If it didn't arrive: Plain text shows it outside of slurp, to select with the mouse.", markup=False)
       yield TextArea(self.text, id="copy-text", read_only=True, soft_wrap=True)
       with Horizontal(id="copy-buttons"):
-        yield Button("Plain text", id="copy-plain", variant="primary")
-        yield Button("Save to a file", id="copy-save")
-        yield Button("It arrived, don't ask again", id="copy-arrived")
-        yield Button("Close", id="copy-close")
+        yield Button("Plain text", id="copy-plain", variant="primary", compact=True)
+        yield Button("Save to a file", id="copy-save", compact=True)
+        yield Button("It arrived, don't ask again", id="copy-arrived", compact=True)
+        yield Button("Close", id="copy-close", compact=True)
 
   def on_mount(self):
     self.query_one("#copy-plain", Button).focus()

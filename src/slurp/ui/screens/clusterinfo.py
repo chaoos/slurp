@@ -137,10 +137,10 @@ class ClusterInfoScreen(ModalScreen):
       with VerticalScroll(id="ci-body"):
         yield Static(id="ci-info")
       with Horizontal(id="ci-buttons"):
-        yield Button("Reload", id="ci-reload", variant="primary")
+        yield Button("Reload", id="ci-reload", variant="primary", compact=True)
         if self.cluster.destination:
-          yield Button("Reconnect", id="ci-reconnect")
-        yield Button("Close", id="ci-close")
+          yield Button("Reconnect", id="ci-reconnect", compact=True)
+        yield Button("Close", id="ci-close", compact=True)
 
   def on_mount(self):
     self.action_reload()

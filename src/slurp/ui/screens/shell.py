@@ -159,8 +159,8 @@ class TerminalHelpScreen(ModalScreen):
       with VerticalScroll(id="thelp-text"):
         yield Markdown(self.help_text())
       with Horizontal(id="thelp-buttons"):
-        yield Button("Copy the screen", id="thelp-copy", variant="primary")
-        yield Button("Close", id="thelp-close")
+        yield Button("Copy the screen", id="thelp-copy", variant="primary", compact=True)
+        yield Button("Close", id="thelp-close", compact=True)
 
   def on_mount(self):
     self.query_one("#thelp-close", Button).focus()

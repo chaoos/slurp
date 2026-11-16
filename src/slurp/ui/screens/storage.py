@@ -45,7 +45,7 @@ class QuotaScreen(SplitScreen):
   SHOW_BACK = True
   DEFAULT_CSS = """
   #quota-bar { height: auto; padding: 0 1; }
-  #quota-title { text-style: bold; width: 1fr; height: auto; padding-top: 1; }
+  #quota-title { text-style: bold; width: 1fr; height: auto; }
   #quota-body { height: 1fr; padding: 0 1; }
   """
   BINDINGS = [Binding("escape", "back", "Back"), Binding("r", "reload", "Reload")]
@@ -58,7 +58,7 @@ class QuotaScreen(SplitScreen):
   def compose_left(self):
     with Horizontal(id="quota-bar"):
       yield Static(id="quota-title")
-      yield Button("Reload", id="quota-reload", variant="primary")
+      yield Button("Reload", id="quota-reload", variant="primary", compact=True)
     with VerticalScroll(id="quota-body"):
       yield Static(id="quota-info")
 
@@ -143,19 +143,19 @@ class ScratchScreen(SplitScreen):
   def compose_left(self):
     with Horizontal(id="scratch-bar"):
       yield Label("directory")
-      yield Input(id="scratch-dir", placeholder="$SCRATCH")
+      yield Input(id="scratch-dir", placeholder="$SCRATCH", compact=True)
       yield Label("by")
-      yield Select([("last access", "atime"), ("last modification", "mtime")], value="atime", allow_blank=False, id="scratch-by")
+      yield Select([("last access", "atime"), ("last modification", "mtime")], value="atime", allow_blank=False, id="scratch-by", compact=True)
       yield Label("older than")
-      yield Input("30", id="scratch-days", type="integer")
+      yield Input("30", id="scratch-days", type="integer", compact=True)
       yield Label("days")
-      yield Button("Search", id="scratch-search", variant="primary")
+      yield Button("Search", id="scratch-search", variant="primary", compact=True)
     with Horizontal(id="scratch-actions"):
       yield Input(id="scratch-exclude", placeholder="exclude paths matching (regex, e.g. /keep/|\\.git/)",
-                  tooltip="files whose path matches are left out of the list and of every touch (Enter: apply)")
-      yield Button("Touch selected", id="touch-selected")
-      yield Button("Touch all listed", id="touch-listed")
-      yield Button("Touch all my files there", id="touch-all", variant="warning")
+                  tooltip="files whose path matches are left out of the list and of every touch (Enter: apply)", compact=True)
+      yield Button("Touch selected", id="touch-selected", compact=True)
+      yield Button("Touch all listed", id="touch-listed", compact=True)
+      yield Button("Touch all my files there", id="touch-all", variant="warning", compact=True)
     yield Static(id="scratch-status")
     yield ClickTable(id="scratch-files", cursor_type="row", zebra_stripes=True)
 
