@@ -204,17 +204,22 @@ shared. Its **Copy the screen** button copies the visible screen as text.
 Run the program from a clone of this repository on a login or other host with
 Slurm access, or on your own machine with an SSH connection to one. slurp needs
 Python 3.11 or newer. Create and activate a virtual environment, then install
-its Python dependencies:
+slurp into it:
 
 ```bash
 git clone https://github.com/chaoos/slurp.git
 cd slurp
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python -m pip install ".[all]"
 ```
 
-The requirements file includes the Textual app's terminal and browser features.
+`.[all]` includes the optional features: `links` (shells and drives from your
+own terminal, asyncssh), `hdf5` (the HDF5 view, h5py), `web` (`--serve` and
+Textual Web). `python -m pip install .` installs slurp without them; `-e`
+installs it so that changes to the checkout take effect without installing
+again. `pipx install "slurp[all] @ git+https://github.com/chaoos/slurp"`
+installs it without a clone, in an environment of its own.
 System commands such as `ssh`, `squeue`, `sacct`, `scontrol`, `srun`, and
 `sbatch` are installed separately and must be available locally or on the
 selected SSH host.
@@ -222,10 +227,10 @@ selected SSH host.
 `h5py` enables the HDF5 browser. If it is unavailable, the app can show
 `h5dump -H` output when `h5dump` is installed.
 
-Start the terminal UI from the repository:
+Start the terminal UI:
 
 ```bash
-python3 slurp          # or: python3 -m slurp
+slurp          # or: python -m slurp
 ```
 
 Running it again attaches to the slurp that runs already (see "One slurp,
@@ -242,7 +247,7 @@ Pass one or more regular OpenSSH destinations (`user@host`) or aliases from
 your `~/.ssh/config` to add tabs:
 
 ```bash
-python3 slurp --ssh localhost user@host cluster-login
+slurp --ssh localhost user@host cluster-login
 ```
 
 OpenSSH uses your configured identities, certificates, agent, host aliases,
@@ -598,7 +603,7 @@ has errors; `--all` adds the hints, `--no-probe` checks only the text,
 
 ## One slurp, several views: remote web access
 
-`python3 slurp` does not run slurp in the terminal itself: it starts a small
+`slurp` does not run slurp in the terminal itself: it starts a small
 *session holder* that runs slurp in the background (like tmux), and this
 terminal shows it. Running `slurp` again (in another terminal, or after the
 first one was closed or its SSH connection dropped) attaches to the same
@@ -710,8 +715,8 @@ Install `textual-serve` in the same Python environment and start the local
 browser server:
 
 ```bash
-python -m pip install textual-serve
-python3 slurp --serve
+python -m pip install textual-serve   # (included in .[all] and .[web])
+slurp --serve
 ```
 
 Open <http://localhost:8000>. The server binds to `127.0.0.1` by default;
@@ -736,7 +741,7 @@ forward. Install `textual-web`, then create a configuration file such as
 
 ```toml
 [app.Slurm]
-command = "cd /path/to/scripts && /path/to/venv/bin/python slurp"
+command = "/path/to/venv/bin/slurp"
 ```
 
 Run it from the project directory:

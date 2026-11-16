@@ -13,6 +13,13 @@ version may need the helper of the same version).
 - slurp has its own repository (https://github.com/chaoos/slurp), with its
   own `requirements.txt`; it no longer needs `slurm.py` and the other modules
   of the scripts repository it started in.
+- slurp is a Python package to install (`pyproject.toml`): `pip install
+  ".[all]"` gives the `slurp` command (and `python -m slurp`); `pipx install`
+  works without a clone. The optional features are extras: `links`, `hdf5`,
+  `web`, `all`. `requirements.txt` is gone, and `python3 slurp` from the
+  checkout no longer works without installing. slurp starts itself again (the
+  session holder, the app under it, `--serve`) as exactly the same copy,
+  installed or not.
 - The tests are in the repository (`tests/`, run with `pytest`), with a
   GitHub Actions workflow: the unit tests, and the lab tests that drive slurp
   against a fake Slurm cluster behind a local sshd.

@@ -1,7 +1,63 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "slurp"
+description = "Slurm at a glance: a terminal and browser UI for Slurm jobs, locally or on clusters over SSH"
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dynamic = ["version"]
+authors = [{ name = "Roman Gruber" }]
+keywords = ["slurm", "hpc", "tui", "textual", "ssh"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Clustering",
+]
+# Not from pip: ssh, the Slurm commands (here or on the cluster you connect to), and sshfs/fusermount for mounting
+# drives on this machine.
+dependencies = [
+    "humanize",
+    "python-dateutil",  # durations of the finished-jobs window (2w, 1mo, ...)
+    "pyte",             # the terminal emulator of the shells
+    "rich",
+    "textual[syntax]",  # with syntax highlighting in the script editor (tree-sitter)
+]
+
+[project.optional-dependencies]
+links = ["asyncssh"]                    # shells and drives from your own terminal
+hdf5 = ["h5py", "numpy"]                # the HDF5 view; without it slurp shows `h5dump -H`
+web = ["textual-serve", "textual-web"]  # slurp --serve, and a public link to the app
+all = ["slurp[links,hdf5,web]"]
+dev = ["pytest>=8"]                    # with all: pip install -e ".[all,dev]"
+
+[project.scripts]
+slurp = "slurp.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/chaoos/slurp"
+Source = "https://github.com/chaoos/slurp"
+Changelog = "https://github.com/chaoos/slurp/blob/main/slurp/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "slurp/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = ["slurp", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-pythonpath = ["."]
 addopts = ["-ra", "--strict-markers"]
 markers = [
     "lab: needs the lab (a local sshd with a fake Slurm, see tests/lab); skipped without sshd unless SLURP_REQUIRE_LAB=1",

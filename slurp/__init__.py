@@ -2,7 +2,7 @@
 
 Browse queued, running and finished jobs, their details, steps and files (with tail -f style following), run
 commands and shells on the nodes of running jobs, submit interactive jobs, and see the state of the cluster.
-Run it with `python3 slurp` (from this repository) or `python3 -m slurp`.
+Run it with the `slurp` command (see pyproject.toml) or `python -m slurp`.
 """
 
 # the version of slurp and of its Windows helper (one number for both; CHANGELOG.md says what changed)

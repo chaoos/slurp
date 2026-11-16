@@ -17,12 +17,13 @@ git clone https://github.com/chaoos/slurp.git
 cd slurp
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
-python3 slurp          # or: python3 -m slurp
+python -m pip install ".[all]"   # or just "." without the optional features
+slurp                            # or: python -m slurp
 ```
 
+Without cloning: `pipx install "slurp[all] @ git+https://github.com/chaoos/slurp"`.
 Run it on a login node with Slurm, or on your own machine with an SSH
-connection to one: `python3 slurp --ssh user@cluster-login`.
+connection to one: `slurp --ssh user@cluster-login`.
 
 ## Documentation
 
@@ -34,7 +35,7 @@ GPUs, ...). What changed between versions is in
 ## Tests
 
 ```bash
-python -m pip install -r requirements-dev.txt
+python -m pip install -e ".[all,dev]"
 python -m pytest -m "not lab"   # unit tests: seconds, nothing needed beyond pip
 python -m pytest -m lab         # the lab: slurp against a fake Slurm over SSH (~10 min)
 python -m pytest                # both

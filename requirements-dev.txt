@@ -1,4 +1,0 @@
-# What the tests need: slurp with all its optional features, and pytest.
-# Not from pip (the lab tests): OpenSSH (ssh, sshd, ssh-keygen) and sshfs with FUSE.
--r requirements.txt
-pytest>=8
