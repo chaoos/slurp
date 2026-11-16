@@ -1,5 +1,5 @@
 """slurp's UI against the lab: the connection: its health, the cluster window, tabs, reconnecting, closing tabs (last) (the scenarios are in ui_scenarios.py)"""
-from ui_scenarios import t_conn_health, t_border, t_ci_noconn, t_cluster_info, t_titles, t_reconnect, t_close
+from ui_scenarios import t_conn_health, t_border, t_ci_noconn, t_cluster_info, t_titles, t_reconnect, t_connect_button, t_close
 
 
 def test_conn_health(ui, check):
@@ -24,6 +24,10 @@ def test_titles(ui, check):
 
 def test_reconnect(ui, check):
   ui(t_reconnect, check)
+
+
+def test_connect_button(ui, check):
+  ui(t_connect_button, check)
 
 
 def test_close(ui, check):

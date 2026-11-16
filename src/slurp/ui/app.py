@@ -140,6 +140,12 @@ class Slurp(App):
   #back { width: 3; min-width: 3; height: 1; padding: 0; }
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
+  #connect-panel { display: none; layout: horizontal; height: auto; padding: 0 1; }
+  #connect-panel.-center { layout: vertical; height: 1fr; align: center middle; }
+  #connect-panel Static { width: auto; color: $text-muted; margin-right: 2; }
+  #connect-panel.-center Static { width: 100%; text-align: center; margin: 0 0 1 0; }
+  #connect-panel Center { width: auto; height: auto; }
+  #connect-panel.-center Center { width: 100%; }
   #no-slurm { display: none; height: 1fr; content-align: center middle; text-align: center; color: $text-muted; padding: 0 4; }
   #details { height: 1fr; padding: 0 1; }
   #checks-bar { height: auto; margin-top: 1; }
@@ -365,14 +371,17 @@ class Slurp(App):
       return True
     return c.state == "broken" and (cluster.login_terminal is None or cluster.login_terminal.done)
 
-  def activate_cluster(self, index):
-    """Show the tab: its job list as loaded before (no reload), its shell, or its login while not logged in"""
+  def activate_cluster(self, index, connect=True):
+    """Show the tab: its job list as loaded before (no reload), its shell, or its login while not logged in. connect:
+    log in if it is not (at the start, a new tab); else a tab without a session shows Connect in its job list"""
     if not 0 <= index < len(self.clusters):
       return
     cluster = self.clusters[index]
-    if self.needs_login(cluster):
+    if connect and self.needs_login(cluster):
       cluster.attempts = 0
       self.login(cluster)
+    elif cluster.destination and cluster.connection is None:
+      cluster.connection = RemoteSSH(cluster.destination) # (not started: the tab's commands wait for Connect, never run here)
     self.cluster_index = index
     remote.ssh_connection = cluster.connection
     if self.current_mode != cluster.current_view:
@@ -385,6 +394,31 @@ class Slurp(App):
     self.refresh_status()
     if not cluster.loaded and cluster.loader is None and (not cluster.destination or cluster.connection.ready):
       self.action_reload()
+
+  def connect_tab(self):
+    """Connect (the job list of a tab without a session): log in, the login in the pane"""
+    cluster = self.cluster
+    if not self.needs_login(cluster):
+      return
+    cluster.attempts, cluster.broken_at = 0, None
+    self.login(cluster, show=True)
+    remote.ssh_connection = cluster.connection
+    self.show_tab_shell()
+    self.refresh_status()
+
+  @on(Button.Pressed, "#connect")
+  def connect_pressed(self, event):
+    event.stop()
+    self.connect_tab()
+
+  def connect_state(self, cluster):
+    """A remote tab without a session the user wants: "idle" (Connect), "connecting" (after Connect), else None"""
+    c = cluster.connection
+    if not cluster.destination or c is None or c.ready:
+      return None
+    if c.state == "connecting":
+      return "connecting" if cluster.show_login else None
+    return "idle" if self.needs_login(cluster) and (c.state in ("new", "closed") or not c.wanted) else None
 
   def login_visible(self, cluster):
     """The login is shown while it may need the user: one the user started, or an automatic reconnect that printed
@@ -416,12 +450,12 @@ class Slurp(App):
       self.call_after_refresh(self.focus_left)
 
   def select_cluster(self, index):
+    """A click on a tab: show it (one without a session shows Connect); on the active tab again: log in"""
     if index == self.cluster_index:
-      cluster = self.cluster
-      if self.needs_login(cluster):
-        self.activate_cluster(index)
+      if self.needs_login(self.cluster):
+        self.connect_tab()
       return
-    self.activate_cluster(index)
+    self.activate_cluster(index, connect=False)
     self.save_tabs()
 
   # ---- subtabs: the job list (the default mode) and the views of the active tab, each a mode with its own windows
@@ -574,7 +608,7 @@ class Slurp(App):
     self.clusters.pop(index)
     if current:
       if self.clusters:
-        self.activate_cluster(min(index, len(self.clusters) - 1))
+        self.activate_cluster(min(index, len(self.clusters) - 1), connect=False)
       else: # no tab left: only the + button
         self.cluster_index = 0
         remote.ssh_connection = None
@@ -602,7 +636,7 @@ class Slurp(App):
     from ..cluster import jobcache
     jobcache.load(self.clusters[-1])
     self.refresh_cluster_tabs()
-    self.select_cluster(len(self.clusters) - 1)
+    self.activate_cluster(len(self.clusters) - 1) # (logs in right away: the user just asked for it)
     self.save_tabs()
 
   RECONNECT_DELAYS = (0, 5, 15, 30, 60) # seconds before the 1st, 2nd, ... attempt to reconnect a broken session
@@ -758,7 +792,7 @@ class Slurp(App):
     if c is None or c.state == "new":
       return Text(f"SSH {cluster.destination}: not connected", style="dim")
     if c.state == "closed":
-      return Text(f"SSH {cluster.destination}: closed · select the tab to log in", style="yellow")
+      return Text(f"SSH {cluster.destination}: closed · Connect in the job list", style="yellow")
     if c.ready:
       waiting = c.responding()
       if waiting is not None and waiting > remote.PING_SLOW:
@@ -773,7 +807,7 @@ class Slurp(App):
     # broken
     reason = f" ({c.error[:60] + '…' if len(c.error) > 60 else c.error})" if c.error else "" # (short: the status page follows)
     if not c.wanted:
-      return Text(f"SSH {cluster.destination}: disconnected{reason} · select the tab to log in", style="red")
+      return Text(f"SSH {cluster.destination}: disconnected{reason} · Connect in the job list", style="red")
     delay = self.RECONNECT_DELAYS[min(cluster.attempts, len(self.RECONNECT_DELAYS) - 1)]
     left = max(0, delay - (time.monotonic() - (cluster.broken_at or time.monotonic())))
     return Text(f"{self.spinner()} SSH {cluster.destination}: connection lost{reason}, reconnecting"
@@ -849,6 +883,7 @@ class Slurp(App):
         for other in HEALTH_STYLES:
           widget.set_class(other == level and bool(cluster.destination), f"-{other}")
       if isinstance(screen, MainScreen) and screen.query("#reload"):
+        self.show_no_slurm(cluster)
         stale = self.stale_text(cluster)
         screen.query_one("#status", Static).update(Text.assemble(stale, cluster.summary) if stale is not None else Text(cluster.summary))
         button = screen.query_one("#reload", Button)
@@ -1272,7 +1307,8 @@ class Slurp(App):
     widget = getattr(self.screen, "left_focus", None)
     if widget is None or not widget.is_attached or widget.screen is not self.screen or not widget.focusable:
       chain = [w for w in self.screen.focus_chain if not w.has_class("tclose") and not w.has_class("tinfo") and w.id != "shell-help" and not isinstance(w, TerminalView)]
-      widget = chain[0] if chain else None
+      jobs = self.main.query_one("#jobs", ClickTable) if self.main is not None and self.screen is self.main else None
+      widget = jobs if jobs is not None and jobs in chain else chain[0] if chain else None # (on the job list: the list)
     if widget is not None:
       widget.focus()
 
@@ -1756,11 +1792,41 @@ class Slurp(App):
     if table.display and not isinstance(self.focused, (Input, TerminalView, TextArea)):
       table.focus()
 
+  def show_connect(self, cluster):
+    """A remote tab without a session: Connect, in the middle of the job list, or above the jobs it lists from before.
+    True if it takes the place of the job list"""
+    if self.main is None or not self.main.is_mounted:
+      return False
+    panel = self.main.query_one("#connect-panel")
+    state = self.connect_state(cluster)
+    center = state is not None and not cluster.jobs
+    if state == "connecting" and not center:
+      state = None # (the bar goes; the login is in the pane)
+    panel.display = state is not None
+    panel.set_class(center, "-center")
+    if state is not None:
+      where = cluster.destination
+      text = (Text.assemble((f"Connecting to {where} …", "bold"), "\nlog in on the right") if state == "connecting" else
+              Text.assemble((f"Not connected to {where}", "bold"), "\nthe jobs are listed once you are logged in" if center else
+                            " · the jobs below are from before"))
+      label = panel.query_one("#connect-note", Static)
+      if str(label.render()) != str(text):
+        label.update(text)
+      button = panel.query_one("#connect", Button)
+      button.display = state == "idle"
+    return center
+
   def show_no_slurm(self, cluster):
-    """Instead of the job list, in its middle: no Slurm on the machine of the tab (what to do)"""
-    table, note = self.query_one("#jobs", ClickTable), self.query_one("#no-slurm", Static)
-    table.display, note.display = not cluster.no_slurm, cluster.no_slurm
-    if cluster.no_slurm:
+    """Instead of the job list, in its middle: no Slurm on the machine of the tab (what to do); or Connect"""
+    table, note = self.main.query_one("#jobs", ClickTable), self.main.query_one("#no-slurm", Static)
+    connect = self.show_connect(cluster)
+    shown = not connect and not cluster.no_slurm
+    if table.display != shown:
+      table.display = shown
+      if shown: # (the focus went elsewhere while it was hidden)
+        self.call_after_refresh(self.focus_jobs)
+    note.display = cluster.no_slurm and not connect
+    if cluster.no_slurm and not connect:
       where = cluster.destination or "this machine"
       note.update(Text.assemble(
         (f"No Slurm on {where}\n\n", "bold"),
@@ -1851,7 +1917,7 @@ class Slurp(App):
       return
     if not cluster.loaded:
       cluster.summary = "no jobs loaded yet" if not cluster.destination or (cluster.connection and cluster.connection.ready) \
-                        else "log in to load the jobs"
+                        else "press Connect to load the jobs"
       self.refresh_status()
       return
     queued = [j for j in all_jobs if j.queued]

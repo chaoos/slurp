@@ -10,6 +10,12 @@ version may need the helper of the same version).
   in its middle, with what to do (a tab for a cluster with `+`, or
   `slurp --ssh`), instead of an error notification for every Slurm command at
   each load. `r` looks again.
+- Switching to a tab without an SSH session no longer logs in right away:
+  its job list shows a **Connect** button in the middle (a bar above the jobs
+  from last time, if it has some). slurp still logs in at the start and for a
+  tab you add. A click on the active tab logs in, too.
+- Back on a tab with jobs after one without Slurm, the job list has the focus
+  again (it was drawn in the unfocused colours).
 - In a browser (`slurp --serve`, or the browser view of the session holder),
   a web page (a site's status page, a link in the help or the checks) opens in
   a new tab, so the page with slurp stays. The links in the help and the checks

@@ -260,8 +260,12 @@ OpenSSH uses your configured identities, certificates, agent, host aliases,
 and `ProxyJump` chain. `localhost`, `127.0.0.1`, and `::1` refer to the local
 machine tab.
 
-Each remote tab has one SSH session, opened the first time you select the
-tab and held open for the life of the app. The login runs in the terminal
+Each remote tab has one SSH session, held open for the life of the app. It is
+opened at the start for the tab shown then, and right away for a tab you add.
+Switching to a tab that has no session does not log in by itself: its job
+list shows **Connect** in its middle (or, when the tab still lists the jobs
+from last time, in a bar above them), and the session opens when you press
+it (or click the tab again). The login runs in the terminal
 pane on the right, where password, key passphrase, keyboard-interactive, and
 OTP prompts are answered. Once you are logged in, the pane hides by itself
 and the job list loads; nothing has to be typed after the login. A failed
@@ -294,7 +298,7 @@ logged-in user and login node, the resolved destination (`ssh -G`), traffic
 and round-trip times of the command channel, the ssh process and its TCP
 connection (bytes, rtt, retransmissions, from `ss`), and a log of the session
 events. **Reconnect** ends the session and logs in again, **Disconnect** ends
-it until the tab is selected again.
+it until you press **Connect** in the job list.
 
 The footer shows the state of the session of the active tab, tinted by its
 health: green (answers, with the round-trip time), yellow (slow, connecting),

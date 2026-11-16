@@ -149,7 +149,7 @@ unhealthy and why. Reload asks again.
 The SSH session of the tab: its state and the course of a (re)connect, the logged-in user and login node, the
 resolved destination, traffic and round-trip times, the ssh process and its TCP connection, and a log of events.
 
-- **Reconnect** (`R`) logs in again; **Disconnect** ends the session until the tab is selected again. When the
+- **Reconnect** (`R`) logs in again; **Disconnect** ends the session until you press **Connect** in the job list. When the
   login fails, the cluster may be down or in maintenance: a site's status page (from its rule pack, e.g.
   status.cscs.ch) shows as a link here and in the status at the bottom right; a click opens it.
 - **Drive:** your login directory mounted on this machine (state, Mount/Unmount/Remount/Force unmount).

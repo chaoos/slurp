@@ -293,6 +293,28 @@ async def t_reconnect(app, pilot):
   await pilot.press(*"pw123", "enter")
   check("typed straight into it: logged in again", await until(pilot, lambda: app.ssh.ready and app.shell is None, 20))
 
+async def t_connect_button(app, pilot):
+  """Switching to a tab without a session does not log in: Connect (above the jobs it lists from before); Connect logs in"""
+  app.select_cluster(1); await pilot.pause(0.3)
+  cluster = app.cluster
+  app.disconnect(cluster); await pilot.pause(0.5)
+  app.select_cluster(0); await pilot.pause(0.5)
+  app.select_cluster(1); await pilot.pause(0.8)
+  panel, table = app.main.query_one("#connect-panel"), app.main.query_one("#jobs")
+  check("switching to the disconnected tab does not log in", not cluster.connection.ready and cluster.connection.state != "connecting"
+        and app.shell is not cluster.login_terminal, (cluster.connection.state, app.shell))
+  note = str(app.main.query_one("#connect-note").render())
+  check("…its job list shows Connect, as a bar above the jobs from before", panel.display and not panel.has_class("-center")
+        and table.display and "Not connected to lab" in note and app.main.query_one("#connect").display, note)
+  check("…and the status line says where to connect", "Connect in the job list" in str(app.connection_text(cluster)), app.connection_text(cluster))
+  await pilot.click("#connect")
+  ok = await until(pilot, lambda: "passphrase" in term(app), 15)
+  check("Connect: the login is in the pane", ok and app.shell is cluster.login_terminal)
+  await pilot.press(*"pw123", "enter")
+  ok = await until(pilot, lambda: app.ssh.ready, 20); await pilot.pause(0.5)
+  check("logged in: Connect is gone, the job list has the focus", ok and not panel.display and table.display
+        and isinstance(app.focused, ClickTable), type(app.focused).__name__)
+
 async def t_restart(app, pilot):
   got = []
   app.push_screen(RestartScreen("9001", ["sbatch", "job.sh"]), got.append); await pilot.pause(0.3)

@@ -2,7 +2,7 @@
 
 
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Center, Horizontal, Vertical
 from textual.widgets import (
   Button, Checkbox, Input, Label, Select, Static
 )
@@ -78,6 +78,10 @@ class MainScreen(SplitScreen):
     yield Static(id="status")
     yield ClickTable(id="jobs", cursor_type="row", zebra_stripes=True)
     yield Static(id="no-slurm")
+    with Vertical(id="connect-panel"):
+      yield Static(id="connect-note")
+      with Center():
+        yield Button("Connect", id="connect", variant="primary", compact=True, tooltip="log in to the cluster of this tab")
     yield Input(id="jfilter", placeholder="filter jobs by name, command, ID, state, user, account, path, category… (cat:a/b: only that category)")
 
   def action_filter(self):
