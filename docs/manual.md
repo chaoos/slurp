@@ -15,8 +15,9 @@ slurp that finds an older one still running says so before it attaches (quit
 the running one and start again to use the new version). What changed:
 [CHANGELOG.md](../CHANGELOG.md).
 
-The images below are illustrative previews built from the app's current
-features and sample data; they are not screenshots from a live cluster.
+The pictures below are screenshots of slurp against the lab of its tests (a
+fake Slurm cluster with sample jobs and files): `python tools/make_screenshots.py`
+makes them again.
 
 ## Job list
 
@@ -48,7 +49,7 @@ task with its progress bar (sorted by the header clicked; a click on a task open
 (after a confirmation). The job window of an array task has an **Array** button
 for it.
 
-![Illustrative slurp job list with status and progress columns](images/jobs.svg)
+![The job list, newest first: queued and running jobs with progress and estimates, arrays as one row with the mix of their states, finished jobs with their checks](images/jobs.svg)
 
 **The list is kept** on this machine after each load (`~/.cache/slurp/joblists/`,
 only for you), so it is there when the cluster is not: slurp starts with the
@@ -140,7 +141,7 @@ requested. GPU usage is gathered from the processes of the job reported by
 memory of every GPU of the nodes. Completed and failed jobs show CPU peak memory from Slurm
 accounting, and GPU peak memory when the accounting database reports it.
 
-![Illustrative job overview with cancel, restart, progress, and memory controls](images/job-details.svg)
+![The window of a running job: Cancel and Restart, the accounting, the checks of its script, and its current memory on the GPUs of its node](images/job-details.svg)
 
 ## Files and node tools
 
@@ -161,6 +162,8 @@ working directory and related paths. It includes specialized views:
 
 For a running job, run commands such as `nvidia-smi`, `free`, `top`, or `ps`
 on its allocated nodes. Shells on its node and GDB sessions open as subtabs.
+
+![The HDF5 view of a job's output: the groups and datasets, a dataset with its attributes and its data](images/files.svg)
 
 ## Tabs and subtabs
 
@@ -196,8 +199,6 @@ plain `Ctrl+V`), which keys go where, how to close it and that closing ends
 everything running in it, and how to treat it: a limited history (use `less`
 or `tmux` for long output), `tmux` or `sbatch` for work that must survive, and login nodes are
 shared. Its **Copy the screen** button copies the visible screen as text.
-
-![Illustrative Markdown, HDF5, and right-side shell views](images/files.svg)
 
 ## Install and launch
 

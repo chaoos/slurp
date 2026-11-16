@@ -96,8 +96,9 @@ def slurp_modules():
 class UISession:
   """slurp's app under run_test in an event loop of its own, logged in to the lab. Its task runs the scenarios given to
   run(), one at a time, in its own context (as a single run through all of them did); between them the loop waits."""
-  def __init__(self, work, home, out):
+  def __init__(self, work, home, out, size=(170, 45)):
     self.args = (work, home, out)
+    self.size = size # (columns, rows of the terminal)
     self.broken = None
 
   def start(self):
@@ -126,7 +127,7 @@ class UISession:
   async def main(self):
     app = self.app = Slurp()
     try:
-      async with app.run_test(size=(170, 45)) as pilot:
+      async with app.run_test(size=self.size) as pilot:
         self.pilot = pilot
         asyncio.get_running_loop().set_task_factory(asyncio.eager_task_factory) # (as App.run does; run_test does not)
         await until(pilot, lambda: "passphrase" in term(app), 30); await pilot.pause(0.3)

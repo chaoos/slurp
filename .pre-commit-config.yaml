@@ -4,8 +4,9 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: ^docs/images/   # made by tools/make_logo_files.py and tools/make_screenshots.py
       - id: end-of-file-fixer
-        exclude: ^docs/images/   # made by tools/make_logo_files.py, byte for byte
+        exclude: ^docs/images/   # (the same)
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict

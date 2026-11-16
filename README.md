@@ -8,7 +8,7 @@ output and scripts, the nodes they run on, checks of batch scripts against a
 rule catalogue, and shells and drives on the cluster. Use it in a terminal or
 in a browser.
 
-![Illustrative slurp job list with status and progress columns](docs/images/jobs.svg)
+![The job list: queued, running and finished jobs, progress and estimates, an array of 150 tasks as one row](docs/images/jobs.svg)
 
 ## Quick start
 
@@ -77,7 +77,7 @@ src/slurp/            the package (installed with pip; `slurp` is slurp.cli:main
   scripts/              shell scripts slurp runs on the nodes of a job
 tests/                pytest: unit/ (no app), ui/ (Textual windows), e2e/ (slurp against lab/: a fake Slurm behind a local sshd)
 docs/                 the manual and its images
-tools/                maintenance scripts (the logo files)
+tools/                maintenance scripts: the logo files, the screenshots of the docs
 ```
 
 ## Tests
