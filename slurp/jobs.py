@@ -140,16 +140,17 @@ _saved_array_patterns = None
 def progress_pattern(path, task, raw):
   """A pattern for the progress files of the other tasks of an array, from the file chosen for one task: digit groups
   equal to the task's index (zero padding allowed) or else to its job id become placeholders, all other digit
-  groups (dates, times, ...) match any digits. None if neither the index nor the job id is in the path."""
-  # the index as it is written: exactly, else zero-padded (07 for 7) if it is nowhere exactly (a time like 10-01-07
-  # must not count as task 1 when the name also has a plain 1)
-  groups = re.findall(r"\d+", path)
-  exact = task is not None and str(task) in groups
-  def is_task(part):
-    if task is None:
-      return False
-    return part == str(task) if exact else part.lstrip("0") == str(int(task)) and len(part) > len(str(task))
+  groups (dates, times, ...) match any digits. When the file name has the index or the job id, the directory is the
+  same for all tasks (its digits, as in run1/ or pytest-1/, are part of the path); otherwise the deepest directory
+  with one of them is the task's own (task_7/out.log). None if neither is in the path."""
   def template(text, regex):
+    # the index as it is written: exactly, else zero-padded (07 for 7) if it is nowhere exactly (a time like 10-01-07
+    # must not count as task 1 when the name also has a plain 1)
+    exact = task is not None and str(task) in re.findall(r"\d+", text)
+    def is_task(part):
+      if task is None:
+        return False
+      return part == str(task) if exact else part.lstrip("0") == str(int(task)) and len(part) > len(str(task))
     out, found = [], set()
     for i, part in enumerate(re.split(r"(\d+)", text)):
       if i % 2 == 0:
@@ -162,8 +163,15 @@ def progress_pattern(path, task, raw):
         out.append(r"\d+" if regex else part)
     return "".join(out), found
   directory, name = os.path.split(path)
-  dir_tpl, dir_found = template(directory, False)
   name_tpl, name_found = template(name, True)
+  dir_tpl, dir_found = directory, set()
+  if not name_found: # (only the deepest directory that has the index or the job id: the ones above are shared)
+    parts = directory.split("/")
+    for i in reversed(range(len(parts))):
+      tpl, found = template(parts[i], False)
+      if found:
+        dir_tpl, dir_found = "/".join(parts[:i] + [tpl] + parts[i + 1:]), found
+        break
   if not (dir_found | name_found):
     return None
   return {"dir": dir_tpl, "name": name_tpl}
