@@ -47,7 +47,7 @@ from textual.suggester import SuggestFromList
 from textual.widgets import Markdown
 from textual.worker import get_current_worker
 
-import slurm as sl
+from .. import slurm as sl
 
 from ..state import *
 from ..widgets import *

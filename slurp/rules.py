@@ -2,7 +2,7 @@
 
 import difflib
 import math
-import slurm as sl
+from . import slurm as sl
 import os
 import re
 import shlex

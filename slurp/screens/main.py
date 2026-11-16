@@ -46,7 +46,7 @@ from textual.widgets.text_area import Selection
 from textual.suggester import SuggestFromList
 from textual.worker import get_current_worker
 
-import slurm as sl
+from .. import slurm as sl
 
 from ..state import *
 from ..remote import *

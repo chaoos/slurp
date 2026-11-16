@@ -46,7 +46,7 @@ from textual.widgets.text_area import Selection
 from textual.suggester import SuggestFromList
 from textual.worker import get_current_worker
 
-import slurm as sl
+from . import slurm as sl
 
 
 
@@ -100,7 +100,7 @@ class ClusterSession:
   drive: object | None = None          # mounts.LocalDrive: the login directory as a drive on this machine
   loader: object | None = None         # worker loading the job list
   accounts: list | None = None         # Slurm accounts of the user (sacctmgr), None: not asked yet
-  since_value: str = "1d"              # finished jobs listed: within this time (as slurm.py -c), "off": none
+  since_value: str = "1d"              # finished jobs listed: within this time (e.g. 1d, 3d12h, 2w, 1mo), "off": none
   collapse_arrays: bool = True        # big arrays as one row in the job list (else every task)
   expanded: set = field(default_factory=set) # collapsed array rows that are open ("array id|state")
   scope: str = "me"                    # whose jobs are listed: "me", "all" (all accounts) or an account
@@ -136,7 +136,7 @@ def is_local_destination(destination):
   return destination.lower() in {"localhost", "127.0.0.1", "::1"}
 
 def setup_logging(logfile):
-  for name in ("slurp", "utils", "asyncssh"): # "utils" is the logger of slurm.py / helpers.py, asyncssh that of links
+  for name in ("slurp", "asyncssh"): # asyncssh: the logger of links
     lg = logging.getLogger(name)
     lg.handlers.clear()
     lg.propagate = False

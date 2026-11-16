@@ -46,7 +46,7 @@ from textual.widgets.text_area import Selection
 from textual.suggester import SuggestFromList
 from textual.worker import get_current_worker
 
-import slurm as sl
+from . import slurm as sl
 
 from .state import *
 from .remote import *
@@ -1377,7 +1377,7 @@ class Slurp(App):
     else:
       try:
         since = sl.parse_duration(value)
-      except sl.argparse.ArgumentTypeError as e:
+      except argparse.ArgumentTypeError as e:
         self.notify(str(e), severity="error")
         return
     if cluster.destination and cluster.connection is None:
@@ -1921,7 +1921,7 @@ class Slurp(App):
 
   @property
   def since_value(self):
-    """How long ago finished jobs of the active tab are listed (as in slurm.py -c), "off": none"""
+    """How long ago finished jobs of the active tab are listed (e.g. 1d, 3d12h, 2w, 1mo), "off": none"""
     return self.cluster.since_value
 
   @since_value.setter
@@ -1950,7 +1950,7 @@ class Slurp(App):
     if value.lower() not in ("", "0", "off", "no", "none"):
       try:
         sl.parse_duration(value)
-      except sl.argparse.ArgumentTypeError as e:
+      except argparse.ArgumentTypeError as e:
         self.notify(str(e), severity="error")
         return
     self.since_value = value or "off"

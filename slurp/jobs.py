@@ -6,6 +6,7 @@ import codecs
 import collections
 import fcntl
 import functools
+import getpass
 import json
 import logging
 import os
@@ -46,7 +47,7 @@ from textual.widgets.text_area import Selection
 from textual.suggester import SuggestFromList
 from textual.worker import get_current_worker
 
-import slurm as sl
+from . import slurm as sl
 
 from .state import *
 from .remote import *
@@ -376,7 +377,7 @@ def record_from_squeue(row):
 
 def current_user():
   c = conn()
-  return c.user if c else sl.getpass.getuser()
+  return c.user if c else getpass.getuser()
 
 def slurm_accounts():
   """The Slurm accounts the user has associations with (sacctmgr), sorted"""

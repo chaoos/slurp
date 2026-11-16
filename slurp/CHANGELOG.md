@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- slurp has its own repository (https://github.com/chaoos/slurp), with its
+  own `requirements.txt`; it no longer needs `slurm.py` and the other modules
+  of the scripts repository it started in.
 - The job list is kept on this machine after each load: a start shows it at
   once, and when the cluster cannot be reached it can still be browsed and
   categorized (the changes reach the cluster with the next load); the status

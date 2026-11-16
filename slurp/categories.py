@@ -250,7 +250,7 @@ def state_group(state):
 def summary(jobs):
   """The numbers of a category from its jobs (Job objects; an array: all its tasks): counts by state, node, CPU and
   GPU hours, when, where"""
-  import slurm as sl
+  from . import slurm as sl
   def hours(job):
     try:
       return sl.hours(job.rec.get("Elapsed") or "0")

@@ -24,8 +24,8 @@ Browse queued and running jobs alongside recently completed jobs, sort by
 columns (the header marks the sort column with ▲ or ▼; Job ID cycles through job ID
 descending and ascending and array index ascending and descending, marked △/▽), and filter by job
 name, command, ID, state, user, account, or path. The window of finished jobs is
-chosen from a list (only queued, 1 hour … 1 month) or typed (custom …, same
-duration syntax as `slurm.py -c`, e.g. `3d12h`); each tab keeps its own. The dropdown next to it selects
+chosen from a list (only queued, 1 hour … 1 month) or typed (custom …: numbers
+with the units `s`, `m`, `h`, `d`, `w`, `mo`, `y`, e.g. `3d12h`); each tab keeps its own. The dropdown next to it selects
 whose jobs are listed: yours, those of one of your Slurm accounts, or those of
 all of them (the accounts come from `sacctmgr`). Progress appears when the
 output contains a line such as `65/100`; two columns estimate when a running job
@@ -201,30 +201,23 @@ shared. Its **Copy the screen** button copies the visible screen as text.
 
 ## Install and launch
 
-Run the program from this repository on a login or other host with Slurm
-access. The package directory `slurp/` must stay next to `slurm.py` (and the
-modules it uses) in this repository.
-Create and activate a virtual environment, then install the repository's
-Python dependencies:
+Run the program from a clone of this repository on a login or other host with
+Slurm access, or on your own machine with an SSH connection to one. slurp needs
+Python 3.11 or newer. Create and activate a virtual environment, then install
+its Python dependencies:
 
 ```bash
+git clone https://github.com/chaoos/slurp.git
+cd slurp
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-The requirements file includes the dependencies used by the repository's
-scripts, plus the Textual app's terminal and browser features. System commands
-such as `ssh`, `squeue`, `sacct`, `scontrol`, `srun`, and `sbatch` are installed
-separately and must be available locally or on the selected SSH host.
-
-The standalone `fzip.py` compression utility also uses the legacy `bitstream`
-package, whose source build fails under pip's isolated build environment. It is
-not needed by slurp. If you use `fzip.py`, install it separately with:
-
-```bash
-python -m pip install --no-build-isolation bitstream
-```
+The requirements file includes the Textual app's terminal and browser features.
+System commands such as `ssh`, `squeue`, `sacct`, `scontrol`, `srun`, and
+`sbatch` are installed separately and must be available locally or on the
+selected SSH host.
 
 `h5py` enables the HDF5 browser. If it is unavailable, the app can show
 `h5dump -H` output when `h5dump` is installed.
