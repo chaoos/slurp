@@ -14,8 +14,8 @@ from slurp.links import holder
 from aiohttp import web
 import aiohttp
 
-PS = open(winhelper.SCRIPT).read()
-CS = open(winhelper.LAUNCHER).read()
+PS = winhelper.SCRIPT.read_text()
+CS = winhelper.LAUNCHER.read_text()
 
 def free_port():
   s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
@@ -278,7 +278,7 @@ decls = re.findall(r"\[DllImport\(([^\]]*)\)\]\s*static extern \w+ (\w+)\(", CS)
 check("winhelper.cs: no char field in a marshalled struct, W functions with Unicode", "public char" not in CS and
       all("CharSet.Unicode" in attrs for attrs, name in decls if name.endswith("W")) and len(decls) >= 9, decls)
 check("winhelper.cs: C# 5 (no $\"\", no out var, no =>)", not re.search(r'(?<!\w)\$"', CS) and "out var" not in CS and "=>" not in CS)
-WD = open(windrive.SCRIPT).read()
+WD = windrive.SCRIPT.read_text()
 check("logs are read shared with their writer (ssh keeps them open; ReadAllText fails on Windows)",
       all("::ReadAllText(" not in t and "[IO.FileShare]::ReadWrite" in t for t in (PS, WD)),
       [n for n, t in (("winhelper.ps1", PS), ("windrive.ps1", WD)) if "::ReadAllText(" in t])
@@ -291,7 +291,7 @@ check("shell: logged in, it is connected (no window to hide)", "Connected $c" in
 step_login = PS.split("'login' {", 1)[1].split("'opening' {", 1)[0]
 shell_part = step_login.split("if ($c.Kind -eq 'shell') {", 1)[1].split("if (-not $authed", 1)[0]
 check("shell: never ended for a timeout (no Fail while it waits for the login)", "Fail" not in shell_part and "Shell-In" in shell_part and "--watch" in PS, shell_part)
-check("drive window: the console waits for the window to show", "shown.txt" in wd and "shown.txt" in open(windrive.SCRIPT).read())
+check("drive window: the console waits for the window to show", "shown.txt" in wd and "shown.txt" in windrive.SCRIPT.read_text())
 
 print("---- C: the holder hands URLs and downloads to the active browser")
 async def holder_part():

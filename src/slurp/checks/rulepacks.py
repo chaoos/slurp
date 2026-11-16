@@ -27,13 +27,15 @@ Keys (all optional):
 import fnmatch
 import functools
 import os
+import pathlib
+from importlib import resources
 
 try:
   import tomllib
 except ImportError: # Python < 3.11
   tomllib = None
 
-BUILTIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "packs")
+BUILTIN = resources.files(__package__) / "packs" # (the packs that come with slurp)
 
 def user_dir():
   base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
@@ -43,23 +45,21 @@ def load_packs():
   packs = []
   if tomllib is None:
     return packs
-  for directory in (user_dir(), BUILTIN):
+  for directory in (pathlib.Path(user_dir()), BUILTIN): # (a directory, or the packs of the package: the same interface)
     try:
-      names = sorted(os.listdir(directory))
+      files = sorted((p for p in directory.iterdir() if p.name.endswith(".toml")), key=lambda p: p.name)
     except OSError:
       continue
-    for name in names:
-      if name.endswith(".toml"):
-        path = os.path.join(directory, name)
-        try:
-          with open(path, "rb") as f:
-            pack = tomllib.load(f)
-        except (OSError, tomllib.TOMLDecodeError) as e:
-          from ..state import log
-          log.warning(f"rule pack {path}: {e}")
-          continue
-        pack["_path"] = path
-        packs.append(pack)
+    for path in files:
+      try:
+        with path.open("rb") as f:
+          pack = tomllib.load(f)
+      except (OSError, tomllib.TOMLDecodeError) as e:
+        from ..state import log
+        log.warning(f"rule pack {path}: {e}")
+        continue
+      pack["_path"] = str(path)
+      packs.append(pack)
   return packs
 
 @functools.lru_cache(maxsize=64)

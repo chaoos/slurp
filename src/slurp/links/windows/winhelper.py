@@ -13,14 +13,14 @@ binary is shipped), registers slurp:// for the user (no admin), starts it with W
 of this slurp (a link of another slurp asks first)."""
 
 import os
+from importlib import resources
 import urllib.parse
 
 from .. import share
 from . import windrive
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-SCRIPT = os.path.join(HERE, "winhelper.ps1")
-LAUNCHER = os.path.join(HERE, "winhelper.cs")
+SCRIPT = resources.files(__package__) / "winhelper.ps1"
+LAUNCHER = resources.files(__package__) / "winhelper.cs"
 SETUP_NAME = "slurp-helper-setup.cmd"
 SETUP_MARK = "#SLURP-SETUP"
 
@@ -66,10 +66,8 @@ def here_string(name, text):
 
 def setup_script():
   """The PowerShell script that sets the helper up (or updates it) on the user's machine"""
-  with open(SCRIPT, encoding="utf-8") as f:
-    helper = compact(f.read())
-  with open(LAUNCHER, encoding="utf-8") as f:
-    launcher = f.read()
+  helper = compact(SCRIPT.read_text(encoding="utf-8"))
+  launcher = LAUNCHER.read_text(encoding="utf-8")
   import base64
   from ...ui import logo
   from ... import __version__, VERSION_TEXT

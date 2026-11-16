@@ -30,4 +30,4 @@ def test_logo(check, tmp_path, monkeypatch):
   check("README and manual show the wordmark", 'src="docs/images/logo-wordmark.svg"' in open(os.path.join(REPO, "README.md")).read()
         and 'src="images/logo-wordmark.svg"' in open(os.path.join(REPO, "docs", "manual.md")).read())
   setup = winhelper.setup_script()
-  check("the helper's setup carries the icon, the tray loads it", "$IconData = '" in setup and "slurp.ico" in open(winhelper.SCRIPT).read())
+  check("the helper's setup carries the icon, the tray loads it", "$IconData = '" in setup and "slurp.ico" in winhelper.SCRIPT.read_text())

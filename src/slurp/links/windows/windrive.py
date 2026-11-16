@@ -7,13 +7,14 @@ expand $... in a double-quoted string) and into cmd."""
 
 import base64
 import os
+from importlib import resources
 import time
 import zlib
 
 from ... import VERSION_TEXT
 from .. import share
 
-SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "windrive.ps1")
+SCRIPT = resources.files(__package__) / "windrive.ps1"
 CMD_LIMIT = 8191 # the longest line cmd takes
 
 def ps_string(value):
@@ -39,8 +40,7 @@ def settings(link):
 
 def helper_script(link):
   """windrive.ps1 with the settings of the link in front"""
-  with open(SCRIPT, encoding="utf-8") as f:
-    body = f.read()
+  body = SCRIPT.read_text(encoding="utf-8")
   # compact: without comment lines, indentation and empty lines (the script has no here-strings, where they count)
   lines = (line.strip() for line in body.splitlines())
   body = "\n".join(line for line in lines if line and not line.startswith("#"))

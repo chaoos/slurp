@@ -1,6 +1,7 @@
 """What the job window shows besides the accounting: files, core dumps, commands on the nodes, memory"""
 
 import os
+from importlib import resources
 import re
 import shlex
 import time
@@ -194,13 +195,13 @@ def run_on_nodes(job, cmd, node=None):
   text += other + ([f"srun: {err.strip()}"] if err.strip() else [])
   return "\n".join(text) + "\n"
 
-SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts") # shell scripts run on the nodes (slurp/scripts)
+SCRIPTS = resources.files("slurp") / "scripts" # shell scripts run on the nodes (slurp/scripts)
 
 def run_script_on_nodes(job, script, *args, node=None, timeout=60):
   """Run one of the scripts of slurp/scripts once per node of a running job, as a step of the job. The script is not
   copied to the cluster: its text goes to srun on stdin (--input=all: to the task on every node), bash -s runs it.
   -> {task: [lines]} (the output of each node), the other output, the error"""
-  text = open(os.path.join(SCRIPTS, script)).read()
+  text = (SCRIPTS / script).read_text()
   srun = ["srun", f"--jobid={job.rec['JobIDRaw']}", "--overlap", "--ntasks-per-node=1", f"--job-name={STEP_NAME}",
           "--input=all", "--label", "--quiet"]
   srun += ["--nodes=1", "-w", node] if node else [f"--nodes={job.rec['NNodes'] or 1}"]
