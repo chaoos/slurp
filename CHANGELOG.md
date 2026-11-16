@@ -20,6 +20,10 @@ version may need the helper of the same version).
   checkout no longer works without installing. slurp starts itself again (the
   session holder, the app under it, `--serve`) as exactly the same copy,
   installed or not.
+- The changelog is at the top of the repository (`CHANGELOG.md`), the manual
+  is `docs/manual.md` and its images are in `docs/images/` (they were in the
+  package directory); `python tools/make_logo_files.py` writes the logo files
+  (was `python -m slurp.logo`). The About window links both.
 - The tests are in the repository (`tests/`, run with `pytest`), with a
   GitHub Actions workflow: the unit tests, and the lab tests that drive slurp
   against a fake Slurm cluster behind a local sshd.

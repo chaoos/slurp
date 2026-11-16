@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/logo-wordmark.svg" alt="slurp: Slurm at a glance" width="300"></p>
+<p align="center"><img src="images/logo-wordmark.svg" alt="slurp: Slurm at a glance" width="300"></p>
 
 # slurp
 
@@ -13,7 +13,7 @@ icon, window and menu show it, and a link from a slurp of another version says
 so in the connection window (set the helper up again to update it). A new
 slurp that finds an older one still running says so before it attaches (quit
 the running one and start again to use the new version). What changed:
-[CHANGELOG.md](CHANGELOG.md).
+[CHANGELOG.md](../CHANGELOG.md).
 
 The images below are illustrative previews built from the app's current
 features and sample data; they are not screenshots from a live cluster.
@@ -48,7 +48,7 @@ task with its progress bar (sorted by the header clicked; a click on a task open
 (after a confirmation). The job window of an array task has an **Array** button
 for it.
 
-![Illustrative slurp job list with status and progress columns](docs/jobs.svg)
+![Illustrative slurp job list with status and progress columns](images/jobs.svg)
 
 **The list is kept** on this machine after each load (`~/.cache/slurp/joblists/`,
 only for you), so it is there when the cluster is not: slurp starts with the
@@ -140,7 +140,7 @@ requested. GPU usage is gathered from the processes of the job reported by
 memory of every GPU of the nodes. Completed and failed jobs show CPU peak memory from Slurm
 accounting, and GPU peak memory when the accounting database reports it.
 
-![Illustrative job overview with cancel, restart, progress, and memory controls](docs/job-details.svg)
+![Illustrative job overview with cancel, restart, progress, and memory controls](images/job-details.svg)
 
 ## Files and node tools
 
@@ -197,7 +197,7 @@ everything running in it, and how to treat it: a limited history (use `less`
 or `tmux` for long output), `tmux` or `sbatch` for work that must survive, and login nodes are
 shared. Its **Copy the screen** button copies the visible screen as text.
 
-![Illustrative Markdown, HDF5, and right-side shell views](docs/files.svg)
+![Illustrative Markdown, HDF5, and right-side shell views](images/files.svg)
 
 ## Install and launch
 
@@ -795,6 +795,7 @@ TUI shows it exactly with block characters: `❯▂▄█` in the header (in the
 theme's colours), five rows of `▀▄█` in the help windows and on the lock screen
 of a view. `slurp/logo.py` holds the pixel map and makes every other form from
 it: the favicon and the start screen of the web view, the tray icon and start
-menu entry of the slurp helper on Windows (`.ico`), and the files in `docs/`
-(`logo.svg`, `logo-plain.svg`, `logo-wordmark.svg`, `logo-256.png`, `logo.ico`;
-`python -m slurp.logo` writes them again).
+menu entry of the slurp helper on Windows (`.ico`), and the files in
+`docs/images/` (`logo.svg`, `logo-plain.svg`, `logo-wordmark.svg`,
+`logo-256.png`, `logo.ico`; `python tools/make_logo_files.py` writes them
+again).

@@ -1,4 +1,4 @@
-<p align="center"><img src="slurp/docs/logo-wordmark.svg" alt="slurp: Slurm at a glance" width="300"></p>
+<p align="center"><img src="docs/images/logo-wordmark.svg" alt="slurp: Slurm at a glance" width="300"></p>
 
 # slurp
 
@@ -8,7 +8,7 @@ output and scripts, the nodes they run on, checks of batch scripts against a
 rule catalogue, and shells and drives on the cluster. Use it in a terminal or
 in a browser.
 
-![Illustrative slurp job list with status and progress columns](slurp/docs/jobs.svg)
+![Illustrative slurp job list with status and progress columns](docs/images/jobs.svg)
 
 ## Quick start
 
@@ -27,10 +27,10 @@ connection to one: `slurp --ssh user@cluster-login`.
 
 ## Documentation
 
-The manual is [slurp/README.md](slurp/README.md). In the app, the `?` buttons
+The manual is [docs/manual.md](docs/manual.md). In the app, the `?` buttons
 explain each window and `F1` opens the guides (job scripts, arrays, filesystems,
 GPUs, ...). What changed between versions is in
-[slurp/CHANGELOG.md](slurp/CHANGELOG.md).
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Tests
 

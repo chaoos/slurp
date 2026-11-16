@@ -512,8 +512,8 @@ def about_markdown(facts):
   out = [f"# About slurp {facts['version']}", ABOUT.strip(), ""]
   for title, rows in FACTS:
     out += [f"## {title}", "", "| | |", "|---|---|", *[f"| {label} | {cell(facts[key])} |" for label, key in rows if facts.get(key)], ""]
-  out += ["What changed from version to version: `CHANGELOG.md`, next to `README.md` (the whole manual) in "
-          f"`{facts['package']}`."]
+  out += ["What changed from version to version: [CHANGELOG.md](https://github.com/chaoos/slurp/blob/main/CHANGELOG.md); "
+          "the whole manual: [docs/manual.md](https://github.com/chaoos/slurp/blob/main/docs/manual.md)."]
   return "\n".join(out)
 
 def add_help_button(screen):

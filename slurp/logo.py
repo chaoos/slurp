@@ -179,15 +179,11 @@ def ico(sizes=(16, 24, 32, 48, 64, 256)):
 DOCS = {"logo.svg": lambda: svg(boxed=True), "logo-plain.svg": lambda: svg(), "logo-wordmark.svg": wordmark_svg,
         "logo-256.png": lambda: png(256), "logo.ico": ico}
 
-def write_docs(folder=None):
-  """docs/logo*.{svg,png,ico} from the pixel map: python -m slurp.logo"""
+def write_docs(folder):
+  """The logo files of the repository's docs/images/ (DOCS) from the pixel map: tools/make_logo_files.py"""
   import os
-  folder = folder or os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs")
   for name, make in DOCS.items():
     data = make()
     with open(os.path.join(folder, name), "wb") as f:
       f.write(data.encode() if isinstance(data, str) else data)
   return sorted(DOCS)
-
-if __name__ == "__main__":
-  print("written:", ", ".join(write_docs()))

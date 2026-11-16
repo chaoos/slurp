@@ -47,13 +47,14 @@ slurp = "slurp.cli:main"
 [project.urls]
 Homepage = "https://github.com/chaoos/slurp"
 Source = "https://github.com/chaoos/slurp"
-Changelog = "https://github.com/chaoos/slurp/blob/main/slurp/CHANGELOG.md"
+Documentation = "https://github.com/chaoos/slurp/blob/main/docs/manual.md"
+Changelog = "https://github.com/chaoos/slurp/blob/main/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "slurp/__init__.py"
 
 [tool.hatch.build.targets.sdist]
-include = ["slurp", "tests", "README.md", "LICENSE", "pyproject.toml"]
+include = ["slurp", "tests", "docs", "tools", "README.md", "CHANGELOG.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
