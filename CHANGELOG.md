@@ -10,6 +10,10 @@ version may need the helper of the same version).
   in its middle, with what to do (a tab for a cluster with `+`, or
   `slurp --ssh`), instead of an error notification for every Slurm command at
   each load. `r` looks again.
+- In a browser (`slurp --serve`, or the browser view of the session holder),
+  a web page (a site's status page, a link in the help or the checks) opens in
+  a new tab, so the page with slurp stays. The links in the help and the checks
+  open in that browser now, not on the machine slurp runs on.
 - All buttons are compact (one line, as wide as their label): the toolbar of
   the job list, the job window, the dialogs and the other windows had a mix of
   three-line and one-line ones. The toolbar of the job list fits in one row

@@ -354,7 +354,7 @@ class ViewHelpScreen(ModalScreen):
       self.dismiss()
       self.app.action_rule_catalogue(event.href[5:])
     elif event.href.startswith(("http://", "https://")):
-      self.app.open_url(event.href)
+      self.app.open_page(event.href)
 
   @on(Button.Pressed, "#vh-copy")
   def copy_details(self, event):

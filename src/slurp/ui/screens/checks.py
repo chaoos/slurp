@@ -206,7 +206,7 @@ class DocScreen(SplitScreen):
     elif href.startswith("#"):
       self.jump(href[1:])
     elif href.startswith(("http://", "https://")):
-      self.app.open_url(href)
+      self.app.open_page(href)
 
   def action_back(self):
     self.pop_back()

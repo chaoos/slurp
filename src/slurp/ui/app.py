@@ -1144,7 +1144,7 @@ class Slurp(App):
     """Opens the URL in the active browser (a slurp:// link: the slurp helper there); done(ok, why) on the UI thread"""
     from ..links import holder
     if self.is_web:
-      self.open_url(url, new_tab=False)
+      self.open_url(url, new_tab=url.startswith(("http://", "https://"))) # (a web page beside slurp's; a slurp:// link has no page)
       done(True, "")
       return
     if not self.on_client():

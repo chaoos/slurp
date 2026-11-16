@@ -675,9 +675,11 @@ class Holder:
               "web": self.web[1] if self.web else None, "since": self.started, "version": __version__}
     return {"error": f"unknown request {cmd!r}"}
 
-  def open_url(self, url, new_tab=False):
-    """The active view opens the URL, if it is a browser (a terminal cannot open anything on its computer); a download
-    in a new tab, so the page with slurp stays"""
+  def open_url(self, url, new_tab=None):
+    """The active view opens the URL, if it is a browser (a terminal cannot open anything on its computer); a web page
+    and a download in a new tab, so the page with slurp stays (a slurp:// link in the same: it opens no page)"""
+    if new_tab is None:
+      new_tab = url.startswith(("http://", "https://"))
     view = self.active
     if view is None or view.kind != "web" or not getattr(view, "send_text", None):
       return {"ok": False, "error": "the active view is not a browser"}
