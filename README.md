@@ -12,6 +12,9 @@ in a browser.
 
 ## Quick start
 
+slurp needs Python 3.11 or newer. Install it into a virtual environment and
+start it with the `slurp` command:
+
 ```bash
 git clone https://github.com/chaoos/slurp.git
 cd slurp
@@ -21,9 +24,38 @@ python -m pip install ".[all]"   # or just "." without the optional features
 slurp                            # or: python -m slurp
 ```
 
-Without cloning: `pipx install "slurp[all] @ git+https://github.com/chaoos/slurp"`.
 Run it on a login node with Slurm, or on your own machine with an SSH
-connection to one: `slurp --ssh user@cluster-login`.
+connection to one: `slurp --ssh user@cluster-login` (several destinations
+give several tabs). `slurp --help` lists the options; `slurp check job.sh`
+checks batch scripts without the app.
+
+Without cloning, in an environment of its own:
+`pipx install "slurp[all] @ git+https://github.com/chaoos/slurp"`.
+
+### Running it later
+
+The `slurp` command lives in the virtual environment: activate it first
+(`source .venv/bin/activate`), or run `.venv/bin/slurp` directly. To update a
+clone: `git pull`, then `python -m pip install ".[all]"` again (not needed
+for an install with `-e`, see below).
+
+`slurp` attaches to a slurp that is running already (it keeps running in the
+background, like tmux; see the manual). After an update, quit the running one
+(`q`) and start it again, or start a separate one with `slurp --new`.
+`--no-holder` runs it directly in the terminal.
+
+### Working on slurp
+
+Install the checkout in editable mode: changes to `src/` take effect without
+installing again.
+
+```bash
+python -m pip install -e ".[all,dev]"   # dev: pytest, ruff, pre-commit
+slurp
+```
+
+`python3 slurp` from the top of the checkout, as in older versions, no longer
+works: the code is in `src/slurp/`, and slurp runs as an installed package.
 
 ## Documentation
 

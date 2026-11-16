@@ -14,9 +14,9 @@ version may need the helper of the same version).
   guessed from it, a number in the directory that happens to equal the task's
   index (`run1/`, `pytest-1/`) is no longer taken for it, when the file name
   has the index or the job id.
-- slurp has its own repository (https://github.com/chaoos/slurp), with its
-  own `requirements.txt`; it no longer needs `slurm.py` and the other modules
-  of the scripts repository it started in.
+- slurp has its own repository (https://github.com/chaoos/slurp); it no
+  longer needs `slurm.py` and the other modules of the scripts repository it
+  started in.
 - slurp is a Python package to install (`pyproject.toml`): `pip install
   ".[all]"` gives the `slurp` command (and `python -m slurp`); `pipx install`
   works without a clone. The optional features are extras: `links`, `hdf5`,
