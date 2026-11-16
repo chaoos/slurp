@@ -19,14 +19,14 @@ VIEW_HELP = {
 Your queued and running jobs and those that ended recently, of the active tab's cluster.
 
 - **Columns:** a click on a header sorts by it (again: the other way). **Progress** comes from `n/N` lines in the
-  output; **Done: same pace / current pace** estimate the end at the average rate and at the recent rate.
+  output; **Done: current pace** estimates the end at the recent rate (the job window also shows it at the average rate).
   **Checks** shows errors ✖ and warnings ⚠ the checks found for the job; **Err** marks error files that are not empty.
 - **Arrays** with ten or more tasks are one row: its state is the mix of the tasks' states (`30R 10PD 100CD`).
   `Space` (or ▸) lists the tasks under it, Enter opens the array window. `g` switches grouping off and on.
 - **Loading:** the list shows as soon as Slurm answers; commands, error files, progress and checks follow (spinners).
   `r` reloads, `a` aborts a load. **finished since** chooses how far back ended jobs are listed, the dropdown
   next to it whose jobs (yours, an account's, all your accounts').
-- **☰ Menu** (`F10`), what slurp does for the tab, each with its key: Cluster info (`C`), Quota (`Q`), old files in
+- **☰ Menu** (`F10`, at the left of the header, the top line), what slurp does for the tab, each with its key: the job list (`j`), Health (`C`), Quota (`Q`), old files in
   scratch (`X`, what the purge would take), Shell (`t`, in slurp or from your own terminal), the login directory (`d`)
   and as a drive (`F`, on this machine or yours), Interactive job (`i`), New job script (`n`), Categories (`K`), this
   slurp in your browser (`W`, from anywhere, through a link), the guides, the rule catalogue, Options, About, Quit.
@@ -130,7 +130,7 @@ rule catalogue; the contents on the left jump to a section.
   "QuotaScreen": ("Quota", """
 Your quotas (and those of your groups where they use space or have a limit) on every filesystem: space and files,
 used, soft limit, limit, and a bar coloured by how full it is; also what the site's own quota command says. A full
-quota (space *or* files) makes writes fail. `r` asks again.
+quota (space *or* files) makes writes fail. `r` asks again, `Esc` closes the window.
 """),
   "ScratchScreen": ("Old scratch files", """
 Your files in `$SCRATCH` with the oldest access (or modification) time: the ones a purge deletes first. Older than the
@@ -141,32 +141,33 @@ given days: red, close to it: yellow. An exclude regex leaves paths out.
 - `r` searches again (it can be aborted).
 """),
   "MenuScreen": ("Menu", """
-What slurp does for the tab, each with the key that does the same from the job list or the overview: the overview of
-the cluster (`C`), your quotas (`Q`), your oldest files in scratch (`X`), a shell on the cluster (`t`), the login
+What slurp does for the tab, each with the key that does the same from the job list or the overview: the job list (`j`),
+the health of the cluster (`C`), your quotas (`Q`), your oldest files in scratch (`X`), a shell on the cluster (`t`), the login
 directory (`d`) and the login directory as a drive (`F`), an interactive job (`i`), a new job script (`n`), the
 categories (`K`), this slurp in your browser (`W`), the guides (`F1`), the rule catalogue (`F2`), the options (`F3`),
 about slurp, and quit (`q`). Enter or a click does the item; `Esc` or a click elsewhere closes the menu.
 """),
   "OverviewScreen": ("Overview", """
-The first subtab of every tab: the cluster at a glance. The title says whether it is healthy, degraded or unhealthy
-and why, who you are logged in as (and the round trip), and the Slurm version.
-
-- **Your jobs**: running (on how many nodes), pending (and why), those finished within the job list's *finished
-  since* by state, with their node hours, and how many have problems. `j` (or **Jobs**) opens the job list.
-- **The cluster**: health (nodes down, drained, in maintenance, not responding, with the reasons), reservations,
-  occupancy (busy and idle nodes, running and pending jobs and why they wait).
-- **Your quotas**: space and files on each filesystem, with a bar (the full list: **Quota**, `Q`).
-- **Partitions** and the **node topology** of each (CPUs, sockets × cores × threads, NUMA domains, GPUs, memory).
-- **The site**, when a rule pack knows it: its status page and documentation (a click opens them), the scratch purge.
-
-Each part loads in the background when the overview is shown (again after 5 minutes); `r` (**Reload**) asks again.
-A tab without a session shows **Connect**. *A tab opens on* in **Options** (`F3`) chooses the job list instead.
+What a tab shows while none of its subtabs is open: at the start, and when the last one is closed. In its middle:
+the cluster (its site, the Slurm version, its nodes and partitions), its health (healthy, degraded or unhealthy, and
+why), the SSH session, and the ways on: **Jobs** (`j`, with how many run and wait; *No Slurm available* where there
+is none), **Quota** (`Q`) and **Health** (`C`, everything about the nodes and partitions). Below them the site's
+status page and documentation (a click opens them). Not connected: **Connect**, and what happened to the connection (slurp does not log in at the start; a tab added
+with `+` logs in right away); connected: **Disconnect**.
+`r` asks the cluster again (it does by itself after 5 minutes). *At the start a tab shows* in **Options** (`F3`) can
+open the job list instead.
+"""),
+  "ClusterInfoScreen": ("Health", """
+The state of the cluster (a window; `Esc` closes it): health (nodes down, drained, in maintenance, not responding, with the reasons),
+reservations, occupancy (busy and idle nodes, running and pending jobs and why they wait), the partitions, and the
+node topology of every partition (CPUs, sockets × cores × threads, NUMA domains, GPUs, memory). The title says
+healthy, degraded or unhealthy and why. `r` (Reload) asks again.
 """),
   "ConnectionScreen": ("Connection window", """
 The SSH session of the tab: its state and the course of a (re)connect, the logged-in user and login node, the
 resolved destination, traffic and round-trip times, the ssh process and its TCP connection, and a log of events.
 
-- **Reconnect** (`R`) logs in again; **Disconnect** ends the session until you press **Connect** in the job list. When the
+- **Reconnect** (`R`) logs in again; **Disconnect** ends the session until you press **Connect** (overview, job list). When the
   login fails, the cluster may be down or in maintenance: a site's status page (from its rule pack, e.g.
   status.cscs.ch) shows as a link here and in the status at the bottom right; a click opens it.
 - **Drive:** your login directory mounted on this machine (state, Mount/Unmount/Remount/Force unmount).
@@ -288,8 +289,8 @@ The text was sent to your terminal's clipboard (OSC 52), which only some termina
 The settings slurp keeps in `config.json` (the path is shown at the bottom), to see and change; **Save** writes them.
 
 - **Appearance:** the theme in a terminal and the one in a browser (or the same). The theme follows the view that is
-  active: when a browser takes over, its theme is used, when a terminal does, the terminal's. **A tab opens on** its
-  overview (the cluster at a glance) or its job list.
+  active: when a browser takes over, its theme is used, when a terminal does, the terminal's. **At the start a tab
+  shows** its overview (the cluster at a glance; no subtab open) or its job list.
 - **Shells:** how many lines a shell keeps above its screen (scrolled back with the mouse wheel).
 - **Copying:** for a terminal and for a browser: when copying cannot be confirmed (no clipboard tool here; in a
   browser always), ask how to get the text, or only send it (OSC 52) without asking.
@@ -420,7 +421,7 @@ one SSH connection each, with its jump hosts and keys from your `~/.ssh/config`)
 - **Sessions**: slurp keeps running in the background (like tmux); `slurp` again attaches to it, from another
   terminal or a browser. `q` quits it.
 - **Help**: `?` (or the **?** at the right of the title bar) explains the window shown, with its keys; this page
-  (**? slurp**) is about slurp in general. **☰ Menu** (`F10`) in the job list has what slurp does for the tab, and
+  (**? slurp**) is about slurp in general. **☰ Menu** (`F10`) at the left of the title bar has what slurp does for the tab, and
   **Options** (`F3`), the settings.
 """
 

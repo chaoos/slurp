@@ -70,10 +70,9 @@ def sample_hdf5(path):
 
 
 async def shot_overview(app, pilot):
-  """The overview of a tab: health, your jobs, occupancy, your quotas, the partitions"""
-  app.show_overview()
-  await U.until(pilot, lambda: "info" in app.cluster.overview and "quota" in app.cluster.overview
-                and not app.cluster.overview.get("loading"), 60)
+  """The overview of a tab (no subtab open): the cluster, its health, the SSH session, Jobs, Quota, Health"""
+  app.close_jobs()
+  await U.until(pilot, lambda: "degraded" in U.card_text(app) and "running" in str(app.screen.query_one("#ov-jobs").label), 60)
   await pilot.pause(1.0)
   app.save_screenshot(filename="overview.svg", path=IMAGES)
   app.show_view(None); await pilot.pause(0.3)

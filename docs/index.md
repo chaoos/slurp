@@ -12,8 +12,8 @@ browser.
 
 ```bash
 python -m pip install "slurp[all] @ git+https://github.com/chaoos/slurp"
-slurp                         # on a login node, or:
-slurp --ssh user@cluster      # from your own machine
+slurp                         # on a login node, or on your own machine
+                              # (+ adds a tab for a cluster over SSH)
 ```
 
 More in [Install and start](install.md).
@@ -22,8 +22,8 @@ More in [Install and start](install.md).
 
 <div class="grid cards" markdown>
 
-- **[The overview](guide/overview.md)**: every tab opens on it: the cluster's health and occupancy, your jobs and
-  quotas, the partitions and their nodes, the site's status page.
+- **[The overview](guide/overview.md)**: what a tab shows while nothing is open in it: the cluster, its health and
+  the SSH session in a few lines, with the way to its jobs, quota and health; Connect when not connected.
 - **[The job list](guide/job-list.md)**: queued, running and finished jobs; progress and when a job will be done;
   arrays as one row; categories like folders; the last list kept for when the cluster is down.
 - **[The job window](guide/job-window.md)**: accounting, steps, files; cancel, restart (with the environment it was

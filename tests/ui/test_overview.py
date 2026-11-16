@@ -1,4 +1,5 @@
-"""A tab opens on its overview (the default start page); Overview and Jobs are its first subtabs"""
+"""The overview: what a tab shows while none of its subtabs is open, at the start; the job list is a subtab like the
+others, closed with its ✕ or Ctrl-W (then the overview again)"""
 import asyncio
 import shutil
 
@@ -17,33 +18,74 @@ def quiet(monkeypatch, tmp_path):
     pytest.skip("squeue is on PATH")
 
 
-def test_overview_first(check, quiet, start_on_overview):
+def test_overview_at_the_start(check, quiet, start_on_overview):
   async def main():
     app = Slurp()
     async with app.run_test(size=(140, 40)) as pilot:
       for _ in range(100):
         await pilot.pause(0.05)
-        if app.main is not None and isinstance(app.screen, OverviewScreen) and app.cluster.loader is None:
+        if isinstance(app.screen, OverviewScreen) and app.cluster.loader is None and app.cluster.no_slurm:
           break
-      check("a tab opens on its overview", isinstance(app.screen, OverviewScreen) and app.cluster.current_view == "overview",
+      await pilot.pause(0.3)
+      ov = app.screen
+      check("at the start no subtab is open: the overview", isinstance(ov, OverviewScreen) and not app.cluster.jobs_open
+            and not app.cluster.views, type(ov).__name__)
+      check("…the job list's subtab is not there", not ov.query_one("#view-jobs").display and not ov.query_one("#view-close-jobs").display)
+      card = ov.query_one("#ov-card")
+      middle = ov.query_one("#ov-middle").region
+      check("a card in the middle of the window", abs(card.region.x + card.region.width / 2 - (middle.x + middle.width / 2)) <= 2
+            and abs(card.region.y + card.region.height / 2 - (middle.y + middle.height / 2)) <= 2, (card.region, middle))
+      text = " ".join(str(w.render()) for w in ov.query("#ov-card Static") if w.display)
+      check("what it is; here no Slurm, no job list to open", "Local" in text and "this machine" in text and "No Slurm available" in text
+            and not ov.query_one("#ov-jobs").display, text)
+      check("Quota and Health", ov.query_one("#ov-quota").display and ov.query_one("#ov-info").display)
+      check("not many lines: a card, not a report", card.region.height <= 14, card.region)
+      app.show_view(None); await pilot.pause(0.4)
+      check("opening the job list: a subtab with ✕", app.screen is app.main and app.cluster.jobs_open
+            and app.main.query_one("#view-jobs").display and app.main.query_one("#view-close-jobs").display)
+      await pilot.click("#view-close-jobs"); await pilot.pause(0.4)
+      check("its ✕ closes it: the overview again", isinstance(app.screen, OverviewScreen) and not app.cluster.jobs_open)
+      await pilot.click("#ov-quota"); await pilot.pause(0.5)
+      check("Quota: a window over the overview, no subtab", type(app.screen).__name__ == "QuotaScreen" and not app.cluster.views
+            and isinstance(app.screen_stack[-2], OverviewScreen), type(app.screen).__name__)
+      await pilot.press("escape"); await pilot.pause(0.3)
+      check("Esc closes it: the overview again", isinstance(app.screen, OverviewScreen))
+      await pilot.click("#ov-info"); await pilot.pause(0.5)
+      check("Health: a window too", type(app.screen).__name__ == "ClusterInfoScreen" and not app.cluster.views, type(app.screen).__name__)
+      await pilot.click("#ci-close"); await pilot.pause(0.3)
+      check("Close closes it", isinstance(app.screen, OverviewScreen))
+      app.show_view(None); await pilot.pause(0.3)
+      await pilot.press("ctrl+w"); await pilot.pause(0.4)
+      check("Ctrl-W closes the job list too: the overview", isinstance(app.screen, OverviewScreen) and not app.cluster.jobs_open,
             type(app.screen).__name__)
-      tabs = [str(b.label) for b in app.screen.query("#view-tabs Button.view-tab")]
-      check("its subtabs: Overview, Jobs", tabs[:2] == ["Overview", "Jobs"], tabs)
-      await pilot.press("j"); await pilot.pause(0.3)
-      check("j: the job list, which loads in the background meanwhile", app.screen is app.main)
-      for _ in range(100):
-        await pilot.pause(0.05)
-        if app.cluster.loader is None and app.cluster.no_slurm:
-          break
-      await pilot.click("#view-overview"); await pilot.pause(0.5)
-      check("the Overview subtab", isinstance(app.screen, OverviewScreen))
-      from rich.console import Console
-      import os
-      c = Console(width=140, record=True, file=open(os.devnull, "w")); c.print(app.screen.shown); text = c.export_text()
-      check("without Slurm it says so, and asks nothing", "No Slurm on this machine" in text and not app.cluster.overview.get("loading"), text)
-      check("the menu is there too", bool(app.screen.query("#menu")))
       await pilot.press("f10"); await pilot.pause(0.3)
-      check("F10 opens it", type(app.screen).__name__ == "MenuScreen")
-      await pilot.press("escape"); await pilot.pause(0.2)
+      check("the menu is there too (F10)", type(app.screen).__name__ == "MenuScreen")
+      items = app.screen.query_one("#menu-list")
+      items.highlighted = items.get_option_index("job_list"); await pilot.press("enter"); await pilot.pause(0.5)
+      check("Job list in the menu opens the job list", app.screen is app.main and app.cluster.jobs_open, type(app.screen).__name__)
+      await pilot.press("q")
+  asyncio.run(main())
+
+
+def test_no_login_at_the_start(check, quiet, start_on_overview):
+  """A cluster tab from the last run does not log in at the start: its overview shows Connect (no Disconnect)"""
+  from slurp.config import update_config
+  update_config(tabs=[{"destination": "far.invalid"}], active=0)
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(140, 40)) as pilot:
+      for _ in range(60):
+        await pilot.pause(0.05)
+        if isinstance(app.screen, OverviewScreen):
+          break
+      await pilot.pause(0.3)
+      ov, cluster = app.screen, app.cluster
+      check("the cluster tab is shown, on its overview", isinstance(ov, OverviewScreen) and cluster.destination == "far.invalid")
+      check("no login at the start", cluster.connection is not None and cluster.connection.state == "new"
+            and cluster.login_terminal is None and app.shell is None, cluster.connection and cluster.connection.state)
+      check("the overview shows Connect, not Disconnect", ov.query_one("#ov-connect-row").display
+            and not ov.query_one("#ov-disconnect-row").display and not ov.query_one("#ov-links").display)
+      text = str(ov.query_one("#ov-ssh").render())
+      check("…with what happened to the connection", "Not connected to far.invalid" in text and "never connected" in text, text)
       await pilot.press("q")
   asyncio.run(main())

@@ -1,20 +1,25 @@
 # Tabs and subtabs
 
-Every tab opens on its **Overview** (the cluster at a glance, see
-[The overview](overview.md)); **Jobs** is the job list.
-The toolbar of the job list has **☰ Menu** (`F10`) with what slurp does for
-the tab, each with its key (the overview, quota, old files in scratch, shells,
-the login directory and the drive, interactive job, new job script,
-categories, this slurp in your browser, the guides, the rule catalogue,
-options, about), and **Reload**, the time window of finished jobs, whose jobs
-are listed and **group arrays**.
+The top line of every window is the header: **☰ Menu** (`F10`) at its left,
+the title of slurp with its version, and **?** (the help of the window) at its
+right. The menu has what slurp does for the tab, each with its key (the job
+list, health, quota, old files in scratch, shells, the login directory and
+the drive, interactive job, new job script, categories, this slurp in your
+browser, the guides, the rule catalogue, options, about). Under the header
+are the tabs, then the subtabs. The toolbar of the job list has **Reload**,
+the time window of finished jobs, whose jobs are listed and **group arrays**.
 
 Every tab is a cluster (or this machine). Under the tabs, each tab has its
-subtabs: **Jobs** (the job list, always there), and one subtab with a `✕` for
-each job window, each file or directory opened from the job list, and each
-shell (on the cluster, on the node of a job, GDB). What you open inside a
-subtab, like the files of a job, opens in that subtab; `←` or `Esc` goes back,
-and back from its first window shows the job list. Opening a job again shows
+subtabs, each with a `✕`: **Jobs** (the job list), and one for each job
+window, each file or directory opened from the job list, each shell (on the
+cluster, on the node of a job, GDB). Quota and Health are windows over it.
+At the start no
+subtab is open, and while none is the tab shows its
+[overview](overview.md), from where **Jobs** opens the job list. When a
+subtab closes, the job list (if open) or the last subtab is shown. What you
+open inside a subtab, like the files of a job, opens in that subtab; `←` or
+`Esc` goes back, and back from its first window shows the job list (or the
+overview). Opening a job again shows
 its subtab. Switching tabs keeps the subtabs. In a shell all keys go to the
 shell, except `Ctrl-]`, which goes back to the job list; `Ctrl-W` closes the
 subtab shown (outside a shell). Every tab can be closed, also the last one;

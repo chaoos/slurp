@@ -1,16 +1,23 @@
-"""What the overview of a tab shows of its cluster: health, reservations, occupancy, partitions, node topology"""
+"""The state of a tab's cluster (Health, a subtab; the overview uses its health): health, reservations,
+occupancy, partitions, node topology"""
 
 import collections
 import re
 import shlex
+import time
 from datetime import datetime
 
 from rich.table import Table
 from rich.text import Text
+from textual import on
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
+from textual.widgets import Button, Static
 
 
 from ...state import log
-from ...cluster.remote import run_many
+from ...cluster.remote import in_background, run_many
 from ...checks.engine import mem_text
 
 NODE_FLAGS = {"*": "not responding", "~": "powered off", "#": "powering up", "!": "powering down", "%": "powering down",
@@ -180,3 +187,94 @@ def info_grid(info, parts=SECTIONS):
   for err in info["errors"]:
     grid.add_row(Text("error", style="red"), err)
   return grid
+
+
+class ClusterInfoScreen(ModalScreen):
+  """Health: everything about the cluster of a tab (a window): health with the reasons, reservations, occupancy,
+  partitions, node topology; the title (and the border's colour) says healthy, degraded or unhealthy and why"""
+  DEFAULT_CSS = """
+  ClusterInfoScreen { align: center middle; }
+  #ci-dialog { width: 120; max-width: 98%; height: 90%; border: thick $accent; background: $surface; padding: 0 1; }
+  #ci-dialog.-good { border: thick $success; }
+  #ci-dialog.-warn { border: thick $warning; }
+  #ci-dialog.-bad { border: thick $error; }
+  #ci-title { height: auto; margin-bottom: 1; }
+  #ci-body { height: 1fr; }
+  #ci-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #ci-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "close", "Close"), Binding("r", "reload", "Reload")]
+
+  def __init__(self, cluster):
+    super().__init__()
+    self.cluster, self.info, self.fetching = cluster, None, False
+
+  def compose(self):
+    with Vertical(id="ci-dialog"):
+      yield Static(id="ci-title")
+      with VerticalScroll(id="ci-body"):
+        yield Static(id="ci-info")
+      with Horizontal(id="ci-buttons"):
+        yield Button("Reload", id="ci-reload", variant="primary", compact=True)
+        yield Button("Close", id="ci-close", compact=True)
+
+  def on_mount(self):
+    cached = (self.cluster.overview or {}).get("info") if isinstance(self.cluster.overview, dict) else None
+    if cached:
+      self.info = cached
+      self.show()
+    self.action_reload()
+
+  @on(Button.Pressed, "#ci-close")
+  def action_close(self):
+    self.dismiss()
+
+  def title_text(self):
+    text = Text(f"Health of {self.cluster.name}", style="bold")
+    dialog = self.query_one("#ci-dialog")
+    for level in HEALTH_STYLES:
+      dialog.remove_class(f"-{level}")
+    if self.info is not None and not self.info["failed"]:
+      level, why = cluster_health(self.info)
+      dialog.add_class(f"-{level}")
+      text.append(" · ")
+      text.append(f"● {dict(good='healthy', warn='degraded', bad='unhealthy')[level]}: {why}", style=HEALTH_STYLES[level])
+    if self.fetching:
+      text.append(" · loading …", style="yellow")
+    elif self.info:
+      text.append(f" · as of {self.info['time']:%H:%M:%S}", style="dim")
+    return text
+
+  @on(Button.Pressed, "#ci-reload")
+  def action_reload(self, event=None):
+    if event is not None:
+      event.stop()
+    if self.fetching:
+      return
+    c = self.cluster.connection
+    if self.cluster.destination and (c is None or not c.ready):
+      self.query_one("#ci-title", Static).update(self.title_text())
+      self.query_one("#ci-info", Static).update(Text(f"Not connected to {self.cluster.destination}: Connect in the overview or "
+                                                     "the job list, then Reload.", style="bold yellow"))
+      return
+    self.fetching = True
+    self.query_one("#ci-title", Static).update(self.title_text())
+    def loaded(info):
+      self.fetching = False
+      if info is not None:
+        self.info = info
+        if isinstance(self.cluster.overview, dict):
+          self.cluster.overview["info"], self.cluster.overview["info_at"] = info, time.time()
+      self.show()
+    in_background(self, cluster_info, loaded, group="cluster-info",
+                  connection=self.cluster.connection if self.cluster.destination else None)
+
+  def show(self):
+    self.query_one("#ci-title", Static).update(self.title_text())
+    if self.info is None:
+      return
+    if self.info["failed"]:
+      self.shown = Text("Could not query the cluster:\n" + "\n".join(self.info["errors"]), style="red")
+    else:
+      self.shown = info_grid(self.info)
+    self.query_one("#ci-info", Static).update(self.shown)

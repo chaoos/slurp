@@ -36,8 +36,7 @@ Without `h5py` the HDF5 view shows `h5dump -H` when `h5dump` is installed. Syste
 ## Start
 
 ```bash
-slurp                              # or: python -m slurp
-slurp --ssh user@cluster-login     # a tab for a cluster (several destinations: several tabs)
+slurp                              # or: python -m slurp; + in the app adds a tab for a cluster
 slurp check job.sh                 # check batch scripts without the app
 slurp --help                       # all options
 ```

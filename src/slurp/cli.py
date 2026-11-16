@@ -61,12 +61,11 @@ def main():
     from .links import holder
     sys.exit(holder.run_holder(sys.argv[2], sys.argv[3:]))
   parser = argparse.ArgumentParser(prog="slurp", description="Interactive terminal UI for Slurm jobs, locally or on "
-                                   "clusters over SSH (one tab per cluster, given with --ssh or added with +). "
+                                   "clusters over SSH (one tab per cluster, added with +). "
                                    "'slurp check FILE...' checks batch scripts without the UI.")
   from . import VERSION_TEXT, __version__
   parser.add_argument("--version", action="version", version=f"slurp {VERSION_TEXT}")
   parser.add_argument("--log", metavar="FILE", help="write a debug log (all slurm commands that are run) to FILE")
-  parser.add_argument("--ssh", metavar="HOST", nargs="*", default=[], help="add SSH cluster destinations (user@host or ~/.ssh/config aliases)")
   parser.add_argument("--serve", action="store_true", help="serve the app in a browser with textual-serve")
   parser.add_argument("--host", default="127.0.0.1", help="web server bind address for --serve (default: 127.0.0.1)")
   parser.add_argument("--port", type=int, default=8000, help="web server port for --serve (default: 8000)")
@@ -84,8 +83,6 @@ def main():
     command = slurp_command()
     if args.log:
       command += ["--log", args.log]
-    if args.ssh:
-      command += ["--ssh", *args.ssh]
     Server(shlex.join(command), host=args.host, port=args.port, title="slurp").serve()
     return
 
@@ -114,7 +111,6 @@ def main():
   from . import state
   from .ui.app import Slurp
   state.setup_logging(args.log)
-  state.initial_ssh_destinations = args.ssh
   app = Slurp()
   try:
     app.run()

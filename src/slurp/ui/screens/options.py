@@ -57,7 +57,7 @@ class OptionsScreen(ModalScreen):
         yield Static(f"The theme follows the view that is active (now: {'a browser' if active == 'web' else 'a terminal'}).",
                      classes="op-note")
         with Horizontal(classes="op-row"):
-          yield Label("A tab opens on")
+          yield Label("At the start a tab shows")
           yield Select([("its overview", ""), ("its job list", "jobs")], value="jobs" if c.get("start_page") == "jobs" else "",
                        allow_blank=False, id="op-start-page")
         yield Static("Shells", classes="op-section")

@@ -46,7 +46,6 @@ from .screens.connection import ConnectionScreen
 from .screens.array import ArrayScreen
 from .screens.storage import QuotaScreen, ScratchScreen
 from ..cluster import remote
-from .. import state
 from ..config import load_config, update_config
 from ..links.share import ShareManager, SFTP_SERVERS, MAX_FAILURES, available as share_available
 from .screens.links import ShellChoiceScreen, LinkSetupScreen, LinkScreen, DriveScreen
@@ -106,7 +105,8 @@ class Slurp(App):
   #since-choice { width: 15; }
   #since { width: 12; display: none; }
   #since.-custom { display: block; }
-  #topbar { height: 1; }
+  #topbar { height: 1; background: $panel; }
+  #topbar #menu { height: 1; min-height: 1; padding: 0 1; text-style: bold; }
   #cluster-tabs { height: 1; padding: 0 1; background: $panel; }
   #cluster-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 1; }
   #cluster-tabs Button.cluster-tab { margin-right: 0; }
@@ -217,7 +217,7 @@ class Slurp(App):
     Binding("F", "cluster_drive", "Drive", show=False),
     Binding("W", "web_access", "Web", show=False),
     Binding("i", "interactive_job", "Interactive job", show=False),
-    Binding("C", "cluster_info", "Cluster info", show=False),
+    Binding("C", "cluster_info", "Health", show=False),
     Binding("Q", "quota", "Quota", show=False),
     Binding("X", "scratch", "Old scratch files", show=False),
     Binding("a", "abort_load", "Abort loading"),
@@ -236,7 +236,7 @@ class Slurp(App):
     super().__init__()
     self.main = None # the job list (MainScreen sets it when it is mounted; the timer of tick() may run before)
     self.link_manager = ShareManager(self.link_event) # shells and drives for the user's own terminal
-    # the tabs of the last run (from the config; a local tab the first time), and the destinations given with --ssh
+    # the tabs of the last run (from the config; a local tab the first time)
     saved = load_config()
     self.clusters = []
     for tab in saved.get("tabs", [{"destination": None}]):
@@ -247,15 +247,6 @@ class Slurp(App):
       cluster.collapse_arrays = tab.get("collapse_arrays", True)
       self.clusters.append(cluster)
     self.cluster_index = min(max(int(saved.get("active", 0) or 0), 0), max(len(self.clusters) - 1, 0))
-    for destination in state.initial_ssh_destinations:
-      if is_local_destination(destination):
-        continue
-      found = next((i for i, c in enumerate(self.clusters) if c.destination == destination), None)
-      if found is None:
-        self.clusters.append(ClusterSession(destination, destination))
-        found = len(self.clusters) - 1
-      if destination == next(d for d in state.initial_ssh_destinations if not is_local_destination(d)):
-        self.cluster_index = found # the first one given is shown
     from ..cluster import jobcache
     for cluster in self.clusters: # (the list of the last load at once: until the cluster answers, or if it does not)
       jobcache.load(cluster)
@@ -376,7 +367,7 @@ class Slurp(App):
 
   def activate_cluster(self, index, connect=True):
     """Show the tab: its job list as loaded before (no reload), its shell, or its login while not logged in. connect:
-    log in if it is not (at the start, a new tab); else a tab without a session shows Connect in its job list"""
+    log in if it is not (a tab just added with +); else a tab without a session shows Connect (the start, a switch)"""
     if not 0 <= index < len(self.clusters):
       return
     cluster = self.clusters[index]
@@ -389,10 +380,13 @@ class Slurp(App):
     remote.ssh_connection = cluster.connection
     if not cluster.opened:
       cluster.opened = True
-      cluster.current_view = self.start_page()
-    if self.current_mode != cluster.current_view:
-      self.switch_mode(cluster.current_view if cluster.current_view == "overview" or any(v.mode == cluster.current_view for v in cluster.views)
-                       else "_default")
+      cluster.jobs_open = self.start_page() == "_default"
+      cluster.current_view = self.home_mode(cluster)
+    mode = cluster.current_view
+    if not (mode == "_default" and cluster.jobs_open or any(v.mode == mode for v in cluster.views)):
+      mode = cluster.current_view = self.home_mode(cluster)
+    if self.current_mode != mode:
+      self.switch_mode(mode)
     self.show_tab_shell()
     self.update_scope_select()
     self.update_since_widgets()
@@ -485,28 +479,47 @@ class Slurp(App):
 
   def open_window(self, screen, title=""):
     """A window: from the job list it opens as a subtab, within a subtab it opens on top of it (← goes back)"""
-    if self.current_mode == "_default" and not isinstance(self.screen, ModalScreen):
+    if self.current_mode in ("_default", "overview") and not isinstance(self.screen, ModalScreen):
       crumbs = getattr(screen, "crumbs", None)
       self.open_view(title or (crumbs[-1] if crumbs else "") or type(screen).__name__, lambda: screen)
     else:
       self.push_screen(screen)
 
   def start_page(self):
-    """The subtab a tab opens on the first time: "overview" (default) or "_default" (the job list)"""
+    """What a tab shows the first time: "overview" (no subtab open, the default) or "_default" (its job list open)"""
     return "_default" if load_config().get("start_page") == "jobs" else "overview"
 
-  def show_overview(self):
-    """The overview of the active tab: its first subtab"""
+  def home_mode(self, cluster, views=True):
+    """What a tab shows when the subtab shown goes away: its job list if open, else its last subtab (views), else the
+    overview"""
+    if cluster.jobs_open:
+      return "_default"
+    return cluster.views[-1].mode if views and cluster.views else "overview"
+
+  def show_home(self, views=True):
+    """The job list (if open), the last subtab (views: when one closed; not for Back), or the overview of the tab"""
     if not self.clusters:
       return
-    self.cluster.current_view = "overview"
-    if self.current_mode != "overview":
-      self.switch_mode("overview")
+    mode = self.cluster.current_view = self.home_mode(self.cluster, views)
+    if self.current_mode != mode:
+      self.switch_mode(mode)
+      if mode == "_default":
+        self.call_after_refresh(self.focus_jobs)
     self.call_after_refresh(self.refresh_status)
 
+  def close_jobs(self):
+    """Close the job list's subtab (its list stays loaded): the last subtab, or the overview"""
+    cluster = self.cluster
+    cluster.jobs_open = False
+    if self.current_mode == "_default" or cluster.current_view == "_default":
+      self.show_home()
+    self.refresh_status()
+
   def show_view(self, view):
-    """Show a subtab of the active tab (None: the job list)"""
+    """Show a subtab of the active tab (None: the job list, opened if it is closed)"""
     mode = view.mode if view is not None else "_default"
+    if view is None:
+      self.cluster.jobs_open = True
     self.cluster.current_view = mode
     if self.current_mode != mode:
       self.switch_mode(mode)
@@ -522,10 +535,10 @@ class Slurp(App):
     if view.session is not None:
       view.session.terminate()
     cluster.views.remove(view)
-    if self.current_mode == view.mode:
-      self.show_view(None)
     if cluster.current_view == view.mode:
-      cluster.current_view = "_default"
+      cluster.current_view = self.home_mode(cluster)
+    if self.current_mode == view.mode:
+      self.show_home()
     def remove():
       try:
         self.remove_mode(view.mode)
@@ -535,6 +548,9 @@ class Slurp(App):
     self.refresh_status()
 
   def action_close_view(self):
+    if self.current_mode == "_default":
+      self.close_jobs()
+      return
     view = next((v for v in self.cluster.views if v.mode == self.current_mode), None)
     if view is not None:
       self.request_close_view(view)
@@ -561,12 +577,13 @@ class Slurp(App):
     if not jobs:
       return
     jobs.first().variant = "primary" if self.current_mode == "_default" else "default"
-    for b in bar.query("#view-overview"):
-      b.variant = "primary" if self.current_mode == "overview" else "default"
+    for b in (*jobs, *bar.query("#view-close-jobs")):
+      if b.display != self.cluster.jobs_open:
+        b.display = self.cluster.jobs_open
     wanted = {str(v.id) for v in self.cluster.views}
     have = set()
     for b in bar.query("Button.view-tab, Button.view-close"): # remove only the buttons of closed subtabs (ids stay unique)
-      if b.id in ("view-jobs", "view-overview"):
+      if b.id in ("view-jobs", "view-close-jobs"):
         continue
       vid = b.id.rsplit("-", 1)[1]
       if vid not in wanted or getattr(b, "removing", False):
@@ -686,7 +703,7 @@ class Slurp(App):
     self.refresh_status()
 
   def disconnect(self, cluster):
-    """End the session of a tab; it stays disconnected until the tab is selected or Reconnect is pressed"""
+    """End the session of a tab; it stays disconnected until Connect or Reconnect is pressed"""
     c = cluster.connection
     if c is None:
       return
@@ -937,14 +954,14 @@ class Slurp(App):
     store = self.cluster.categories
     with_categories = bool(store and (store.paths or store.jobs))
     visible_columns = [(key, label) for key, label in COLUMNS
-                       if (key != "user" or all_accounts) and (key not in ("progress", "eta", "eta_now") or show_progress)
+                       if (key != "user" or all_accounts) and (key not in ("progress", "eta_now") or show_progress)
                        and (key != "category" or with_categories)]
     column_keys = [key for key, _ in visible_columns]
     if column_keys == self.job_column_keys:
       return
     if not all_accounts and self.sort_column == "user":
       self.sort_column, self.sort_reverse = "jobid", True
-    if not show_progress and self.sort_column in ("progress", "eta", "eta_now"):
+    if not show_progress and self.sort_column in ("progress", "eta_now"):
       self.sort_column, self.sort_reverse = "jobid", True
     if not with_categories and self.sort_column == "category":
       self.sort_column, self.sort_reverse = "jobid", True
@@ -1147,12 +1164,15 @@ class Slurp(App):
     event.stop()
     self.action_menu()
 
+  def action_job_list(self):
+    """The job list of the tab (opened if it is closed; without Slurm it says so)"""
+    if self.clusters:
+      self.show_view(None)
+
   def action_menu(self):
-    """The menu of the job list, under its button: what slurp does for the tab"""
+    """The menu, under its button in the header (every window has it): what slurp does for the tab"""
     from .screens.menu import MenuScreen
-    if self.screen is not self.main and self.current_mode != "overview":
-      return
-    if not self.screen.query("#menu"):
+    if not self.screen.query("#menu"): # (a dialog, the menu itself)
       return
     button = self.screen.query_one("#menu", Button)
     at = (button.region.x, button.region.y + 1)
@@ -1406,7 +1426,7 @@ class Slurp(App):
     if action == "abort_load":
       return self.cluster.loader is not None
     if action == "close_view":
-      return self.current_mode != "_default"
+      return self.current_mode != "overview"
     if action in ("quit", "command_palette", "help_quit") and isinstance(self.focused, TerminalView):
       return False # Ctrl-Q, Ctrl-P, Ctrl-C go to the shell
     return True
@@ -1800,7 +1820,7 @@ class Slurp(App):
       progress = [p for j in tasks if (p := progress_for_job(j))]
       total, done = sum(p.total for p in progress), sum(p.current for p in progress)
       values.append(RichProgressBar(total=max(total, 1), completed=done, width=8) if progress else "")
-      values.extend(("", ""))
+      values.append("") # (no estimate for the array as a whole)
     starts = [j.rec["Start"] for j in tasks if is_time(j.rec["Start"])]
     ends = [j.rec["End"] for j in tasks if is_time(j.rec["End"])]
     errors = sum(j.err[0] == "file" and j.err[1] > 0 for j in tasks)
@@ -1858,7 +1878,7 @@ class Slurp(App):
       note.update(Text.assemble(
         (f"No Slurm on {where}\n\n", "bold"),
         f"squeue is not found {'there' if cluster.destination else 'here'}, so there are no jobs to list.\n\n",
-        "Add a tab for a cluster with ", ("+", "bold"), " above, or start slurp with ", ("slurp --ssh user@login-node", "bold"), ".\n",
+        "Add a tab for a cluster with ", ("+", "bold"), " above (", ("user@login-node", "bold"), " or a ~/.ssh/config alias).\n",
         ("r", "bold"), " looks again (e.g. after module load slurm); the shell, the drive and the files work without Slurm.",
         style="", justify="center"))
 
@@ -1919,11 +1939,10 @@ class Slurp(App):
         values.append(RichProgressBar(total=max(progress.total, 1), completed=progress.current, width=8) if progress
                       else SPINNING if job.running and not job.annotated else "")
         going = job.running and job.progress and job.progress.current < job.progress.total
-        for pace in ("same", "current"):
-          if job.running and not job.annotated:
-            values.append(SPINNING)
-            continue
-          eta = pace_eta(job.progress, pace) if going else None
+        if job.running and not job.annotated:
+          values.append(SPINNING)
+        else:
+          eta = pace_eta(job.progress, "current") if going else None
           values.append(Text(duration_text(eta - time.time()) if eta and eta > time.time() else "overdue" if eta
                              else "-" if going else "", style="" if not eta or eta > time.time() else "yellow"))
       values.extend((rec["NNodes"], f"{rec['Elapsed']} / {rec['Timelimit']}",
@@ -1974,7 +1993,8 @@ class Slurp(App):
 
   def action_quota(self):
     cluster = self.cluster
-    self.open_view("quota", lambda: QuotaScreen(cluster), key="quota")
+    if self.clusters and not isinstance(self.screen, QuotaScreen): # (a window)
+      self.push_screen(QuotaScreen(cluster))
 
   def action_scratch(self):
     cluster = self.cluster
@@ -1984,12 +2004,11 @@ class Slurp(App):
     self.open_view("old files in scratch", lambda: ScratchScreen(cluster), key="scratch")
 
   def action_cluster_info(self):
-    """The overview of the tab (health, occupancy, partitions, …), asked again"""
-    self.show_overview()
-    def reload():
-      if self.current_mode == "overview":
-        self.screen.refresh_overview(force=True)
-    self.call_after_refresh(reload)
+    """Health, reservations, occupancy, partitions and node topology of the tab's cluster: a window"""
+    from .screens.clusterinfo import ClusterInfoScreen
+    cluster = self.cluster
+    if self.clusters and not isinstance(self.screen, ClusterInfoScreen):
+      self.push_screen(ClusterInfoScreen(cluster))
 
   def action_interactive_job(self):
     """Submit a job that only holds its nodes; once it runs, its job window opens shells on them"""
@@ -2255,7 +2274,7 @@ class Slurp(App):
   def open_array(self, array_id, job=None):
     """The window of an array job (a subtab from the job list, else on top of the window it is opened from)"""
     job = job or next((j for j in self.jobs.values() if j.jid.partition("_")[0] == str(array_id)), None)
-    if self.current_mode == "_default":
+    if self.current_mode in ("_default", "overview"):
       self.open_view(f"array {array_id}", lambda: ArrayScreen(array_id, job), kind="job", key=f"array {array_id}")
     else:
       self.push_screen(ArrayScreen(array_id, job))

@@ -9,8 +9,8 @@ with the units `s`, `m`, `h`, `d`, `w`, `mo`, `y`, e.g. `3d12h`); each tab keeps
 whose jobs are listed: yours, those of one of your Slurm accounts, or those of
 all of them (the accounts come from `sacctmgr`). Progress appears when the
 output contains a line such as `65/100`; two columns estimate when a running job
-gets to the end: **Done: same pace** (at the average rate since the job started)
-and **Done: current pace** (at the rate of the last few `n/N` lines; `-` until there are two).
+gets to the end: **Done: current pace** (at the rate of the last few `n/N` lines; `-` until there are two; the
+[job window](job-window.md) also estimates it at the average rate since the job started).
 The list shows as soon as Slurm answers; the command, error file and progress of
 each job (files on the cluster) follow, with spinners in those cells for jobs
 not seen before (the others keep their values meanwhile). The sizes of the error
@@ -30,7 +30,7 @@ for it.
 
 Without Slurm on the machine of a tab (no `squeue` there, e.g. the Local tab
 on your own computer), the job list says so in its middle, with what to do: add
-a tab for a cluster with `+`, or start slurp with `--ssh`. `r` looks again (after
+a tab for a cluster with `+`. `r` looks again (after
 `module load slurm`, for example); shells, drives and files work without Slurm.
 
 ![The job list, newest first: queued and running jobs with progress and estimates, arrays as one row with the mix of their states, finished jobs with their checks](../images/jobs.svg)

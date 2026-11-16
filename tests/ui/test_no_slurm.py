@@ -28,7 +28,7 @@ def test_no_slurm_in_the_job_list(check, no_slurm_path):
       check("the job list shows the message instead of the table", note.display and not table.display)
       text = str(note.render())
       check("the message: what is missing and what to do", "No Slurm on this machine" in text and "squeue" in text
-            and "slurp --ssh" in text, text)
+            and "Add a tab for a cluster" in text, text)
       check("the status line says it too", "no Slurm on this machine" in str(app.main.query_one("#status").render()))
       check("no notification about it", not app._notifications, [n.message for n in app._notifications])
       await pilot.press("r")

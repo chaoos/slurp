@@ -14,7 +14,7 @@ from .base import SplitScreen
 from ...checks.engine import counts as checks_counts
 
 COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("category", "Category"), ("user", "User"), ("state", "State"), ("progress", "Progress"),
-           ("eta", "Done: same pace"), ("eta_now", "Done: current pace"),
+           ("eta_now", "Done: current pace"),
            ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
            ("start", "Start"), ("end", "End"), ("checks", "Checks"), ("err", "Err"), ("cmd", "Command")]
 
@@ -29,7 +29,6 @@ SORT_KEYS = {
   "user":  lambda j: j.rec["User"].casefold(),
   "state": lambda j: j.state,
   "progress": lambda j: (p.current / p.total if (p := progress_for_job(j)) and p.total else 0),
-  "eta": lambda j: pace_eta(j.progress, "same") or float("inf"),
   "eta_now": lambda j: pace_eta(j.progress, "current") or float("inf"),
   "nodes": lambda j: int(j.rec["NNodes"] or 0),
   "checks": lambda j: tuple(-v for v in checks_counts(j.checks).values()),
@@ -58,8 +57,6 @@ class MainScreen(SplitScreen):
 
   def compose_left(self):
     with Horizontal(id="toolbar"):
-      yield Button("☰ Menu", id="menu", compact=True,
-                   tooltip="cluster info, quota, shell, drive, interactive job, categories, web, options, … (F10)")
       yield Button("Reload", id="reload", variant="primary", compact=True)
       yield Label("finished since")
       yield Select(SINCE_CHOICES, value="1d", allow_blank=False, id="since-choice",
@@ -110,6 +107,6 @@ class MainScreen(SplitScreen):
     table = self.query_one("#jobs", ClickTable)
     table.focus()
     if self.app.clusters:
-      self.app.activate_cluster(self.app.cluster_index)
+      self.app.activate_cluster(self.app.cluster_index, connect=False) # (no login at the start: Connect in the overview)
     else:
       self.set_class(True, "-no-tabs")

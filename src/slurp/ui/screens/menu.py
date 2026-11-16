@@ -1,4 +1,5 @@
-"""The menu of the job list: what slurp does for the tab (shell, drive, cluster info, quota, …), each with its key"""
+"""The menu of the job list and the overview: what slurp does for the tab (job list, shell, drive, health, quota,
+…), each with its key"""
 
 from rich.text import Text
 from textual import events, on
@@ -10,7 +11,8 @@ from textual.widgets.option_list import Option
 
 # (action of the app, label, key shown); None: a line between groups
 ITEMS = [
-  ("cluster_info", "Overview of the cluster", "C"),
+  ("job_list", "Job list", "j"),
+  ("cluster_info", "Health", "C"),
   ("quota", "Quota", "Q"),
   ("scratch", "Old files in scratch", "X"),
   None,

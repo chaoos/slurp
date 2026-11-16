@@ -1,6 +1,6 @@
 # Quota and scratch
 
-**Quota** (in the menu, or `Q`, a subtab that loads in the background) lists your quotas, and those of your groups where they
+**Quota** (in the menu, or `Q`, a window that loads in the background; `Esc` closes it) lists your quotas, and those of your groups where they
 use space or have a limit: `lfs quota` on each Lustre filesystem and on
 `$SCRATCH`, `$HOME`, `$PROJECT`, `$STORE`, `$WORK`, `quota` on the others,
 with space and files (inodes), used, limit and soft limit, and a bar coloured

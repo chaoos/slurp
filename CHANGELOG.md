@@ -6,9 +6,25 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The header (slurp and its version) is the top line, above the tabs, and has
+  **☰ Menu** at its left, in every window (it was in the job list's toolbar
+  and the overview).
+- **Quota** and **Health** are windows again, not subtabs: they open over the
+  job list or the overview, `Esc` or **Close** closes them.
+- Quota, Health, Categories and the window of a job array no longer cover the
+  whole screen while they load (Textual's loading indicator took every click
+  until they were done).
+- The menu (`F10`) has **Job list** (`j`), so it opens from the overview's
+  menu too.
+- slurp no longer logs in at the start: a cluster tab shows **Connect** in its
+  overview. Only a tab added with `+` logs in right away. Connected, the
+  overview has **Disconnect**.
+- The job list shows only **Done: current pace**; the *same pace* column is
+  gone (the job window still shows both estimates).
+- The `--ssh` option is gone: `+` adds a tab for a cluster, and slurp starts
+  with the tabs of the last run.
 - Without Slurm on the machine of a tab (no `squeue`), the job list says so
-  in its middle, with what to do (a tab for a cluster with `+`, or
-  `slurp --ssh`), instead of an error notification for every Slurm command at
+  in its middle, with what to do (a tab for a cluster with `+`), instead of an error notification for every Slurm command at
   each load. `r` looks again.
 - The documentation is a website now, <https://chaoos.github.io/slurp/>
   (Material for MkDocs): the manual is split into pages (the overview, the
@@ -17,14 +33,15 @@ version may need the helper of the same version).
   every push and pull request (`mkdocs build --strict`: a broken link fails)
   and publishes it from main. The README is a short start page; `.[docs]`
   installs MkDocs.
-- Every tab opens on an **Overview** of its cluster, a new first subtab
-  before **Jobs**: health (nodes down, drained, in maintenance), reservations,
-  occupancy and why jobs wait, your jobs (running, pending, finished by state,
-  node hours, problems), your quotas with bars, the partitions and their node
-  topology, the Slurm version, and the site's status page and docs. It loads in
-  the background, `r` asks again, `j` opens the job list. It replaces the
-  Cluster info window (`C` shows the overview). `"start_page": "jobs"` keeps
-  the job list as the first page.
+- A tab starts with no subtab open, and then shows its **overview**: in its
+  middle the cluster in a line (site, Slurm version, nodes and partitions),
+  its health (healthy, degraded or unhealthy, and why), the SSH session, and
+  **Jobs** (with how many run and wait; *No Slurm available* where there is
+  none), **Quota** and **Health**; not connected, **Connect** with what
+  happened to the connection. The job list is a subtab like the others, with
+  a `✕` (and `Ctrl-W`); when the last subtab closes, the overview shows again.
+  Cluster info is called **Health** (`C`). *At the start a tab shows* in
+  Options keeps the job list open from the start (`"start_page": "jobs"`).
 - The buttons of the job list's toolbar are a menu now: **☰ Menu** (`F10`)
   has cluster overview, quota, scratch, shells, the login directory and drive,
   interactive job, new job script, categories, web access, guides, rule
@@ -44,8 +61,7 @@ version may need the helper of the same version).
   Windows helper ("no valid 'rh'"): the link now carries only the host there.
 - Switching to a tab without an SSH session no longer logs in right away:
   its job list shows a **Connect** button in the middle (a bar above the jobs
-  from last time, if it has some). slurp still logs in at the start and for a
-  tab you add. A click on the active tab logs in, too.
+  from last time, if it has some). A click on the active tab logs in, too.
 - Back on a tab with jobs after one without Slurm, the job list has the focus
   again (it was drawn in the unfocused colours).
 - In a browser (`slurp --serve`, or the browser view of the session holder),

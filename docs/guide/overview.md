@@ -1,25 +1,26 @@
 # The overview
 
-Every tab opens on its **Overview**, the first subtab, before **Jobs**: the cluster at a glance. `C` (or *Overview
-of the cluster* in the ☰ Menu) shows it and asks the cluster again.
+While none of its subtabs is open, a tab shows its **overview**: at the start, and when the last subtab closes. In its
+middle, a few lines about the cluster and the ways on.
 
-![The overview of a cluster: its health, your jobs, your quotas, the partitions](../images/overview.svg)
+![The overview of a cluster: what it is, its health, the SSH session, and Jobs, Quota, Health](../images/overview.svg)
 
-Its title says whether the cluster is **healthy** (green), **degraded** (yellow) or **unhealthy** (red) and why, who
-you are logged in as (with the round trip), and the Slurm version. Below it:
+- **The cluster** in a line: the site (when a [rule pack](checks.md) knows it), how slurp reaches it (SSH, or this
+  machine), the Slurm version, its nodes and partitions.
+- **Its health**: healthy (green), degraded (yellow) or unhealthy (red), and why: nodes down, drained or in
+  maintenance, a maintenance soon.
+- **The SSH session**, as the status at the bottom right shows it: who you are logged in as and the round trip.
+- **Jobs** opens the [job list](job-list.md) as a subtab (`j`); its label says how many of your jobs run and wait.
+  Where there is no Slurm, *No Slurm available* stands there instead.
+- **Quota** (`Q`) and **Health** (`C`: health with the reasons, reservations, occupancy, partitions, node
+  topology) open as windows over the overview (`Esc` closes them).
+- For a known site, its status page and documentation (a click opens them).
 
-- **Your jobs**: running (on how many nodes), pending and why, those finished within the job list's *finished since*
-  by state with their node hours, and how many have problems. `j` (or **Jobs**) opens the job list.
-- **Health**: nodes down, drained, in maintenance or not responding, with the reasons Slurm gives; reservations
-  (a maintenance soon makes the cluster *degraded*).
-- **Occupancy**: busy and idle nodes, running and pending jobs and why they wait.
-- **Your quotas**: space and files on each filesystem, with a bar (all of them: **Quota**, `Q`).
-- **Partitions** and the **node topology** of each: CPUs, sockets × cores × threads, NUMA domains, GPUs, memory.
-- **The site**, when a [rule pack](checks.md) knows it: its status page and documentation (a click opens them), and
-  how long scratch keeps unused files.
+Not connected, the overview shows **Connect** in its middle, with what happened to the connection (never connected,
+closed, lost and why); while logging in, the login is in the pane on the right. slurp does not log in by itself at the
+start: a cluster tab waits for Connect (a tab added with `+` logs in right away). Connected, **Disconnect** ends the
+session.
 
-Each part loads in the background when the overview is shown, and again after 5 minutes; `r` (**Reload**) asks at
-once. A tab without an SSH session shows **Connect** instead, a tab without Slurm says so.
-
-To open tabs on the job list instead: **Options** (`F3`), *A tab opens on*: its job list (`"start_page": "jobs"` in
-the [settings](settings.md)).
+The cluster is asked in the background when the overview is shown, and again after 5 minutes; `r` asks at once.
+To have the job list open from the start: **Options** (`F3`), *At the start a tab shows*: its job list
+(`"start_page": "jobs"` in the [settings](settings.md)).

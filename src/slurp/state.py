@@ -42,7 +42,6 @@ class Collector(logging.Handler):
     return msgs
 
 collector = Collector()
-initial_ssh_destinations = []
 
 @dataclass
 class ClusterSession:
@@ -65,8 +64,9 @@ class ClusterSession:
   expanded: set = field(default_factory=set) # collapsed array rows that are open ("array id|state")
   scope: str = "me"                    # whose jobs are listed: "me", "all" (all accounts) or an account
   views: list = field(default_factory=list) # the subtabs besides the job list
-  current_view: str = "_default"       # mode of the subtab shown ("_default": the job list, "overview": the overview)
-  opened: bool = False                 # shown once (the first time it opens on the start page: the overview)
+  current_view: str = "_default"       # mode shown ("_default": the job list, "overview": no subtab open, a view's mode)
+  opened: bool = False                 # shown once (the first time: the overview, or the job list with start_page jobs)
+  jobs_open: bool = False              # the job list is open as a subtab (closed: the overview, when nothing else is open)
   overview: dict = field(default_factory=dict) # what the overview loaded of its cluster (screens/overview.py)
   load_started: float = 0.0
   updated: object | None = None        # when the list was loaded

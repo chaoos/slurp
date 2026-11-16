@@ -73,7 +73,7 @@ in the script view.
 Slurm in five minutes, writing a job script, common mistakes, arrays and
 dependencies, software, filesystems and quotas, NUMA placement (a recipe
 table for the node), GPUs, failed jobs. Their rule links open the catalogue.
-**The overview** shows the node topology of every partition.
+**Health** (`C`) shows the node topology of every partition.
 
 **Muting**: a finding's *Mute everywhere* stores the rule in
 `"checks_muted"` in the config; *Mute in this script* (script view) adds

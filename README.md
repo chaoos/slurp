@@ -22,8 +22,8 @@ cd slurp
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install ".[all]"
-slurp                         # on a login node, or from your own machine:
-slurp --ssh user@cluster      # a tab for a cluster over SSH
+slurp                         # on a login node, or on your own machine
+                              # (+ adds a tab for a cluster over SSH)
 ```
 
 More in [Install and start](https://chaoos.github.io/slurp/install/). In the

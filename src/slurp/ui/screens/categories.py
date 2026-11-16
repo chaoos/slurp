@@ -246,7 +246,7 @@ class CategoriesScreen(SplitScreen):
     self.path = ""             # the category shown ("": all of them)
     self.known = {}            # job id -> [Job] (an array: its tasks), as Slurm reported them
     self.asked = set()         # job ids asked from Slurm (also those it no longer knows)
-    self.loading = False
+    self.fetching = False
     self.loose = {}            # "not categorized" shown: its jobs, {job or array id: [jobs]}
 
   @property
@@ -337,14 +337,14 @@ class CategoriesScreen(SplitScreen):
       return
     ids = store.job_ids(self.path)
     missing = [j for j in ids if j not in self.asked]
-    if missing and not self.loading and not self.app.offline(self.cluster):
+    if missing and not self.fetching and not self.app.offline(self.cluster):
       self.load(missing)
     self.show_info(ids)
     self.show_jobs(ids)
 
   def load(self, ids):
     """The jobs of the category from Slurm (sacct -j: also old ones), in chunks; an array id gives all its tasks"""
-    self.loading, self.load_started = True, time.monotonic()
+    self.fetching, self.load_started = True, time.monotonic()
     def work():
       found = {}
       for i in range(0, len(ids), 200):
@@ -352,7 +352,7 @@ class CategoriesScreen(SplitScreen):
           found.setdefault(cat.array_of(job.jid) if cat.array_of(job.jid) in ids else job.jid, []).append(job)
       return found
     def loaded(found):
-      self.loading = False
+      self.fetching = False
       self.asked.update(ids)
       for jid, jobs in (found or {}).items():
         self.known[jid] = jobs
@@ -390,7 +390,7 @@ class CategoriesScreen(SplitScreen):
     else:
       out.append(f"{len(ids)} job{'s' if len(ids) != 1 else ''} put in it" + (f" (with the {len([p for p in store.paths if cat.within(p, self.path) and p != self.path])} categories in it)" if subs else "")
                + (f", {m['tasks']} with their array tasks" if m["tasks"] > m["jobs"] else "") + "\n")
-    if self.loading:
+    if self.fetching:
       out.append(f"asking Slurm … {time.monotonic() - self.load_started:.0f} s\n", style="yellow")
     elif self.app.offline(self.cluster) and not none:
       out.append("the cluster cannot be reached: the numbers are of the jobs kept with the job list; the others when it "

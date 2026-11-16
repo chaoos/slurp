@@ -246,7 +246,7 @@ def r02(ctx):
 @rule("R03", ERROR, "More than a node has",
       "Per node more CPUs (tasks per node × CPUs per task), GPUs or memory than the nodes of the partition have.",
       "The job never starts (pending with a reason like Resources or BadConstraints) or sbatch rejects it.",
-      "Spread the tasks over more nodes, or ask for less per node. The partition's nodes are listed in Cluster info.",
+      "Spread the tasks over more nodes, or ask for less per node. The partition's nodes are listed in Health (C).",
       "#SBATCH --ntasks-per-node=8\n#SBATCH --cpus-per-task=64   # 512 CPUs per node, the nodes have 288")
 def r03(ctx):
   p = ctx.partition()

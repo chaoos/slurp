@@ -95,7 +95,7 @@ class ArrayScreen(SplitScreen):
     super().__init__()
     self.array_id, self.job = str(array_id), job
     self.crumbs = ["Jobs", f"array {array_id}"]
-    self.overview, self.groups, self.loading = None, {}, False
+    self.overview, self.groups, self.fetching = None, {}, False
 
   def compose_left(self):
     with Horizontal(id="arr-bar"):
@@ -122,19 +122,19 @@ class ArrayScreen(SplitScreen):
       table.add_column(label, key=key, **({"width": 10} if key == "progress" else {}))
     self.action_reload()
     self.set_interval(5, self.refresh_task_progress) # (the job list reads the progress of running tasks)
-    self.set_interval(1, lambda: self.show_info() if self.loading else None) # the seconds asked so far
+    self.set_interval(1, lambda: self.show_info() if self.fetching else None) # the seconds asked so far
 
   def action_back(self):
     self.pop_back()
 
   @on(Button.Pressed, "#arr-reload")
   def action_reload(self):
-    if self.loading:
+    if self.fetching:
       return
-    self.loading, self.load_started, self.load_failed = True, time.monotonic(), False
+    self.fetching, self.load_started, self.load_failed = True, time.monotonic(), False
     self.show_info()
     def loaded(overview):
-      self.loading = False
+      self.fetching = False
       if overview is None:
         self.load_failed = True # (the error was shown) the tasks as they were
       else:
@@ -208,7 +208,7 @@ class ArrayScreen(SplitScreen):
                      + (" …" if len(nodes) > 8 else ""))
     for err in (self.overview or {}).get("errors", []):
       grid.add_row(Text("error", style="red"), err)
-    if self.loading:
+    if self.fetching:
       grid.add_row("", Text(f"asking Slurm … {time.monotonic() - self.load_started:.0f} s", style="yellow"))
     elif getattr(self, "load_failed", False):
       grid.add_row("", Text("loading failed (see the message); Reload tries again", style="red"))

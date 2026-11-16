@@ -1,4 +1,4 @@
-"""The frame of every window: tabs, subtabs, the window, the login pane, the footer"""
+"""The frame of every window: the header (with the menu), tabs, subtabs, the window, the login pane, the footer"""
 
 
 from textual import on
@@ -18,6 +18,13 @@ class SplitScreen(Screen):
   SHOW_NOTABS = False # the hint shown when no tab is open (the job list)
 
   def compose(self) -> ComposeResult:
+    with Horizontal(id="topbar"): # (the top line: the menu, the title of slurp and of the window, its help)
+      yield Button("☰ Menu", id="menu", compact=True,
+                   tooltip="job list, health, quota, shell, drive, interactive job, categories, web, options, … (F10)")
+      if self.SHOW_BACK:
+        yield Button("←", id="back", compact=True, tooltip="Back")
+      yield Header()
+      yield Button("?", id="view-help", compact=True, tooltip="about this window: what it shows, what it can do, its keys (?)")
     with Horizontal(id="cluster-tabs"):
       for index, cluster in enumerate(self.app.clusters):
         variant = "primary" if index == self.app.cluster_index else "default"
@@ -26,13 +33,8 @@ class SplitScreen(Screen):
       yield Button("+", id="cluster-add", tooltip="Add a local or SSH cluster", compact=True)
       yield Button("? slurp", id="about", compact=True, tooltip="about slurp: how it works, its version, the machine it runs on")
     with Horizontal(id="view-tabs"):
-      yield Button("Overview", id="view-overview", classes="view-tab", compact=True, tooltip="the cluster at a glance: health, your jobs and quotas, partitions")
       yield Button("Jobs", id="view-jobs", classes="view-tab", compact=True, tooltip="the job list")
-    with Horizontal(id="topbar"):
-      if self.SHOW_BACK:
-        yield Button("←", id="back", compact=True, tooltip="Back")
-      yield Header()
-      yield Button("?", id="view-help", compact=True, tooltip="about this window: what it shows, what it can do, its keys (?)")
+      yield Button("✕", id="view-close-jobs", classes="view-close", compact=True, tooltip="close the job list (Ctrl-W)")
     if self.SHOW_NOTABS:
       yield Static("No tabs. The + button above adds a connection (blank for this machine, or an SSH destination).", id="notabs")
     with Horizontal(classes="split"):
@@ -74,9 +76,9 @@ class SplitScreen(Screen):
       event.stop()
       self.app.show_view(None)
       return
-    if event.button.id == "view-overview":
+    if event.button.id == "view-close-jobs":
       event.stop()
-      self.app.show_overview()
+      self.app.close_jobs()
       return
     if event.button.id and event.button.id.startswith(("view-tab-", "view-close-")):
       event.stop()
@@ -94,8 +96,8 @@ class SplitScreen(Screen):
     return []
 
   def pop_back(self):
-    if len(self.app.screen_stack) <= 1: # the first window of a subtab: back to the job list (the subtab stays)
-      self.app.show_view(None)
+    if len(self.app.screen_stack) <= 1: # the first window of a subtab: back to the job list, or the overview (the subtab stays)
+      self.app.show_home(views=False)
       return
     self.app.pop_screen()
     # pop_screen completes after this key action; queue a full redraw behind it.

@@ -439,7 +439,7 @@ class TerminalView(Widget, can_focus=True):
       if self.own_session is None:
         self.app.action_switch_side()
       else:
-        self.app.show_view(None)
+        self.app.show_home(views=False)
       return
     s = self.session
     if s is None or s.vt is None and not s.done:

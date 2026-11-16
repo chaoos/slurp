@@ -11,8 +11,9 @@ from rich.table import Table
 from rich.text import Text
 from textual import on
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.coordinate import Coordinate
+from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input, Label, Select, Static
 
 from ...cluster.remote import in_background
@@ -27,7 +28,7 @@ def not_connected(cluster):
   if not cluster.destination:
     return None if cluster.name else "no tab"
   if c is None or not c.ready:
-    return f"No connection to {cluster.destination}. Reconnect (in the connection window, c) and Reload."
+    return f"Not connected to {cluster.destination}: Connect in the overview or the job list, then Reload."
   return None
 
 def usage_bar(used, limit):
@@ -39,54 +40,57 @@ def usage_bar(used, limit):
   return RichProgressBar(total=limit, completed=min(used, limit), width=16, complete_style=style, finished_style="red"), \
          Text(f"{share:.0%}", style=style)
 
-class QuotaScreen(SplitScreen):
-  """Quotas of the user and the user's groups on the filesystems of the cluster of a tab (a subtab; loads in the
+class QuotaScreen(ModalScreen):
+  """Quotas of the user and the user's groups on the filesystems of the cluster of a tab (a window; loads in the
   background)"""
-  SHOW_BACK = True
   DEFAULT_CSS = """
-  #quota-bar { height: auto; padding: 0 1; }
-  #quota-title { text-style: bold; width: 1fr; height: auto; }
-  #quota-body { height: 1fr; padding: 0 1; }
+  QuotaScreen { align: center middle; }
+  #quota-dialog { width: 130; max-width: 98%; height: 80%; border: thick $accent; background: $surface; padding: 0 1; }
+  #quota-title { text-style: bold; height: auto; margin-bottom: 1; }
+  #quota-body { height: 1fr; }
+  #quota-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #quota-buttons Button { margin-left: 1; }
   """
-  BINDINGS = [Binding("escape", "back", "Back"), Binding("r", "reload", "Reload")]
+  BINDINGS = [Binding("escape", "close", "Close"), Binding("r", "reload", "Reload")]
 
   def __init__(self, cluster):
     super().__init__()
-    self.cluster, self.info, self.loading = cluster, None, False
-    self.crumbs = ["quota"]
+    self.cluster, self.info, self.fetching = cluster, None, False
 
-  def compose_left(self):
-    with Horizontal(id="quota-bar"):
+  def compose(self):
+    with Vertical(id="quota-dialog"):
       yield Static(id="quota-title")
-      yield Button("Reload", id="quota-reload", variant="primary", compact=True)
-    with VerticalScroll(id="quota-body"):
-      yield Static(id="quota-info")
+      with VerticalScroll(id="quota-body"):
+        yield Static(id="quota-info")
+      with Horizontal(id="quota-buttons"):
+        yield Button("Reload", id="quota-reload", variant="primary", compact=True)
+        yield Button("Close", id="quota-close", compact=True)
 
   def on_mount(self):
-    self.sub_title = f"quota · {self.cluster.name}"
     self.action_reload()
 
-  def action_back(self):
-    self.pop_back()
+  @on(Button.Pressed, "#quota-close")
+  def action_close(self):
+    self.dismiss()
 
   def set_title(self):
-    state = "loading …" if self.loading else f"as of {self.info['time']:%H:%M:%S}" if self.info else ""
+    state = "loading …" if self.fetching else f"as of {self.info['time']:%H:%M:%S}" if self.info else ""
     self.query_one("#quota-title", Static).update(Text(f"Quota on {self.cluster.name or '-'} · {state}"))
 
   @on(Button.Pressed, "#quota-reload")
   def action_reload(self):
-    if self.loading:
+    if self.fetching:
       return
     why = not_connected(self.cluster)
     if why:
       self.query_one("#quota-info", Static).update(Text(why, style="bold yellow"))
       self.set_title()
       return
-    self.loading = True
+    self.fetching = True
     self.set_title()
     self.query_one("#quota-info", Static).update(Text("asking the filesystems (in the background) …", style="dim"))
     def loaded(info):
-      self.loading = False
+      self.fetching = False
       if info is not None:
         self.info = info
       self.show()
