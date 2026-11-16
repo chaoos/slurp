@@ -1,0 +1,29 @@
+"""slurp's logo: one pixel map, every form of it consistent; docs/ files current"""
+import os, re, struct, sys, xml.dom.minidom
+from slurp import logo, winhelper
+
+
+def test_logo(check, tmp_path, monkeypatch):
+  check("the map: 15×10, known colours", len(logo.PIXELS) == 10 and all(len(r) == 15 and set(r) <= set(".gca") for r in logo.PIXELS))
+  lines = logo.half_blocks()
+  check("half blocks: 5 rows of 15 cells", len(lines) == 5 and all(l.cell_len == 15 for l in lines))
+  plain = [re.sub(r"\x1b\[[0-9;]*m", "", l) for l in logo.ansi_lines()]
+  check("ANSI lines: the same characters", plain == [l.plain for l in lines], plain)
+  check("one-line mark", logo.mark(theme=False).plain == "❯▂▄█" and str(logo.mark()) == "❯▂▄█")
+  for name in ("svg", "boxed", "wordmark"):
+    text = logo.wordmark_svg() if name == "wordmark" else logo.svg(boxed=(name == "boxed"))
+    try: xml.dom.minidom.parseString(text); ok = True
+    except Exception as e: ok = False
+    check(f"{name}: valid SVG", ok)
+  data = logo.ico()
+  n = struct.unpack("<HHH", data[:6])[2]
+  entries = [struct.unpack("<BBBBHHII", data[6 + 16 * i:22 + 16 * i]) for i in range(n)]
+  check("ico: 6 frames, each inside the file", n == 6 and all(off + size <= len(data) for *_, size, off in entries))
+  check("ico: bitmaps up to 64, PNG at 256", all((data[off:off + 4] == b"\x89PNG") == (w == 0) for w, _, _, _, _, _, size, off in entries))
+  docs = os.path.join(os.path.dirname(logo.__file__), "docs")
+  stale = [name for name, make in logo.DOCS.items()
+           if open(os.path.join(docs, name), "rb").read() != (lambda d: d.encode() if isinstance(d, str) else d)(make())]
+  check("docs/ logo files are current (python -m slurp.logo)", not stale, stale)
+  check("README shows the wordmark", 'src="docs/logo-wordmark.svg"' in open(os.path.join(os.path.dirname(logo.__file__), "README.md")).read())
+  setup = winhelper.setup_script()
+  check("the helper's setup carries the icon, the tray loads it", "$IconData = '" in setup and "slurp.ico" in open(winhelper.SCRIPT).read())
