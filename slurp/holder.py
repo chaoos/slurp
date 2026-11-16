@@ -35,7 +35,7 @@ import termios
 import time
 
 from . import __version__
-from .cli import slurp_command
+from .launch import slurp_command
 
 log = logging.getLogger("slurp.holder")
 

@@ -33,7 +33,8 @@ from .jobs import (
   annotate, array_task_id, compress_array_ids, duration_text, fmt_time, is_time, load_jobs, pace_eta,
   progress_for_job, slurm_accounts
 )
-from .details import current_memory_usage, job_vars, MEMORY, record_memory
+from .details import current_memory_usage, MEMORY, record_memory
+from .paths import job_vars
 from .widgets import ClickTable, err_text, SPINNING, STATE_STYLES, state_text, url_text
 from .terminal import SWITCH_KEY, TerminalSession, TerminalView
 from .screens.dialogs import ConfirmScreen, InteractiveJobScreen
@@ -1560,9 +1561,14 @@ class Slurp(App):
     if isinstance(screen, ViewHelpScreen):
       return
     if isinstance(screen, TerminalScreen):
-      self.push_screen(TerminalHelpScreen(screen.session), lambda _: screen.query_one(TerminalView).focus())
+      self.show_terminal_help(screen.session, then=lambda: screen.query_one(TerminalView).focus())
       return
     self.push_screen(ViewHelpScreen(help_markdown(screen)))
+
+  def show_terminal_help(self, session, pane=False, then=None):
+    """The help of a shell (pane: one in the side pane), then() when it closes (the widgets of the shells ask for it
+    here: the screens build on them)"""
+    self.push_screen(TerminalHelpScreen(session, pane=pane), lambda _: then and then())
 
   def push_screen(self, screen, *args, **kwargs):
     """Dialogs get a ? in their top right corner (the windows have theirs in the top bar)"""

@@ -450,7 +450,7 @@ def client_commands(link):
     out.append(("Linux, macOS (sshfs): one command", f"mkdir -p {mount} && sshfs -o {jump} {user}@{host}:{shlex.quote(link.path)} {mount}",
                 f"asks for the password, then the drive is {mount}; unmount: fusermount -u {mount} (Linux), umount {mount} (macOS)"))
     if link.auth == "password":
-      from . import windrive
+      from . import windrive # (here: windrive builds on this module, its helper carries the link's user and host key)
       helper = windrive.command(link)
       where = "PowerShell or cmd" if len(helper) <= windrive.CMD_LIMIT else "PowerShell (too long for cmd)"
       out.append((f"Windows: map the drive with a small window (paste into {where})", helper,

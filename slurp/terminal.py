@@ -556,8 +556,7 @@ class TerminalPane(Vertical):
   def info_pressed(self, event):
     event.stop()
     if self.app.shell is not None:
-      from .screens.shell import TerminalHelpScreen
-      self.app.push_screen(TerminalHelpScreen(self.app.shell, pane=True), lambda _: self.query_one(TerminalView).focus())
+      self.app.show_terminal_help(self.app.shell, pane=True, then=lambda: self.query_one(TerminalView).focus())
 
   @on(Button.Pressed, ".tclose")
   def close_pressed(self, event):

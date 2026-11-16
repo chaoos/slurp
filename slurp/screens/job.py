@@ -25,10 +25,8 @@ from ..jobs import (
   original_submission, output_progress, PROGRESS, progress_for_job, progress_path, progress_pattern, progress_state,
   rate_text, record_progress, restart_args, set_array_pattern, set_progress_file, with_array_spec
 )
-from ..details import (
-  current_memory_usage, job_vars, load_details, MEMORY_EVERY, memory_watch, peak_job_memory, record_memory,
-  run_on_nodes, sacct_all
-)
+from ..details import current_memory_usage, load_details, MEMORY_EVERY, memory_watch, peak_job_memory, record_memory, run_on_nodes, sacct_all
+from ..paths import job_vars
 from ..widgets import ClickTable, state_text, TimePlot
 from .dialogs import ConfirmScreen, RestartScreen, RunArrayScreen
 from .base import SplitScreen

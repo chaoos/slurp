@@ -16,7 +16,7 @@ from textual.widget import Widget
 from textual.widgets import DataTable, Static, TextArea
 
 
-from .details import word_at
+from .paths import word_at
 
 # ---------------------------------------------------------------------------
 # widgets and screens

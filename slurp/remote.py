@@ -14,7 +14,7 @@ from datetime import datetime
 
 
 
-from .state import log
+from .state import collector, log
 
 ssh_connection = None # RemoteSSH of the active tab, None: the local machine
 
@@ -36,6 +36,8 @@ def tab_name():
   """Name of the tab the running code works for (shown as the title of its notifications)"""
   c = conn()
   return c.destination if c is not None else "Local"
+
+collector.tab_of = tab_name # (the warnings collected for the UI are titled with their tab)
 
 def check_cancelled():
   event = getattr(_thread, "cancel", None)

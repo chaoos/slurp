@@ -751,7 +751,7 @@ def make_context(script_text=None, path="", job=None, facts=None, **kw):
   if job is not None and not ctx.submit_line:
     ctx.submit_line = job.rec.get("SubmitLine") or ""
   if job is not None:
-    from .details import job_vars
+    from .paths import job_vars
     env = job_vars(job)
     ctx.env = {k: v for k, v in env.items() if k.startswith("SLURM_") or k == "PWD"} | ctx.env
   return ctx
@@ -1035,7 +1035,7 @@ def check_script_text(text, path="", facts=None, probes=None, job=None, **kw):
 def check_file(path, with_probe=True, text=None):
   """Findings of a script file on the cluster of the current tab (worker): the script, the facts, the probe, the quota.
   text: check this text as the content of path (an edited, unsaved version) instead of reading the file."""
-  from .details import read_text
+  from .paths import read_text
   if text is None:
     text = read_text(path)
   facts = gather_facts()
@@ -1098,7 +1098,7 @@ def check_job(job, full=True, replay=None, live=None):
   """Findings of a job (worker). full: also its log tails and the quota; the script as submitted (queued) or as the
   accounting stored it (finished), else the file it was submitted with."""
   from .jobs import batch_script
-  from .details import existing_files, read_text
+  from .paths import existing_files, read_text
   facts = gather_facts()
   submitted = getattr(job, "script", None) or (batch_script(job.jid) if job.queued else "")
   if not submitted and full and not job.queued:

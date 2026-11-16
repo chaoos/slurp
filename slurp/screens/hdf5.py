@@ -14,7 +14,7 @@ from textual.widgets import (
 
 
 from ..remote import command_exists, conn, fs_expanduser, fs_getsize, fs_isfile, in_background, RemoteFile, run
-from ..details import is_hdf5
+from ..paths import is_hdf5
 from ..widgets import crumb_title
 from .base import SplitScreen
 from .files import FileScreen, register_file_view

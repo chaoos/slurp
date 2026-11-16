@@ -16,7 +16,7 @@ from textual.widgets import Button, Input, Label, Static
 
 
 from ..remote import cluster_work, conn, fs_isfile, fs_stat, run_cmd
-from ..details import is_core_dump
+from ..paths import is_core_dump
 from ..widgets import crumb_title
 from .base import SplitScreen
 from .files import register_file_view

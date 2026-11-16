@@ -29,12 +29,14 @@ PRESETS = {
 # logging: never write to the terminal, collect warnings to show them in the UI
 
 class Collector(logging.Handler):
+  """The warnings, with the tab of the thread that logs each; tab_of() names that tab (remote.py sets it: it knows the
+  connections, this module is below it)"""
   def __init__(self):
     super().__init__(logging.WARNING)
     self.messages = []
+    self.tab_of = lambda: "Local"
   def emit(self, record):
-    from .remote import tab_name # (remote builds on this module)
-    self.messages.append((tab_name(), record.getMessage())) # the tab of the thread that logs it
+    self.messages.append((self.tab_of(), record.getMessage()))
   def drain(self):
     msgs, self.messages = self.messages, []
     return msgs

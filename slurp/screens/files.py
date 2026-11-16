@@ -20,7 +20,7 @@ from ..state import TAIL_BYTES
 from ..remote import (
   cluster_work, conn, fs_getsize, fs_isdir, fs_isfile, fs_read, fs_scandir, in_background, start_worker, tab_name
 )
-from ..details import is_binary, resolve_path
+from ..paths import is_binary, resolve_path
 from ..widgets import clean, ClickTable, crumb_title, PathArea
 from .base import SplitScreen
 

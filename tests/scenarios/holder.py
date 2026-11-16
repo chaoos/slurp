@@ -10,7 +10,7 @@ for k in ("SLURP_INNER", "SLURP_HOLDER"): ENV.pop(k, None)
 os.makedirs(ENV["XDG_RUNTIME_DIR"], mode=0o700)
 sys.path.insert(0, REPO)
 import pyte
-from slurp.cli import slurp_command # (this checkout's slurp, as slurp starts itself)
+from slurp.launch import slurp_command # (this checkout's slurp, as slurp starts itself)
 results = []
 def check(name, cond, info=""):
   results.append(bool(cond)); print(f"{'PASS' if cond else 'FAIL'}  {name}  {'' if cond else info}", flush=True)

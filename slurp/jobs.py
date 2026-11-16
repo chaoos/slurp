@@ -13,6 +13,7 @@ from . import slurm as sl
 
 from .state import log, OLD_STEP_NAMES, PROGRESS_PATTERN, PROGRESS_TAIL_BYTES, PROGRESS_TAIL_LINES
 from .remote import conn, fs_getsize, fs_read, fs_scandir, run, run_cmd, run_many, SLURM_ENV, tab_name
+from .paths import existing_files, expand_vars, job_vars, read_text
 
 def parsable(out, fields):
   """Rows of '|'-separated output as dicts, the last field may contain '|'; other lines (e.g. messages) are skipped"""
@@ -411,7 +412,6 @@ def step_commands(job):
 def command_of(job, cache):
   """srun line of the latest step, the job's own srun line, the srun lines of
   the batch script of a queued job or the sbatch/salloc line"""
-  from .details import expand_vars, job_vars # (details builds on this module)
   cmds = step_commands(job)
   if not cmds and job.queued:
     cmds = [expand_vars(line, job_vars(job)) for line in sl.srun_lines(batch_script(job.jid, cache))]
@@ -457,7 +457,6 @@ def original_array_spec(job):
     args = []
   if spec := array_spec_in_args(args):
     return spec
-  from .details import existing_files, read_text # (details builds on this module)
   workdir = job.rec.get("WorkDir") or "."
   for path in existing_files([submit_line], workdir):
     text = read_text(path)
@@ -587,7 +586,6 @@ def original_submission(job, args):
   script = script if script.lstrip().startswith("#!") else ""
   script_arg = None
   if script and "--wrap" not in " ".join(args):
-    from .details import existing_files # (details builds on this module)
     workdir = job.rec.get("WorkDir") or "."
     named = {os.path.normpath(p) for p in existing_files([shlex.join(args[1:])], workdir)}
     for i, arg in enumerate(args[1:], 1):
