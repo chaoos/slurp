@@ -2330,8 +2330,8 @@ async def t_drive(app, pilot):
   scr.query_one("#drive-path").value = mnt
   scr.query_one("#drive-ro").value = True; await pilot.pause(0.2)
   await pilot.click("#drive-mount")
+  ok = await until(pilot, lambda: cluster.drive is not None and cluster.drive.state == "mounted", 20) # (the drive is made by the click's handler)
   drive = cluster.drive
-  ok = await until(pilot, lambda: drive and drive.state == "mounted", 20)
   listing = await asyncio.get_running_loop().run_in_executor(None, lambda: sorted(os.listdir(mnt)) if ok else [])
   check("Mount here: sshfs through the tab's session, the login directory at the path", ok and listing == sorted(os.listdir(home)),
         (drive.state if drive else None, drive.error if drive else None, drive.messages if drive else None))
