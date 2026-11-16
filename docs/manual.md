@@ -49,6 +49,11 @@ task with its progress bar (sorted by the header clicked; a click on a task open
 (after a confirmation). The job window of an array task has an **Array** button
 for it.
 
+Without Slurm on the machine of a tab (no `squeue` there, e.g. the Local tab
+on your own computer), the job list says so in its middle, with what to do: add
+a tab for a cluster with `+`, or start slurp with `--ssh`. `r` looks again (after
+`module load slurm`, for example); shells, drives and files work without Slurm.
+
 ![The job list, newest first: queued and running jobs with progress and estimates, arrays as one row with the mix of their states, finished jobs with their checks](images/jobs.svg)
 
 **The list is kept** on this machine after each load (`~/.cache/slurp/joblists/`,

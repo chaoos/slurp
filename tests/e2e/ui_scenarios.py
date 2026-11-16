@@ -204,8 +204,13 @@ class UISession:
 
 async def t_titles(app, pilot):
   app.select_cluster(0)
-  await until(pilot, lambda: any(t == "Local" and "squeue" in m for t, m in notes(app)), 15)
-  check("errors of the local tab are titled Local", any(t == "Local" and "squeue" in m for t, m in notes(app)), notes(app)[-3:])
+  await until(pilot, lambda: app.cluster.loader is None and (app.cluster.no_slurm or app.cluster.loaded), 15)
+  if app.cluster.no_slurm: # (this machine has no Slurm, as in the CI)
+    note = app.main.query_one("#no-slurm")
+    check("no Slurm on this machine: the job list says so, instead of errors", note.display and not app.main.query_one("#jobs").display
+          and "No Slurm on this machine" in str(note.render()) and not any(t == "Local" and "squeue" in m for t, m in notes(app)), notes(app)[-3:])
+  app.notify("y"); await pilot.pause(0.2)
+  check("a notification on the local tab is titled Local", ("Local", "y") in notes(app), notes(app)[-2:])
   app.select_cluster(1); await pilot.pause(0.3)
   app.notify("x"); await pilot.pause(0.2)
   check("a notification on the lab tab is titled lab", ("lab", "x") in notes(app), notes(app)[-2:])

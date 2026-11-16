@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Without Slurm on the machine of a tab (no `squeue`), the job list says so
+  in its middle, with what to do (a tab for a cluster with `+`, or
+  `slurp --ssh`), instead of an error notification for every Slurm command at
+  each load. `r` looks again.
 - The tagline is "All of slurm in one slurp" (was "Slurm at a glance").
 - slurp could end right at its start with an error (no attribute "main")
   when its 0.25 s timer came before the job list was shown.

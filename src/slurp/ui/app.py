@@ -26,7 +26,7 @@ from ..cluster import slurm as sl
 
 from ..state import ClusterSession, collector, is_local_destination, log, View
 from ..cluster.remote import (
-  connection_health, CURRENT, HEALTH_STYLES, in_background, RemoteSSH, run, run_cmd, SLURM_ENV, start_worker
+  command_exists, connection_health, CURRENT, HEALTH_STYLES, in_background, RemoteSSH, run, run_cmd, SLURM_ENV, start_worker
 )
 from ..cluster.jobs import (
   annotate, array_task_id, compress_array_ids, duration_text, fmt_time, is_time, load_jobs, pace_eta, progress_for_job, slurm_accounts
@@ -138,6 +138,7 @@ class Slurp(App):
   #back { width: 3; min-width: 3; height: 1; padding: 0; }
   #status { height: 1; padding: 0 1; background: $panel; }
   #jobs { height: 1fr; }
+  #no-slurm { display: none; height: 1fr; content-align: center middle; text-align: center; color: $text-muted; padding: 0 4; }
   #details { height: 1fr; padding: 0 1; }
   #checks-bar { height: auto; margin-top: 1; }
   #checks-bar Label { margin-right: 2; }
@@ -1376,6 +1377,12 @@ class Slurp(App):
     worker = get_current_worker()
     jobs, accounts = None, cluster.accounts
     try:
+      if not cluster.slurm_found: # (no Slurm there: the job list says so, instead of an error per command)
+        cluster.slurm_found = command_exists("squeue")
+        cluster.no_slurm = not cluster.slurm_found
+        if cluster.no_slurm:
+          log.info(f"{cluster.name}: no squeue there, no Slurm")
+          return
       if accounts is None:
         accounts = slurm_accounts()
       jobs = load_jobs(since, scope, accounts)
@@ -1480,6 +1487,8 @@ class Slurp(App):
       return
     cluster.loader = None
     cluster.listed = False
+    if cluster.no_slurm and cluster is self.cluster:
+      self.populate()
     if jobs is not None:
       for job in jobs:
         job.annotated = True # (also when reading the files failed: what is known stays)
@@ -1734,6 +1743,19 @@ class Slurp(App):
                    Text(f"! {errors}", style="bold red") if errors else "", tasks[0].command[:150]))
     return values
 
+  def show_no_slurm(self, cluster):
+    """Instead of the job list, in its middle: no Slurm on the machine of the tab (what to do)"""
+    table, note = self.query_one("#jobs", ClickTable), self.query_one("#no-slurm", Static)
+    table.display, note.display = not cluster.no_slurm, cluster.no_slurm
+    if cluster.no_slurm:
+      where = cluster.destination or "this machine"
+      note.update(Text.assemble(
+        (f"No Slurm on {where}\n\n", "bold"),
+        f"squeue is not found {'there' if cluster.destination else 'here'}, so there are no jobs to list.\n\n",
+        "Add a tab for a cluster with ", ("+", "bold"), " above, or start slurp with ", ("slurp --ssh user@login-node", "bold"), ".\n",
+        ("r", "bold"), " looks again (e.g. after module load slurm); the shell, the drive and the files work without Slurm.",
+        style="", justify="center"))
+
   def populate(self, jobs=None):
     table = self.query_one("#jobs", ClickTable)
     cluster = self.cluster
@@ -1810,6 +1832,11 @@ class Slurp(App):
         pass
     if self.screen is self.main and (self.focused is None or not isinstance(self.focused, (Input, TerminalView, TextArea))):
       table.focus() # an unfocused table is drawn in other colours (e.g. after a tab switch or a reload)
+    self.show_no_slurm(cluster)
+    if cluster.no_slurm:
+      cluster.summary = f"no Slurm on {cluster.destination or 'this machine'}"
+      self.refresh_status()
+      return
     if not cluster.loaded:
       cluster.summary = "no jobs loaded yet" if not cluster.destination or (cluster.connection and cluster.connection.ready) \
                         else "log in to load the jobs"

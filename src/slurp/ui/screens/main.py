@@ -77,6 +77,7 @@ class MainScreen(SplitScreen):
                      tooltip="big arrays as one row (on) or every task individually (off) (g)")
     yield Static(id="status")
     yield ClickTable(id="jobs", cursor_type="row", zebra_stripes=True)
+    yield Static(id="no-slurm")
     yield Input(id="jfilter", placeholder="filter jobs by name, command, ID, state, user, account, path, category… (cat:a/b: only that category)")
 
   def action_filter(self):
