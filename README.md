@@ -31,6 +31,29 @@ explain each window and `F1` opens the guides (job scripts, arrays, filesystems,
 GPUs, ...). What changed between versions is in
 [slurp/CHANGELOG.md](slurp/CHANGELOG.md).
 
+## Tests
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -m "not lab"   # unit tests: seconds, nothing needed beyond pip
+python -m pytest -m lab         # the lab: slurp against a fake Slurm over SSH (~10 min)
+python -m pytest                # both
+```
+
+The lab tests start their own `sshd` on a free port of 127.0.0.1, with a fake
+Slurm and fresh keys in pytest's temporary directory. They need OpenSSH
+(`ssh`, `sshd`, `ssh-keygen`) and `sshfs` (Debian/Ubuntu: `apt install
+openssh-server sshfs`); without `sshd` they are skipped. They never touch
+your `~/.ssh` or slurp's settings. Each scenario writes its output, log and
+screenshots to `<basetemp>/lab0/out/<scenario>/` (set the place with
+`--basetemp=DIR`). Parts of the long UI scenario can be run on their own:
+`ONLY=t_categories,t_sort python -m pytest -k "tui and not drive"`, or left
+out with `SKIP=t_sort`. See [tests/conftest.py](tests/conftest.py) and
+[tests/lab](tests/lab/__init__.py).
+
+The same runs on GitHub Actions ([.github/workflows/tests.yml](.github/workflows/tests.yml)):
+the unit tests on Python 3.11 to 3.13, the lab on 3.12.
+
 ## License
 
 GPL-3.0, see [LICENSE](LICENSE).
