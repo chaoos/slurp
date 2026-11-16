@@ -540,7 +540,7 @@ def about_markdown(facts):
   for title, rows in FACTS:
     out += [f"## {title}", "", "| | |", "|---|---|", *[f"| {label} | {cell(facts[key])} |" for label, key in rows if facts.get(key)], ""]
   out += ["What changed from version to version: [CHANGELOG.md](https://github.com/chaoos/slurp/blob/main/CHANGELOG.md); "
-          "the whole manual: [docs/manual.md](https://github.com/chaoos/slurp/blob/main/docs/manual.md)."]
+          "the documentation: [chaoos.github.io/slurp](https://chaoos.github.io/slurp/)."]
   return "\n".join(out)
 
 def add_help_button(screen):

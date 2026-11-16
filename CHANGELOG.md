@@ -10,6 +10,13 @@ version may need the helper of the same version).
   in its middle, with what to do (a tab for a cluster with `+`, or
   `slurp --ssh`), instead of an error notification for every Slurm command at
   each load. `r` looks again.
+- The documentation is a website now, <https://chaoos.github.io/slurp/>
+  (Material for MkDocs): the manual is split into pages (the overview, the
+  job list, the job window, …, shells and drives, the helper, web access,
+  development), with search and the changelog. GitHub Actions builds it for
+  every push and pull request (`mkdocs build --strict`: a broken link fails)
+  and publishes it from main. The README is a short start page; `.[docs]`
+  installs MkDocs.
 - Every tab opens on an **Overview** of its cluster, a new first subtab
   before **Jobs**: health (nodes down, drained, in maintenance), reservations,
   occupancy and why jobs wait, your jobs (running, pending, finished by state,

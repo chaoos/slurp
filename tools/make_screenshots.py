@@ -1,4 +1,4 @@
-"""Make the screenshots of the docs again (docs/images/jobs.svg, job-details.svg, files.svg): slurp against the test lab
+"""Make the screenshots of the docs again (docs/images/overview.svg, jobs.svg, job-details.svg, files.svg): slurp against the test lab
 (tests/e2e/lab: a fake Slurm cluster behind a local sshd, sample jobs and files), saved by Textual as SVG. Run it after
 changing what these windows show:
 
@@ -67,6 +67,16 @@ def sample_hdf5(path):
     fields = f.create_group("fields")
     fields.create_dataset("gauge", data=np.random.default_rng(7).standard_normal((16, 16, 4)).astype("float32"))
     fields["gauge"].attrs["lattice"] = [16, 16, 4]
+
+
+async def shot_overview(app, pilot):
+  """The overview of a tab: health, your jobs, occupancy, your quotas, the partitions"""
+  app.show_overview()
+  await U.until(pilot, lambda: "info" in app.cluster.overview and "quota" in app.cluster.overview
+                and not app.cluster.overview.get("loading"), 60)
+  await pilot.pause(1.0)
+  app.save_screenshot(filename="overview.svg", path=IMAGES)
+  app.show_view(None); await pilot.pause(0.3)
 
 
 async def shot_jobs(app, pilot):
@@ -143,14 +153,14 @@ def main():
       node_fakes(lab)
       session = U.UISession(lab.work, os.path.join(lab.work, "home"), os.path.join(lab.work, "out"), size=SIZE).start()
       try:
-        for shot in (shot_jobs, shot_job, shot_files):
+        for shot in (shot_jobs, shot_overview, shot_job, shot_files):
           session.run(shot, no_check, timeout=300)
           print("made", shot.__doc__.split(":")[0])
       finally:
         session.close()
   finally:
     shutil.rmtree(work, ignore_errors=True)
-  for name in ("jobs.svg", "job-details.svg", "files.svg"):
+  for name in ("overview.svg", "jobs.svg", "job-details.svg", "files.svg"):
     anonymize(os.path.join(IMAGES, name), getpass.getuser())
   print("written to", IMAGES)
 
