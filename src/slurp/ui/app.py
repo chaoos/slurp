@@ -456,6 +456,8 @@ class Slurp(App):
     self.cluster.current_view = mode
     if self.current_mode != mode:
       self.switch_mode(mode)
+      if view is None:
+        self.call_after_refresh(self.focus_jobs)
     self.call_after_refresh(self.refresh_status)
 
   def close_view(self, view, cluster=None):
@@ -1745,6 +1747,15 @@ class Slurp(App):
                    Text(f"! {errors}", style="bold red") if errors else "", tasks[0].command[:150]))
     return values
 
+  def focus_jobs(self):
+    """The job list takes the focus unless something to type into has it: an unfocused table is drawn in other colours
+    (e.g. after a tab switch, a reload, or back from a tab without Slurm, whose hidden table gave the focus away)"""
+    if self.main is None or self.screen is not self.main:
+      return
+    table = self.main.query_one("#jobs", ClickTable)
+    if table.display and not isinstance(self.focused, (Input, TerminalView, TextArea)):
+      table.focus()
+
   def show_no_slurm(self, cluster):
     """Instead of the job list, in its middle: no Slurm on the machine of the tab (what to do)"""
     table, note = self.query_one("#jobs", ClickTable), self.query_one("#no-slurm", Static)
@@ -1832,9 +1843,8 @@ class Slurp(App):
         table.move_cursor(row=table.get_row_index(current)) # a job or the row of an array
       except Exception:
         pass
-    if self.screen is self.main and (self.focused is None or not isinstance(self.focused, (Input, TerminalView, TextArea))):
-      table.focus() # an unfocused table is drawn in other colours (e.g. after a tab switch or a reload)
-    self.show_no_slurm(cluster)
+    self.show_no_slurm(cluster) # (first: a table hidden on a tab without Slurm cannot take the focus)
+    self.focus_jobs()
     if cluster.no_slurm:
       cluster.summary = f"no Slurm on {cluster.destination or 'this machine'}"
       self.refresh_status()
