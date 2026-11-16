@@ -112,6 +112,9 @@ class ClusterSession:
   attempts: int = 0                    # logins since the session was last ready
   ready_generation: int | None = None  # session generation the app has seen ready
   broken_at: float | None = None       # when the session broke (or the last reconnect started)
+  categories: object | None = None     # categories.Store of its Slurm cluster (None: not read yet)
+  slurm_cluster: str | None = None     # Slurm's name of the cluster (ClusterName; the categories are kept by it)
+  marked: set = field(default_factory=set) # rows of the job list marked (m): job ids, "group|<array>" for an array
 
 @dataclass
 class View:

@@ -58,7 +58,7 @@ def parsable(out, fields):
 
 SACCT_FIELDS = ["JobID", "JobIDRaw", "JobName", "User", "Account", "Partition", "State", "ExitCode", "NNodes", "NTasks",
                 "NodeList", "Submit", "Start", "End", "Elapsed", "Timelimit", "WorkDir", "StdOut", "StdErr",
-                "MaxRSS", "AveRSS", "TRESUsageInMax", "ReqMem", "AllocCPUS", "TotalCPU", "SubmitLine"]
+                "MaxRSS", "AveRSS", "TRESUsageInMax", "ReqMem", "AllocCPUS", "TotalCPU", "AllocTRES", "SubmitLine"] # (SubmitLine last: it may have |)
 SQUEUE_FIELDS = ["JobID", "JobName", "User", "Account", "Partition", "State", "Reason", "NNodes", "Elapsed",
                  "Timelimit", "Start", "Submit", "WorkDir", "NodeList"]
 SQUEUE_FMT = "%i|%j|%u|%a|%P|%T|%r|%D|%M|%l|%S|%V|%Z|%N"
@@ -314,6 +314,7 @@ class Job:
   annotated: bool = True                 # False while command, error file and progress are still being read
   script: str | None = None              # the batch script as submitted (queued jobs, fetched by annotate)
   checks: list | None = None             # findings of the checks (None: not checked yet)
+  category: str = ""                     # its category (categories.py), set when the list is drawn
 
   @property
   def jid(self):

@@ -55,7 +55,7 @@ from ..widgets import *
 from ..screens.base import *
 from ..checks import counts as checks_counts, summary as checks_summary, SEVERITY_STYLE, ERROR, WARNING
 
-COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("user", "User"), ("state", "State"), ("progress", "Progress"),
+COLUMNS = [("jobid", "Job ID"), ("name", "Name"), ("category", "Category"), ("user", "User"), ("state", "State"), ("progress", "Progress"),
            ("eta", "Done: same pace"), ("eta_now", "Done: current pace"),
            ("nodes", "Nodes"), ("time", "Elapsed / Limit"),
            ("start", "Start"), ("end", "End"), ("checks", "Checks"), ("err", "Err"), ("cmd", "Command")]
@@ -67,6 +67,7 @@ SORT_KEYS = {
   "arrayid": lambda j: (int(t) if (t := array_task_id(j)) is not None else -1, job_id_key(j.jid)), # array index first
   "jobid": lambda j: job_id_key(j.jid),
   "name":  lambda j: j.rec["JobName"],
+  "category": lambda j: (not j.category, j.category.casefold()), # (those in none last)
   "user":  lambda j: j.rec["User"].casefold(),
   "state": lambda j: j.state,
   "progress": lambda j: (p.current / p.total if (p := progress_for_job(j)) and p.total else 0),
@@ -91,6 +92,10 @@ class MainScreen(SplitScreen):
     Binding("g", "app.toggle_collapse", "Group arrays"),
     Binding("exclamation_mark", "app.toggle_problems", "Only problems"),
     Binding("n", "app.new_script", "New job script"),
+    Binding("m", "app.mark", "Mark"),
+    Binding("M", "app.mark_all", "Mark all / none", show=False),
+    Binding("c", "app.categorize", "Categorize"),
+    Binding("K", "app.categories", "Categories", show=False),
   ]
 
   def compose_left(self):
@@ -103,6 +108,7 @@ class MainScreen(SplitScreen):
       yield Button("Cluster info", id="cluster-info", tooltip="health and occupancy of the cluster (C)")
       yield Button("Quota", id="quota", tooltip="your quotas on the filesystems (Q)")
       yield Button("Scratch", id="scratch", tooltip="your oldest files in $SCRATCH, which a cleanup may delete (X)")
+      yield Button("Categories", id="categories", tooltip="your jobs in categories, like folders: the tree, their numbers and jobs (K); m marks jobs, c puts them in one")
       yield Label("finished since")
       yield Select(SINCE_CHOICES, value="1d", allow_blank=False, id="since-choice",
                    tooltip="also list the jobs that finished within this time")
@@ -113,7 +119,7 @@ class MainScreen(SplitScreen):
                      tooltip="big arrays as one row (on) or every task individually (off) (g)")
     yield Static(id="status")
     yield ClickTable(id="jobs", cursor_type="row", zebra_stripes=True)
-    yield Input(id="jfilter", placeholder="filter jobs by name, command, ID, state, user, account, path…")
+    yield Input(id="jfilter", placeholder="filter jobs by name, command, ID, state, user, account, path, category… (cat:a/b: only that category)")
 
   def action_filter(self):
     search = self.query_one("#jfilter", Input)

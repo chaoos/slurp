@@ -50,6 +50,42 @@ for it.
 
 ![Illustrative slurp job list with status and progress columns](docs/jobs.svg)
 
+### Categories
+
+Put your jobs in **categories**, like folders: `project X/production runs`,
+`project X/tests`, `thesis/scaling`. In the job list, `m` marks a row (again:
+unmarks it; `M` marks all rows or none), and `c` puts the marked jobs (or the
+one under the cursor) in a category: pick one, or type a new path (`a/b` makes
+b in a). An array goes in as a whole, with all its tasks; a single task can
+have its own. `c` in a job window does the same for that job. The **Category**
+column shows where each job is (a click on its header sorts by it), and the
+filter finds categories too: `/` with `cat:project X` lists only that category
+and the ones in it, `cat:-` the jobs in none.
+
+**Categories** (the toolbar button, or `K`) shows them as a tree, with how many
+jobs each has. For the one selected (with the categories in it) it shows its
+numbers: jobs and array tasks, by state, and how many of those that ended
+completed; node, CPU and GPU hours (nodes, CPUs and GPUs of Slurm's
+accounting, times the run time); from the first submit to the last end; the
+partitions and accounts. Below them are its jobs: a click opens one. slurp
+asks Slurm for these jobs themselves (`sacct -j`), so old jobs count too, as
+long as Slurm's accounting keeps them; the ones it no longer knows are named.
+At the end of the tree, **not categorized** has the jobs of the job list
+(queued, and those finished within its *finished since*) that are in no
+category, with their numbers: `c` there (or on any job of the window) puts
+the job selected in a category.
+**New** (`n`), **Rename** (`e`: another path moves it with all it has, into an
+existing category they merge), **Delete** (`Del`: its jobs go to the category
+it is in), **Categorize…** (`c`) and **Take job out** (`x`) for the job
+selected, **In the job list** (`l`) and **Reload** (`r`).
+
+The categories are kept on the cluster, in `~/.config/slurp/categories.json`
+in your home there, so slurp on your own machine and slurp on the login node
+see the same. One home is often shared by several clusters (at CSCS: daint,
+eiger, …), whose job ids repeat, so the file has one part per Slurm cluster
+(its `ClusterName`). slurp reads it with every reload and writes it back with
+each change; a file that is not valid JSON is not overwritten (slurp says so).
+
 ## Job details and controls
 
 Open a row to inspect accounting fields, steps, output and error files, the
@@ -719,10 +755,11 @@ top-left `←` button to go back.
 
 | Screen | Main controls |
 |---|---|
-| Job list | `/` search jobs; `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `!` only jobs with problems; `n` new job script; `W` remote web access; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
-| Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (in slurp or your own terminal); Checks: `Check`, `Placement`, `Fixed copy…`, `What changed`, `Rule catalogue` |
+| Job list | `/` search jobs (`cat:a/b`: a category); `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `!` only jobs with problems; `m` mark, `M` all/none, `c` categorize, `K` categories; `n` new job script; `W` remote web access; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
+| Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (in slurp or your own terminal); `c` categorize; Checks: `Check`, `Placement`, `Fixed copy…`, `What changed`, `Rule catalogue` |
 | Script view | `r` check (all checks, the environment too); `x` explain the `#SBATCH` lines; `e` edit in place (`Ctrl+S` save, `Esc` stop editing); buttons `Test`, `Fixed copy…`, `Submit…` |
 | Everywhere | `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue; `F3` options |
+| Categories | the tree (and *not categorized*): `n` new, `e` rename/move, `Del` delete; its jobs: `Enter` open, `c` categorize, `x` take out; `l` in the job list; `r` reload |
 | Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
 | Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |

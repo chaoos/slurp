@@ -94,6 +94,7 @@ class JobScreen(SplitScreen):
     Binding("escape,backspace", "back", "Back"),
     Binding("r", "reload", "Reload"),
     Binding("s", "shell", "Shell on node"),
+    Binding("c", "categorize", "Categorize"),
   ]
 
   def __init__(self, job):
@@ -196,8 +197,11 @@ class JobScreen(SplitScreen):
       state.append(f"  ({job.reason})", style="dim")
     elif not job.queued and rec["ExitCode"]:
       state.append(f"  exit code {rec['ExitCode']}")
+    store = self.app.cluster.categories if self.app.clusters else None
+    category = store.category_of(job.jid) if store else ""
     rows = [
       ("Job", f"{job.jid}  {rec['JobName']}"),
+      *([("Category", category)] if category else []),
       ("State", state),
       ("User / account", f"{rec['User']} / {rec['Account']}   partition {rec['Partition']}"),
       ("Nodes", f"{rec['NNodes']}  {rec['NodeList'] if rec['NodeList'] not in ('None assigned', '') else ''}"),
@@ -722,6 +726,10 @@ class JobScreen(SplitScreen):
     return True
 
   @on(Button.Pressed, "#shell")
+  def action_categorize(self):
+    """c: this job (an array task: the task) in a category"""
+    self.app.categorize_jobs([self.job.jid], after=self.show_job)
+
   def action_shell(self):
     if not self.job.running:
       self.notify("the job is not running", severity="error")

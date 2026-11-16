@@ -81,6 +81,13 @@ def job_has_problems(job):
   c = checks_counts(job.checks)
   return bool(c[ERROR] or c[WARNING])
 
+def category_cell(path):
+  """A job's category in the job list: its own name bold, the categories it is in dimmed"""
+  if not path:
+    return ""
+  up, _, leaf = path.rpartition("/")
+  return Text.assemble((up + "/", "dim") if up else "", leaf)
+
 def checks_cell(findings):
   """✖1 ⚠2 in the colours of the severities ('' without errors and warnings)"""
   c = checks_counts(findings)
@@ -851,14 +858,19 @@ class Slurp(App):
     all_accounts = self.cluster.scope != "me"
     if show_progress is None:
       show_progress = any(progress_for_job(job) is not None or job.running and not job.annotated for job in self.jobs.values())
+    store = self.cluster.categories
+    with_categories = bool(store and (store.paths or store.jobs))
     visible_columns = [(key, label) for key, label in COLUMNS
-                       if (key != "user" or all_accounts) and (key not in ("progress", "eta", "eta_now") or show_progress)]
+                       if (key != "user" or all_accounts) and (key not in ("progress", "eta", "eta_now") or show_progress)
+                       and (key != "category" or with_categories)]
     column_keys = [key for key, _ in visible_columns]
     if column_keys == self.job_column_keys:
       return
     if not all_accounts and self.sort_column == "user":
       self.sort_column, self.sort_reverse = "jobid", True
     if not show_progress and self.sort_column in ("progress", "eta", "eta_now"):
+      self.sort_column, self.sort_reverse = "jobid", True
+    if not with_categories and self.sort_column == "category":
       self.sort_column, self.sort_reverse = "jobid", True
     table.clear(columns=True)
     for key, label in visible_columns:
@@ -1353,6 +1365,7 @@ class Slurp(App):
       if accounts is None:
         accounts = slurm_accounts()
       jobs = load_jobs(since, scope, accounts)
+      self.load_categories(cluster)
       # the list is shown now; the command, error file and progress of each job (files on the cluster) follow. Until
       # then a job keeps what the last load found, and a new one shows spinners
       known = cluster.jobs
@@ -1368,6 +1381,21 @@ class Slurp(App):
       annotate(jobs)
     finally:
       self.call_from_thread(self.jobs_loaded, cluster, worker, jobs, since, accounts)
+
+  def load_categories(self, cluster):
+    """(in a worker of the tab) its categories, read with every load: another slurp may have changed them"""
+    from . import categories
+    try:
+      if cluster.slurm_cluster is None:
+        cluster.slurm_cluster = categories.cluster_name()
+      cluster.categories = categories.load(cluster.slurm_cluster)
+    except (OSError, ValueError) as e:
+      log.warning(f"categories of {cluster.name}: {e}")
+      if cluster.categories is None:
+        cluster.categories = categories.Store(cluster.slurm_cluster or "default")
+      if not getattr(cluster, "told_categories", False):
+        cluster.told_categories = True
+        self.call_from_thread(self.notify, f"the categories cannot be read: {e}", title=cluster.name, severity="warning", timeout=12)
 
   def jobs_listed(self, cluster, worker, jobs, since, accounts):
     """The jobs from Slurm, before their files are read"""
@@ -1616,6 +1644,11 @@ class Slurp(App):
     opened = key in cluster.expanded
     first = tasks[0].rec
     values = [Text(f"{array_id}_[{ids}] {'▾' if opened else '▸'} {len(tasks)} tasks", style="bold"), first["JobName"]]
+    if "group|" + key in cluster.marked:
+      values[0] = Text.assemble(("● ", "bold magenta"), values[0])
+    if "category" in self.job_column_keys:
+      cats = {j.category for j in tasks}
+      values.append(category_cell(cats.pop()) if len(cats) == 1 else Text(f"{len(cats)} categories", style="dim"))
     if cluster.scope != "me":
       users = {j.rec["User"] for j in tasks}
       values.append(first["User"] if len(users) == 1 else f"{len(users)} users")
@@ -1644,13 +1677,21 @@ class Slurp(App):
       except Exception:
         pass
     all_jobs = list(cluster.jobs.values())
+    store = cluster.categories
+    for job in all_jobs:
+      job.category = store.category_of(job.jid) if store else ""
     self.setup_job_columns()
     pattern = self.job_filter.casefold()
-    visible_jobs = [job for job in all_jobs if (not self.problems_only or job_has_problems(job)) and (not pattern or pattern in " ".join(str(value or "") for value in (
+    from .categories import within
+    only = self.job_filter.strip()[4:].strip().strip("/") if pattern.startswith("cat:") else None # (cat:a/b: that category)
+    visible_jobs = [job for job in all_jobs if (not self.problems_only or job_has_problems(job)) and (
+      (not job.category if only == "-" else within(job.category, only) and (job.category or not only)) if only is not None else
+      not pattern or pattern in " ".join(str(value or "") for value in (
       job.jid, job.rec.get("JobName"), job.state, job.rec.get("User"), job.rec.get("Account"),
       job.rec.get("Partition"), job.rec.get("NodeList"), job.rec.get("WorkDir"), job.command,
-      job.rec.get("SubmitLine"), job.rec.get("ExitCode"),
+      job.rec.get("SubmitLine"), job.rec.get("ExitCode"), job.category,
     )).casefold())]
+    cluster.marked &= {job.jid for job in all_jobs} | {"group|" + job.jid.partition("_")[0] for job in all_jobs} # (gone ones)
     table.clear()
     self.mark_sort_column(table)
     ordered = sorted(visible_jobs, key=SORT_KEYS[self.sort_column], reverse=self.sort_reverse)
@@ -1671,6 +1712,10 @@ class Slurp(App):
       start = fmt_time(rec["Start"])
       in_open_array = rows and job.jid.partition("_")[0] in rows and array_task_id(job) is not None # under its row
       values = [("  " + job.jid) if in_open_array else job.jid, rec["JobName"]]
+      if job.jid in cluster.marked:
+        values[0] = Text.assemble(("● ", "bold magenta"), (values[0], "bold"))
+      if "category" in self.job_column_keys:
+        values.append(category_cell(job.category))
       if cluster.scope != "me":
         values.append(rec["User"])
       values.append(state_text(state))
@@ -1716,6 +1761,8 @@ class Slurp(App):
       status += f" · only the {len(visible_jobs)} jobs with problems (!: all)"
     if errors:
       status += f" · {errors} with output in their error file"
+    if cluster.marked:
+      status += f" · {len(cluster.marked)} marked (c: categorize, M: none)"
     cluster.summary = status + f" · updated {cluster.updated:%H:%M:%S}"
     self.refresh_status()
 
@@ -1924,6 +1971,88 @@ class Slurp(App):
       self.cluster.collapse_arrays = event.value
       self.populate()
       self.save_tabs()
+
+  # ---- categories: m marks rows, c puts the marked ones (or the row under the cursor) in a category, K the window
+  def cursor_key(self):
+    table = self.query_one("#jobs", ClickTable)
+    if not table.row_count:
+      return None
+    return str(table.coordinate_to_cell_key(Coordinate(table.cursor_row, 0)).row_key.value)
+
+  def action_mark(self):
+    """m: mark the row under the cursor (again: unmark it), then the next row"""
+    key = self.cursor_key()
+    if key is None:
+      return
+    self.cluster.marked.symmetric_difference_update({key})
+    table = self.query_one("#jobs", ClickTable)
+    row = table.cursor_row
+    self.populate()
+    table.move_cursor(row=min(row + 1, table.row_count - 1))
+
+  def action_mark_all(self):
+    """M: mark every row shown; if some are marked: none"""
+    table = self.query_one("#jobs", ClickTable)
+    if self.cluster.marked:
+      self.cluster.marked.clear()
+    else:
+      self.cluster.marked.update(str(k.value) for k in table.rows)
+    self.populate()
+
+  def category_targets(self):
+    """The jobs c works on: the marked rows (an array's row: the array), else the row under the cursor; as job ids"""
+    keys = sorted(self.cluster.marked) or ([k] if (k := self.cursor_key()) else [])
+    jids = [k.partition("|")[2] if k.startswith("group|") else k for k in keys]
+    return list(dict.fromkeys(jids))
+
+  def action_categorize(self):
+    """c in the job list: the marked rows (else the row under the cursor) in a category"""
+    jids = self.category_targets()
+    if not jids:
+      self.notify("no job here to categorize", severity="warning")
+      return
+    self.categorize_jobs(jids, {k.partition("|")[2] for k in self.cluster.marked if k.startswith("group|")})
+
+  def categorize_jobs(self, jids, arrays=(), after=None):
+    """Ask for the category of the jobs (ids; arrays: those that are whole arrays), then put them in it"""
+    from .screens.categories import CategorizeScreen, change_categories
+    cluster = self.cluster
+    if cluster.categories is None:
+      self.notify("the categories are not read yet (they come with the job list)", severity="warning")
+      return
+    names = {}
+    for jid in jids:
+      job = cluster.jobs.get(jid) or next((j for j in cluster.jobs.values() if j.jid.partition("_")[0] == jid), None)
+      if job is not None:
+        names[jid] = job.rec.get("JobName") or ""
+    shown = ", ".join(f"{j} (array)" if j in arrays else j for j in jids[:6]) + (" …" if len(jids) > 6 else "")
+    describe = f"{'job' if len(jids) == 1 else f'{len(jids)} jobs'}: {shown}"
+    def answered(result):
+      if not result:
+        return
+      what, path = result
+      def done(store, _):
+        cluster.marked.clear()
+        self.populate()
+        if after is not None:
+          after()
+        n = f"{len(jids)} job{'s' if len(jids) != 1 else ''}"
+        self.notify(f"{n} put in {path}" if what == "assign" else f"{n} taken out of their category", title=cluster.name)
+      fn = (lambda st: st.assign(jids, path, names)) if what == "assign" else (lambda st: st.unassign(jids))
+      change_categories(self, cluster, fn, done, "categorizing jobs")
+    self.push_screen(CategorizeScreen(cluster.categories, jids, describe), answered)
+
+  def action_categories(self):
+    from .screens.categories import CategoriesScreen
+    if self.cluster.categories is None:
+      self.notify("the categories are read with the job list: load it first (r)", severity="warning")
+      return
+    self.open_view("categories", CategoriesScreen, key="categories")
+
+  @on(Button.Pressed, "#categories")
+  def categories_pressed(self, event):
+    event.stop()
+    self.action_categories()
 
   def action_toggle_collapse(self):
     self.query_one("#collapse-arrays", Checkbox).value = not self.cluster.collapse_arrays

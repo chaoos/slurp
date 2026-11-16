@@ -29,7 +29,12 @@ Your queued and running jobs and those that ended recently, of the active tab's 
   next to it whose jobs (yours, an account's, all your accounts').
 - **Toolbar:** Shell (`t`, in slurp or from your own terminal), Drive (`F`, your login directory on this machine or
   yours), Web (`W`, this slurp in your browser from anywhere, through a link), Interactive job (`i`), Cluster info (`C`),
-  Quota (`Q`), Scratch (`X`, old files the purge would take).
+  Quota (`Q`), Scratch (`X`, old files the purge would take), Categories (`K`).
+- **Categories**, like folders (`project X/production runs`): `m` marks a row (again: unmarks it; `M`: all or none),
+  `c` puts the marked jobs (or the one under the cursor) in a category, an existing one or a new one. The
+  **Category** column shows it (sort by it with a click); `/` with `cat:project X` lists only that category
+  (`cat:-`: the jobs in none). The
+  Categories window (`K`) has the tree, the numbers of each (node hours, …) and its jobs, also old ones.
 - `n` writes a new job script from a template; `!` shows only the jobs with problems; `/` filters by any text.
 """),
   "JobScreen": ("Job window", """
@@ -178,6 +183,32 @@ A web link through Cloudflare has only its https address (no password): Revoke e
 computer** (slurp in your browser) hands it to the browser, which starts the helper; **Copy helper link** for Win+R
 (from a terminal). The helper asks for the password, then maps the drive, opens the web view or a terminal, and keeps
 it in its tray icon. **Set up the helper…** sets it up once on your computer.
+"""),
+  "CategoriesScreen": ("Categories", """
+Your jobs in categories, like folders (`project X/production runs`): the tree on the left (with how many jobs each
+has, the ones in the categories in it counted too), and for the one selected its numbers and its jobs.
+
+- **Numbers:** jobs (arrays once, with their tasks), by state, how many of those that ended completed; node, CPU
+  and GPU hours (from Slurm's accounting: nodes, CPUs, GPUs times run time); from the first submit to the last end;
+  partitions, accounts. Slurm is asked for the jobs themselves (`sacct -j`), so old jobs count too, as long as its
+  accounting keeps them.
+- **Jobs:** a click (Enter) opens a job (an array: its window). **Categorize…** (`c`) puts it in a category,
+  **Take job out** (`x`) takes it out of its category.
+- **not categorized** (at the end of the tree): the jobs of the job list (queued, and those finished since …) that
+  are in no category, with their numbers; `c` sorts them in.
+- **New** (`n`, in the category selected), **Rename** (`e`: another path moves it, with all it has), **Delete**
+  (`Del`: its jobs go to the category it is in). **In the job list** (`l`) filters the job list to the category
+  (`cat:` in the filter). **Reload** (`r`) reads the categories and asks Slurm again.
+- They are kept on the cluster (`~/.config/slurp/categories.json` in your home there), per Slurm cluster: slurp on
+  your own machine and slurp on the login node see the same.
+"""),
+  "CategorizeScreen": ("Categorize", """
+Put the jobs in a category: pick one in the tree, or type a new one (`a/b` makes b in a, and a if it is new).
+An array goes in as a whole, with all its tasks. **Take out of its category** leaves them in none.
+"""),
+  "NameScreen": ("Category name", """
+The name of a category: `a/b` is b in the category a (made too, if it is new). Renaming to another path moves it
+with all it has; into a category that exists, the two are merged.
 """),
   "AboutScreen": ("About slurp", """
 slurp in general (how it works, where to find what), its version (and the commit it runs from), and the machine it

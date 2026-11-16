@@ -6,6 +6,15 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+
+- Categories of jobs, like folders (`project X/production runs`): mark jobs
+  in the job list (`m`), put them in a category (`c`, a new one is made); a
+  Category column, `cat:` in the filter; the Categories window (`K`): the
+  tree, each one's numbers (jobs by state, node, CPU and GPU hours, when,
+  where) and its jobs, also old ones; new, rename/move, delete; "not
+  categorized" (the jobs of the job list in none, `cat:-` in the filter). Kept
+  on the cluster, per Slurm cluster.
+
 - Web links through Cloudflare: a quick tunnel (cloudflared, no account; slurp
   asks, then downloads it once, and the link window shows downloading and
   installing it) gives the web view a public https address that opens in any
