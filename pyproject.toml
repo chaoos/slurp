@@ -39,7 +39,7 @@ links = ["asyncssh"]                    # shells and drives from your own termin
 hdf5 = ["h5py", "numpy"]                # the HDF5 view; without it slurp shows `h5dump -H`
 web = ["textual-serve", "textual-web"]  # slurp --serve, and a public link to the app
 all = ["slurp[links,hdf5,web]"]
-dev = ["pytest>=8"]                    # with all: pip install -e ".[all,dev]"
+dev = ["pytest>=8", "ruff", "pre-commit"]  # with all: pip install -e ".[all,dev]"
 
 [project.scripts]
 slurp = "slurp.cli:main"
@@ -62,4 +62,17 @@ testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers"]
 markers = [
     "lab: needs the lab (a local sshd with a fake Slurm, see tests/lab); skipped without sshd unless SLURP_REQUIRE_LAB=1",
+]
+
+[tool.ruff]
+target-version = "py311"
+indent-width = 2     # slurp's style; ruff check only, no formatter (it would rewrite the compact one-line forms)
+line-length = 160
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "W6"]
+ignore = [
+    "E701", "E702",  # one-line bodies (`try: x`) and `a; b`: the compact style of the code
+    "E731",          # small lambdas bound to a name
+    "E741",          # l and I as names
 ]

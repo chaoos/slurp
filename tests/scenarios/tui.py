@@ -400,7 +400,7 @@ async def t_checks_ui(app, pilot):
   check("then the environment: the setup replayed (the module load fails here: E04), ls checked with ldd",
         ok and "/bin/ls" in (sc.ctx.replay or {}).get("libs", {}) and "checking the environment" not in str(sc.query_one("#sc-findings").query_one(".fv-summary").render()),
         (ids, sc.ctx.replay if sc.ctx else None))
-  open(path, "a").write("#comment\n"); 
+  open(path, "a").write("#comment\n");
   ok = await until(pilot, lambda: "#comment" in sc.text, 10)
   check("a change of the file is checked again by itself", ok)
   await pilot.press("escape"); await pilot.pause(0.3)

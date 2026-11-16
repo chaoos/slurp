@@ -127,7 +127,7 @@ async def browser():
       check("the browser takes over: slurp drawn in it", ok and c.wait(r"taken over by Python|taken over by .*web", 10), c.text())
       ok = await collect(10, GRUVBOX)
       check("the browser being active, slurp switches to the browser's theme (gruvbox)", ok)
-      c.raw = b"" 
+      c.raw = b""
       await ws.send_str(json.dumps(["ping", "x"]))
       pong = False
       end = time.time() + 5
