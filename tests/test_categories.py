@@ -1,6 +1,6 @@
 """The model of the categories (slurp/categories.py): paths, jobs and arrays, rename/move, delete, the file's data,
 the numbers of a category; and the file itself (read, change, a broken one is not overwritten), isolated"""
-import json, os, sys, tempfile
+import json, os
 from slurp import categories as c
 
 

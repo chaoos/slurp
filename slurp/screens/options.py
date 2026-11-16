@@ -1,6 +1,5 @@
 """Options (F3): the settings slurp keeps in config.json, to see and change"""
 
-from rich.text import Text
 from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll

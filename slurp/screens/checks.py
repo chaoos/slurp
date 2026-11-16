@@ -5,10 +5,11 @@ from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Collapsible, Label, MarkdownViewer, Static, TextArea
+from textual.widgets import Button, Collapsible, MarkdownViewer, Static
 
 from .. import checks
-from ..screens.base import SplitScreen, crumb_title
+from .base import SplitScreen
+from ..widgets import crumb_title
 
 def code(text, language):
   """Syntax-highlighted code (plain text if highlighting is not available)"""

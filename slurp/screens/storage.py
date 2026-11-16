@@ -1,7 +1,6 @@
 """The quota window, and the scratch window: the oldest files of the user in $SCRATCH, which the cluster may delete
 after some time without asking, and touching them"""
 
-import os
 import re
 import time
 from datetime import datetime
@@ -11,18 +10,15 @@ from rich.progress_bar import ProgressBar as RichProgressBar
 from rich.table import Table
 from rich.text import Text
 from textual import on
-from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
 from textual.coordinate import Coordinate
-from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input, Label, Select, Static
 
-from ..state import *
-from ..remote import *
-from ..storage import *
-from ..widgets import *
-from .base import *
+from ..remote import in_background
+from ..widgets import ClickTable
+from .base import SplitScreen
+from ..storage import oldest_files, quota_info, scratch_dir, touch_files
 from .dialogs import ConfirmScreen
 
 def not_connected(cluster):

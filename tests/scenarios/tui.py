@@ -2289,7 +2289,6 @@ async def t_links(app, pilot):
       r = subprocess.run(["sshfs", "-o", opts, f"slurp@localhost:{home}", mnt], input=(link.password + "\n").encode(),
                          stdout=subprocess.DEVNULL, stderr=err, timeout=30)
     return r.returncode, open(errf).read()
-  import functools
   loop = asyncio.get_running_loop()
   code, err = await loop.run_in_executor(None, mount)
   listing = await loop.run_in_executor(None, lambda: sorted(os.listdir(mnt)) if code == 0 else [])

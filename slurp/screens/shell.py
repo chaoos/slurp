@@ -1,58 +1,18 @@
 """A shell in a subtab"""
 
-import argparse
-import asyncio
-import codecs
-import collections
-import fcntl
-import functools
-import json
-import logging
-import os
-import re
-import select
-import shlex
-import shutil
-import struct
-import subprocess
-import sys
-import tempfile
-import termios
-import threading
-import time
-from dataclasses import dataclass, field
-from datetime import datetime
 
-import humanize
-from rich.color import Color
-from rich.progress_bar import ProgressBar as RichProgressBar
-from rich.segment import Segment
-from rich.style import Style
-from rich.table import Table
 from rich.text import Text
-from textual import events, on, work
-from textual.app import App, ComposeResult, SuspendNotSupported
+from textual import on
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.coordinate import Coordinate
-from textual.message import Message
-from textual.reactive import reactive
-from textual.screen import ModalScreen, Screen
-from textual.strip import Strip
-from textual.widget import Widget
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, MarkdownViewer, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
-from textual.widgets.option_list import Option
-from textual.widgets.text_area import Selection
-from textual.suggester import SuggestFromList
+from textual.screen import ModalScreen
+from textual.widgets import Button, Static
 from textual.widgets import Markdown
-from textual.worker import get_current_worker
 
-from .. import slurm as sl
 
-from ..state import *
-from ..widgets import *
-from ..terminal import *
-from ..screens.base import *
+from ..terminal import TerminalSession, TerminalView
+from .base import SplitScreen
 
 def shell_kind(session):
   """What a terminal runs: login (the SSH login of a tab), node (a step in a job), gdb, cluster or local"""

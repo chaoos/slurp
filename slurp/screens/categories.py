@@ -12,10 +12,9 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static, Tree
 
 from .. import categories as cat
-from ..state import *
-from ..remote import *
-from ..jobs import *
-from ..widgets import *
+from ..remote import in_background
+from ..jobs import fmt_time, is_time, load_jobs
+from ..widgets import ClickTable, state_text
 from .base import SplitScreen
 from .dialogs import ConfirmScreen
 
@@ -518,7 +517,7 @@ class CategoriesScreen(SplitScreen):
     def made(path):
       if path:
         change_categories(self.app, self.cluster, ["add", path], lambda st, p: self.changed(p), "making a category")
-    self.app.push_screen(NameScreen(f"New category" + (f" in {base}" if base else ""), base + "/" if base else "",
+    self.app.push_screen(NameScreen("New category" + (f" in {base}" if base else ""), base + "/" if base else "",
                                     "a/b: b in the category a (made too, if it is new)", "Make it"), made)
 
   @on(Button.Pressed, "#cat-rename")

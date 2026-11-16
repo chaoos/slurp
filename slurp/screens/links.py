@@ -745,7 +745,6 @@ class DriveScreen(ModalScreen):
 
   def compose(self) -> ComposeResult:
     import socket
-    from .. import mounts
     drive = self.app.drive_of(self.cluster)
     with Vertical(id="drive-dialog"):
       yield Static(f"Drive: {self.cluster.name} {self.home}", id="drive-title", markup=False)
@@ -812,7 +811,6 @@ class DriveScreen(ModalScreen):
 
 def drive_state_text(drive):
   """The state of a drive on this machine in words"""
-  import humanize
   now = time.time()
   if drive.state == "mounted":
     since = f" since {datetime.fromtimestamp(drive.mounted_at):%H:%M:%S}" if drive.mounted_at else ""

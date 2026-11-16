@@ -9,13 +9,14 @@ from rich.text import Text
 from textual import on
 from textual.app import SuspendNotSupported
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Static, TextArea
 from textual.worker import get_current_worker
 
 from .. import checks
-from ..remote import cluster_work, conn, fs_read, fs_stat, in_background, run_cmd, tab_name
-from ..screens.base import SplitScreen, crumb_title
+from ..remote import cluster_work, conn, fs_read, fs_stat, in_background, run_cmd
+from .base import SplitScreen
+from ..widgets import crumb_title
 from ..screens.dialogs import ConfirmScreen
 from ..screens.files import register_file_view
 from .checks import FindingsView
@@ -151,7 +152,6 @@ class ScriptScreen(SplitScreen):
     unsaved = " of the edited, unsaved version" if self.unsaved() else ""
     view.show(findings, (f"(checks{unsaved}; checking the environment on the login node …)" if environment_follows
                          else f"(checks{unsaved})" if unsaved else ""))
-    c = checks.counts(findings)
     self.show_status()
 
   def show_status(self):

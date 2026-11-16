@@ -1,56 +1,26 @@
 """The connection window of a tab"""
 
-import argparse
-import asyncio
-import codecs
-import collections
-import fcntl
-import functools
-import json
-import logging
 import os
 import re
-import select
 import shlex
-import shutil
-import struct
 import subprocess
-import sys
-import tempfile
-import termios
-import threading
 import time
-from dataclasses import dataclass, field
 from datetime import datetime
 
 import humanize
-from rich.color import Color
-from rich.progress_bar import ProgressBar as RichProgressBar
-from rich.segment import Segment
-from rich.style import Style
 from rich.table import Table
 from rich.text import Text
-from textual import events, on, work
-from textual.app import App, ComposeResult, SuspendNotSupported
+from textual import on
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.coordinate import Coordinate
-from textual.message import Message
-from textual.reactive import reactive
-from textual.screen import ModalScreen, Screen
-from textual.strip import Strip
-from textual.widget import Widget
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, MarkdownViewer, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
-from textual.widgets.option_list import Option
-from textual.widgets.text_area import Selection
-from textual.suggester import SuggestFromList
-from textual.worker import get_current_worker
+from textual.screen import ModalScreen
+from textual.widgets import Button, DataTable, Static
 
-from .. import slurm as sl
 
-from ..state import *
-from ..remote import *
-from ..widgets import *
+from .. import remote # (remote.PING_*: the settings of the heartbeat, read where they are set)
+from ..remote import connection_health, HEALTH_STYLES, in_background
+from ..widgets import ClickTable, open_clicked_url, url_text
 from .. import share
 from .links import LinkScreen, link_state, drive_state_text
 from .dialogs import ConfirmScreen
@@ -361,9 +331,9 @@ class ConnectionScreen(ModalScreen):
     now = time.monotonic()
     if c.state == "ready":
       waiting = c.responding()
-      if waiting is not None and waiting > PING_SLOW:
+      if waiting is not None and waiting > remote.PING_SLOW:
         return Text(f"connected, but no answer to the heartbeat for {waiting:.0f} s "
-                    f"(given up after {PING_DEAD} s)", style="bold red")
+                    f"(given up after {remote.PING_DEAD} s)", style="bold red")
       return Text(f"connected since {c.ready_at:%Y-%m-%d %H:%M:%S} ({ago((datetime.now() - c.ready_at).total_seconds())})",
                   style="bold green")
     if c.state == "connecting":
@@ -447,9 +417,9 @@ class ConnectionScreen(ModalScreen):
       grid.add_row("Waiting", f"{len(c.pending)} commands" + (f", last answer {ago(now - c.last_answer)} ago" if c.last_answer else ""))
       if c.latencies:
         grid.add_row("Heartbeat", f"round trip {c.latencies[-1] * 1000:.0f} ms (average {sum(c.latencies) / len(c.latencies) * 1000:.0f} ms, "
-                     f"max {max(c.latencies) * 1000:.0f} ms of {len(c.latencies)}), every {PING_INTERVAL} s when idle")
+                     f"max {max(c.latencies) * 1000:.0f} ms of {len(c.latencies)}), every {remote.PING_INTERVAL} s when idle")
       else:
-        grid.add_row("Heartbeat", f"none yet (sent after {PING_INTERVAL} s without an answer from the cluster)")
+        grid.add_row("Heartbeat", f"none yet (sent after {remote.PING_INTERVAL} s without an answer from the cluster)")
       section("SSH process")
       proc = c.proc
       if proc is None:

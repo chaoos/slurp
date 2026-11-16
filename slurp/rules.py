@@ -8,8 +8,7 @@ import re
 import shlex
 
 from .checks import (rule, Finding, ERROR, WARNING, INFO, RULES, parse_time, time_text, parse_mem, mem_text, to_int,
-                     gres_gpus, known_options, output_pattern, referenced_paths, strip_comment, LONG_OPTIONS,
-                     submit_options, is_placeholder)
+                     known_options, output_pattern, referenced_paths, strip_comment, submit_options, is_placeholder)
 
 def F(rule_id, evidence, line=None, severity="", fix="", snippet=""):
   return Finding(RULES[rule_id], evidence, line, severity, fix, snippet)
@@ -453,7 +452,6 @@ def b10(ctx):
   job = ctx.job
   if not job.running:
     return
-  from .jobs import is_time
   steps = [s for s in job.steps if s["JobID"].partition(".")[2].isdigit()]
   submit = job.rec.get("SubmitLine") or ""
   holds = "sleep infinity" in (job.command or "") or submit.startswith("salloc") or "sleep infinity" in (ctx.script.text if ctx.script else "")
@@ -1170,7 +1168,7 @@ def u06(ctx):
 # ===========================================================================
 # G: good practice
 
-from .checks import relative_uses, alternative_bases, is_relative_path, LAUNCHERS, launcher_options # noqa: E402
+from .checks import relative_uses, alternative_bases, launcher_options # noqa: E402
 
 SETUP_PATTERN = (r"(^|[;\s])(source|\.)\s+\S*activate|conda\s+activate|mamba\s+activate|uenv\s+(start|run|view)|"
                  r"spack\s+(env\s+activate|load)|(^|[;\s])(source|\.)\s+\S+")

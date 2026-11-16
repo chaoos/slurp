@@ -1,7 +1,6 @@
 """The guides (F1): how to use a Slurm cluster well, with this cluster's numbers. Links: rule:R01 opens the rule in
 the catalogue, #anchor goes to a heading of the guides."""
 
-import re
 
 from . import checks
 

@@ -1,7 +1,6 @@
 """Placement of a running job: which cores, NUMA domains and GPUs its tasks and threads use, and the problems
 (shared cores, threads crossing NUMA domains, more threads than cores, GPUs of another NUMA domain)."""
 
-import re
 from dataclasses import dataclass, field
 
 def cpu_list(text):

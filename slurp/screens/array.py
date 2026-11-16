@@ -10,11 +10,18 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, DataTable, Static, TabbedContent, TabPane
 
-from ..state import *
-from ..remote import *
-from ..jobs import *
-from ..widgets import *
-from .base import *
+import shlex
+from rich.progress_bar import ProgressBar as RichProgressBar
+from textual.coordinate import Coordinate
+from .. import slurm as sl
+from ..state import log
+from ..remote import in_background, run_cmd
+from ..jobs import (
+  annotate, array_overview, compress_array_ids, duration_text, fmt_time, is_time, Job, load_jobs, progress_for_job,
+  task_group
+)
+from ..widgets import ClickTable, state_text
+from .base import SplitScreen
 from .dialogs import ConfirmScreen, copy_text
 from .job import JobScreen
 

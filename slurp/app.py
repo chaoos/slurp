@@ -2,78 +2,58 @@
 
 import argparse
 import asyncio
-import codecs
-import collections
-import fcntl
-import functools
-import json
-import logging
 import os
 import re
-import select
-import shlex
-import shutil
-import struct
-import subprocess
-import sys
-import tempfile
-import termios
 import threading
 import time
-from dataclasses import dataclass, field
 from datetime import datetime
 
-import humanize
-from rich.color import Color
 from rich.progress_bar import ProgressBar as RichProgressBar
-from rich.segment import Segment
-from rich.style import Style
-from rich.table import Table
 from rich.text import Text
-from textual import events, on, work
-from textual.app import App, ComposeResult, SuspendNotSupported
+from textual import events, on
+from textual.app import App
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal
 from textual.coordinate import Coordinate
-from textual.message import Message
 from textual.reactive import reactive
-from textual.screen import ModalScreen, Screen
-from textual.strip import Strip
-from textual.widget import Widget
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, MarkdownViewer, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
-from textual.widgets.option_list import Option
-from textual.widgets.text_area import Selection
-from textual.suggester import SuggestFromList
+from textual.screen import ModalScreen
+from textual.widgets import (
+  Button, Checkbox, DataTable, Input, Select, Static, TextArea
+)
 from textual.worker import get_current_worker
 
 from . import slurm as sl
 
-from .state import *
-from .remote import *
-from .jobs import *
-from .details import *
-from .widgets import *
-from .terminal import *
-from .screens.dialogs import *
-from .screens.base import *
-from .screens.files import *
-from .screens.hdf5 import *
-from .screens.core import *
-from .screens.shell import *
-from .screens.job import *
-from .screens.main import *
-from .screens.connection import *
-from .screens.clusterinfo import *
-from .screens.array import *
-from .storage import *
-from .screens.storage import *
+from .state import ClusterSession, collector, is_local_destination, log, View
+from .remote import (
+  connection_health, CURRENT, HEALTH_STYLES, in_background, RemoteSSH, run, run_cmd, SLURM_ENV,
+  start_worker
+)
+from .jobs import (
+  annotate, array_task_id, compress_array_ids, duration_text, fmt_time, is_time, load_jobs, pace_eta,
+  progress_for_job, slurm_accounts
+)
+from .details import current_memory_usage, job_vars, MEMORY, record_memory
+from .widgets import ClickTable, err_text, SPINNING, STATE_STYLES, state_text, url_text
+from .terminal import SWITCH_KEY, TerminalSession, TerminalView
+from .screens.dialogs import ConfirmScreen, InteractiveJobScreen
+from .screens.base import SplitScreen
+from .screens.files import open_path
+from .screens import hdf5, core # noqa: F401 (they register the views of HDF5 files and core dumps, in this order)
+from .screens.shell import TerminalHelpScreen, TerminalScreen
+from .screens.job import JobScreen
+from .screens.main import COLUMNS, MainScreen, SINCE_CHOICES, SORT_KEYS
+from .screens.connection import ConnectionScreen
+from .screens.clusterinfo import ClusterInfoScreen
+from .screens.array import ArrayScreen
+from .screens.storage import QuotaScreen, ScratchScreen
 from . import remote, state
 from .config import load_config, update_config
 from .share import ShareManager, SFTP_SERVERS, MAX_FAILURES, available as share_available
 from .screens.links import ShellChoiceScreen, LinkSetupScreen, LinkScreen, DriveScreen
 from .screens.script import ScriptScreen # (registers the view of batch scripts)
 from . import mounts
-from .checks import check_jobs, counts as checks_counts, SEVERITY_ICON, SEVERITY_STYLE, ERROR, WARNING, INFO
+from .checks import check_jobs, counts as checks_counts, SEVERITY_ICON, SEVERITY_STYLE, ERROR, WARNING
 
 LOGIN_CHECK_EVERY = 300 # seconds between the checks of your processes on the login nodes (B09)
 
@@ -775,7 +755,7 @@ class Slurp(App):
       return Text(f"SSH {cluster.destination}: closed · select the tab to log in", style="yellow")
     if c.ready:
       waiting = c.responding()
-      if waiting is not None and waiting > PING_SLOW:
+      if waiting is not None and waiting > remote.PING_SLOW:
         return Text(f"{self.spinner()} SSH {c.identity}: no answer for {waiting:.0f} s", style="bold red")
       latency = f" · {c.latency * 1000:.0f} ms" if c.latency is not None else ""
       level, words = connection_health(c)
@@ -807,7 +787,7 @@ class Slurp(App):
     c = cluster.connection
     label = Text(cluster.name)
     if cluster.destination:
-      mark = "●" if c and c.ready and (c.responding() or 0) <= PING_SLOW else "○" if c is None or c.state in ("new", "closed") else "◌"
+      mark = "●" if c and c.ready and (c.responding() or 0) <= remote.PING_SLOW else "○" if c is None or c.state in ("new", "closed") else "◌"
       level = connection_health(c)[0] if c is not None and c.state != "new" else None
       label.append(" " + mark, style=HEALTH_STYLES[level] if level else "dim")
     if cluster.loader is not None:
@@ -1515,7 +1495,7 @@ class Slurp(App):
 
   def check_login_nodes(self):
     """B09: your processes on the login nodes that use a lot of CPU for long (said once per process)"""
-    from .checks import login_hogs, RULES
+    from .checks import login_hogs
     if "B09" in set((load_config().get("checks_muted") or [])):
       return
     for cluster in self.clusters:

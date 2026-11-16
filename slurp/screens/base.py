@@ -1,58 +1,16 @@
 """The frame of every window: tabs, subtabs, the window, the login pane, the footer"""
 
-import argparse
-import asyncio
-import codecs
-import collections
-import fcntl
-import functools
-import json
-import logging
-import os
-import re
-import select
-import shlex
-import shutil
-import struct
-import subprocess
-import sys
-import tempfile
-import termios
-import threading
-import time
-from dataclasses import dataclass, field
-from datetime import datetime
 
-import humanize
-from rich.color import Color
-from rich.progress_bar import ProgressBar as RichProgressBar
-from rich.segment import Segment
-from rich.style import Style
-from rich.table import Table
-from rich.text import Text
-from textual import events, on, work
-from textual.app import App, ComposeResult, SuspendNotSupported
-from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.coordinate import Coordinate
-from textual.message import Message
-from textual.reactive import reactive
-from textual.screen import ModalScreen, Screen
-from textual.strip import Strip
-from textual.widget import Widget
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, MarkdownViewer, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
-from textual.widgets.option_list import Option
-from textual.widgets.text_area import Selection
-from textual.suggester import SuggestFromList
-from textual.worker import get_current_worker
+from textual import on
+from textual.app import ComposeResult
+from textual.containers import Horizontal, Vertical
+from textual.screen import Screen
+from textual.widgets import Button, Footer, Header, Static
 
-from .. import slurm as sl
 
-from ..state import *
-from ..remote import *
-from ..widgets import *
-from ..terminal import *
-from ..screens.dialogs import *
+from ..widgets import ConnectionStatus
+from ..terminal import Splitter, TerminalPane
+from .dialogs import AddClusterScreen
 
 class SplitScreen(Screen):
   """Window with its content on the left and, while a shell is open, the terminal pane on the right"""

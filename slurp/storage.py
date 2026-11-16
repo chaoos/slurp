@@ -1,13 +1,10 @@
 """Storage of the user on the cluster: quotas of the filesystems, and the oldest files in the scratch directory (which
 the cluster may delete after some time without asking)"""
 
-import os
 import re
-import shlex
 from datetime import datetime
 
-from .state import *
-from .remote import *
+from .remote import conn, run, run_cmd, run_many
 from .jobs import current_user
 
 STORAGE_VARS = ("SCRATCH", "HOME", "PROJECT", "STORE", "WORK")

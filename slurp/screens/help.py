@@ -1,6 +1,5 @@
 """The ? of every window: what the view shows, what it can do, its keys (from its live bindings)"""
 
-from rich.text import Text
 from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -414,7 +413,13 @@ def _run(argv, cwd=None):
 
 def about_facts(app):
   """What the About window shows (blocking: git, cloudflared and the session holder are asked; run it in a worker)"""
-  import getpass, importlib.metadata, os, platform, socket, sys, time
+  import getpass
+  import importlib.metadata
+  import os
+  import platform
+  import socket
+  import sys
+  import time
   from .. import VERSION_TEXT, __version__, cloudflare, holder
   from ..config import config_path
   pkg = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

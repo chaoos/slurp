@@ -1,56 +1,19 @@
 """What the job window shows besides the accounting: files, core dumps, commands on the nodes, memory"""
 
-import argparse
-import asyncio
-import codecs
-import collections
-import fcntl
-import functools
-import json
-import logging
 import os
 import re
-import select
 import shlex
-import shutil
-import struct
-import subprocess
-import sys
-import tempfile
-import termios
-import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 
 import humanize
-from rich.color import Color
-from rich.progress_bar import ProgressBar as RichProgressBar
-from rich.segment import Segment
-from rich.style import Style
-from rich.table import Table
-from rich.text import Text
-from textual import events, on, work
-from textual.app import App, ComposeResult, SuspendNotSupported
-from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.coordinate import Coordinate
-from textual.message import Message
-from textual.reactive import reactive
-from textual.screen import ModalScreen, Screen
-from textual.strip import Strip
-from textual.widget import Widget
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, MarkdownViewer, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
-from textual.widgets.option_list import Option
-from textual.widgets.text_area import Selection
-from textual.suggester import SuggestFromList
-from textual.worker import get_current_worker
 
 from . import slurm as sl
 
-from .state import *
-from .remote import *
-from .jobs import *
+from .state import log, OLD_STEP_NAMES, STEP_NAME
+from .remote import conn, fs_exists, fs_expanduser, fs_isdir, fs_read, fs_scandir, run, run_cmd, tab_name
+from .jobs import batch_script, output_progress, parsable, progress_path, progress_state, record_progress
 
 # ---------------------------------------------------------------------------
 # job details

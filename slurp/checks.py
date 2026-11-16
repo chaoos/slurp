@@ -314,7 +314,7 @@ def submit_options(submit_line):
   if not words or os.path.basename(words[0]) != "sbatch":
     return {}, None
   opts, script = {}, None
-  i, rest = 1, words[1:]
+  i = 1
   parsed = []
   while i < len(words):
     w = words[i]
@@ -587,7 +587,7 @@ class PathInfo:
 
 def run_probe(requests):
   """{"kind:path": PathInfo} (worker)"""
-  from .remote import run_cmd, conn
+  from .remote import run_cmd
   requests = list(dict.fromkeys(requests))
   out = {}
   for i in range(0, len(requests), 200):
@@ -1171,11 +1171,11 @@ def rules_markdown():
          "failed jobs.",
          ""]
   for cat, name in CATEGORIES.items():
-    rules = [r for r in RULES.values() if r.category == cat]
-    if not rules:
+    in_category = [r for r in RULES.values() if r.category == cat]
+    if not in_category:
       continue
     out += [f"## {cat} · {name}", ""]
-    for r in rules:
+    for r in in_category:
       link = lambda text: re.sub(r"\b([SRBPQENU]\d\d)\b", lambda m: f"[{m.group(1)}](rule:{m.group(1)})"
                                  if m.group(1) in RULES else m.group(1), text)
       out += [f"### {r.heading}", "",
@@ -1192,7 +1192,7 @@ NEEDS_TEXT = {"script": "the script", "job": "the job record", "probe": "files o
               "live": "the running job (Placement)", "list": "the job list", "login": "your processes on the login node",
               "facts": "your login files"}
 
-from . import rules # noqa: E402 (registers the rules)
+from . import rules # noqa: E402, F401 (it registers the rules: imported for that)
 
 # ---------------------------------------------------------------------------
 # Explain: what Slurm makes of each #SBATCH line

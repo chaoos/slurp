@@ -1,6 +1,5 @@
 """Job script templates: commented scripts for the usual kinds of jobs, with the cluster's real numbers"""
 
-import math
 
 KINDS = [
   ("serial", "Serial: one program on one core"),

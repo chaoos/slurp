@@ -1,6 +1,6 @@
 """A web link through the lab relay: a real ssh -N -L with the password reaches the web view (a test web server here);
 forwarding anywhere else and a shell are refused. Usage: SLURP_TEST_WORK=<lab dir> python tests/scenarios/weblink.py (the lab sshd runs)"""
-import asyncio, os, shlex, socket, subprocess, sys, time
+import asyncio, os, shlex, socket
 src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "share.py")).read() # (its setup: the lab, check, the link manager)
 exec(src.split("async def main():")[0])
 from aiohttp import web

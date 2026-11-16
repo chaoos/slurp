@@ -1,62 +1,38 @@
 """The job window"""
 
-import argparse
-import asyncio
-import codecs
-import collections
-import fcntl
-import functools
-import json
-import logging
 import os
-import re
-import select
-import shlex
-import shutil
-import struct
 import subprocess
-import sys
-import tempfile
-import termios
-import threading
 import time
-from dataclasses import dataclass, field
 from datetime import datetime
 
 import humanize
-from rich.color import Color
-from rich.progress_bar import ProgressBar as RichProgressBar
-from rich.segment import Segment
-from rich.style import Style
 from rich.table import Table
 from rich.text import Text
-from textual import events, on, work
-from textual.app import App, ComposeResult, SuspendNotSupported
+from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.coordinate import Coordinate
-from textual.message import Message
-from textual.reactive import reactive
-from textual.screen import ModalScreen, Screen
-from textual.strip import Strip
-from textual.widget import Widget
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, MarkdownViewer, OptionList, ProgressBar, RadioButton, RadioSet, Select, Static, Switch, TextArea, Tree
+from textual.widgets import Button, DataTable, Input, Label, OptionList, ProgressBar, Select, Static
 from textual.widgets.option_list import Option
-from textual.widgets.text_area import Selection
-from textual.suggester import SuggestFromList
 from textual.worker import get_current_worker
 
 from .. import slurm as sl
 
-from ..state import *
-from ..remote import *
-from ..jobs import *
-from ..details import *
-from ..widgets import *
-from ..terminal import *
-from ..screens.dialogs import *
-from ..screens.base import *
-from ..screens.files import *
+from ..state import PRESETS, STEP_NAME
+from ..remote import cluster_work, in_background, run, run_cmd, SLURM_ENV, start_worker, tab_name
+from ..jobs import (
+  annotate, array_ids_not_running_or_completed, array_task_id, array_task_states, compress_array_ids, eta_text,
+  expand_array_spec, FAILED_JOB_STATES, guess_array_progress, is_time, load_jobs, original_array_spec,
+  original_submission, output_progress, PROGRESS, progress_for_job, progress_path, progress_pattern, progress_state,
+  rate_text, record_progress, restart_args, set_array_pattern, set_progress_file, with_array_spec
+)
+from ..details import (
+  current_memory_usage, job_vars, load_details, MEMORY_EVERY, memory_watch, peak_job_memory, record_memory,
+  run_on_nodes, sacct_all
+)
+from ..widgets import ClickTable, state_text, TimePlot
+from .dialogs import ConfirmScreen, RestartScreen, RunArrayScreen
+from .base import SplitScreen
+from .files import DirScreen, FileScreen, open_path
 from .links import ShellChoiceScreen
 from .checks import FindingsView
 from .. import checks

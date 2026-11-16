@@ -1,5 +1,4 @@
 """The rule corpus: scripts with the findings they must (and must not) give, without a cluster (facts made up)"""
-import os, sys
 from slurp import checks as c
 from slurp.checks import Facts, Partition, PathInfo
 

@@ -4,7 +4,6 @@ plain assignments) and look at the programs it runs: their shared libraries (ldd
 Only setup lines run, never the job's commands; lines with command substitutions ($(...), backticks) are skipped, so
 nothing but the module system and the sourced files runs. The result feeds rules P05, P06, E04 and B02."""
 
-import os
 import re
 import shlex
 
