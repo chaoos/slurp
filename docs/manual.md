@@ -78,7 +78,7 @@ column shows where each job is (a click on its header sorts by it), and the
 filter finds categories too: `/` with `cat:project X` lists only that category
 and the ones in it, `cat:-` the jobs in none.
 
-**Categories** (the toolbar button, or `K`) shows them as a tree, with how many
+**Categories** (in the menu, or `K`) shows them as a tree, with how many
 jobs each has. For the one selected (with the categories in it) it shows its
 numbers: jobs and array tasks, by state, and how many of those that ended
 completed; node, CPU and GPU hours (nodes, CPUs and GPUs of Slurm's
@@ -171,6 +171,13 @@ on its allocated nodes. Shells on its node and GDB sessions open as subtabs.
 ![The HDF5 view of a job's output: the groups and datasets, a dataset with its attributes and its data](images/files.svg)
 
 ## Tabs and subtabs
+
+The toolbar of the job list has **☰ Menu** (`F10`) with what slurp does for
+the tab, each with its key (cluster info, quota, old files in scratch, shells,
+the login directory and the drive, interactive job, new job script,
+categories, this slurp in your browser, the guides, the rule catalogue,
+options, about), and **Reload**, the time window of finished jobs, whose jobs
+are listed and **group arrays**.
 
 Every tab is a cluster (or this machine). Under the tabs, each tab has its
 subtabs: **Jobs** (the job list, always there), and one subtab with a `✕` for
@@ -321,15 +328,15 @@ Each tab keeps its own job list, shell, and session. Switching tabs shows the
 list as it was loaded; `r` (or **Reload**) loads it again. While a list
 loads, the old one stays visible, the footer shows the progress, and `a` (or
 the **Abort** button, which replaces **Reload** meanwhile) stops it.
-**Shell** (or `t`) opens a login shell on the cluster of the tab in a subtab. The **+** tab button adds another local or remote connection.
+**Shell on the cluster** (in the menu, or `t`) opens a login shell on the cluster of the tab in a subtab. The **+** tab button adds another local or remote connection.
 `d` opens the login directory in the directory browser. Each tab has a `✕`
 that closes it (after asking). Notifications name the tab they belong to.
 
-**Interactive job** (or `i`) shows an `sbatch` command for a job that only
+**Interactive job** (in the menu, or `i`) shows an `sbatch` command for a job that only
 holds a node (`sleep infinity`) in a bash editor, with fields for the account
 (one of yours or typed), the partition, the time limit, nodes, GPUs and the job
 name; the fields write the command, which stays editable. Once the job runs, its job
-window opens shells on its node. **Cluster info** (or `C`) shows the health
+window opens shells on its node. **Cluster info** (in the menu, or `C`) shows the health
 of the cluster (nodes down, drained, in maintenance, not responding, with
 the reasons; reservations), its occupancy (busy and idle nodes, running and
 pending jobs and why they wait) and the partitions, with its own Reload; its
@@ -355,11 +362,11 @@ machine slurp runs on, not the browser's.
 
 ## Shells and drives from your own terminal
 
-**Shell** (`t`, and `s` in the job window of a running job for its node) asks
+**Shell on the cluster** (in the menu, `t`, and `s` in the job window of a running job for its node) asks
 every time: **In slurp** (a subtab, as before) or **From your own terminal**.
 The latter makes a *link*: an `ssh` command and a password for the terminal or
 SSH client on your own machine (OpenSSH in any terminal, cmd or PowerShell,
-PuTTY, …). **Drive** (`F`) asks where your login directory goes as a drive:
+PuTTY, …). **Login directory as a drive** (in the menu, `F`) asks where your login directory goes as a drive:
 
 - **On this machine** (where slurp runs): `sshfs` through the session of the tab
   (no login), at a path you choose (default `~/mnt/<tab>`, remembered per tab
@@ -656,7 +663,7 @@ slurp instead of starting another one; slurp keeps running until you quit it
 (`q`). `--new` starts a separate one, `--no-holder` runs directly in the
 terminal as before (ending with it).
 
-**Web** (`W` in the job list) shows this same slurp in a browser, from
+**This slurp in your browser** (in the menu, `W`) shows this same slurp in a browser, from
 anywhere: it starts a web view on `127.0.0.1` (a random port and an access
 token; nothing listens before you ask) and makes a *web link* through the
 relay, like the links for shells and drives (relay, password or key, logins,
@@ -716,12 +723,11 @@ that this ends the very view you are using.
 slurp keeps a few settings in `~/.config/slurp/config.json` (or under
 `$XDG_CONFIG_HOME`): the theme (`"theme"` in a terminal, `"theme_web"` in a
 browser, which uses the terminal's until it has its own; with several views
-the theme follows the active one, and choosing a theme with the command
-palette, `Ctrl-P`, sets it for that kind of view), the
+the theme follows the active one; **Options**, `F3`, sets each), the
 open tabs with the one shown and their choices (finished since, accounts),
 the progress files chosen for jobs and the patterns for arrays. At the next
-start the tabs are back, and the tab shown connects; the others connect when
-they are selected. The dot of an SSH tab is coloured by the health of its
+start the tabs are back, and the tab shown connects; the others show
+**Connect** when they are selected. The dot of an SSH tab is coloured by the health of its
 session (green, yellow, red; grey when not connected yet).
 
 **Options** (`F3`) shows the settings and changes them: the two themes, the
@@ -735,14 +741,14 @@ checks do not report), `"link_relay"` (the relay of links), `"copy"`.
 
 ## Storage: quota and old files in scratch
 
-**Quota** (or `Q`, a subtab that loads in the background) lists your quotas, and those of your groups where they
+**Quota** (in the menu, or `Q`, a subtab that loads in the background) lists your quotas, and those of your groups where they
 use space or have a limit: `lfs quota` on each Lustre filesystem and on
 `$SCRATCH`, `$HOME`, `$PROJECT`, `$STORE`, `$WORK`, `quota` on the others,
 with space and files (inodes), used, limit and soft limit, and a bar coloured
 by how full it is. The output of a site's own `quota` command is shown too.
 
 Scratch filesystems are usually cleaned up automatically: files not used for
-some time are deleted without asking. **Scratch** (or `X`) searches your files
+some time are deleted without asking. **Old files in scratch** (in the menu, or `X`) searches your files
 in `$SCRATCH` in the background (one `find` on the cluster; it can be
 aborted) and lists the 2000 with the oldest access (or modification) time;
 those older than the given number of days (30) are red, those in its last fifth
@@ -816,7 +822,7 @@ top-left `←` button to go back.
 
 | Screen | Main controls |
 |---|---|
-| Job list | `/` search jobs (`cat:a/b`: a category); `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `!` only jobs with problems; `m` mark, `M` all/none, `c` categorize, `K` categories; `n` new job script; `W` remote web access; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
+| Job list | `F10` the menu; `/` search jobs (`cat:a/b`: a category); `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `!` only jobs with problems; `m` mark, `M` all/none, `c` categorize, `K` categories; `n` new job script; `W` remote web access; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` cluster info; `Q` quota; `X` old scratch files; `q` quit |
 | Job details | `Cancel job` / `Restart job` / `Run array` / `Array`; `r` reload; `s` shell on the node (in slurp or your own terminal); `c` categorize; Checks: `Check`, `Placement`, `Fixed copy…`, `What changed`, `Rule catalogue` |
 | Script view | `r` check (all checks, the environment too); `x` explain the `#SBATCH` lines; `e` edit in place (`Ctrl+S` save, `Esc` stop editing); buttons `Test`, `Fixed copy…`, `Submit…` |
 | Everywhere | `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue; `F3` options |

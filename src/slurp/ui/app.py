@@ -81,8 +81,10 @@ def checks_cell(findings):
 
 class Slurp(App):
   TITLE = "slurp"
+  ENABLE_COMMAND_PALETTE = False # (Textual's palette and its ⭘ in the header: the menu of the job list has what slurp does)
   CSS = """
   Button { min-width: 6; } /* (all buttons are compact: one line, as wide as their label) */
+  HeaderIcon { display: none; }
   #toolbar { height: auto; padding: 0 1; }
   #toolbar > * { margin-right: 1; }
   #reload, #scratch-search { width: 8; } /* (Reload/Search and Abort: one width, the row does not move) */
@@ -207,16 +209,18 @@ class Slurp(App):
   .tclose, .tinfo { width: 3; min-width: 3; height: 1; }
   """
   BINDINGS = [
+    Binding("f10", "menu", "Menu", priority=False),
     Binding("q", "quit", "Quit"),
     Binding("r", "reload", "Reload"),
-    Binding("t", "cluster_shell", "Shell"),
-    Binding("d", "login_dir", "Home dir"),
-    Binding("F", "cluster_drive", "Drive"),
+    # (in the menu, with their keys: not in the footer)
+    Binding("t", "cluster_shell", "Shell", show=False),
+    Binding("d", "login_dir", "Home dir", show=False),
+    Binding("F", "cluster_drive", "Drive", show=False),
     Binding("W", "web_access", "Web", show=False),
-    Binding("i", "interactive_job", "Interactive job"),
-    Binding("C", "cluster_info", "Cluster info"),
-    Binding("Q", "quota", "Quota"),
-    Binding("X", "scratch", "Old scratch files"),
+    Binding("i", "interactive_job", "Interactive job", show=False),
+    Binding("C", "cluster_info", "Cluster info", show=False),
+    Binding("Q", "quota", "Quota", show=False),
+    Binding("X", "scratch", "Old scratch files", show=False),
     Binding("a", "abort_load", "Abort loading"),
     Binding("ctrl+w", "close_view", "Close subtab"),
     Binding(SWITCH_KEY, "switch_side", "Shell ⇄", key_display="^]"),
@@ -306,7 +310,7 @@ class Slurp(App):
       self.apply_theme()
 
   def theme_changed(self, theme):
-    """A theme chosen (e.g. with the command palette) is the default from now on, for this kind of view"""
+    """A theme chosen (in Options) is the default from now on, for this kind of view"""
     if theme == self.theme_applied:
       self.theme_applied = None
       return
@@ -1120,14 +1124,22 @@ class Slurp(App):
                   style="bold red" if d.state in ("broken", "reconnecting") else "bold magenta")
     return text
 
-  @on(Button.Pressed, "#cluster-drive")
-  def cluster_drive_pressed(self, event):
-    self.action_cluster_drive()
-
-  @on(Button.Pressed, "#web-access")
-  def web_access_pressed(self, event):
+  @on(Button.Pressed, "#menu")
+  def menu_pressed(self, event):
     event.stop()
-    self.action_web_access()
+    self.action_menu()
+
+  def action_menu(self):
+    """The menu of the job list, under its button: what slurp does for the tab"""
+    from .screens.menu import MenuScreen
+    if self.screen is not self.main:
+      return
+    button = self.main.query_one("#menu", Button)
+    at = (button.region.x, button.region.y + 1)
+    def chosen(action):
+      if action:
+        self.call_later(self.run_action, action)
+    self.push_screen(MenuScreen(at), chosen)
 
   # ---- remote web access: this slurp in a browser, through a web link (see links/holder.py)
   web_port = None # the web view of the session holder, while one runs
@@ -1598,11 +1610,6 @@ class Slurp(App):
                   lambda facts: self.push_screen(AboutScreen(about_markdown(facts), about_text(facts))) if facts else None,
                   group="about", connection=None)
 
-  def get_system_commands(self, screen):
-    from textual.app import SystemCommand
-    yield from super().get_system_commands(screen)
-    yield SystemCommand("About slurp", "how slurp works, its version, the machine it runs on", self.action_about)
-
   def action_view_help(self):
     """? : the help of the window shown (a shell: its terminal help)"""
     from .screens.help import ViewHelpScreen, help_markdown
@@ -1945,17 +1952,9 @@ class Slurp(App):
     else:
       self.action_reload()
 
-  @on(Button.Pressed, "#quota")
-  def quota_pressed(self, event):
-    self.action_quota()
-
   def action_quota(self):
     cluster = self.cluster
     self.open_view("quota", lambda: QuotaScreen(cluster), key="quota")
-
-  @on(Button.Pressed, "#scratch")
-  def scratch_pressed(self, event):
-    self.action_scratch()
 
   def action_scratch(self):
     cluster = self.cluster
@@ -1964,18 +1963,10 @@ class Slurp(App):
       return
     self.open_view("old files in scratch", lambda: ScratchScreen(cluster), key="scratch")
 
-  @on(Button.Pressed, "#cluster-info")
-  def cluster_info_pressed(self, event):
-    self.action_cluster_info()
-
   def action_cluster_info(self):
     cluster = self.cluster
     if not isinstance(self.screen, ClusterInfoScreen):
       self.push_screen(ClusterInfoScreen(cluster))
-
-  @on(Button.Pressed, "#interactive-job")
-  def interactive_job_pressed(self, event):
-    self.action_interactive_job()
 
   def action_interactive_job(self):
     """Submit a job that only holds its nodes; once it runs, its job window opens shells on them"""
@@ -2005,10 +1996,6 @@ class Slurp(App):
       if cluster is self.cluster:
         self.reload_cluster(cluster)
     in_background(self, submit, submitted, group="submit", connection=cluster.connection)
-
-  @on(Button.Pressed, "#cluster-shell")
-  def cluster_shell_pressed(self, event):
-    self.action_cluster_shell()
 
   @property
   def since_value(self):
@@ -2221,10 +2208,6 @@ class Slurp(App):
       return
     self.open_view("categories", CategoriesScreen, key="categories")
 
-  @on(Button.Pressed, "#categories")
-  def categories_pressed(self, event):
-    event.stop()
-    self.action_categories()
 
   def action_toggle_collapse(self):
     self.query_one("#collapse-arrays", Checkbox).value = not self.cluster.collapse_arrays

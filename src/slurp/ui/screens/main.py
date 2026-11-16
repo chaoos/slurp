@@ -58,15 +58,9 @@ class MainScreen(SplitScreen):
 
   def compose_left(self):
     with Horizontal(id="toolbar"):
+      yield Button("☰ Menu", id="menu", compact=True,
+                   tooltip="cluster info, quota, shell, drive, interactive job, categories, web, options, … (F10)")
       yield Button("Reload", id="reload", variant="primary", compact=True)
-      yield Button("Shell", id="cluster-shell", tooltip="shell on the cluster of this tab: in slurp, or from your own terminal (t)", compact=True)
-      yield Button("Drive", id="cluster-drive", tooltip="your login directory as a drive on your own machine: sshfs, SSHFS-Win, … (F)", compact=True)
-      yield Button("Web", id="web-access", tooltip="this slurp in your browser, from anywhere: a link through the relay (W)", compact=True)
-      yield Button("Interactive job", id="interactive-job", tooltip="submit a job that holds nodes for shells (i)", compact=True)
-      yield Button("Cluster info", id="cluster-info", tooltip="health and occupancy of the cluster (C)", compact=True)
-      yield Button("Quota", id="quota", tooltip="your quotas on the filesystems (Q)", compact=True)
-      yield Button("Scratch", id="scratch", tooltip="your oldest files in $SCRATCH, which a cleanup may delete (X)", compact=True)
-      yield Button("Categories", id="categories", tooltip="your jobs in categories, like folders: the tree, their numbers and jobs (K); m marks jobs, c puts them in one", compact=True)
       yield Label("finished since")
       yield Select(SINCE_CHOICES, value="1d", allow_blank=False, id="since-choice",
                    tooltip="also list the jobs that finished within this time", compact=True)

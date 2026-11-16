@@ -54,8 +54,8 @@ class OptionsScreen(ModalScreen):
           yield Label("Theme in a browser")
           yield Select([("as in the terminal", "")] + [(t, t) for t in themes],
                        value=c.get("theme_web") if c.get("theme_web") in themes else "", allow_blank=False, id="op-theme-web")
-        yield Static(f"The theme follows the view that is active (now: {'a browser' if active == 'web' else 'a terminal'}). "
-                     "Choosing one with the command palette (Ctrl-P) sets it for the active kind of view.", classes="op-note")
+        yield Static(f"The theme follows the view that is active (now: {'a browser' if active == 'web' else 'a terminal'}).",
+                     classes="op-note")
         yield Static("Shells", classes="op-section")
         with Horizontal(classes="op-row"):
           yield Label("Scrollback (lines)")

@@ -90,6 +90,15 @@ async def until(pilot, cond, t=20):
     except Exception: pass
   return False
 def notes(app): return [(n.title, n.message) for n in app._notifications]
+async def menu(app, pilot, action):
+  """☰ Menu of the job list (a click on it), then its item for action (as Enter on it)"""
+  from slurp.ui.screens.menu import MenuScreen
+  from textual.widgets import OptionList
+  await pilot.click("#menu")
+  await until(pilot, lambda: isinstance(app.screen, MenuScreen), 5)
+  items = app.screen.query_one(OptionList)
+  items.highlighted = items.get_option_index(action); await pilot.pause(0.1)
+  await pilot.press("enter")
 def note_ids(app): return {n.identity for n in app._notifications}
 def new_notes(app, seen):
   """the notifications that came after note_ids gave seen (by identity: counting them would not do, Textual drops
@@ -337,7 +346,7 @@ async def t_interactive(app, pilot):
   calls = os.path.join(LAB, "sbatch_calls")
   if os.path.exists(calls): os.unlink(calls)
   app.select_cluster(1); await pilot.pause(0.3)
-  await pilot.click("#interactive-job"); await pilot.pause(0.3)
+  await menu(app, pilot, "interactive_job"); await pilot.pause(0.3)
   ed = app.screen.query_one("#command-text") if isinstance(app.screen, CommandScreen) else None
   check("the button opens the dialog with the command in a bash editor", ed is not None and ed.language == "bash" and "sleep infinity" in ed.text)
   ed.load_text(ed.text.replace("01:00:00", "00:30:00")); await pilot.pause(0.1)
@@ -358,7 +367,7 @@ async def t_cluster_info(app, pilot):
     if not isinstance(scr, ClusterInfoScreen) or not hasattr(scr, "shown"): return ""
     c = Console(width=200, record=True, file=open(os.devnull, "w")); c.print(scr.shown); return c.export_text()
   app.select_cluster(1); await pilot.pause(0.3)
-  await pilot.click("#cluster-info")
+  await menu(app, pilot, "cluster_info")
   ok = await until(pilot, lambda: "Occupancy" in text(), 15)
   t = text()
   print(t)
@@ -1025,7 +1034,7 @@ exec sleep 300
       app.link_manager.revoke(app.cf_link); app.link_manager.links.remove(app.cf_link)
 
 async def t_about(app, pilot):
-  """? slurp at the top right: slurp in general, its version, the machine it runs on; Copy details; in the palette"""
+  """? slurp at the top right: slurp in general, its version, the machine it runs on; Copy details; in the menu"""
   import socket
   import slurp
   await until(pilot, lambda: app.cluster.loader is None, 30)
@@ -1043,8 +1052,8 @@ async def t_about(app, pilot):
   check("Copy details: the same as text", app.screen.query("#vh-copy") and slurp.__version__ in app.screen.details and socket.getfqdn() in app.screen.details)
   await pilot.pause(0.5); app.save_screenshot(filename="about.svg", path=OUT)
   await pilot.press("escape"); await pilot.pause(0.3)
-  commands = [c.title for c in app.get_system_commands(app.screen)]
-  check("the command palette has About slurp", "About slurp" in commands, commands[-4:])
+  from slurp.ui.screens.menu import ITEMS
+  check("the menu has About slurp", ("about", "About slurp", "") in ITEMS)
 
 async def t_links_health(app, pilot):
   """The links list: a health column for links and sessions (as for the SSH login), a drive without its path but one
@@ -1154,7 +1163,7 @@ async def t_categories(app, pilot):
   app.show_view(None)
   await pilot.pause(0.4)
   # the window
-  await pilot.click("#categories")
+  await menu(app, pilot, "categories")
   ok = await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10)
   cs = app.screen
   tree = cs.query_one("#cat-tree")
@@ -1196,7 +1205,7 @@ async def t_categories(app, pilot):
   check("In the job list (l): cat:- lists the jobs in no category", app.main.query_one("#jfilter").value == "cat:-" and shown
         and not {"9000", "9001", "9003"} & set(shown), (app.main.query_one("#jfilter").value, shown[:5], type(app.screen).__name__, app.focused))
   await pilot.press("escape"); await pilot.pause(0.3)
-  await pilot.click("#categories"); await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10); await pilot.pause(0.3)
+  await menu(app, pilot, "categories"); await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10); await pilot.pause(0.3)
   cs = app.screen; tree = cs.query_one("#cat-tree"); jt = cs.query_one("#cat-jobs")
   node = next(n for n in tree.root.children if n.data == "proj X")
   tree.move_cursor(node); await pilot.pause(0.4)
@@ -2381,7 +2390,7 @@ async def t_links(app, pilot):
   if os.path.exists(known): os.unlink(known)
   app.show_view(None); await pilot.pause(0.2)
   # Shell asks where, every time
-  await pilot.click("#cluster-shell"); await pilot.pause(0.4)
+  await menu(app, pilot, "cluster_shell"); await pilot.pause(0.4)
   check("Shell asks: in slurp or from your own terminal", isinstance(app.screen, ShellChoiceScreen)
         and not app.screen.query_one("#choice-own").disabled)
   await pilot.click("#choice-own"); await pilot.pause(0.5)
@@ -2480,7 +2489,7 @@ async def t_links(app, pilot):
 
   # the login directory as a drive (read only, so the test never writes into it)
   app.show_view(None); await pilot.pause(0.3)
-  await pilot.click("#cluster-drive")
+  await menu(app, pilot, "cluster_drive")
   await until(pilot, lambda: isinstance(app.screen, DriveScreen), 10)
   for _ in range(3): # (the drive window may still be settling: click again)
     await pilot.click("#drive-link") # (the drive on your own machine)

@@ -26,9 +26,10 @@ Your queued and running jobs and those that ended recently, of the active tab's 
 - **Loading:** the list shows as soon as Slurm answers; commands, error files, progress and checks follow (spinners).
   `r` reloads, `a` aborts a load. **finished since** chooses how far back ended jobs are listed, the dropdown
   next to it whose jobs (yours, an account's, all your accounts').
-- **Toolbar:** Shell (`t`, in slurp or from your own terminal), Drive (`F`, your login directory on this machine or
-  yours), Web (`W`, this slurp in your browser from anywhere, through a link), Interactive job (`i`), Cluster info (`C`),
-  Quota (`Q`), Scratch (`X`, old files the purge would take), Categories (`K`).
+- **☰ Menu** (`F10`), what slurp does for the tab, each with its key: Cluster info (`C`), Quota (`Q`), old files in
+  scratch (`X`, what the purge would take), Shell (`t`, in slurp or from your own terminal), the login directory (`d`)
+  and as a drive (`F`, on this machine or yours), Interactive job (`i`), New job script (`n`), Categories (`K`), this
+  slurp in your browser (`W`, from anywhere, through a link), the guides, the rule catalogue, Options, About, Quit.
 - **Categories**, like folders (`project X/production runs`): `m` marks a row (again: unmarks it; `M`: all or none),
   `c` puts the marked jobs (or the one under the cursor) in a category, an existing one or a new one. The
   **Category** column shows it (sort by it with a click); `/` with `cat:project X` lists only that category
@@ -138,6 +139,13 @@ given days: red, close to it: yellow. An exclude regex leaves paths out.
 - `Space` selects, `A` selects all; **Touch selected / all listed / all my files there** set their access time to
   now (after asking). Many sites do not allow keeping files this way: move what you keep to permanent storage.
 - `r` searches again (it can be aborted).
+"""),
+  "MenuScreen": ("Menu", """
+What slurp does for the tab, each with the key that does the same from the job list or the overview: the overview of
+the cluster (`C`), your quotas (`Q`), your oldest files in scratch (`X`), a shell on the cluster (`t`), the login
+directory (`d`) and the login directory as a drive (`F`), an interactive job (`i`), a new job script (`n`), the
+categories (`K`), this slurp in your browser (`W`), the guides (`F1`), the rule catalogue (`F2`), the options (`F3`),
+about slurp, and quit (`q`). Enter or a click does the item; `Esc` or a click elsewhere closes the menu.
 """),
   "ClusterInfoScreen": ("Cluster info", """
 The state of the cluster: health (nodes down, drained, in maintenance, with the reasons), reservations, occupancy
@@ -271,8 +279,7 @@ The text was sent to your terminal's clipboard (OSC 52), which only some termina
 The settings slurp keeps in `config.json` (the path is shown at the bottom), to see and change; **Save** writes them.
 
 - **Appearance:** the theme in a terminal and the one in a browser (or the same). The theme follows the view that is
-  active: when a browser takes over, its theme is used, when a terminal does, the terminal's. Choosing a theme with the
-  command palette (`Ctrl-P`) sets it for the kind of view that is active.
+  active: when a browser takes over, its theme is used, when a terminal does, the terminal's.
 - **Shells:** how many lines a shell keeps above its screen (scrolled back with the mouse wheel).
 - **Copying:** for a terminal and for a browser: when copying cannot be confirmed (no clipboard tool here; in a
   browser always), ask how to get the text, or only send it (OSC 52) without asking.
@@ -380,7 +387,7 @@ class ViewHelpScreen(ModalScreen):
   def action_close(self):
     self.dismiss()
 
-NO_HELP_BUTTON = ("ViewHelpScreen", "AboutScreen", "TerminalHelpScreen")
+NO_HELP_BUTTON = ("ViewHelpScreen", "AboutScreen", "TerminalHelpScreen", "MenuScreen")
 
 class AboutScreen(ViewHelpScreen):
   """The ? slurp of the top right corner: slurp in general, its version, the machine it runs on"""
@@ -403,7 +410,8 @@ one SSH connection each, with its jump hosts and keys from your `~/.ssh/config`)
 - **Sessions**: slurp keeps running in the background (like tmux); `slurp` again attaches to it, from another
   terminal or a browser. `q` quits it.
 - **Help**: `?` (or the **?** at the right of the title bar) explains the window shown, with its keys; this page
-  (**? slurp**) is about slurp in general. `Ctrl-P` opens the command palette. Settings: **Options** in the palette.
+  (**? slurp**) is about slurp in general. **☰ Menu** (`F10`) in the job list has what slurp does for the tab, and
+  **Options** (`F3`), the settings.
 """
 
 def _run(argv, cwd=None):

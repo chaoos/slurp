@@ -10,6 +10,12 @@ version may need the helper of the same version).
   in its middle, with what to do (a tab for a cluster with `+`, or
   `slurp --ssh`), instead of an error notification for every Slurm command at
   each load. `r` looks again.
+- The buttons of the job list's toolbar are a menu now: **☰ Menu** (`F10`)
+  has cluster info, quota, scratch, shells, the login directory and drive,
+  interactive job, new job script, categories, web access, guides, rule
+  catalogue, options, about and quit, each with its key. The toolbar keeps
+  Reload and the choices of the list. Textual's command palette (and its ⭘ at
+  the top left) is gone; themes are chosen in Options (`F3`).
 - Web links (this slurp in a browser) belong to no tab: the connection
   window of every tab lists them, not only that of the tab they were made in.
 - The slurp helper for Linux: **Open on my computer** in a link window, the
