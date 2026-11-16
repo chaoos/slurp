@@ -453,7 +453,9 @@ def local_clipboard(text):
       continue
   return None
 
-COPIED_FILE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "slurp", "copied.txt")
+def copied_file():
+  """Where Save to a file puts the text: in the cache directory ($XDG_CACHE_HOME, read when it is saved)"""
+  return os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "slurp", "copied.txt")
 
 class CopyScreen(ModalScreen):
   """Text that went to the terminal (OSC 52) without knowing if it arrived: ways to get it by hand"""
@@ -504,12 +506,13 @@ class CopyScreen(ModalScreen):
   @on(Button.Pressed, "#copy-save")
   def save(self):
     try:
-      os.makedirs(os.path.dirname(COPIED_FILE), exist_ok=True)
-      with open(COPIED_FILE, "w") as f:
+      path = copied_file()
+      os.makedirs(os.path.dirname(path), exist_ok=True)
+      with open(path, "w") as f:
         f.write(self.text + "\n")
-      self.notify(f"saved {self.what} to {COPIED_FILE}", timeout=8)
+      self.notify(f"saved {self.what} to {path}", timeout=8)
     except OSError as e:
-      self.notify(f"cannot save to {COPIED_FILE}: {e}", severity="error")
+      self.notify(f"cannot save to {path}: {e}", severity="error")
 
   @on(Button.Pressed, "#copy-arrived")
   def arrived(self):

@@ -8,6 +8,8 @@ version may need the helper of the same version).
 
 - slurp could end right at its start with an error (no attribute "main")
   when its 0.25 s timer came before the job list was shown.
+- Save to a file (the copy window) uses the cache directory as it is when
+  saving ($XDG_CACHE_HOME), not as it was when slurp started.
 - An array task's progress file: when the files of the other tasks are
   guessed from it, a number in the directory that happens to equal the task's
   index (`run1/`, `pytest-1/`) is no longer taken for it, when the file name

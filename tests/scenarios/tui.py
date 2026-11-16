@@ -1908,7 +1908,7 @@ async def t_array_window(app, pilot):
   await pilot.click("#copy-plain"); await pilot.pause(0.3)
   check("Plain text without a real terminal: a notice, no crash", app.is_running and any("cannot leave" in m for _, m in notes(app)))
   await pilot.click("#copy-save"); await pilot.pause(0.3)
-  check("Save to a file", open(dlg.COPIED_FILE).read() == "132,134,136,138,140\n" and any(dlg.COPIED_FILE in m for _, m in notes(app)))
+  check("Save to a file", open(dlg.copied_file()).read() == "132,134,136,138,140\n" and any(dlg.copied_file() in m for _, m in notes(app)))
   await pilot.click("#copy-arrived"); await pilot.pause(0.3)
   check("It arrived: stored, the window closes", not isinstance(app.screen, CopyScreen) and load_config().get("copy") == "terminal")
   button.scroll_visible(); await pilot.pause(0.2); await pilot.click(button); await pilot.pause(0.5)
