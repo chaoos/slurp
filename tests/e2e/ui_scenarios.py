@@ -25,7 +25,7 @@ from slurp.cluster import remote
 from slurp.ui.screens import dialogs
 from textual.coordinate import Coordinate
 from textual.screen import Screen
-from textual.widgets import Markdown, RadioButton, Select, TextArea
+from textual.widgets import Markdown, RadioButton, TextArea
 from slurp.ui.app import Slurp
 from slurp.config import config_path, load_config, update_config
 from slurp.cluster.jobs import array_overview, ERR_SIZES, JobProgress, progress_state, set_progress_file
@@ -2176,10 +2176,21 @@ async def t_cancel_reason(app, pilot):
     await pilot.click("#cr-ok"); await pilot.pause(0.2)
     check("another reason: it must be said", isinstance(app.screen, CancelScreen) and "say the reason" in str(dlg.query_one("#cr-error").render()))
     choose("duplicate"); await pilot.pause(0.2)
-    sel = dlg.query_one("#cr-related")
-    options = [str(v) for _, v in sel._options if v is not Select.NULL]
-    check("submitted twice: the job that looks the same is proposed", sel.display and options[:1] == ["9002"], options)
-    sel.value = "9002"
+    box = dlg.query_one("#cr-related-list")
+    options = lambda: [box.get_option_at_index(i).id for i in range(box.option_count)]
+    first = str(box.get_option_at_index(0).prompt) if box.option_count else ""
+    check("submitted twice: the job that looks the same first (★), then the other jobs of the job list", dlg.query_one("#cr-related").display
+          and options()[:1] == ["9002"] and first.startswith("★") and len(options()) > 3 and "9001" not in options(), (options()[:5], first))
+    search = dlg.query_one("#cr-related-search")
+    search.value = "run05"; await pilot.pause(0.2)
+    check("searchable: by name", options() == ["9005"], options())
+    search.value = "acct1 fail"; await pilot.pause(0.2)
+    failed = [j.jid for j in cluster.jobs.values() if j.state.startswith("FAILED") and "_" not in j.jid and j.jid != "9001"]
+    check("…by every word typed (account, state)", sorted(options()) == sorted(failed), (options(), failed))
+    search.value = "9002"; await pilot.pause(0.2)
+    search.focus(); await pilot.press("enter"); await pilot.pause(0.2)
+    check("Enter chooses the first match", dlg.related_jid == "9002" and "chosen: 9002" in str(dlg.query_one("#cr-related-chosen").render()),
+          str(dlg.query_one("#cr-related-chosen").render()))
     dlg.query_one("#cr-details").value = "pressed submit twice"
     await pilot.click("#cr-ok")
     ok = await until(pilot, lambda: os.path.exists(calls), 10)

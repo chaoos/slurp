@@ -52,3 +52,15 @@ def test_how_it_reads(check):
   keys = [k for k, *_ in REASONS]
   check("the list: the asked for ones, and others, and one of your own", {"duplicate", "hung", "allocation", "account", "dependency", "other"} <= set(keys)
         and len(keys) >= 12 and keys[-1] == "other", keys)
+
+
+def test_job_choices(check):
+  from slurp.ui.screens.cancel import choice_matches, job_choices
+  me = job("100")
+  jobs = [me, job("101"), job("102", name="other", workdir="/x", command="/x/y", submit="2026-11-17T12:00:00"),
+          job("103", name="old", workdir="/o", command="/o/j", submit="2026-11-16T12:00:00"), job("105_2"), job("105_3")]
+  got = [(j.jid, alike) for j, alike in job_choices(me, jobs)]
+  check("the alike first (marked), then every other job, newest first, an array once, not itself",
+        got == [("101", True), ("105_2", True), ("102", False), ("103", False)], got)
+  check("search: every word, in id, name, state, directory", choice_matches(jobs[2], ["oth", "running"]) and not choice_matches(jobs[2], ["oth", "pending"])
+        and choice_matches(jobs[3], ["/o"]))

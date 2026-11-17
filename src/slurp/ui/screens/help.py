@@ -286,7 +286,8 @@ An array goes in as a whole, with all its tasks. **Take out of its category** le
 """),
   "CancelScreen": ("Cancel a job", """
 Cancelling cannot be undone; the dialog shows the `scancel` command. It also asks **why** (you may also not say):
-submitted twice (slurp proposes the jobs that look the same, to name the one that stays), the program hangs, wrong
+submitted twice (name the one that stays: a searchable list of the job list's jobs, those that look the same
+first, ★), the program hangs, wrong
 resources or account, a job it depends on failed (with how Slurm does that for you: `--dependency=afterok`, and the
 guide), a bug, wrong input, replaced by a newer job, too slow, out of memory or quota, waits too long, a problem of
 the cluster, not needed any more, a test, or your own words. **Details** add to any of them.

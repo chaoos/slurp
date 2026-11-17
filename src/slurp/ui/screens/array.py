@@ -378,8 +378,8 @@ class ArrayScreen(SplitScreen):
                + (f": {len(hit)} task{'s' if len(hit) != 1 else ''} ({compress_array_ids(hit)[:200]})" if hit else "")
                + ("." if pending else ", running tasks included. Ended tasks are not affected."))
     args = ["scancel", *(["--state=PENDING"] if pending else []), self.array_id]
-    from .cancel import CancelScreen, related_jobs
-    related = related_jobs(self.job, self.app.jobs.values()) if self.job else []
+    from .cancel import CancelScreen, job_choices
+    related = job_choices(self.job, list(self.app.jobs.values())) if self.job else []
     self.app.push_screen(CancelScreen(f"Cancel {what}?", message + f"\n\n{shlex.join(args)}", "Cancel " + ("pending" if pending else "array"),
                                       related),
                          lambda answer: self.cancel(args, what, answer["reason"]) if answer is not None else None)

@@ -10,7 +10,8 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, RadioButton, RadioSet, Select, Static
+from textual.widgets import Button, Input, OptionList, RadioButton, RadioSet, Static
+from textual.widgets.option_list import Option
 
 DEPENDENCY_GUIDE = "arrays-and-dependencies" # (the heading of the guides on dependencies)
 
@@ -43,7 +44,7 @@ REASONS = [
 ]
 LABELS = {key: label for key, label, _, _ in REASONS}
 
-def related_jobs(job, jobs):
+def related_jobs(job, jobs, limit=12):
   """Jobs of the job list that look like this one (a duplicate, the one it depends on, …): the same name, directory
   or command; the likeliest first ([job])"""
   rec = job.rec
@@ -64,7 +65,24 @@ def related_jobs(job, jobs):
       seen.add(top)
       busy = 0 if (other.queued or other.running) else 1
       out.append(((-s, busy, abs(submit_seconds(other) - submit_seconds(job))), other))
-  return [o for _, o in sorted(out, key=lambda x: x[0])][:12]
+  return [o for _, o in sorted(out, key=lambda x: x[0])][:limit]
+
+def job_choices(job, jobs):
+  """The jobs to name with a reason (the one it duplicates, depends on, …): those that look like it first, then all
+  other jobs of the job list, newest first (an array once); [(job, alike)]"""
+  alike = related_jobs(job, jobs, limit=None)
+  mine = job.jid.partition("_")[0]
+  seen = {mine} | {j.jid.partition("_")[0] for j in alike}
+  rest = []
+  for other in sorted(jobs, key=submit_seconds, reverse=True):
+    top = other.jid.partition("_")[0]
+    if top not in seen:
+      seen.add(top)
+      rest.append(other)
+  return [(j, True) for j in alike] + [(j, False) for j in rest]
+
+def choice_id(job):
+  return job.jid.partition("_")[0] if "_" in job.jid else job.jid
 
 def submit_seconds(job):
   try:
@@ -75,7 +93,14 @@ def submit_seconds(job):
 def job_label(job):
   r = job.rec
   state = job.state.split()[0] if job.state else ""
-  return f"{job.jid.partition('_')[0] if '_' in job.jid else job.jid}  {r.get('JobName') or ''}  {state}  submitted {(r.get('Submit') or '').replace('T', ' ')}"
+  return f"{choice_id(job)}  {r.get('JobName') or ''}  {state}  submitted {(r.get('Submit') or '').replace('T', ' ')}"
+
+def choice_matches(job, words):
+  """Does a job match what was typed (every word in its id, name, state, account, directory or command)?"""
+  r = job.rec
+  hay = " ".join(str(x) for x in (job.jid, r.get("JobName"), job.state, r.get("Account"), r.get("Partition"),
+                                  r.get("WorkDir"), job.command) if x).lower()
+  return all(w in hay for w in words)
 
 def reason_text(entry, link=True):
   """Why it was cancelled, for the job window: the reason, the details, the related job (a link), the guide (a link)"""
@@ -129,7 +154,9 @@ class CancelScreen(ModalScreen[dict | None]):
   #cr-reasons { height: auto; width: 1fr; border: none; padding: 0; }
   #cr-hint { height: auto; color: $text-muted; margin: 1 0 0 0; }
   #cr-hint.-empty { display: none; }
-  #cr-related { margin: 1 0 0 0; width: 1fr; }
+  #cr-related { margin: 1 0 0 0; width: 1fr; height: auto; }
+  #cr-related-list { height: auto; max-height: 8; }
+  #cr-related-chosen { height: auto; }
   #cr-guide { margin: 1 0 0 0; }
   #cr-details { margin: 1 0 0 0; }
   #cr-error { color: $error; height: auto; }
@@ -138,11 +165,15 @@ class CancelScreen(ModalScreen[dict | None]):
   """
   BINDINGS = [Binding("escape", "back", "Do not cancel")]
 
+  SHOWN = 50 # jobs listed at most (the search narrows them down)
+
   def __init__(self, title, message, ok_label, related=()):
     super().__init__()
     self.title_text, self.message, self.ok_label = title, message, ok_label
-    self.related = list(related)
+    # (the jobs to choose from for a reason that names one: [(job, alike)], see job_choices; plain jobs: all alike)
+    self.related = [r if isinstance(r, tuple) else (r, True) for r in related]
     self.reason = None # (the key chosen; None: not said)
+    self.related_jid = "" # (the job chosen)
 
   @property
   def dialog_message(self): # (as ConfirmScreen)
@@ -158,8 +189,10 @@ class CancelScreen(ModalScreen[dict | None]):
           for key, label, _, _ in REASONS:
             yield RadioButton(label, name=key)
         yield Static(id="cr-hint", classes="-empty", markup=False)
-        yield Select([(job_label(j), j.jid.partition("_")[0] if "_" in j.jid else j.jid) for j in self.related],
-                     prompt="which job? (none of these: leave it)", id="cr-related", compact=True)
+        with Vertical(id="cr-related"):
+          yield Input(id="cr-related-search", placeholder="which job? type to search: id, name, state, directory …")
+          yield OptionList(id="cr-related-list", compact=True)
+          yield Static(id="cr-related-chosen")
         yield Button("Dependencies in the guides", id="cr-guide", compact=True)
         yield Input(id="cr-details", placeholder="details (optional): what happened, what to do next time")
       yield Static(id="cr-error")
@@ -168,16 +201,61 @@ class CancelScreen(ModalScreen[dict | None]):
         yield Button(self.ok_label, id="cr-ok", variant="error", compact=True)
 
   def on_mount(self):
+    self.show_jobs()
     self.show_choice()
     self.query_one("#cr-reasons", RadioSet).focus()
+
+  def show_jobs(self):
+    """The jobs that match the search (the likely ones first: marked ★)"""
+    words = self.query_one("#cr-related-search", Input).value.lower().split()
+    found = [(j, alike) for j, alike in self.related if not words or choice_matches(j, words)]
+    box = self.query_one("#cr-related-list", OptionList)
+    box.clear_options()
+    box.add_options([Option(Text.assemble(("★ " if alike else "  ", "yellow"), job_label(j)), id=choice_id(j))
+                     for j, alike in found[:self.SHOWN]])
+    if found:
+      box.highlighted = 0
+    self.show_chosen(len(found))
+
+  def show_chosen(self, found=None):
+    chosen = next((j for j, _ in self.related if choice_id(j) == self.related_jid), None)
+    text = Text()
+    if chosen is not None:
+      text.append("chosen: ", style="bold")
+      text.append(job_label(chosen))
+    else:
+      text.append("none chosen (Enter or a click chooses one; none: leave it)", style="dim")
+    if found is not None and found > self.SHOWN:
+      text.append(f"  · {found} match, the first {self.SHOWN} listed: type more", style="dim")
+    elif found == 0:
+      text.append("  · no job of the job list matches", style="yellow")
+    self.query_one("#cr-related-chosen", Static).update(text)
+
+  @on(Input.Changed, "#cr-related-search")
+  def search_changed(self, event):
+    event.stop()
+    self.show_jobs()
+
+  @on(Input.Submitted, "#cr-related-search")
+  def search_submitted(self, event):
+    event.stop()
+    box = self.query_one("#cr-related-list", OptionList)
+    if box.highlighted is not None and box.option_count:
+      self.related_jid = box.get_option_at_index(box.highlighted).id
+      self.show_chosen()
+
+  @on(OptionList.OptionSelected, "#cr-related-list")
+  def job_chosen(self, event):
+    event.stop()
+    self.related_jid = event.option.id
+    self.show_chosen()
 
   def show_choice(self):
     entry = next((r for r in REASONS if r[0] == self.reason), None)
     hint = self.query_one("#cr-hint", Static)
     hint.update(entry[2] if entry else "")
     hint.set_class(not (entry and entry[2]), "-empty")
-    related = self.query_one("#cr-related", Select)
-    related.display = bool(entry and entry[3] == "job" and self.related)
+    self.query_one("#cr-related").display = bool(entry and entry[3] == "job" and self.related)
     self.query_one("#cr-guide", Button).display = self.reason == "dependency"
     details = self.query_one("#cr-details", Input)
     details.placeholder = ("the reason, in your words" if self.reason == "other" else
@@ -200,11 +278,10 @@ class CancelScreen(ModalScreen[dict | None]):
     text = self.query_one("#cr-details", Input).value.strip()
     if self.reason is None and not text:
       return None
-    related = self.query_one("#cr-related", Select)
     wants_job = next((r[3] for r in REASONS if r[0] == self.reason), "") == "job"
     reason = self.reason or "other"
     return {"reason": reason, "label": "" if reason == "other" else LABELS[reason], "text": text,
-            "related": related.value if wants_job and related.display and related.value not in (Select.NULL, None) else "",
+            "related": self.related_jid if wants_job and self.related else "",
             "at": datetime.now().strftime("%Y-%m-%d %H:%M")}
 
   @on(Button.Pressed, "#cr-ok")

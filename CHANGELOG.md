@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The cancel dialog's job to name (the duplicate, the job it depends on,
+  the one that replaces it) is a searchable list of all jobs of the job
+  list: type an id, a name, a state, a directory; the jobs that look the
+  same come first (★).
 - The text file view has no `l` (open in `less`) any more: it pages like
   `less` itself.
 - The array window opens the job window of a task in a subtab of its own

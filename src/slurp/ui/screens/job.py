@@ -671,7 +671,7 @@ class JobScreen(SplitScreen):
   @on(Button.Pressed, "#cancel-job")
   def confirm_cancel(self, event):
     event.stop()
-    from .cancel import CancelScreen, related_jobs
+    from .cancel import CancelScreen, job_choices
     jid = self.job.rec["JobIDRaw"]
     args = ["scancel", str(jid)]
     def answered(answer):
@@ -679,7 +679,7 @@ class JobScreen(SplitScreen):
         self.cancel_reason = answer["reason"]
         self.run_job_action("cancel", args)
     self.app.push_screen(CancelScreen(f"Cancel job {self.job.jid}?", f"This cannot be undone.  {shlex.join(args)}", "Cancel job",
-                                      related_jobs(self.job, self.app.jobs.values())), answered)
+                                      job_choices(self.job, list(self.app.jobs.values()))), answered)
 
   cancel_reason = None # (said in the dialog: kept once the cancel worked)
 
