@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Progress: only lines like the progress count (the structure of the
+  line, its numbers aside): a `checkpoint 1/1 saved` in the log is no
+  longer taken for the progress and no longer breaks the current pace.
+  The structure is kept from read to read; a new one counts once it
+  repeats (another phase: its pace starts anew).
 - A text file's status is two lines: its path and size (a long path wraps), then what is shown and
   whether it is followed, which a long path hid before.
 - The subtabs of a tab are kept for the next start: its job and array

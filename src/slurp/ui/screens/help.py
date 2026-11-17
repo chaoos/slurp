@@ -512,6 +512,10 @@ step 450/1000            epoch 3/20, loss 0.41        [2026-11-17 14:03:12] 450/
   For a task of an array, slurp guesses the files of the other tasks from the name of the one chosen.
 - **The latest line counts**, n/N before M% in the same line (tqdm writes both: its n/N is exact). A count above its
   total, or a percentage over 100, is no progress.
+- **Only lines like the progress.** The progress lines of a file look alike (`step 450/1000 loss 0.41`, the numbers
+  aside); a line of another structure (`checkpoint 1/1 saved`, `copying 3/7 files`) is not progress, even if it is the
+  latest. slurp keeps the structure of a job's progress from read to read; a new one counts only when it repeats (the
+  program went on to another phase: then its pace starts anew).
 - **Write it when it happens.** Programs often buffer what they print into a file: the progress then comes in chunks,
   late. In Python `print(..., flush=True)` or `PYTHONUNBUFFERED=1`; in C `fflush(stdout)`; `srun --unbuffered`.
 - **A time in the line helps** (`2026-11-17 14:03:12`, `2026-11-17T14:03:12`, or `14:03:12` for today): the pace
@@ -534,7 +538,7 @@ more makes the job list and the job window slow, over SSH most of all.
 - **On current pace** (shown when it can be told): the rate of the last {pace} different progress values, from the first
   of them to the latest: (latest n − first n) / (the time between them); done in (N − n) / that rate. The times are the
   timestamps in the lines when at least two of them have one (with the same N); else the times slurp saw a new n (at
-  its reads, so a little late). It needs two values: right after the start, or with progress that rarely moves, it is
+  its reads, to the millisecond: every {every} s in the job window, at each reload in the job list; so a little late). It needs two values: right after the start, or with progress that rarely moves, it is
   not there yet.
 - **On same pace** (only while the current pace cannot be told): the average rate since the job started:
   n / (the time of the latest value − the job's start); done in (N − n) / that rate. It counts the start-up (loading,

@@ -61,6 +61,7 @@ class JobProgress:
   path: str = ""                             # the file it was read from
   estimate: dict = field(default_factory=dict)
   percent: bool = False                      # an M% line (current: M, total: 100), not n/N
+  shape: str = ""                            # the structure of its line (digits as #): later lines must be like it
 
   @property
   def text(self):
@@ -87,7 +88,8 @@ def set_progress_file(jid, path):
   from ..config import load_config, update_config
   state = progress_state(jid)
   state["file"] = path
-  state["points"].clear() # another file, other points
+  state["points"].clear() # another file, other points …
+  state.pop("shape", None) # … and other lines
   files = dict(load_config().get("progress_files") or {})
   key = f"{tab_name()}|{jid}"
   if path:
@@ -272,7 +274,12 @@ def record_progress(job, progress):
   """Remember when the app saw a new n/N of the job, and estimate the end"""
   if progress is None:
     return None
-  points = progress_state(job.jid)["points"]
+  state = progress_state(job.jid)
+  if progress.shape and state.get("shape") != progress.shape: # (the structure of its progress lines, for the next reads)
+    if state.get("shape"):
+      state["points"].clear() # (another phase, another progress: the times seen of the old one do not count)
+    state["shape"] = progress.shape
+  points = state["points"]
   if not points or points[-1][1:] != (progress.current, progress.total):
     points.append((time.time(), progress.current, progress.total))
     del points[:-200]
@@ -720,10 +727,47 @@ def err_status(job, sizes=None):
   except OSError:
     return ("missing", 0)
 
-def output_progress(path, tail=None):
+SIMILAR = 0.6 # how alike the structures of two progress lines must be (difflib's ratio) to count as the same progress
+
+def line_shape(line):
+  """The structure of a line: numbers as #, progress bar blocks and repeated spaces gone ("step #/# loss #")"""
+  shape = re.sub(r"\d+(?:[.,:]\d+)*", "#", line.strip())
+  shape = re.sub(r"[\u2580-\u259f]+", "", shape) # (█▌: a bar's length changes)
+  return re.sub(r"\s+", " ", shape)[:160]
+
+def similar(a, b):
+  import difflib
+  return a == b or difflib.SequenceMatcher(None, a, b, autojunk=False).ratio() >= SIMILAR
+
+def progress_lines(found, shape=""):
+  """Of the lines with n/N or M% (oldest first: (line, n, N, percent)), those of the progress: like the structure
+  of the progress so far (shape, from earlier reads); without one, or when it is no longer in the tail, the structure
+  the most lines share (a lone line of another structure, a "1/1" somewhere, is not progress; a new one that repeats
+  is: the program went on to another phase)"""
+  if not found:
+    return [], ""
+  shapes = [line_shape(f[0]) for f in found]
+  if shape:
+    like = [f for f, s in zip(found, shapes) if similar(s, shape)]
+    if like:
+      return like, shape
+  groups = [] # [representative shape, [indices]]
+  for i, s in enumerate(shapes):
+    group = next((g for g in groups if similar(s, g[0])), None)
+    if group is None:
+      groups.append([s, [i]])
+    else:
+      group[1].append(i)
+  if shape and all(len(g[1]) < 2 for g in groups): # (only lone lines unlike the progress so far: none of them)
+    return [], shape
+  best = max(groups, key=lambda g: (len(g[1]), g[1][-1])) # (the most lines; of equal ones, the latest)
+  return [found[i] for i in best[1]], best[0]
+
+def output_progress(path, tail=None, job=None):
   """Latest valid n/N entry in the tail of a file (only its end is read, see progress_scan; here unless given),
   with the n/N points of the tail and their timestamps (if the lines have one). A line without n/N may say M% (0 to
-  100, integer or not): M of 100 (a line with both, as tqdm writes: its n/N, which is exact)"""
+  100, integer or not): M of 100 (a line with both, as tqdm writes: its n/N, which is exact). Only the lines like
+  the progress (progress_lines): of the job's earlier reads (job), else those most lines share."""
   if not path:
     return None
   if tail is None:
@@ -733,7 +777,7 @@ def output_progress(path, tail=None):
       tail = fs_read(path, max(0, size - scan), scan).decode("utf-8", errors="replace")
     except OSError:
       return None
-  latest, points = None, []
+  found_lines = []
   for line in tail.splitlines()[-progress_scan()["lines"]:]:
     found = None
     for match in reversed(list(PROGRESS_PATTERN.finditer(line))):
@@ -751,12 +795,15 @@ def output_progress(path, tail=None):
           found = (int(value) if value.is_integer() else value, 100, True)
           break
     if found is not None:
-      latest = (*found, line.strip())
-      points.append((line_time(line), found[0], found[1]))
-  if latest is None:
+      found_lines.append((line.strip(), *found))
+  shape = progress_state(job.jid).get("shape", "") if job is not None else ""
+  lines, shape = progress_lines(found_lines, shape)
+  if not lines:
     return None
-  current, total, percent, line = latest
-  return JobProgress(current, total, line, points=points[-max(50, 2 * progress_scan()["pace"]):], path=path, percent=percent)
+  line, current, total, percent = lines[-1]
+  points = [(line_time(l), c, t) for l, c, t, _p in lines]
+  return JobProgress(current, total, line, points=points[-max(50, 2 * progress_scan()["pace"]):], path=path, percent=percent,
+                     shape=shape)
 
 PROGRESS_CHUNK = 200 # files per command that reads the progress
 PROGRESS_LINES_SCRIPT = (
@@ -795,7 +842,7 @@ def annotate(jobs):
       job.command = command_of(job, cache)
       job.script = cache.get(job.jid.split("_")[0]) if job.queued else None
       job.err = err_status(job)
-      job.progress = record_progress(job, output_progress(progress_path(job))) if job.running else None
+      job.progress = record_progress(job, output_progress(progress_path(job), job=job)) if job.running else None
       job.annotated = True
     return jobs
   tab = tab_name()
@@ -828,6 +875,6 @@ def annotate(jobs):
     job.script = cache.get(job.jid.split("_")[0]) if job.queued else None
     job.err = err_status(job, sizes)
     path = progress_path(job)
-    job.progress = record_progress(job, output_progress(path, tails.get(path))) if job.running and tails.get(path) is not None else None
+    job.progress = record_progress(job, output_progress(path, tails.get(path), job=job)) if job.running and tails.get(path) is not None else None
     job.annotated = True
   return jobs

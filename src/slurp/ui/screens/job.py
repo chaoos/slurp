@@ -325,7 +325,7 @@ class JobScreen(SplitScreen):
     self.progress_reading = True
     job = self.job
     def read():
-      return record_progress(job, output_progress(progress_path(job)))
+      return record_progress(job, output_progress(progress_path(job), job=job))
     def got(progress):
       self.progress_reading = False
       self.progress_at = time.monotonic()

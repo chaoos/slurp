@@ -47,7 +47,7 @@ def sacct_all(job):
 def load_details(job):
   """Everything shown in the job window that needs extra queries or file system access"""
   # (the progress: of a running job recorded for the estimates; of one that ended its last line, where it got to)
-  progress = (record_progress(job, output_progress(progress_path(job))) if job.running
+  progress = (record_progress(job, output_progress(progress_path(job), job=job)) if job.running
               else output_progress(progress_path(job)) if not job.state.startswith("PENDING") else None)
   d = {"files": [], "sstat": {}, "nodes": [], "progress": progress}
   workdir = job.rec["WorkDir"]
