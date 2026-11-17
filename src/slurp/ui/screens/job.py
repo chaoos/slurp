@@ -170,6 +170,8 @@ class JobScreen(SplitScreen):
           yield Button("Progress file…", id="progress-file", compact=True,
                        tooltip="choose the (log) file checked for n/N or M% lines, for this job")
           yield Button("Use stdout", id="progress-stdout", compact=True)
+          yield Button("?", id="progress-help", compact=True,
+                       tooltip="what the progress is, what it needs (a file with progress lines), how the estimates are made")
         yield Static(id="progress-line", markup=False)
         yield Static(id="progress-age")
       yield Label(icons.label("folder", "Files"), classes="section")
@@ -330,6 +332,12 @@ class JobScreen(SplitScreen):
     if progress.path:
       lines.append(f"from {progress.path}" + (" (chosen for this job)" if chosen else ""))
     return "\n".join(lines)
+
+  @on(Button.Pressed, "#progress-help")
+  def progress_help(self, event):
+    event.stop()
+    from .help import progress_help_markdown, ViewHelpScreen
+    self.app.push_screen(ViewHelpScreen(progress_help_markdown()))
 
   @on(Button.Pressed, "#progress-file")
   def choose_progress_file(self, event):

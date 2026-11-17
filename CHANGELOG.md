@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The job window's progress has a **?** next to Progress file…: what the
+  progress is and why it helps, what it needs (a file with n/N or M% lines,
+  best the output, written unbuffered), how much of the file is read (its
+  last 64 KiB, 600 lines), and how the current and the same pace are
+  worked out.
 - The overview of a cluster's tab has **SSH settings…** (below Connect and
   Disconnect): its destination or full SSH settings, filled in, the blocks
   of `~/.ssh/config` that apply and what `ssh -G` makes of it all, Check;

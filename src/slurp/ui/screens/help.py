@@ -58,8 +58,8 @@ Everything about one job.
 - **Runtime diagnostics** (running jobs): on a node of the job or all of them, its memory, CPU and GPU use and load,
   I/O, local disks and busiest processes, in a window of its own; the memory row shows its memory (MiB/GiB, as
   `free -h` and `nvidia-smi`). Repeated memory queries with plots (every 1 to 60 min).
-- **Progress:** the latest `n/N` (or `M%`) line with two estimates of the end (a job that ended: where its file got to
-  and how it ended); **Progress file…** picks another log file.
+- **Progress:** the latest `n/N` (or `M%`) line with an estimate of the end (a job that ended: where its file got to
+  and how it ended); its **?** explains what it needs and how the estimates are made; **Progress file…** picks another log file.
 - **Files:** output, error, script, working directory and files the job names; Enter opens one.
 - **Steps** of the job; for a running job **Run on the nodes** (a command on every node, or one).
 """),
@@ -395,6 +395,63 @@ The settings slurp keeps in `config.json` (the path is shown at the bottom), to 
   removes them (on Save).
 """),
 }
+
+def progress_help_markdown():
+  """What the progress of a job is, why it helps, how to get it, and how its estimates are made (the ? next to
+  Progress file… in the job window)"""
+  from ...state import PROGRESS_TAIL_BYTES, PROGRESS_TAIL_LINES
+  from .job import JobScreen
+  kib, lines, every = PROGRESS_TAIL_BYTES // 1024, PROGRESS_TAIL_LINES * 20, JobScreen.PROGRESS_EVERY
+  return f"""# Progress of a job
+
+**What it is.** slurp reads how far a running job is from a file it writes: the latest line with a count like
+`step 450/1000` (*n/N*), or, in a line without one, a percentage like `training 45.5% done` (*M%*, 0 to 100). The bar,
+the line and the estimates of when it is done come from there; the job list has the same bar and **Done: current pace**.
+
+**Why it is useful.** You see at a glance how far each job is and when it will be done, without opening its log: whether
+it will finish within its time limit (or needs more), whether it is stuck (the count does not move), whether a restart
+made it faster or slower. For a job that ended, the progress shows where it got to (a failed job at `873/1000`).
+
+## What it needs
+
+A file in which the job writes its progress as it goes, in one of these forms, a line per step:
+
+```
+step 450/1000            epoch 3/20, loss 0.41        [2026-11-17 14:03:12] 450/1000 done
+45%|████▌     | 450/1000 [00:10<00:12]        training 45.5% done
+```
+
+- **Which file:** by default the job's output (its stdout, `--output`), the easiest place: print the progress there.
+  **Progress file…** chooses another one for this job (a log of the program, a file per task), **Use stdout** goes back.
+  For a task of an array, slurp guesses the files of the other tasks from the name of the one chosen.
+- **The latest line counts**, n/N before M% in the same line (tqdm writes both: its n/N is exact). A count above its
+  total, or a percentage over 100, is no progress.
+- **Write it when it happens.** Programs often buffer what they print into a file: the progress then comes in chunks,
+  late. In Python `print(..., flush=True)` or `PYTHONUNBUFFERED=1`; in C `fflush(stdout)`; `srun --unbuffered`.
+- **A time in the line helps** (`2026-11-17 14:03:12`, `2026-11-17T14:03:12`, or `14:03:12` for today): the pace
+  is then measured from when the steps really happened, not from when slurp saw them.
+
+## How much of the file is read
+
+Only its end: the last {kib} KiB, and of these the last {lines} lines (a carriage return counts as a line end, as
+progress bars write). A file is never read as a whole: a large log costs nothing more. The job window reads it every
+{every} s while the job runs (the line below the bar says when). The job list reads the files of all running jobs at
+each reload, in one command, which sends back only their lines with n/N or M%.
+
+## The estimates of when it is done
+
+- **On current pace** (shown when it can be told): the rate of the last 6 different progress values, from the first
+  of them to the latest: (latest n − first n) / (the time between them); done in (N − n) / that rate. The times are the
+  timestamps in the lines when at least two of them have one (with the same N); else the times slurp saw a new n (at
+  its reads, so a little late). It needs two values: right after the start, or with progress that rarely moves, it is
+  not there yet.
+- **On same pace** (only while the current pace cannot be told): the average rate since the job started:
+  n / (the time of the latest value − the job's start); done in (N − n) / that rate. It counts the start-up (loading,
+  compiling) as if it were steps, so it is often too pessimistic early and too optimistic when the job slows down.
+
+Both assume the steps take the same time from now on. A job whose steps get slower (or faster) is done later (or
+sooner) than they say.
+"""
 
 def help_markdown(screen):
   """The help of a window: its text, its own keys (from its live bindings), the keys of everywhere"""

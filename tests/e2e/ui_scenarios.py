@@ -2085,6 +2085,15 @@ async def t_ended_progress(app, pilot):
   bar = js.query_one("#progress-bar")
   check("…the bar where it got to (not 0 of 1)", bar.total == 100 and bar.progress == 28, (bar.total, bar.progress))
   check("…and another file can be chosen for it", js.query_one("#progress-file").display)
+  from slurp.ui.screens.help import ViewHelpScreen
+  js.query_one("#progress-help").press()
+  ok = await until(pilot, lambda: isinstance(app.screen, ViewHelpScreen), 5)
+  doc = app.screen.markdown if ok else ""
+  check("? next to Progress file…: what the progress is, what it needs, how much is read, how the paces are made",
+        ok and "What it needs" in doc and "the last 64 KiB" in doc and "the last 600 lines" in doc and "On current pace" in doc
+        and "last 6 different progress values" in doc and "On same pace" in doc and "flush=True" in doc, doc[:200])
+  await pilot.press("escape"); await pilot.pause(0.3)
+  check("…Esc: back to the job", app.screen is js)
   wd = js.job.rec["WorkDir"]
   other = os.path.join(wd, "train.log"); open(other, "w").write("epoch 3\nvalidation 62.5% done\n")
   set_progress_file("9009", other); js.load()
