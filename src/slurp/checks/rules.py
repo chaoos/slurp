@@ -619,6 +619,8 @@ def p04(ctx):
       "module load gcc/12 openmpi/4.1    # what the program was built with\nsrun ./sim", needs="replay")
 def p05(ctx):
   replay = ctx.replay or {}
+  if replay.get("uenv_not_pulled"): # (E05 says why)
+    return
   if replay.get("uenv_error"): # (not checked: without the uenv every library of it would be missing)
     yield F("P05", f"the shared libraries are not checked: {replay['uenv_error']}", ctx.directive_line("uenv"),
             INFO if replay.get("no_uenv") else WARNING)
@@ -1172,6 +1174,19 @@ def u06(ctx):
   if minutes and minutes >= 24 * 60 and minutes != math.inf and ctx.opt("signal") is None and ctx.opt("requeue") is None \
      and not ctx.script.uses(r"\btrap\b"):
     yield F("U06", f"--time={ctx.opt('time')} without --signal, trap or --requeue", ctx.directive_line("time"))
+
+@rule("E05", ERROR, "uenv not pulled",
+      "The script asks for a uenv (#SBATCH --uenv) that is not in your uenv repository (uenv image ls lists what is "
+      "there).",
+      "A job can only use a uenv that was pulled before: it fails at the start without running anything.",
+      "Pull it on the login node: uenv image pull <name>/<version>:<tag> (uenv image find lists what there is).",
+      "#SBATCH --uenv=prgenv-gnu/24.11:v1\n#SBATCH --view=default\n\n$ uenv image pull prgenv-gnu/24.11:v1   # once, before sbatch",
+      needs="replay")
+def e05(ctx):
+  missing = (ctx.replay or {}).get("uenv_not_pulled") or []
+  if missing:
+    yield F("E05", f"not pulled: {', '.join(missing)} (uenv image ls does not list {'it' if len(missing) == 1 else 'them'})",
+            ctx.directive_line("uenv"), snippet="\n".join(f"uenv image pull {m}" for m in missing))
 
 # ===========================================================================
 # G: good practice

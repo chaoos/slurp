@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- New rule E05 (error): the script's uenv (`--uenv`) is not pulled. A job
+  can only use a uenv in your repository; `uenv image ls`, run with the
+  environment check, lists them. The finding has the `uenv image pull`
+  command. Labels match as uenv does: name, version, tag, `@system`,
+  `%arch` or an image id; several uenvs and mount points too.
 - The environment check also replays `conda activate`, `mamba activate`,
   `micromamba activate`, `spack load` and `spack env activate`: a program of
   such an environment was checked without it (P05: libraries missing).

@@ -40,7 +40,9 @@ after a fresh login, and the programs are checked: found at all (G01), shared
 libraries (`ldd`), GPU code (`cuobjdump`). A job with a uenv (`--uenv`,
 `--view`, on Alps) gets it for the replay too: the setup and the checks run in
 `uenv run` with the same uenv and view (in a login shell if the script's `#!`
-line asks for one). If the login node has no `uenv` command or the uenv does
+line asks for one). Before that, `uenv image ls` shows whether the uenv is
+pulled: a job cannot use one that is not, and E05 says so, with the
+`uenv image pull` command. If the login node has no `uenv` command or the uenv does
 not start, the libraries are not checked (P05 says so) rather than all missing.
 In a container (`--environment`, `--container-image`) the programs are not
 looked at: the login node does not have what the container has. **Check** runs

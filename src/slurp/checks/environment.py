@@ -66,9 +66,52 @@ def replay_command(ctx):
     return replay_script(ctx)
   view = ctx.opt("view")
   inner = "printf '@@UENVSTARTED\\n'\n" + replay_script(ctx)
+  pulled = "uenv image ls 2>/dev/null | sed 's/^/@@UENVIMG /'; printf '@@UENVLS %s\\n' \"${PIPESTATUS[0]}\"; "
   run = ["uenv", "run", *([f"--view={view}"] if view else []), uenv, "--", "bash", "-lc" if login_shell(ctx) else "-c", inner]
-  return ("if command -v uenv >/dev/null 2>&1; then " + shlex.join(run) + "; "
+  return ("if command -v uenv >/dev/null 2>&1; then " + pulled + shlex.join(run) + "; "
           "else printf '@@NOUENV\\n'; fi\n")
+
+def pulled_uenvs(lines):
+  """The uenvs uenv image ls lists: [{name, version, tag, system, arch, id}] (its header and other lines skipped)"""
+  images = []
+  for line in lines:
+    words = line.split()
+    m = re.fullmatch(r"([^/\s:@%]+)/([^:\s@%]+):([^\s@%]+)", words[0]) if words else None
+    if not m:
+      continue
+    image = {"name": m[1], "version": m[2], "tag": m[3], "system": "", "arch": "", "id": ""}
+    image["arch"], image["system"] = (words[1], words[2]) if len(words) > 2 else ("", "")
+    image["id"] = next((w for w in words[3:] if re.fullmatch(r"[0-9a-f]{16}|[0-9a-f]{64}", w)), "")
+    images.append(image)
+  return images
+
+def uenv_specs(value):
+  """The uenvs of an --uenv value: [label] (several separated by commas, each maybe with :/mount/point)"""
+  specs = []
+  for part in (value or "").split(","):
+    m = re.fullmatch(r"\s*(.+?)(?::(/[^:]*))?\s*", part)
+    if m and m[1]:
+      specs.append(m[1])
+  return specs
+
+def not_pulled(value, images):
+  """The uenvs of an --uenv value that are not among the pulled images (name[/version][:tag][@system][%arch], or an
+  id; a path to a squashfs file is no image to pull)"""
+  missing = []
+  for spec in uenv_specs(value):
+    if spec.startswith(("/", "./", "~")):
+      continue
+    if re.fullmatch(r"[0-9a-f]{16}|[0-9a-f]{64}", spec):
+      if not any(i["id"] and (spec.startswith(i["id"]) or i["id"].startswith(spec)) for i in images):
+        missing.append(spec)
+      continue
+    m = re.fullmatch(r"([^/:@%]+)(?:/([^:@%]+))?(?::([^@%]+))?(?:@([^%]+))?(?:%(.+))?", spec)
+    if not m:
+      continue
+    want = {"name": m[1], "version": m[2], "tag": m[3], "system": m[4], "arch": m[5]}
+    if not any(all(v is None or image[k] == v for k, v in want.items()) for image in images):
+      missing.append(spec)
+  return missing
 
 def replay_script(ctx, run_programs=True):
   lines = [f"cd {shlex.quote(ctx.workdir())} 2>/dev/null"] if ctx.workdir() else []
@@ -99,6 +142,12 @@ def parse_replay(text):
       continue
     if line.startswith("@@NOUENV"):
       out["no_uenv"] = True
+      continue
+    if line.startswith("@@UENVIMG "):
+      out.setdefault("uenv_list", []).append(line[10:])
+      continue
+    if line.startswith("@@UENVLS "):
+      out["uenv_listed"] = line[9:].strip() == "0"
       continue
     if line.startswith("@@CONTAINER "):
       out["container"] = line[12:].strip()
@@ -153,6 +202,8 @@ def replay_result(ctx, res):
   uenv = ctx.opt("uenv")
   if uenv and not out["container"]:
     out["uenv"] = uenv
+    if out.get("uenv_listed"): # (uenv image ls worked: what it lists is all that is pulled)
+      out["uenv_not_pulled"] = not_pulled(uenv, pulled_uenvs(out.get("uenv_list", [])))
     if out["no_uenv"]:
       out["uenv_error"] = "the login node has no uenv command"
     elif not out["uenv_started"]:
