@@ -11,7 +11,7 @@ from datetime import datetime
 from rich.progress_bar import ProgressBar as RichProgressBar
 from rich.text import Text
 from textual import events, on
-from textual.app import App
+from textual.app import App, ScreenStackError
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.coordinate import Coordinate
@@ -786,6 +786,10 @@ class Slurp(App):
 
   def tick(self):
     """Every 0.25 s (only reads state, never waits): notice logins and broken sessions, reconnect, update the status"""
+    try:
+      self.screen
+    except ScreenStackError: # (no window: the app is closing down)
+      return
     self.spinner_frame += 1
     now = time.monotonic()
     self.link_manager.tick()
