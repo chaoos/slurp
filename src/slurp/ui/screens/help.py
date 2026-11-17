@@ -58,7 +58,7 @@ and the array window (kept). `r` reloads at once.
   details. Kept on the cluster with the categories, so slurp on the login node sees them too.
 - **Array** (a task of an array): a click on it opens the window of the array, in a subtab of its own.
 - **Buttons:** Reload (`r`: the job, its files and progress from the cluster again), Cancel job, Restart job (the original submission, another array range, or an edited command; with the
-  environment and script it was submitted with, if the cluster kept them), Run array, Array (the window of its array), Shell… (`s`, a running job: on
+  environment and script it was submitted with, if the cluster kept them), Run array, Array (the window of its array, in a subtab of its own), Shell… (`s`, a running job: on
   which of its nodes, in slurp or your own terminal).
 - **Info:** state (with the pending reason or exit code), account, partition, nodes, times, node hours, the command.
 - **Checks:** what is wrong or could be better with the script and the job, most severe first; open an entry for why

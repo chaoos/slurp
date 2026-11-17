@@ -2610,9 +2610,16 @@ class Slurp(App):
       self.open_view(f"job {job.jid}", lambda: JobScreen(job), kind="job", key=f"job {job.jid}")
 
   def open_array_subtab(self, array_id, job=None):
-    """The window of an array job in a subtab of its own, from wherever (the one open already: shown)"""
+    """The window of an array job in a subtab of its own, from wherever (the one open already: shown, if it shows the
+    array window; another window on top of it there, e.g. the job window of a task opened from it: a new subtab)"""
     job = job or next((j for j in self.jobs.values() if j.jid.partition("_")[0] == str(array_id)), None)
-    self.in_new_subtab(lambda: self.open_window(ArrayScreen(array_id, job)), key=f"array {array_id}")
+    key = f"array {array_id}"
+    view = self.find_view(key)
+    if view is not None:
+      stack = (getattr(self, "_screen_stacks", {}) or {}).get(view.mode, [])
+      if not (stack and isinstance(stack[-1], ArrayScreen) and str(stack[-1].array_id) == str(array_id)):
+        key = "" # (a subtab of its own, next to that one)
+    self.in_new_subtab(lambda: self.open_window(ArrayScreen(array_id, job)), key=key)
 
   def open_file(self, job, path):
     """A log of a job (its output or error file): at its end, followed while the job runs"""

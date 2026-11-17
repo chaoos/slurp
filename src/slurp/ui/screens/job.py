@@ -697,7 +697,7 @@ class JobScreen(SplitScreen):
   @on(Button.Pressed, "#array-window")
   def array_window_pressed(self, event):
     event.stop()
-    self.app.open_array(self.job.jid.partition("_")[0], self.job)
+    self.action_open_array_window()
 
   @on(Button.Pressed, "#run-array")
   def run_array_pressed(self, event):
@@ -823,7 +823,7 @@ class JobScreen(SplitScreen):
       self.app.open_category(category)
 
   def action_open_array_window(self):
-    """The array of the task (a click on it): its window, in a subtab of its own"""
+    """The array of the task (a click on it, the Array button): its window, in a subtab of its own"""
     if array_task_id(self.job) is not None:
       self.app.open_array_subtab(self.job.jid.partition("_")[0], self.job)
 

@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Fixed: the **Array** line of a task's job window did nothing when the
+  task was opened from the array window (it showed the subtab already
+  shown); it opens the array window in a new subtab now, and so does the
+  **Array** button.
 - **Progress file…** opens a window with the directory listing instead
   of the directory browser: type a path, filter, and for the file under
   the cursor its end and whether it has progress in it.
