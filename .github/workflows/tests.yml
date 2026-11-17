@@ -18,8 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python -m pip install pre-commit
@@ -34,8 +34,8 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -50,8 +50,8 @@ jobs:
     env:
       SLURP_REQUIRE_LAB: "1" # a missing sshd is an error here, not a skip
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12" # (the UI scenario uses asyncio.eager_task_factory: 3.12+)
           cache: pip
@@ -65,7 +65,7 @@ jobs:
       - run: python -m pytest tests/e2e -v --basetemp="$RUNNER_TEMP/pytest"
       - name: Keep the output of the e2e tests (logs, screenshots)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-output
           path: ${{ runner.temp }}/pytest/lab*/out/
