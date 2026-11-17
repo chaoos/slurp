@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The overview of a cluster's tab has **SSH settings…** (below Connect and
+  Disconnect): its destination or full SSH settings, filled in, the blocks
+  of `~/.ssh/config` that apply and what `ssh -G` makes of it all, Check;
+  Save changes the tab, the next login uses it.
 - Links (web, drive, shell) show when they started and how long they are
   still valid: **Started** and **Valid** in the connection window's links
   (sessions: when they started) and in the link window; until when, or

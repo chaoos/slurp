@@ -500,7 +500,9 @@ class AddClusterScreen(ModalScreen):
   """A new tab. The main way: an SSH destination, a Host of ~/.ssh/config (its user, jump hosts and keys are there;
   suggested as you type) or user@host; empty: this machine. The fallback: the full SSH settings (user, host, port,
   jump hosts, identity files, more options). Check tries the connection without asking anything and says what is
-  wrong; Add adds the tab, checked or not. Dismissed with the destination (str), {"ssh": settings}, or None."""
+  wrong; Add adds the tab, checked or not. Dismissed with the destination (str), {"ssh": settings}, or None.
+  With a cluster: its SSH settings, to see and change (Save): filled in, with the blocks of ~/.ssh/config that apply
+  and what ssh makes of it all (ssh -G)."""
   DEFAULT_CSS = """
   AddClusterScreen { align: center middle; }
   #cluster-dialog { width: 100; max-width: 98%; height: auto; max-height: 96%; border: thick $accent; background: $surface; padding: 1 2; }
@@ -514,6 +516,7 @@ class AddClusterScreen(ModalScreen):
   .ssh-row Input { width: 1fr; }
   #ssh-port { width: 12; }
   #ssh-options { height: 5; }
+  #cluster-config { height: auto; margin-bottom: 1; }
   #cluster-check-scroll { height: auto; max-height: 18; border: round $panel-lighten-2; display: none; }
   #cluster-check-scroll.-shown { display: block; }
   #cluster-check { height: auto; padding: 0 1; }
@@ -522,12 +525,17 @@ class AddClusterScreen(ModalScreen):
   """
   BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
+  def __init__(self, cluster=None):
+    super().__init__()
+    self.cluster = cluster # (its SSH settings to change; None: a new tab)
+
   def compose(self) -> ComposeResult:
     from ...cluster import sshsetup
     hosts = sshsetup.config_hosts()
     with Vertical(id="cluster-dialog"):
       with VerticalScroll(id="cluster-body"):
-        yield Static("Add a tab: a cluster (or this machine)", id="cluster-title")
+        yield Static(f"SSH settings of the tab {self.cluster.name}" if self.cluster else "Add a tab: a cluster (or this machine)",
+                     id="cluster-title", markup=False)
         yield Label("SSH destination")
         yield Input(placeholder="a Host of your ~/.ssh/config (best), or user@host; empty: this machine", id="cluster-destination",
                     suggester=SuggestFromList(hosts, case_sensitive=False) if hosts else None)
@@ -547,16 +555,83 @@ class AddClusterScreen(ModalScreen):
           yield Label("More ssh options, one per line: Key=Value (e.g. ForwardAgent=yes, ServerAliveInterval=30, "
                       "UserKnownHostsFile=…, PreferredAuthentications=…, ProxyCommand=…)")
           yield TextArea(id="ssh-options", soft_wrap=False)
+        if self.cluster is not None:
+          yield Static(id="cluster-config")
         with VerticalScroll(id="cluster-check-scroll"):
           yield Static(id="cluster-check")
       with Horizontal(id="cluster-actions"):
         yield Button("Cancel", id="cluster-cancel", compact=True)
         yield Button("Check", id="cluster-check-button", compact=True,
                      tooltip="try the connection without logging in interactively, and say what is wrong")
-        yield Button("Add", id="cluster-confirm", variant="primary", compact=True, tooltip="add the tab (checked or not); it logs in")
+        yield Button("Save" if self.cluster else "Add", id="cluster-confirm", variant="primary", compact=True,
+                     tooltip="the tab takes these settings (the next login uses them)" if self.cluster else
+                     "add the tab (checked or not); it logs in")
 
   def on_mount(self):
     self.query_one("#cluster-destination", Input).focus()
+    cluster = self.cluster
+    if cluster is None:
+      return
+    settings = cluster.ssh or {}
+    if settings:
+      self.query_one("#cluster-full", Collapsible).collapsed = False
+      for key in ("host", "user", "port", "jump", "name"):
+        self.query_one(f"#ssh-{key}", Input).value = str(settings.get(key) or "")
+      self.query_one("#ssh-identities", Input).value = ", ".join(settings.get("identities") or [])
+      self.query_one("#ssh-options", TextArea).load_text("\n".join(settings.get("options") or []))
+      self.query_one("#ssh-host", Input).focus()
+    else:
+      self.query_one("#cluster-destination", Input).value = cluster.destination or ""
+    self.show_config()
+
+  config_timer = None
+
+  @on(Input.Changed)
+  def destination_changed(self, event):
+    """(editing a tab: what applies follows the destination and the full settings, when the typing pauses)"""
+    if self.cluster is None or not (event.input.id or "").startswith(("cluster-destination", "ssh-")):
+      return
+    if self.config_timer is not None:
+      self.config_timer.stop()
+    self.config_timer = self.set_timer(0.6, self.show_config)
+
+  def show_config(self):
+    """What applies to the destination: the blocks of ~/.ssh/config, and what ssh makes of it all (ssh -G)"""
+    from ...cluster import sshsetup
+    destination, settings = self.query_one("#cluster-destination", Input).value.strip(), self.settings()
+    target = sshsetup.target(destination, settings)
+    def work():
+      blocks = sshsetup.config_blocks(target) if target else []
+      conf, err = sshsetup.effective_config(destination, settings) if target else (None, "")
+      return blocks, conf, err
+    def show(result):
+      if result is None or not self.is_mounted:
+        return
+      blocks, conf, err = result
+      out = Text()
+      if not target:
+        out.append("no destination", style="dim")
+      else:
+        out.append(f"In ~/.ssh/config for {target}:\n", style="bold")
+        if blocks:
+          for path, line, text in blocks:
+            out.append(f"{path.replace(os.path.expanduser('~'), '~', 1)}, line {line}:\n", style="dim")
+            out.append(text + "\n")
+        else:
+          out.append("nothing (not an entry there: the host name as it is)\n", style="dim")
+        if conf:
+          one = lambda key: (conf.get(key) or [""])[0]
+          keys = [p.replace(os.path.expanduser("~"), "~", 1) for p in conf.get("identityfile", [])
+                  if os.path.exists(os.path.expanduser(p))]
+          out.append("\nWhat ssh makes of it all (ssh -G):\n", style="bold")
+          out.append(f"{one('user')}@{one('hostname')} port {one('port')}"
+                     + (f", through {one('proxyjump')}" if one("proxyjump") not in ("", "none") else "")
+                     + (f", through the command {one('proxycommand')}" if one("proxycommand") not in ("", "none") else "")
+                     + (f"\nkeys: {', '.join(keys)}" if keys else "") + "\n")
+        elif err:
+          out.append(f"\nssh does not take it: {err}\n", style="red")
+      self.query_one("#cluster-config", Static).update(out)
+    in_background(self, work, show, group="ssh-config", connection=None)
 
   def settings(self):
     """The full settings filled in ({} if no host)"""

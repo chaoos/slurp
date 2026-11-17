@@ -184,7 +184,8 @@ the cluster (its site, the Slurm version, its nodes and partitions), its health 
 why), the SSH session, and the ways on: **Jobs** (`j`, with how many run and wait; *No Slurm available* where there
 is none), **Quota** (`Q`) and **Health** (`C`, everything about the nodes and partitions). Below them the site's
 status page and documentation (a click opens them). Not connected: **Connect**, and what happened to the connection (slurp does not log in at the start; a tab added
-with `+` logs in right away); connected: **Disconnect**.
+with `+` logs in right away); connected: **Disconnect**. **SSH settings…**: how the tab logs in, its destination or
+full SSH settings, what `~/.ssh/config` and `ssh -G` make of it, **Check**; saved, the next login uses them.
 `r` asks the cluster again (it does by itself after 5 minutes). *At the start a tab shows* in **Options** (`F3`) can
 open the job list instead.
 """),
@@ -353,6 +354,10 @@ nothing, not even a host key): what ssh makes of the settings, the keys, the hos
 a login. It says whether it works, works with a prompt (a passphrase, a password or a code, a new host key: the
 login asks), or what is wrong, precisely, with ssh's verbose log. **Add** adds the tab, checked or not; the login runs
 in the pane on the right.
+
+From a tab's overview (**SSH settings…**) the same dialog shows the tab's settings, filled in, with the blocks of your
+`~/.ssh/config` that apply (with their file and line) and what ssh makes of it all (`ssh -G`); **Save** changes the tab
+(the next login uses it: **Reconnect**).
 """),
   "InteractiveJobScreen": ("Interactive job", """
 An `sbatch` command for a job that only holds nodes (`sleep infinity`), for shells on them from its job window. The

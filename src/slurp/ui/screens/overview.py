@@ -52,6 +52,9 @@ class OverviewScreen(SplitScreen):
           yield Button(icons.label("connect", "Connect"), id="ov-connect", variant="primary", compact=True, tooltip="log in to the cluster of this tab")
         with Center(id="ov-disconnect-row"):
           yield Button(icons.label("disconnect", "Disconnect"), id="ov-disconnect", compact=True, tooltip="end the SSH session of this tab")
+        with Center(id="ov-config-row"):
+          yield Button(icons.label("options", "SSH settings…"), id="ov-config", compact=True,
+                       tooltip="how this tab logs in: its destination or full SSH settings, what ~/.ssh/config says, Check")
         yield Static(id="ov-site")
 
   def on_mount(self):
@@ -125,6 +128,11 @@ class OverviewScreen(SplitScreen):
     self.app.connect_tab()
     self.show()
 
+  @on(Button.Pressed, "#ov-config")
+  def config_pressed(self, event):
+    event.stop()
+    self.app.edit_ssh_settings(self.cluster)
+
   @on(Button.Pressed, "#ov-disconnect")
   def disconnect_pressed(self, event):
     event.stop()
@@ -158,6 +166,7 @@ class OverviewScreen(SplitScreen):
     q("#ov-connect-row").display = state == "idle"
     c = cluster.connection if cluster and cluster.destination else None
     q("#ov-disconnect-row").display = c is not None and c.state not in ("new", "closed") and state != "idle"
+    q("#ov-config-row").display = bool(cluster and cluster.destination)
     if connected:
       jobs = q("#ov-jobs")
       jobs.display = not cluster.no_slurm

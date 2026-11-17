@@ -112,6 +112,54 @@ def config_hosts(path=None):
   return hosts
 
 
+def config_blocks(destination, path=None):
+  """The blocks of ~/.ssh/config (and the files it includes) that apply to a destination: [(file, line, text)], in
+  order (a Host whose patterns match it, also Host * ; a Match block is shown as it is, not evaluated)"""
+  import fnmatch
+  import glob
+  host = destination.rsplit("@", 1)[-1]
+  blocks, seen = [], set()
+  def matches(patterns):
+    hit = False
+    for p in patterns:
+      if p.startswith("!"):
+        if fnmatch.fnmatch(host, p[1:]):
+          return False
+      elif fnmatch.fnmatch(host, p):
+        hit = True
+    return hit
+  def read(p, depth=0):
+    if depth > 4 or p in seen:
+      return
+    seen.add(p)
+    try:
+      lines = open(p, encoding="utf-8", errors="replace").read().splitlines()
+    except OSError:
+      return
+    current = None # (line number, lines) of a block that applies
+    def close():
+      if current:
+        blocks.append((p, current[0], "\n".join(current[1]).rstrip()))
+    for number, line in enumerate(lines, 1):
+      words = line.strip().split()
+      key = words[0].lower() if words else ""
+      if key in ("host", "match"):
+        close()
+        current = (number, [line]) if key == "match" or matches(words[1:]) else None
+      elif key == "include" and current is None:
+        for pattern in words[1:]:
+          pattern = os.path.expanduser(pattern)
+          if not os.path.isabs(pattern):
+            pattern = os.path.join(os.path.expanduser("~/.ssh"), pattern)
+          for f in sorted(glob.glob(pattern)):
+            read(f, depth + 1)
+      elif current is not None:
+        current[1].append(line)
+    close()
+  read(path or os.path.expanduser("~/.ssh/config"))
+  return blocks
+
+
 # ---------------------------------------------------------------------------
 # the check
 

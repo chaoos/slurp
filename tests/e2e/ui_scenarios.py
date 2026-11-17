@@ -428,7 +428,7 @@ async def t_cluster_info(app, pilot):
   jobs = str(app.screen.query_one("#ov-jobs").label)
   check("…Jobs (with how many run and wait), Quota, Health", "running" in jobs and "pending" in jobs
         and app.screen.query_one("#ov-quota").display and app.screen.query_one("#ov-info").display, jobs)
-  check("…a few lines, not a report", app.screen.query_one("#ov-card").region.height <= 14)
+  check("…a few lines, not a report", app.screen.query_one("#ov-card").region.height <= 15) # (with SSH settings…: 15)
   app.save_screenshot(filename="overview.svg", path=OUT)
   await pilot.click("#ov-jobs"); await pilot.pause(0.4)
   check("Jobs: the job list, as a subtab again", app.screen is app.main and app.cluster.jobs_open and vtabs(app) == ["Jobs"], vtabs(app))
@@ -3003,3 +3003,57 @@ async def t_ssh_setup(app, pilot):
   check("Add without Check (even one that does not work): the tab is there", ok and app.clusters[-1].destination == "no-such-host.invalid")
   for c in list(app.clusters[n:]):
     app.close_cluster(c); await pilot.pause(0.3)
+
+
+async def t_ssh_edit(app, pilot):
+  """The overview's SSH settings…: the tab's destination (and what ~/.ssh/config and ssh -G make of it); changed to
+  full settings and saved, the next login (Reconnect) uses them; and back"""
+  import re as _re
+  from slurp.ui.screens.dialogs import AddClusterScreen
+  from slurp.ui.screens.overview import OverviewScreen
+  cluster = app.cluster
+  port = _re.search(r"Port (\d+)", open(os.path.join(LAB, "ssh_config")).read())[1]
+  relay = os.path.join(HERE, "share", "relaykey")
+  app.show_home(); await pilot.pause(0.3)
+  for v in list(cluster.views): app.close_view(v)
+  cluster.jobs_open = False; app.show_home(); await pilot.pause(0.5)
+  ok = await until(pilot, lambda: isinstance(app.screen, OverviewScreen) and app.screen.query_one("#ov-config-row").display, 10)
+  check("the overview of an SSH tab: SSH settings…", ok)
+  app.screen.query_one("#ov-config").press()
+  ok = await until(pilot, lambda: isinstance(app.screen, AddClusterScreen) and "What ssh makes of it all" in str(app.screen.query_one("#cluster-config").render()), 15)
+  dlg = app.screen
+  config = str(dlg.query_one("#cluster-config").render()) if ok else ""
+  check("its settings: the destination filled in, what ssh makes of it (user@host port), Save",
+        ok and dlg.query_one("#cluster-destination").value == "lab" and f"@127.0.0.1 port {port}" in config
+        and str(dlg.query_one("#cluster-confirm").label) == "Save", config)
+  dlg.query_one("#cluster-full").collapsed = False; await pilot.pause(0.2)
+  for key, value in (("host", "127.0.0.1"), ("port", port), ("user", getpass.getuser()), ("identities", relay), ("name", "lab-full")):
+    dlg.query_one(f"#ssh-{key}").value = value
+  dlg.query_one("#ssh-options").load_text(f"UserKnownHostsFile={os.path.join(LAB, 'known_hosts')}")
+  dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
+  check("Save: the tab takes them (its name, its settings), kept; the session at its next login", cluster.name == "lab-full"
+        and cluster.ssh and cluster.ssh["port"] == port and "-p" in cluster.connection.ssh_options
+        and any(t.get("name") == "lab-full" for t in load_config().get("tabs") or []), (cluster.name, cluster.ssh))
+  calls = os.path.join(LAB, "ssh_calls.log")
+  before = len(open(calls).read().splitlines())
+  app.reconnect(cluster)
+  if not cluster.connection.ready:
+    app.connect_tab()
+  ok = await until(pilot, lambda: cluster.connection and cluster.connection.ready and len(open(calls).read().splitlines()) > before, 30)
+  master = next((l for l in open(calls).read().splitlines()[before:] if " -M " in l), "")
+  check("Reconnect: the login with the full settings", ok and f"-p {port}" in master and f"-i {relay}" in master, master)
+  # back to the Host of ssh_config
+  app.edit_ssh_settings(cluster); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
+  dlg = app.screen
+  for key in ("host", "port", "user", "identities", "name"):
+    dlg.query_one(f"#ssh-{key}").value = ""
+  dlg.query_one("#ssh-options").load_text("")
+  dlg.query_one("#cluster-destination").value = "lab"
+  dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
+  check("back to a Host of ~/.ssh/config: no full settings", cluster.name == "lab" and cluster.destination == "lab" and not cluster.ssh
+        and cluster.connection.ssh_options == [], (cluster.name, cluster.ssh))
+  app.disconnect(cluster); await pilot.pause(0.5); app.connect_tab()
+  ok = await until(pilot, lambda: "passphrase" in term(app), 15)
+  await pilot.press(*"pw123", "enter")
+  ok = await until(pilot, lambda: cluster.connection.ready, 30)
+  check("…and it logs in as before", ok)

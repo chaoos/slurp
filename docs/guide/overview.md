@@ -19,7 +19,11 @@ middle, a few lines about the cluster and the ways on.
 Not connected, the overview shows **Connect** in its middle, with what happened to the connection (never connected,
 closed, lost and why); while logging in, the login is in the pane on the right. slurp does not log in by itself at the
 start: a cluster tab waits for Connect (a tab added with `+` logs in right away). Connected, **Disconnect** ends the
-session.
+session. Below it, for a tab of a cluster, **SSH settings…** shows how the tab logs in:
+its destination, or its full SSH settings (host, user, port, jump hosts, identity
+files, more options), the blocks of your `~/.ssh/config` that apply (with file and
+line) and what ssh makes of it all (`ssh -G`), with **Check** (as when adding a
+tab). **Save** changes the tab; the next login uses it (**Reconnect**).
 
 The cluster is asked in the background when the overview is shown, and again after 5 minutes; `r` asks at once.
 To have the job list open from the start: **Options** (`F3`), *At the start a tab shows*: its job list

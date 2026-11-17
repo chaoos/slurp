@@ -768,6 +768,32 @@ class Slurp(App):
     self.activate_cluster(len(self.clusters) - 1) # (logs in right away: the user just asked for it)
     self.save_tabs()
 
+  def edit_ssh_settings(self, cluster):
+    """The SSH settings of a tab, to see and change: its destination, or its full settings (the add dialog)"""
+    from .screens.dialogs import AddClusterScreen
+    def saved(result):
+      if result is None or cluster not in self.clusters:
+        return
+      settings = sshsetup.clean(result.get("ssh")) if isinstance(result, dict) else None
+      destination = settings["host"] if settings else str(result or "").strip()
+      if not destination:
+        self.notify("a tab of a cluster needs a destination (this machine: add a tab with an empty one)", severity="warning")
+        return
+      changed = (destination, settings) != (cluster.destination, cluster.ssh)
+      cluster.destination, cluster.ssh = destination, settings
+      cluster.name = sshsetup.label(settings) if settings else destination
+      c = cluster.connection
+      if c is not None: # (the session takes them at its next login)
+        c.destination, c.ssh_options = destination, sshsetup.ssh_args(settings)
+      self.refresh_cluster_tabs()
+      self.save_tabs()
+      self.refresh_status()
+      if changed and c is not None and c.ready:
+        self.notify(f"{cluster.name}: the new SSH settings apply at the next login (Reconnect, R)", timeout=8)
+      elif changed:
+        self.notify(f"{cluster.name}: SSH settings saved", timeout=4)
+    self.push_screen(AddClusterScreen(cluster), saved)
+
   RECONNECT_DELAYS = (0, 5, 15, 30, 60) # seconds before the 1st, 2nd, ... attempt to reconnect a broken session
 
   def action_connection(self):

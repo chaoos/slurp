@@ -75,3 +75,19 @@ def test_check_without_a_server(check):
   check("an identity file that does not exist: said", any("/nonexistent/key does not exist" in f.text for f in r.findings), r.findings)
   text = s.check_text(r).plain
   check("in words: the verdict first, the findings", text.startswith("✖ does not work") and "✖" in text)
+
+
+def test_the_blocks_of_ssh_config_for_a_destination(check, tmp_path):
+  (tmp_path / "inc.conf").write_text("Host daint\n  ForwardAgent yes\n")
+  (tmp_path / "config").write_text(f"Include {tmp_path}/inc.conf\nHost daint dom\n  HostName daint.alps.cscs.ch\n  User me\n\n"
+                                   "Host *.cscs.ch !ela.cscs.ch\n  ProxyJump ela\nHost other\n  User x\nMatch exec true\n  ServerAliveInterval 5\n"
+                                   "Host *\n  IdentitiesOnly yes\n")
+  blocks = s.config_blocks("me@daint", str(tmp_path / "config"))
+  texts = [t for _, _, t in blocks]
+  check("the blocks for daint: of the included file, its Host, Match (shown, not evaluated), Host *; not other ones",
+        texts == ["Host daint\n  ForwardAgent yes", "Host daint dom\n  HostName daint.alps.cscs.ch\n  User me",
+                  "Match exec true\n  ServerAliveInterval 5", "Host *\n  IdentitiesOnly yes"], texts)
+  check("…with the file and line", blocks[0][0].endswith("inc.conf") and blocks[1][1] == 2, [(f, l) for f, l, _ in blocks])
+  texts = [t.splitlines()[0] for _, _, t in s.config_blocks("x.cscs.ch", str(tmp_path / "config"))]
+  check("wildcards match, a negated pattern excludes", "Host *.cscs.ch !ela.cscs.ch" in texts
+        and "Host *.cscs.ch !ela.cscs.ch" not in [t.splitlines()[0] for _, _, t in s.config_blocks("ela.cscs.ch", str(tmp_path / "config"))], texts)
