@@ -1826,6 +1826,8 @@ async def t_progress(app, pilot):
   check("the progress has its own title, before Files, like the other sections", any(t.endswith("Progress") for t in titles)
         and [t.split()[-1] for t in titles].index("Progress") < [t.split()[-1] for t in titles].index("Files")
         and app.screen.query_one("#job-progress Label.section") is not None, titles)
+  check("the diagnostics have their own title too, above the query and the plot (a running job)",
+        any(t.endswith("Diagnostics") for t in titles) and app.screen.query_one("#diagnostics-title").display, titles)
   app.save_screenshot(filename="job_progress.svg", path=OUT)
   wd = app.jobs["9001"].rec["WorkDir"]
   now = datetime.now().replace(microsecond=0)
@@ -2342,6 +2344,7 @@ async def t_ended_progress(app, pilot):
   check("an ended job: its progress file's last line, and that it ended there (FAILED, exit code)",
         ok and "step 28/100 done" in line() and "the job ended FAILED (exit code 1:0) here" in line()
         and "slurm-9009.out" in line() and js.query_one("#job-progress").display, (line(), repr(js.job.progress)[:300], js.job.state))
+  check("an ended job without measurements: no Diagnostics (nothing under it)", not js.query_one("#diagnostics-title").display)
   bar = js.query_one("#progress-bar")
   check("…the bar where it got to (not 0 of 1)", bar.total == 100 and bar.progress == 28, (bar.total, bar.progress))
   check("…and another file can be chosen for it", js.query_one("#progress-file").display)

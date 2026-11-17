@@ -185,7 +185,7 @@ class Slurp(App):
   #checks-bar { height: auto; margin-top: 1; }
   #checks-bar Label { margin-right: 2; }
   #checks-bar Button { margin-right: 1; }
-  #memory-controls { height: auto; margin: 1 0; }
+  #memory-controls { height: auto; margin: 0 0 1 0; }
   #memory-controls > * { margin-right: 1; }
   #memory-controls Label { width: auto; height: 1; content-align: center middle; padding: 0; }
   #memory-cpu { width: auto; height: 1; }

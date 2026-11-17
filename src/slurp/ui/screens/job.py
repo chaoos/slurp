@@ -161,6 +161,7 @@ class JobScreen(SplitScreen):
                      tooltip="the script and the command line, compared with the last run of this job that worked")
         yield Button("Rule catalogue", id="checks-catalogue", compact=True)
       yield FindingsView(id="job-checks")
+      yield Label(icons.label("health", "Diagnostics"), id="diagnostics-title", classes="section")
       with Horizontal(id="memory-controls"):
         yield Button(icons.label("health", "Query runtime diagnostics…"), id="diagnostics", variant="primary", compact=True,
                      tooltip="on a node of the job (or all): memory, CPU and GPU use and load, I/O, local disks, its busiest processes")
@@ -274,6 +275,7 @@ class JobScreen(SplitScreen):
     self.query_one("#info", Static).update(grid)
     self.show_notes()
     self.query_one("#memory-controls", Horizontal).display = job.running
+    self.show_diagnostics_title()
     self.query_one("#diagnostics", Button).disabled = not job.running
     self.show_progress()
     self.query_one("#nodes").display = job.running
@@ -625,6 +627,7 @@ class JobScreen(SplitScreen):
     """Status of the watch (samples, next query, the file) and the plots of CPU and GPU memory over time"""
     w = self.memory
     self.query_one("#memory-watch").display = self.job.running or bool(w["samples"])
+    self.show_diagnostics_title()
     samples = w["samples"]
     parts = [f"{len(samples)} measurement{'s' if len(samples) != 1 else ''}"]
     if samples:
@@ -828,6 +831,11 @@ class JobScreen(SplitScreen):
     """The array of the task (a click on it, the Array button): its window, in a subtab of its own"""
     if array_task_id(self.job) is not None:
       self.app.open_array_subtab(self.job.jid.partition("_")[0], self.job)
+
+  def show_diagnostics_title(self):
+    """The Diagnostics title: shown with what is under it (the queries of a running job, the measurements kept)"""
+    self.query_one("#diagnostics-title").display = (self.query_one("#memory-controls").display
+                                                    or self.query_one("#memory-watch").display)
 
   # ---- notes (Markdown, kept with the categories on the cluster)
   def show_notes(self):

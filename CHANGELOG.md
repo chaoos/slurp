@@ -6,7 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
-- The job window's progress has a title of its own (**Progress**), like Checks, Files and Steps.
+- The job window's progress and diagnostics (the runtime queries and the memory plot) have titles of their own
+  (**Progress**, **Diagnostics**), like Checks, Files and Steps.
 - **Options** (`F3`) → *Progress of jobs*: how much of the end of a file
   is read for the progress (KiB, of it the last lines), and over how many
   progress values the current pace goes; high values are said to slow the
