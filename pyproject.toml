@@ -27,18 +27,19 @@ classifiers = [
 # Not from pip: ssh, the Slurm commands (here or on the cluster you connect to), and sshfs/fusermount for mounting
 # drives on this machine.
 dependencies = [
-    "humanize",
-    "python-dateutil",  # durations of the finished-jobs window (2w, 1mo, ...)
-    "pyte",             # the terminal emulator of the shells
-    "rich",
-    "textual[syntax]",  # with syntax highlighting in the script editor (tree-sitter)
+    "humanize>=4",
+    "python-dateutil>=2.8",  # durations of the finished-jobs window (2w, 1mo, ...)
+    "pyte>=0.8",             # the terminal emulator of the shells
+    "rich>=13",
+    "textual[syntax]>=8.2",  # with syntax highlighting in the script editor (tree-sitter); 8.2: compact buttons, modes
 ]
 
 [project.optional-dependencies]
-links = ["asyncssh"]                    # shells and drives from your own terminal
-hdf5 = ["h5py", "numpy"]                # the HDF5 view; without it slurp shows `h5dump -H`
-web = ["textual-serve", "textual-web"]  # slurp --serve, and a public link to the app
-all = ["slurp[links,hdf5,web]"]
+links = ["asyncssh>=2.14"]                     # shells and drives from your own terminal
+hdf5 = ["h5py>=3", "numpy"]                    # the HDF5 view; without it slurp shows `h5dump -H`
+web = ["textual-serve>=1.1", "textual-web"]    # slurp --serve, and a public link to the app
+all = ["asyncssh>=2.14", "h5py>=3", "numpy", "textual-serve>=1.1", "textual-web"]  # (links, hdf5, web: listed, so that
+                                               # it holds whatever the package is called on an index)
 dev = ["pytest>=8", "ruff", "pre-commit", "fonttools"]  # with all: pip install -e ".[all,dev]" (fonttools: tools/make_icon_font.py)
 docs = ["mkdocs-material>=9.6,<10"]  # the documentation site: mkdocs serve, mkdocs build --strict
 

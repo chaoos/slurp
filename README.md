@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/images/logo-wordmark.svg" alt="slurp: All of slurm in one slurp" width="300"></p>
+<p align="center"><img src="https://chaoos.github.io/slurp/images/logo-wordmark.svg" alt="slurp: All of slurm in one slurp" width="300"></p>
 
 # slurp
 
@@ -10,7 +10,7 @@ in a browser.
 
 **Documentation: <https://chaoos.github.io/slurp/>**
 
-![The job list: queued, running and finished jobs, progress and estimates, an array of 150 tasks as one row](docs/images/jobs.svg)
+![The job list: queued, running and finished jobs, progress and estimates, an array of 150 tasks as one row](https://chaoos.github.io/slurp/images/jobs.svg)
 
 ## Quick start
 
@@ -32,10 +32,10 @@ app, `?` explains the window shown and `F1` opens the guides.
 
 ## Links
 
-- [Documentation](https://chaoos.github.io/slurp/) (the pages are in [docs/](docs/))
-- [Changelog](CHANGELOG.md)
+- [Documentation](https://chaoos.github.io/slurp/) (the pages are in [docs/](https://github.com/chaoos/slurp/tree/main/docs))
+- [Changelog](https://github.com/chaoos/slurp/blob/main/CHANGELOG.md)
 - [Development](https://chaoos.github.io/slurp/development/): editable install, the tests, CI
 
 ## License
 
-GPL-3.0, see [LICENSE](LICENSE).
+GPL-3.0, see [LICENSE](https://github.com/chaoos/slurp/blob/main/LICENSE).
