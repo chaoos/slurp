@@ -620,6 +620,8 @@ class FileScreen(SplitScreen):
     self.crumbs, self.path, self.text, self.refresher = crumbs, path, text, refresher
     self.bases, self.env = list(bases), env # to resolve relative paths in the text
     self.following = follow and path is not None
+    self.from_top = not self.following # (a file opens at its top; one that is followed at its end)
+    self.head_only = False # only the beginning of a large file is shown (its first TAIL_BYTES)
     self.watching = False
     self.start_pos = 0 # where in the file the text shown starts (only the end of a large file is read)
     self.file_pos = 0
@@ -661,6 +663,8 @@ class FileScreen(SplitScreen):
         parts.append(f"{self.path}  (not readable)" if self.decoder else f"{self.path} · loading …")
       else:
         parts.append(f"{self.path}  {humanize.naturalsize(self.file_size)}")
+      if self.head_only:
+        parts.append(f"showing the first {humanize.naturalsize(self.file_pos)} (G or f: its end)")
       if self.truncated:
         parts.append(f"showing the last {humanize.naturalsize((self.file_size or 0) - self.start_pos)} "
                      f"(A: the {humanize.naturalsize(TAIL_BYTES)} before)")
@@ -675,15 +679,19 @@ class FileScreen(SplitScreen):
       self.area.load_text(clean(self.text or ""))
       self.update_status()
       return
+    from_top = self.from_top
     def read():
       try:
         size = fs_getsize(self.path)
         truncated = size > TAIL_BYTES
+        if from_top: # (its beginning)
+          data = fs_read(self.path, 0, min(size, TAIL_BYTES))
+          return size, truncated, len(data), data, True
         offset = size - TAIL_BYTES if truncated else 0
         data = fs_read(self.path, offset, size - offset)
-        return size, truncated, offset + len(data), data
+        return size, truncated, offset + len(data), data, False
       except OSError as e:
-        return None, False, 0, f"cannot read {self.path}: {e}\n".encode()
+        return None, False, 0, f"cannot read {self.path}: {e}\n".encode(), from_top
     in_background(self, read, self.file_read, group="load")
     self.update_status()
 
@@ -691,15 +699,21 @@ class FileScreen(SplitScreen):
     if result is None:
       return
     area = self.area
-    self.file_size, self.truncated, self.file_pos, data = result
+    self.file_size, self.truncated, self.file_pos, data, from_top = result
     self.start_pos = self.file_pos - len(data)
     self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-    if self.truncated:
+    self.head_only = False
+    if from_top and self.truncated: # the beginning of a large file: up to its last whole line
+      self.truncated, self.head_only = False, True
+      if b"\n" in data:
+        data = data[:data.rindex(b"\n") + 1]
+        self.file_pos = len(data)
+    elif self.truncated:
       first, newline, data = data.partition(b"\n") # drop the partial first line
       self.start_pos += len(first) + len(newline)
     area.load_text(clean(self.decoder.decode(data)))
     area.history.clear()
-    self.action_bottom()
+    (self.action_top if from_top else self.action_bottom)()
     self.update_status()
 
   polling = False
@@ -762,6 +776,12 @@ class FileScreen(SplitScreen):
 
   def action_follow(self):
     self.following = not self.following
+    if self.following and self.head_only: # (the end is read, then followed)
+      self.from_top, self.head_only = False, False
+      self.load()
+      self.timer.resume()
+      self.update_status()
+      return
     if self.following:
       self.poll()
       self.action_bottom()
@@ -775,6 +795,10 @@ class FileScreen(SplitScreen):
     self.area.scroll_home(animate=False)
 
   def action_bottom(self):
+    if self.head_only: # (only the beginning is read: its end instead)
+      self.from_top, self.head_only = False, False
+      self.load()
+      return
     area = self.area
     area.move_cursor((area.document.line_count - 1, 0))
     area.scroll_end(animate=False)

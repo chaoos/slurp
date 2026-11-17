@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- A text file opens at its top; a large one shows its first 1 MB (`G` or
+  `f` read its end). A log that is followed (a running job's) still opens
+  at its end.
 - The directory view searches names (`/`): a part of them or a pattern
   (`*.out`), here as you type, or with **Subdirectories** (`Ctrl+R`) in all
   directories below, in the background (on a cluster a round trip per batch
