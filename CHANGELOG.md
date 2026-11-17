@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Jobs have notes, in Markdown, like categories: **Notes…** (`o`) in the
+  job window; shown there rendered, kept on the cluster.
 - Large text files (logs of millions of lines) work like `less`, without
   being read as a whole: scrolling past the part shown reads on (a window
   of 4 MB at most), `g` / `G` jump to the start and end, `:` to a line or

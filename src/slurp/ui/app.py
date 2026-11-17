@@ -208,6 +208,9 @@ class Slurp(App):
   #open-gdb { margin-top: 1; }
   #job-actions { height: auto; margin: 1 0; }
   #job-actions Button { margin-right: 1; }
+  #job-notes-box { height: auto; border: round $panel; border-title-color: $text-muted; padding: 0 1; margin: 1 0 0 0; }
+  #job-notes-box.-empty { display: none; }
+  #job-notes { margin: 0; padding: 0; }
   .section { margin-top: 1; text-style: bold; color: $accent; }
   #files { height: auto; max-height: 16; }
   #steps { height: auto; max-height: 14; }

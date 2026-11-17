@@ -1238,6 +1238,19 @@ async def t_categories(app, pilot):
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10); await pilot.pause(0.5)
   info = rendered(app.screen.query_one("#info").content) if ok and app.screen.query("#info") else ""
   check("the job window shows its category", "proj X/production" in info, info[:300])
+  # notes of the job, in Markdown
+  js = app.screen
+  check("no notes: no box", js.query_one("#job-notes-box").has_class("-empty"))
+  await pilot.press("o"); await pilot.pause(0.4)
+  ok = type(app.screen).__name__ == "NotesScreen"
+  if ok:
+    app.screen.query_one("#nt-text").text = "## Run 1\n\nthe **baseline**\n"
+    await pilot.press("ctrl+s")
+  ok = ok and await until(pilot, lambda: cluster.categories.job_notes_of("9001").startswith("## Run 1"), 10); await pilot.pause(0.5)
+  shown = " ".join(str(b.render()) for b in js.query_one("#job-notes").query("MarkdownBlock"))
+  check("Notes… (o) in the job window: kept on the cluster, rendered", ok and not js.query_one("#job-notes-box").has_class("-empty")
+        and "Run 1" in shown and "**" not in shown
+        and json.load(open(CATEGORIES_FILE))["clusters"]["lab"]["job_notes"]["9001"].startswith("## Run 1"), (ok, shown[:200]))
   # a click on it: the categories window there, in a subtab of its own
   grid = app.screen.query_one("#info").content if ok else None
   cell = next((c for c in getattr(grid, "columns", [None, None])[1]._cells if "proj X/production" in str(c)), None) if grid else None

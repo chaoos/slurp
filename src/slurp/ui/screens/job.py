@@ -12,7 +12,7 @@ from rich.text import Text
 from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, DataTable, Input, Label, OptionList, ProgressBar, Select, Static
+from textual.widgets import Button, DataTable, Input, Label, Markdown, OptionList, ProgressBar, Select, Static
 from textual.widgets.option_list import Option
 from textual.worker import get_current_worker
 
@@ -112,6 +112,7 @@ class JobScreen(SplitScreen):
     Binding("r", "reload", "Reload"),
     Binding("s", "shell", "Shell on node"),
     Binding("c", "categorize", "Categorize"),
+    Binding("o", "notes", "Notes"),
   ]
 
   def __init__(self, job):
@@ -129,8 +130,11 @@ class JobScreen(SplitScreen):
       yield Button(icons.label("array", "Array"), id="array-window", tooltip="all tasks of the array by state, to copy or cancel", compact=True)
       yield Button(icons.label("shell", "Shell…"), id="shell", compact=True,
                    tooltip="an interactive shell on a node of the job (you choose the node), in slurp or your own terminal (s)")
+      yield Button("Notes…", id="job-notes-edit", compact=True, tooltip="notes of the job, in Markdown (o)")
     with VerticalScroll(id="details"):
       yield Static(id="info")
+      with Vertical(id="job-notes-box", classes="-empty"):
+        yield Markdown(id="job-notes", open_links=False)
       with Horizontal(id="checks-bar"):
         yield Label(icons.label("check", "Checks"), classes="section")
         yield Button(icons.label("check", "Check"), id="checks-run", compact=True,
@@ -252,6 +256,7 @@ class JobScreen(SplitScreen):
     for key, val in rows:
       grid.add_row(key, val)
     self.query_one("#info", Static).update(grid)
+    self.show_notes()
     self.query_one("#memory-controls", Horizontal).display = job.running
     self.query_one("#diagnostics", Button).disabled = not job.running
     self.show_progress()
@@ -792,6 +797,35 @@ class JobScreen(SplitScreen):
     """The array of the task (a click on it): its window, in a subtab of its own"""
     if array_task_id(self.job) is not None:
       self.app.open_array_subtab(self.job.jid.partition("_")[0], self.job)
+
+  # ---- notes (Markdown, kept with the categories on the cluster)
+  def show_notes(self):
+    store = self.app.cluster.categories if self.app.clusters else None
+    text = store.job_notes_of(self.job.jid) if store else ""
+    box = self.query_one("#job-notes-box", Vertical)
+    box.border_title = "notes" if text else ""
+    box.set_class(not text, "-empty")
+    if getattr(self, "notes_shown", None) != text:
+      self.notes_shown = text
+      self.query_one("#job-notes", Markdown).update(text)
+
+  @on(Markdown.LinkClicked, "#job-notes")
+  def note_link(self, event):
+    event.stop()
+    if (event.href or "").startswith(("http://", "https://")):
+      self.app.open_page(event.href)
+
+  @on(Button.Pressed, "#job-notes-edit")
+  def action_notes(self, event=None):
+    from .categories import NotesScreen, change_categories
+    cluster, jid = self.app.cluster, self.job.jid
+    if cluster.categories is None:
+      self.notify("the notes are read with the job list: load it first (r)", severity="warning")
+      return
+    def saved(text):
+      if text is not None and text.strip() != cluster.categories.job_notes_of(jid):
+        change_categories(self.app, cluster, ["job_note", jid, text], lambda st, r: self.show_notes(), "writing notes")
+    self.app.push_screen(NotesScreen(f"job {jid}", cluster.categories.job_notes_of(jid), "in the job window"), saved)
 
   def action_categorize(self):
     """c: this job (an array task: the task) in a category"""

@@ -57,8 +57,8 @@ def array_of(jid):
 MAX_NOTES = 20000 # characters of a category's notes at most
 
 class Store:
-  """The categories of one Slurm cluster: their paths, the jobs in them ({jid: {category, name, added}}), and notes
-  of categories (Markdown, {path: text})"""
+  """The categories of one Slurm cluster: their paths, the jobs in them ({jid: {category, name, added}}), notes of
+  categories (Markdown, {path: text}) and notes of jobs (Markdown, {jid: text}; of any job, in a category or not)"""
 
   def __init__(self, cluster="default", data=None):
     data = data if isinstance(data, dict) else {}
@@ -86,10 +86,14 @@ class Store:
           self.paths.update(lineage(normalize(p)))
       except ValueError:
         pass
+    self.job_notes = {str(jid): text[:MAX_NOTES] for jid, text in (data.get("job_notes") or {}).items()
+                      if isinstance(text, str) and text.strip() and re.fullmatch(r"[0-9]+(_[0-9]+)?", str(jid))}
 
   def to_data(self):
     return {"categories": sorted(self.paths), "jobs": dict(sorted(self.jobs.items())),
-            **({"notes": dict(sorted(self.notes.items()))} if self.notes else {})}
+            **({"notes": dict(sorted(self.notes.items()))} if self.notes else {}),
+            **({"job_notes": dict(sorted(self.job_notes.items(), key=lambda kv: [int(x) for x in kv[0].split("_")]))}
+               if self.job_notes else {})}
 
   # ---- reading
   def category_of(self, jid):
@@ -114,6 +118,10 @@ class Store:
     """The notes of a category (Markdown), "" if none"""
     return self.notes.get(path, "")
 
+  def job_notes_of(self, jid):
+    """The notes of a job (Markdown; an array task: its own), "" if none"""
+    return self.job_notes.get(str(jid), "")
+
   # ---- changes (on a store just read from the file: see change())
   def note(self, path, text):
     """Notes of a category (Markdown; empty: none)"""
@@ -124,6 +132,18 @@ class Store:
     else:
       self.notes.pop(path, None)
     return path
+
+  def job_note(self, jid, text):
+    """Notes of a job (Markdown; empty: none)"""
+    jid = str(jid)
+    if not re.fullmatch(r"[0-9]+(_[0-9]+)?", jid):
+      raise ValueError(f"not a job id: {jid}")
+    text = (text or "").strip()
+    if text:
+      self.job_notes[jid] = text[:MAX_NOTES]
+    else:
+      self.job_notes.pop(jid, None)
+    return jid
 
   def add(self, path):
     path = normalize(path)
@@ -244,7 +264,7 @@ def cluster_name():
 def load(cluster):
   return Store(cluster, read_all()["clusters"].get(cluster))
 
-OPS = ("add", "assign", "unassign", "rename", "delete", "note") # (the changes, by name: kept to be done later, see jobcache)
+OPS = ("add", "assign", "unassign", "rename", "delete", "note", "job_note") # (the changes, by name: kept to be done later, see jobcache)
 
 def apply_op(store, op):
   """[name, args...] on a store; its result"""

@@ -143,14 +143,14 @@ class NotesScreen(ModalScreen[str | None]):
   """
   BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("ctrl+s", "save", "Save", priority=True)]
 
-  def __init__(self, path, text):
+  def __init__(self, path, text, shown="in the categories window"):
     super().__init__()
-    self.path, self.text = path, text
+    self.path, self.text, self.shown = path, text, shown
 
   def compose(self) -> ComposeResult:
     with Vertical(id="nt-dialog"):
       yield Static(f"Notes of {self.path}", id="nt-title", markup=False)
-      yield Static("Markdown: # headings, **bold**, - lists, `code`, [links](https://…). Shown in the categories window. "
+      yield Static(f"Markdown: # headings, **bold**, - lists, `code`, [links](https://…). Shown {self.shown}. "
                    "Empty: no notes. Ctrl+S saves.", id="nt-note", markup=False)
       yield TextArea(self.text, id="nt-text", language="markdown", soft_wrap=True, show_line_numbers=False)
       with Horizontal(id="nt-buttons"):

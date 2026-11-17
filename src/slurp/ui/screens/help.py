@@ -52,6 +52,8 @@ to it; a click there switches automatic refreshing off (**⟳ off**) and on agai
 and the array window (kept). `r` reloads at once.
 
 - **Category:** a click on it opens the categories window at that category, in a subtab of its own.
+- **Notes…** (`o`): notes of the job, in Markdown (what this run was for, what came out); shown rendered under its
+  details. Kept on the cluster with the categories, so slurp on the login node sees them too.
 - **Array** (a task of an array): a click on it opens the window of the array, in a subtab of its own.
 - **Buttons:** Reload (`r`: the job, its files and progress from the cluster again), Cancel job, Restart job (the original submission, another array range, or an edited command; with the
   environment and script it was submitted with, if the cluster kept them), Run array, Array (the window of its array), Shell… (`s`, a running job: on
@@ -280,10 +282,10 @@ has, the ones in the categories in it counted too), and for the one selected its
 Put the jobs in a category: pick one in the tree, or type a new one (`a/b` makes b in a, and a if it is new).
 An array goes in as a whole, with all its tasks. **Take out of its category** leaves them in none.
 """),
-  "NotesScreen": ("Notes of a category", """
-Notes of the category, in Markdown: `# headings`, `**bold**`, `- lists`, `` `code` ``, `[links](https://…)`. The
-categories window shows them rendered, under the numbers of the category. **Save** (`Ctrl+S`) keeps them with the
-categories (on the cluster); empty: no notes.
+  "NotesScreen": ("Notes", """
+Notes of a category or a job, in Markdown: `# headings`, `**bold**`, `- lists`, `` `code` ``, `[links](https://…)`.
+The categories window (under the numbers of the category) and the job window (under its details) show them
+rendered. **Save** (`Ctrl+S`) keeps them with the categories (on the cluster); empty: no notes.
 """),
   "NameScreen": ("Category name", """
 The name of a category: `a/b` is b in the category a (made too, if it is new). Renaming to another path moves it

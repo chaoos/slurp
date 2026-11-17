@@ -88,3 +88,19 @@ def test_notes(check):
   check("an op, kept to a size", len(s.notes_of("a")) == c.MAX_NOTES)
   bad = c.Store("x", {"notes": {"/": "x", "b": 3, "c": "ok"}})
   check("broken notes in a file: skipped", bad.notes == {"c": "ok"}, bad.notes)
+
+
+def test_job_notes(check):
+  s = c.Store("daint")
+  c.apply_op(s, ["job_note", "4711", "  ## Run 3\n\nwith **-O3**\n"])
+  c.apply_op(s, ["job_note", "200_3", "task 3: bad seed"])
+  check("notes of jobs, also of one in no category, also of an array task", s.job_notes_of("4711") == "## Run 3\n\nwith **-O3**"
+        and s.job_notes_of("200_3") == "task 3: bad seed" and s.job_notes_of("200") == "" and not s.paths and not s.jobs)
+  data = s.to_data()
+  check("in the data, sorted by job id; read back", list(data["job_notes"]) == ["200_3", "4711"] and c.Store("daint", data).job_notes == s.job_notes, data)
+  c.apply_op(s, ["job_note", "4711", " "])
+  check("empty: none", "4711" not in s.job_notes)
+  try: c.apply_op(s, ["job_note", "x; rm", "no"]); check("a job id only", False)
+  except ValueError: check("a job id only", True)
+  bad = c.Store("x", {"job_notes": {"12": "ok", "a": "no", "13": 5}})
+  check("broken ones in the file: skipped", bad.job_notes == {"12": "ok"}, bad.job_notes)
