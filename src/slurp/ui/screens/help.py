@@ -52,6 +52,7 @@ to it; a click there switches automatic refreshing off (**⟳ off**) and on agai
 and the array window (kept). `r` reloads at once.
 
 - **Category:** a click on it opens the categories window at that category, in a subtab of its own.
+- **Array** (a task of an array): a click on it opens the window of the array, in a subtab of its own.
 - **Buttons:** Reload (`r`: the job, its files and progress from the cluster again), Cancel job, Restart job (the original submission, another array range, or an edited command; with the
   environment and script it was submitted with, if the cluster kept them), Run array, Array (the window of its array), Shell… (`s`, a running job: on
   which of its nodes, in slurp or your own terminal).

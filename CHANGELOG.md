@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The job window of an array task has an **Array** line: a click opens
+  the array window, in a subtab of its own.
 - The job window: a click on the job's category opens the categories
   window at that category, in a subtab of its own.
 - Categories have notes, in Markdown: **Notes…** (`o`) in the categories

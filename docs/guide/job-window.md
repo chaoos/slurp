@@ -2,7 +2,9 @@
 
 Open a row to inspect accounting fields, steps, output and error files, the
 batch script, and files referenced by the job. A click on its **Category**
-opens the categories window at that category, in a subtab of its own. **Node hours (total)** is nodes ×
+opens the categories window at that category, in a subtab of its own; for a
+task of an array, a click on its **Array** line opens the array window in a
+subtab of its own. **Node hours (total)** is nodes ×
 elapsed time (for a running job so far, with the most it can take by its time limit). **Cancel job** and **Restart
 job** ask for confirmation; restart lets you use the original submission,
 retry eligible array IDs, or edit a custom command (in a bash editor). If

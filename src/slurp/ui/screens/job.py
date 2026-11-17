@@ -227,6 +227,8 @@ class JobScreen(SplitScreen):
       return Text.assemble((text, Style(underline=True) + Style.from_meta({"@click": f"screen.{action}"})), (f"  {tip}", "dim"))
     rows = [
       ("Job", f"{job.jid}  {rec['JobName']}"),
+      *([("Array", link(f"{job.jid.partition('_')[0]}  (task {array_task_id(job)})", "open_array_window",
+                         "→ a click: the array"))] if array_task_id(job) is not None else []),
       *([("Category", link(category, "open_category", "→ a click: the category"))] if category else []),
       ("State", state),
       ("User / account", f"{rec['User']} / {rec['Account']}   partition {rec['Partition']}"),
@@ -785,6 +787,11 @@ class JobScreen(SplitScreen):
     category = store.category_of(self.job.jid) if store else ""
     if category:
       self.app.open_category(category)
+
+  def action_open_array_window(self):
+    """The array of the task (a click on it): its window, in a subtab of its own"""
+    if array_task_id(self.job) is not None:
+      self.app.open_array_subtab(self.job.jid.partition("_")[0], self.job)
 
   def action_categorize(self):
     """c: this job (an array task: the task) in a category"""

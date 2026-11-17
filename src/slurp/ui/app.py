@@ -2594,6 +2594,11 @@ class Slurp(App):
     else:
       self.push_screen(ArrayScreen(array_id, job))
 
+  def open_array_subtab(self, array_id, job=None):
+    """The window of an array job in a subtab of its own, from wherever (the one open already: shown)"""
+    job = job or next((j for j in self.jobs.values() if j.jid.partition("_")[0] == str(array_id)), None)
+    self.in_new_subtab(lambda: self.open_window(ArrayScreen(array_id, job)), key=f"array {array_id}")
+
   def open_file(self, job, path):
     """A log of a job (its output or error file): at its end, followed while the job runs"""
     open_path(self, ["Jobs", job.jid], path, [job.rec["WorkDir"]], job_vars(job), follow=job.running, at_end=True)

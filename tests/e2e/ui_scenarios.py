@@ -2514,7 +2514,20 @@ async def t_array_window(app, pilot):
         app.screen.groups if ok else None)
   await pilot.press("escape"); await pilot.pause(0.3)
   check("← goes back to the job", app.screen is js)
+  # the Array line of its info: a link to the array, in a subtab of its own
+  grid = js.query_one("#info").content
+  cell = next((c for c in grid.columns[1]._cells if "(task 1)" in str(c)), None)
+  clicks = [s.style.meta.get("@click") for s in (cell.spans if cell is not None else []) if s.style and not isinstance(s.style, str)]
+  check("the job window of an array task: an Array line, a link", str(cell).startswith("9500  (task 1)") and "screen.open_array_window" in clicks, (str(cell), clicks))
+  views = len(app.cluster.views)
+  await js.run_action("open_array_window")
+  ok = await until(pilot, lambda: isinstance(app.screen, ArrayScreen) and app.screen.groups, 20)
+  check("a click on it: the array window in a new subtab", ok and app.screen.array_id == "9500" and len(app.cluster.views) == views + 1
+        and app.cluster.views[-1].key == "array 9500", [v.key for v in app.cluster.views])
+  await js.run_action("open_array_window"); await pilot.pause(0.3)
+  check("again: that subtab, not another", len(app.cluster.views) == views + 1)
   js2 = await open_job(app, pilot, "9001")
+  check("no Array line for other jobs", "(task " not in rendered(js2.query_one("#info").content))
   check("no Array button for other jobs", not js2.query_one("#array-window").display)
   for v in list(app.cluster.views): app.close_view(v)
   arrays(False)
