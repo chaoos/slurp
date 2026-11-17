@@ -7,7 +7,7 @@
 every time: **In slurp** (a subtab, as before) or **From your own terminal**.
 The latter makes a *link*: an `ssh` command and a password for the terminal or
 SSH client on your own machine (OpenSSH in any terminal, cmd or PowerShell,
-PuTTY, …). **Login directory as a drive** (in the menu, `F`) asks where your login directory goes as a drive:
+PuTTY, …). **Map a directory…** (in the menu, `F`) asks where your login directory goes as a drive:
 
 - **On this machine** (where slurp runs): `sshfs` through the session of the tab
   (no login), at a path you choose (default `~/mnt/<tab>`, remembered per tab

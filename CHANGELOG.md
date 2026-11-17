@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The menu's **Login directory as a drive** is now **Map a directory…**
+  (`F`), next to **Open a directory…** (`d`).
 - The job window has a **Reload** button (as `r`): the job, its files and
   progress from the cluster again; it says *Reloading …* meanwhile.
 - Progress also from `M%` lines (0 to 100, integer or not: `45%`,

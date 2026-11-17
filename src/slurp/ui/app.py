@@ -240,7 +240,7 @@ class Slurp(App):
     # (in the menu, with their keys: not in the footer)
     Binding("t", "cluster_shell", "Shell", show=False),
     Binding("d", "login_dir", "Open a directory", show=False),
-    Binding("F", "cluster_drive", "Drive", show=False),
+    Binding("F", "cluster_drive", "Map a directory", show=False),
     Binding("W", "web_access", "Web", show=False),
     Binding("i", "interactive_job", "Interactive job", show=False),
     Binding("C", "cluster_info", "Health", show=False),

@@ -29,7 +29,7 @@ Your queued and running jobs and those that ended recently, of the active tab's 
   next to it whose jobs (yours, an account's, all your accounts').
 - **☰ Menu** (`F10`, at the left of the header, the top line), what slurp does for the tab, each with its key: the job list (`j`), Health (`C`), Quota (`Q`), old files in
   scratch (`X`, what the purge would take), Shell (`t`, in slurp or from your own terminal), Open a directory (`d`: home,
-  scratch, project, … or a path), the login directory as a drive (`F`, on this machine or yours), Interactive job (`i`), New job script (`n`), Categories (`K`), this
+  scratch, project, … or a path), Map a directory (`F`: the login directory as a drive, on this machine or yours), Interactive job (`i`), New job script (`n`), Categories (`K`), this
   slurp in your browser (`W`, from anywhere, through a link), the guides, the rule catalogue, Options, About, Quit.
 - **Categories**, like folders (`project X/production runs`): `m` marks a row (again: unmarks it; `M`: all or none),
   `c` puts the marked jobs (or the one under the cursor) in a category, an existing one or a new one. The
@@ -167,7 +167,7 @@ given days: red, close to it: yellow. An exclude regex leaves paths out.
   "MenuScreen": ("Menu", """
 What slurp does for the tab, each with the key that does the same from the job list or the overview: the job list (`j`),
 the health of the cluster (`C`), your quotas (`Q`), your oldest files in scratch (`X`), a shell on the cluster (`t`), a directory
-(`d`: home, scratch, project, … or a path; each time in a new subtab) and the login directory as a drive (`F`), an interactive job (`i`), a new job script (`n`), the
+(`d`: home, scratch, project, … or a path; each time in a new subtab) and Map a directory (`F`: the login directory as a drive), an interactive job (`i`), a new job script (`n`), the
 categories (`K`), this slurp in your browser (`W`), the guides (`F1`), the rule catalogue (`F2`), the options (`F3`),
 about slurp, and quit (`q`). Enter or a click does the item; `Esc` or a click elsewhere closes the menu.
 """),
@@ -275,8 +275,8 @@ traffic, but anyone who has the command and the password can log in until the li
 go through **Cloudflare**: a public https address that opens in any browser, nothing to install, no password (the
 address is the key; Cloudflare can read what passes).
 """),
-  "DriveScreen": ("Drive", """
-Your login directory of the cluster as a drive: **on this machine** (sshfs through the tab's session, at the path
+  "DriveScreen": ("Map a directory", """
+Your login directory of the cluster as a drive (Map a directory…, `F`): **on this machine** (sshfs through the tab's session, at the path
 given, optionally read only; the connection window shows its state), or **on your own machine** (a link with commands
 for sshfs, SSHFS-Win, WinSCP).
 """),

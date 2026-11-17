@@ -809,7 +809,7 @@ class DriveScreen(ModalScreen):
     import socket
     drive = self.app.drive_of(self.cluster)
     with Vertical(id="drive-dialog"):
-      yield Static(icons.label("drive", f"Drive: {self.cluster.name} {self.home}"), id="drive-title", markup=False)
+      yield Static(icons.label("drive", f"Map a directory: {self.cluster.name} {self.home}"), id="drive-title", markup=False)
       yield Static(f"On this machine ({socket.gethostname()}, where slurp runs)", classes="drive-section", markup=False)
       yield Static("sshfs through the session of this tab (no login); slurp shows its state in the connection window "
                    "and unmounts it when it quits." + (f"\nNot possible: {self.local_reason}" if self.local_reason else ""),
