@@ -294,6 +294,12 @@ the cluster, not needed any more, a test, or your own words. **Details** add to 
 The reason is kept with the job, on the cluster (next to the categories): the job window (and the array window)
 show it, with the other job as a link, and the categories window has a column for it.
 """),
+  "FilePickScreen": ("Choose a file", """
+A directory of the cluster, to choose a file from (the progress file of a job, …). Enter or a click goes into a
+directory, or chooses the file; `..` or `Backspace` (**↑ Up**) goes up; the path at the top can be typed (Enter goes
+there; `~` is your home); the filter keeps the names that contain what you type. Under the list: the end of the
+file under the cursor, and (the progress file) whether slurp finds progress in it (`n/N` or `M%`). `Esc` cancels.
+"""),
   "NotesScreen": ("Notes", """
 Notes of a category or a job, in Markdown: `# headings`, `**bold**`, `- lists`, `` `code` ``, `[links](https://…)`.
 The categories window (under the numbers of the category) and the job window (under its details) show them
@@ -484,7 +490,9 @@ step 450/1000            epoch 3/20, loss 0.41        [2026-11-17 14:03:12] 450/
 ```
 
 - **Which file:** by default the job's output (its stdout, `--output`), the easiest place: print the progress there.
-  **Progress file…** chooses another one for this job (a log of the program, a file per task), **Use stdout** goes back.
+  **Progress file…** chooses another one for this job (a log of the program, a file per task) in a window with the
+  directory listing, which shows the end of the file under the cursor and whether it has progress in it; **Use
+  stdout** goes back.
   For a task of an array, slurp guesses the files of the other tasks from the name of the one chosen.
 - **The latest line counts**, n/N before M% in the same line (tqdm writes both: its n/N is exact). A count above its
   total, or a percentage over 100, is no progress.

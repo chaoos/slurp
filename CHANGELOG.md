@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- **Progress file…** opens a window with the directory listing instead
+  of the directory browser: type a path, filter, and for the file under
+  the cursor its end and whether it has progress in it.
 - Cancelling a job or an array asks why: a list of the usual reasons
   (submitted twice, with the jobs that look the same to name the one that
   stays; the program hangs; wrong resources or account; a job it depends

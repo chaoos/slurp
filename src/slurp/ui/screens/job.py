@@ -32,7 +32,7 @@ from .. import icons
 from ..widgets import ClickTable, state_text, TimePlot
 from .dialogs import RestartScreen, RunArrayScreen
 from .base import SplitScreen
-from .files import DirScreen, FileScreen, open_path
+from .files import FilePickScreen, FileScreen, open_path
 from .links import ShellChoiceScreen
 from .checks import FindingsView
 from .cancel import reason_text
@@ -105,6 +105,16 @@ def gpu_memory_text(result):
     lines.append(f"GPUs of the nodes (as nvidia-smi): {memory_text(used)} of {memory_text(total)} used ({used / max(total, 1):.0%})")
     lines += [f"  {node} GPU {idx} {name}: {memory_text(u)} / {memory_text(t)}" for node, idx, name, u, t in gpus[:16]]
   return "\n".join(lines)
+
+def progress_preview(path, tail):
+  """What the progress of a file would be (the file chooser's preview)"""
+  progress = output_progress(path, tail=tail)
+  if progress is None:
+    return Text("no n/N or M% in its end: no progress from this file", style="yellow")
+  return Text.assemble(("progress found: ", "green"), (f"{progress.current}/{progress.total}" if not progress.percent
+                                                       else f"{progress.current}%", "bold green"),
+                       (f"  ({len(progress.points)} lines with progress in its end"
+                        + (", with timestamps" if any(t for t, _, _ in progress.points) else "") + ")", "dim"))
 
 class JobScreen(SplitScreen):
   """Details, files and steps of one job, commands on its nodes"""
@@ -359,11 +369,14 @@ class JobScreen(SplitScreen):
     state = progress_state(self.job.jid)
     start = os.path.dirname(state["file"] or self.job.stdout_path() or "") or self.job.rec.get("WorkDir") or "/"
     def picked(path):
+      if not path:
+        return
       set_progress_file(self.job.jid, path)
       self.guess_array(path)
       self.notify(f"progress of job {self.job.jid} from {path}", timeout=4)
       self.load()
-    self.app.push_screen(DirScreen(["Jobs", self.job.jid, "progress file"], start, pick=picked))
+    self.app.push_screen(FilePickScreen(f"The progress file of job {self.job.jid}: the file its progress (n/N or M%) is "
+                                        "read from", start, describe=progress_preview, chosen=state["file"] or ""), picked)
 
   def guess_array(self, path):
     """For an array task: the progress files of the other tasks, from the name of the file chosen for this one"""

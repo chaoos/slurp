@@ -38,7 +38,7 @@ from slurp.ui.screens.clusterinfo import cluster_health, ClusterInfoScreen
 from slurp.ui.screens.overview import OverviewScreen
 from slurp.ui.screens.connection import ConnectionScreen
 from slurp.ui.screens.dialogs import CommandScreen, ConfirmScreen, CopyScreen, RestartScreen, RunArrayScreen
-from slurp.ui.screens.files import DirScreen, FileScreen, open_path, OpenDirScreen
+from slurp.ui.screens.files import DirScreen, FilePickScreen, FileScreen, open_path, OpenDirScreen
 from slurp.ui.screens.help import AboutScreen, VIEW_HELP, ViewHelpScreen
 from slurp.ui.screens.job import JobScreen
 from slurp.ui.screens.links import OTHER_PLACE, DriveScreen, link_state, LinkScreen, LinkSetupScreen, ShellChoiceScreen
@@ -1798,11 +1798,22 @@ async def t_progress(app, pilot):
       f.write(f"{(now - timedelta(minutes=minutes)).isoformat()} INFO iteration {k}/100\n")
   js = app.screen
   await pilot.click("#progress-file")
-  ok = await until(pilot, lambda: isinstance(app.screen, DirScreen) and app.screen.entries, 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, FilePickScreen) and app.screen.entries, 10)
   ds = app.screen
-  check("Progress file… opens the directory of the output in pick mode", ok and ds.pick is not None and ds.path == wd
-        and "choose a file" in str(ds.query_one("#dstatus").render()))
-  dt = ds.query_one("#dir"); dt.focus(); dt.move_cursor(row=dt.get_row_index("progress.log")); await pilot.press("enter")
+  check("Progress file… opens a window with the directory of the output", ok and ds.path == wd and len(app.screen_stack) >= 2
+        and app.screen_stack[-2] is js, (ds.path if ok else None, wd))
+  dt = ds.query_one("#fp-list"); dt.focus()
+  dt.move_cursor(row=dt.get_row_index("slurm-9001.out")); await pilot.pause(0.5)
+  pv = lambda: str(ds.query_one("#fp-preview").render())
+  ok = await until(pilot, lambda: "progress found" in pv() or "no n/N" in pv(), 10)
+  check("the file under the cursor: its end, and whether it has progress", ok and "progress found" in pv() and "step" in pv(), pv())
+  ds.query_one("#fp-filter").value = "progress"; await pilot.pause(0.3)
+  rows = [str(k.value) for k in dt.rows]
+  check("the filter: only the names with it", "progress.log" in rows and "slurm-9001.out" not in rows, rows)
+  dt.focus(); dt.move_cursor(row=dt.get_row_index("progress.log")); await pilot.pause(0.3)
+  ok = await until(pilot, lambda: "40/100" in pv(), 10)
+  check("progress.log: 40/100 found, with timestamps", ok and "with timestamps" in pv(), pv())
+  await pilot.press("enter")
   ok = await until(pilot, lambda: app.screen is js and "40/100" in line(), 10)
   ok2 = await until(pilot, lambda: any(e.kind == "progress" for e in js.details["files"]), 10)
   entry = next((e for e in js.details["files"] if e.kind == "progress"), None)
@@ -2448,8 +2459,8 @@ async def t_array_progress(app, pilot):
   await reload(app, pilot)
   js = await open_job(app, pilot, "9500_1")
   js.choose_progress_file(type("E", (), {"stop": lambda self: None})())
-  await until(pilot, lambda: isinstance(app.screen, DirScreen) and app.screen.entries, 10)
-  dt = app.screen.query_one("#dir"); dt.focus(); dt.move_cursor(row=dt.get_row_index("train_task1_2026-11-13T10-01-07.log")); await pilot.press("enter")
+  await until(pilot, lambda: isinstance(app.screen, FilePickScreen) and app.screen.entries, 10)
+  dt = app.screen.query_one("#fp-list"); dt.focus(); dt.move_cursor(row=dt.get_row_index("train_task1_2026-11-13T10-01-07.log")); await pilot.press("enter")
   ok = await until(pilot, lambda: any("array 9500" in m for _, m in notes(app)), 15)
   files = {j: os.path.basename(progress_state(j)["file"] or "") for j in ("9500_2", "9500_3", "9500_4")}
   check("an array task's progress file: the files of the other running tasks guessed (datetime differs, zero padding)",

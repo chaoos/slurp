@@ -234,6 +234,207 @@ class OpenDirScreen(ModalScreen[str | None]):
 DIR_COLUMNS = [("name", "Name"), ("size", "Size"), ("mtime", "Modified"), ("mode", "Permissions"), ("owner", "Owner"),
                ("you", "You"), ("acl", "ACL")]
 
+class FilePickScreen(ModalScreen[str | None]):
+  """A window to choose a file of the cluster: a directory listing (Enter or a click: into a directory, or the file),
+  the path to type, a filter, and for the file under the cursor its end (and what describe(path, tail) says of it);
+  dismissed with the path, or None"""
+  DEFAULT_CSS = """
+  FilePickScreen { align: center middle; }
+  #fp-dialog { width: 120; max-width: 95%; height: 90%; border: thick $accent; background: $surface; padding: 1 2; }
+  #fp-title { text-style: bold; height: auto; }
+  #fp-bar { height: auto; margin: 1 0 0 0; }
+  #fp-up { margin-right: 1; }
+  #fp-path { width: 1fr; }
+  #fp-filter { margin: 1 0 0 0; }
+  #fp-list { height: 1fr; margin: 1 0 0 0; }
+  #fp-status { height: auto; color: $text-muted; }
+  #fp-preview { height: 9; border: round $panel; padding: 0 1; overflow: hidden hidden; }
+  #fp-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #fp-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("backspace", "up", "Up", show=False)]
+  PREVIEW_BYTES = 4096
+
+  def __init__(self, title, start, describe=None, chosen=""):
+    super().__init__()
+    self.title_text, self.path, self.describe, self.chosen = title, start or "/", describe, chosen
+    self.entries = []
+    self.previewed = None
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="fp-dialog"):
+      yield Static(self.title_text, id="fp-title", markup=False)
+      with Horizontal(id="fp-bar"):
+        yield Button("↑ Up", id="fp-up", compact=True, tooltip="the directory above (Backspace)")
+        yield Input(self.path, id="fp-path", tooltip="a directory or a file: Enter goes there (~: your home)")
+      yield Input(id="fp-filter", placeholder="filter: part of a name")
+      yield ClickTable(id="fp-list", cursor_type="row", zebra_stripes=True)
+      yield Static(id="fp-status")
+      yield Static(id="fp-preview", markup=False)
+      with Horizontal(id="fp-buttons"):
+        yield Button("Cancel", id="fp-cancel", compact=True)
+        yield Button("Choose", id="fp-ok", variant="primary", compact=True, disabled=True)
+
+  def on_mount(self):
+    table = self.query_one("#fp-list", ClickTable)
+    for key, label in (("name", "Name"), ("size", "Size"), ("mtime", "Modified")):
+      table.add_column(label, key=key)
+    self.go(self.path)
+    table.focus()
+
+  def go(self, path):
+    """List a directory (in the background); a file: its directory, the file under the cursor"""
+    self.query_one("#fp-status", Static).update(Text(f"listing {path} …", style="dim"))
+    def work():
+      try:
+        if not fs_isdir(path):
+          if fs_isfile(path):
+            return os.path.dirname(path) or "/", listing(os.path.dirname(path) or "/", DIR_LIMIT)[1], os.path.basename(path)
+          raise OSError(f"{path}: no such directory")
+        return path, listing(path, DIR_LIMIT)[1], ""
+      except OSError as e:
+        return None, None, str(e)
+    def listed(result):
+      if result is None:
+        return
+      where, entries, select = result
+      if where is None: # (it stays where it was)
+        self.query_one("#fp-status", Static).update(Text(select, style="red"))
+        return
+      self.path, self.entries = where, entries
+      self.query_one("#fp-path", Input).value = self.path
+      self.populate(select or (os.path.basename(self.chosen) if os.path.dirname(self.chosen) == self.path else ""))
+    in_background(self, work, listed, group="fp-list")
+
+  def populate(self, select=""):
+    table = self.query_one("#fp-list", ClickTable)
+    table.clear()
+    text = self.query_one("#fp-filter", Input).value.strip().lower()
+    if self.path != "/":
+      table.add_row(Text("..", style="bold"), "", "", key="..")
+    shown = [e for e in self.entries if not text or text in e["name"].lower()]
+    shown.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+    for e in shown:
+      name = Text(e["name"] + ("/" if e["dir"] else ""), style="bold blue" if e["dir"] else "" if can_read(e) else "dim")
+      size = "" if e["dir"] else humanize.naturalsize(e["size"] or 0)
+      table.add_row(name, size, datetime.fromtimestamp(e["mtime"]).strftime("%Y-%m-%d %H:%M"), key=e["name"])
+    files = sum(not e["dir"] for e in shown)
+    self.query_one("#fp-status", Static).update(Text(
+      f"{self.path}: {len(shown)} of {len(self.entries)} entries, {files} files · Enter or a click: into a directory, "
+      "or choose the file", style="dim"))
+    if select and select in [e["name"] for e in shown]:
+      table.move_cursor(row=table.get_row_index(select))
+    elif shown and self.path != "/":
+      table.move_cursor(row=1)
+    self.preview()
+
+  def current(self):
+    """The entry under the cursor (None: none, or ..)"""
+    table = self.query_one("#fp-list", ClickTable)
+    if not table.row_count:
+      return None
+    try:
+      name = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value
+    except Exception:
+      return None
+    return next((e for e in self.entries if e["name"] == name), None)
+
+  @on(ClickTable.RowHighlighted, "#fp-list")
+  def highlighted(self, event):
+    self.preview()
+
+  def preview(self):
+    """The end of the file under the cursor (in the background), and what describe says of it"""
+    entry = self.current()
+    ok = self.query_one("#fp-ok", Button)
+    box = self.query_one("#fp-preview", Static)
+    ok.disabled = entry is None or entry["dir"]
+    if entry is None or entry["dir"]:
+      self.previewed = None
+      box.update(Text("a directory: Enter goes into it" if entry else "", style="dim"))
+      return
+    path = os.path.join(self.path, entry["name"])
+    if path == self.previewed:
+      return
+    self.previewed = path
+    box.update(Text("reading its end …", style="dim"))
+    describe, size = self.describe, entry["size"] or 0
+    def work():
+      try:
+        tail = fs_read(path, max(0, size - self.PREVIEW_BYTES), self.PREVIEW_BYTES).decode("utf-8", errors="replace")
+      except OSError as e:
+        return None, Text(f"cannot read it: {e}", style="yellow")
+      return tail, (describe(path, tail) if describe else None)
+    def got(result):
+      if result is None or self.previewed != path:
+        return
+      tail, said = result
+      if tail is None:
+        box.update(said)
+        return
+      lines = [line for line in clean(tail).splitlines() if line.strip()][-6:]
+      out = Text()
+      if said is not None:
+        out.append_text(said if isinstance(said, Text) else Text(str(said)))
+        out.append("\n")
+      out.append("\n".join(line[:200] for line in lines) or "(empty)", style="dim")
+      box.update(out)
+    in_background(self, work, got, group="fp-preview")
+
+  @on(ClickTable.RowSelected, "#fp-list")
+  def selected(self, event):
+    event.stop()
+    name = event.row_key.value
+    if name == "..":
+      self.action_up()
+      return
+    entry = next((e for e in self.entries if e["name"] == name), None)
+    if entry is None:
+      return
+    if entry["dir"]:
+      self.query_one("#fp-filter", Input).value = ""
+      self.go(os.path.join(self.path, name))
+    else:
+      self.dismiss(os.path.join(self.path, name))
+
+  @on(Input.Changed, "#fp-filter")
+  def filter_changed(self, event):
+    self.populate()
+
+  @on(Input.Submitted, "#fp-filter")
+  def filter_submitted(self, event):
+    self.query_one("#fp-list", ClickTable).focus()
+
+  @on(Input.Submitted, "#fp-path")
+  def path_submitted(self, event):
+    text = event.value.strip()
+    if text:
+      self.go(expand_path(text, (home_of(self.app.cluster) if self.app.clusters else os.path.expanduser("~")) or "/"))
+    self.query_one("#fp-list", ClickTable).focus()
+
+  @on(Button.Pressed, "#fp-up")
+  def action_up(self, event=None):
+    if event is not None:
+      event.stop()
+    if self.focused is not None and isinstance(self.focused, Input) and event is None:
+      return # (Backspace while typing)
+    if self.path != "/":
+      self.query_one("#fp-filter", Input).value = ""
+      self.go(os.path.dirname(self.path.rstrip("/")) or "/")
+
+  @on(Button.Pressed, "#fp-ok")
+  def ok(self, event):
+    event.stop()
+    entry = self.current()
+    if entry is not None and not entry["dir"]:
+      self.dismiss(os.path.join(self.path, entry["name"]))
+
+  @on(Button.Pressed, "#fp-cancel")
+  def action_cancel(self, event=None):
+    if event is not None:
+      event.stop()
+    self.dismiss(None)
+
 def access_text(entry):
   """What the user cannot do with an entry: "no read" (red), "no write" (yellow); empty if both"""
   marks = []
@@ -259,10 +460,9 @@ class DirScreen(SplitScreen):
     Binding("full_stop", "hidden", "Hidden files"),
   ]
 
-  def __init__(self, crumbs, path, bases=(), env=None, pick=None):
+  def __init__(self, crumbs, path, bases=(), env=None):
     super().__init__()
     self.path = os.path.normpath(path)
-    self.pick = pick # pick mode: a file is chosen (pick(path)) instead of opened; directories open in place
     self.base_crumbs = list(crumbs)
     self.crumbs = [*crumbs, self.path.rstrip("/") + "/"]
     self.bases, self.env = list(bases), env # passed on to the files opened from here (e.g. the job's WorkDir)
@@ -324,25 +524,8 @@ class DirScreen(SplitScreen):
       self.go(path)
 
   def go(self, path):
-    """To another directory (from the path or a place): here (← comes back), in place while picking a file; a file
-    opens in a subtab"""
-    if self.pick is None:
-      open_path(self.app, self.base_crumbs, path, bases=self.bases, env=self.env, here=True)
-      return
-    def went(isdir):
-      if isdir:
-        self.enter(path)
-      elif isdir is not None:
-        self.notify(f"{path} is not a directory", severity="warning")
-    in_background(self, lambda: fs_isdir(path), went, group="go")
-
-  def enter(self, path):
-    """Show another directory in this view (picking a file)"""
-    self.path = os.path.normpath(path)
-    self.crumbs = [*self.base_crumbs, self.path.rstrip("/") + "/"]
-    self.sub_title = crumb_title(self.crumbs)
-    self.query_one("#dpath", Input).value = self.path
-    self.action_reload()
+    """To another directory (from the path or a place): here (← comes back); a file opens in a subtab"""
+    open_path(self.app, self.base_crumbs, path, bases=self.bases, env=self.env, here=True)
 
   def scan(self):
     """(the directory, its entries) with permissions, owners, ACLs and what the user may do (cluster/listing.py)"""
@@ -421,8 +604,6 @@ class DirScreen(SplitScreen):
         status.append(f" · searching: {done} directories looked at, {left} to go (Esc stops)", style="bold yellow")
       elif len(self.results) >= SEARCH_LIMIT:
         status.append(f" · stopped at {SEARCH_LIMIT}: say more precisely what you look for", style="yellow")
-      if self.pick is not None:
-        status = Text("choose a file (Enter or click) · Esc: cancel · ") + status
       self.query_one("#dstatus", Static).update(status)
       return
     status = Text(f"{count} of {len(self.entries)} entries")
@@ -434,8 +615,6 @@ class DirScreen(SplitScreen):
         status.append(" · you cannot list this directory", style="bold red")
       elif not can_write(self.this):
         status.append(" · read-only for you", style="yellow")
-    if self.pick is not None:
-      status = Text("choose a file (Enter or click) · Esc: cancel · ") + status
     if len(self.entries) >= DIR_LIMIT:
       status += f" (only the first {DIR_LIMIT} are listed)"
     if text:
@@ -445,15 +624,6 @@ class DirScreen(SplitScreen):
 
   def open(self, name):
     path = os.path.dirname(self.path) if name == ".." else os.path.join(self.path, name)
-    if self.pick is not None:
-      entry = next((e for e in (self.results if self.results is not None else self.entries) if e["name"] == name), None)
-      if name == ".." or entry and entry["dir"]:
-        self.enter(path)
-      else:
-        pick, self.pick = self.pick, None
-        self.app.pop_screen()
-        pick(path)
-      return
     open_path(self.app, self.crumbs, path, bases=self.bases, env=self.env, here=True)
 
   @on(DataTable.RowSelected, "#dir")

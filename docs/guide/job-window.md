@@ -36,7 +36,10 @@ what it needs (a file with progress lines, best the output, written unbuffered),
 how the two paces are worked out. A job that ended keeps its progress: the last line of its
 progress file (where it got to) and how it ended ("the job ended FAILED (exit
 code 1:0) here"). **Progress file…** picks another (log) file for this job, in
-the directory browser; **Use stdout** goes back. For a task of an array, the
+a window with the directory listing (start: the directory of the output; type
+a path, filter by name, `Backspace` the directory above); for the file under
+the cursor it shows its end and whether slurp finds progress in it (`40/100`
+or `40%`). **Use stdout** goes back. For a task of an array, the
 progress files of the other tasks are guessed from the name of the chosen one:
 the index of the task (or its job id) in the name marks the task, other digits
 (dates, times) may differ; the newest match is used, and tasks whose file is
