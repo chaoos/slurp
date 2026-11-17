@@ -25,8 +25,8 @@ def test_search_the_rule_catalogue(check, monkeypatch):
       app.action_rule_catalogue()
       await until(pilot, lambda: isinstance(app.screen, RuleCatalogueScreen))
       screen = app.screen
-      shown = lambda: [(b.source or "").split()[1] for b in screen.query_one("#doc").document.children
-                       if isinstance(b, MarkdownH3)] if screen.query("#doc") else []
+      shown = lambda: [words[1] for b in screen.query_one("#doc").document.children # (a heading being built has no text yet)
+                       if isinstance(b, MarkdownH3) and len(words := (b.source or "").split()) > 1] if screen.query("#doc") else []
       await until(pilot, lambda: len(shown()) == len(checks.RULES))
       await pilot.press("slash")
       check("/ goes to the search", app.focused is screen.query_one("#rc-search"))
