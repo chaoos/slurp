@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The rule catalogue has a search (`/`, at the top): only the rules with all
+  its words (id, title, texts, example), as you type; `Esc` shows all again.
 - Rules by software stack: the module rules (E01, E04) apply on clusters
   with environment modules, the uenv rules on clusters with uenv, found with
   the cluster's facts (or a rule pack's `stacks`). A module rule applies in

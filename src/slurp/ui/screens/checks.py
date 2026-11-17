@@ -5,7 +5,7 @@ from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Collapsible, MarkdownViewer, Static
+from textual.widgets import Button, Collapsible, Input, MarkdownViewer, Static
 
 from ...checks import engine as checks
 from .base import SplitScreen
@@ -218,7 +218,10 @@ class RuleCatalogueScreen(DocScreen):
   title_word = "Rule catalogue"
   DEFAULT_CSS = """
   RuleCatalogueScreen .-inactive-rule { text-opacity: 45%; }
+  #rc-search { height: 1; border: none; padding: 0 1; background: $boost; }
+  #rc-search:focus { background: $surface; }
   """
+  BINDINGS = [Binding("escape", "back", "Back"), Binding("slash", "search", "Search")]
 
   def __init__(self, rule_id=""):
     from ...cluster.remote import tab_name
@@ -228,6 +231,56 @@ class RuleCatalogueScreen(DocScreen):
     self.rule_id = rule_id
     self.crumbs = ["Rule catalogue"] + ([rule_id] if rule_id else [])
     self.grey_tries = 0
+    self.query_text = ""
+    self.search_timer = None
+
+  def compose_left(self):
+    yield Input(placeholder="search the rules: words, an id (E01), a severity … (/; Esc clears)", id="rc-search")
+    yield from super().compose_left()
+
+  def action_search(self):
+    self.query_one("#rc-search", Input).focus()
+
+  @on(Input.Changed, "#rc-search")
+  def search_changed(self, event):
+    if self.search_timer is not None:
+      self.search_timer.stop()
+    self.search_timer = self.set_timer(0.3, self.show_matches)
+
+  @on(Input.Submitted, "#rc-search")
+  def search_submitted(self, event):
+    self.show_matches()
+    self.query_one("#doc", MarkdownViewer).focus()
+
+  def show_matches(self):
+    """Only the rules that match the search (all of them without one); a single match: there"""
+    text = self.query_one("#rc-search", Input).value
+    if text == self.query_text:
+      return
+    self.query_text = text
+    matches = [r for r in checks.RULES.values() if text.strip() and checks.rule_matches(r, text)]
+    self.reload(anchor=matches[0].anchor if len(matches) == 1 else "")
+
+  def reload(self, anchor=""):
+    viewer = self.query_one("#doc", MarkdownViewer)
+    async def update():
+      await viewer.document.update(checks.rules_markdown(self.facts, self.tab, self.query_text))
+      self.grey_tries = 0
+      self.set_timer(0.1, self.grey_inactive)
+      if anchor:
+        self.jump(anchor)
+      else:
+        viewer.scroll_home(animate=False)
+    self.call_later(update)
+
+  def action_back(self):
+    search = self.query_one("#rc-search", Input)
+    if search.value: # (Esc first clears the search)
+      search.value = ""
+      self.show_matches()
+      self.query_one("#doc", MarkdownViewer).focus()
+    else:
+      super().action_back()
 
   def on_mount(self):
     super().on_mount()
@@ -241,14 +294,7 @@ class RuleCatalogueScreen(DocScreen):
     if facts is None:
       return
     self.facts = facts
-    viewer = self.query_one("#doc", MarkdownViewer)
-    async def update():
-      await viewer.document.update(checks.rules_markdown(facts, self.tab))
-      self.grey_tries = 0
-      self.set_timer(0.1, self.grey_inactive)
-      if self.anchor:
-        self.jump(self.anchor)
-    self.call_later(update)
+    self.reload(anchor=self.anchor)
 
   def inactive_rules(self):
     return {r.id for r in checks.RULES.values() if not checks.rule_active(r, self.facts)} if self.facts is not None else set()
@@ -258,7 +304,8 @@ class RuleCatalogueScreen(DocScreen):
     mounting: tried until its headings are there"""
     from textual.widgets._markdown import MarkdownH2, MarkdownH3
     blocks = list(self.query_one("#doc", MarkdownViewer).document.children)
-    if sum(isinstance(b, MarkdownH3) for b in blocks) < len(checks.RULES) and self.grey_tries < 30:
+    shown = sum(checks.rule_matches(r, self.query_text) for r in checks.RULES.values()) if self.query_text.strip() else len(checks.RULES)
+    if sum(isinstance(b, MarkdownH3) for b in blocks) < shown and self.grey_tries < 30:
       self.grey_tries += 1
       self.set_timer(0.15, self.grey_inactive)
       return
@@ -294,7 +341,11 @@ class RuleCatalogueScreen(DocScreen):
     self.rule_id = rule_id
     self.crumbs = ["Rule catalogue"] + ([rule_id] if rule_id else [])
     self.sub_title = crumb_title(self.crumbs)
-    if rule_id in checks.RULES:
+    if rule_id in checks.RULES and self.query_text.strip() and not checks.rule_matches(checks.RULES[rule_id], self.query_text):
+      self.query_one("#rc-search", Input).value = "" # (a rule the search hides: all of them again, at that rule)
+      self.query_text = ""
+      self.reload(anchor=checks.RULES[rule_id].anchor)
+    elif rule_id in checks.RULES:
       self.jump(checks.RULES[rule_id].anchor)
 
 class GuidesScreen(DocScreen):

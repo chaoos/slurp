@@ -134,6 +134,9 @@ A batch script with the findings of the checks below it.
 All rules of the checks, by category: what each finds, why it matters, how to fix it, often with an example.
 The contents on the left jump to a rule; rule ids in the text are links. Findings everywhere link here.
 
+The search at the top (`/`) shows only the rules that contain all its words (in the id, title, texts or example; an
+id like E01 or a word like memory, uenv, error), as you type; Enter goes to them, `Esc` shows all again.
+
 Some rules are about one software stack: environment modules (E01, E04) or uenv (E05 to E08). Those that do not
 apply on this tab's cluster (it has no modules, or no uenv) are greyed out, here and in the contents.
 """),

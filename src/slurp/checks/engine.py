@@ -1198,9 +1198,14 @@ def check_jobs(jobs):
 # ---------------------------------------------------------------------------
 # the rule catalogue
 
-def rules_markdown(facts=None, where=""):
+def rule_matches(r, query):
+  """The rule contains every word of the query (its id, title, texts and example; any case)"""
+  text = " ".join((r.id, r.title, r.what, r.implies, r.fix, r.example, r.severity, STACKS.get(r.stack, ""))).lower()
+  return all(word in text for word in query.lower().split())
+
+def rules_markdown(facts=None, where="", query=""):
   """The catalogue; with the facts of a cluster (where: its name) the rules that do not apply there say so (and the
-  rule catalogue window greys them out)"""
+  rule catalogue window greys them out); query: only the rules that match it"""
   stacks_text = (f"{where or 'This cluster'} has " + (" and ".join(sorted(facts.stacks)) if facts.stacks else
                  "no module system and no uenv that slurp found (all rules apply)") + "." if facts is not None else "")
   out = ["# Rule catalogue",
@@ -1220,8 +1225,11 @@ def rules_markdown(facts=None, where=""):
          "Module rules also apply in part to a uenv's modules view (--view=modules). " + stacks_text
          + (" The rules that do not apply there are greyed out." if facts is not None else ""),
          ""]
+  if query.strip():
+    count = sum(rule_matches(r, query) for r in RULES.values())
+    out += [f"**Search:** {count} of {len(RULES)} rules match “{query.strip()}”" + ("" if count else " (Esc shows all)") + ".", ""]
   for cat, name in CATEGORIES.items():
-    in_category = [r for r in RULES.values() if r.category == cat]
+    in_category = [r for r in RULES.values() if r.category == cat and (not query.strip() or rule_matches(r, query))]
     if not in_category:
       continue
     out += [f"## {cat} · {name}", ""]

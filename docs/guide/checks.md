@@ -5,7 +5,7 @@ mistakes and classic Slurm traps, requests that make no sense, paths and
 programs that do not exist, full quotas, the software environment, NUMA
 placement, and what a job really used. Every finding says what was found
 (with the line of the script), why it matters and how to fix it, often with
-a snippet to copy, and links to its rule in the **rule catalogue** (`F2`), a
+a snippet to copy, and links to its rule in the **rule catalogue** (`F2`; `/` searches it), a
 subtab of its own (one per tab: a later rule link goes there and jumps to the
 rule; the guides, `F1`, have theirs too). Code in the catalogue, the guides and
 the help (and in Markdown files) shows as a framed, highlighted block.
