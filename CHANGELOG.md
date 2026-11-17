@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The progress file window's filter takes patterns (`run_123*.log`,
+  `step_??.out`); directories stay listed, and the filter stays when
+  going into one.
 - The cancel dialog's job to name (the duplicate, the job it depends on,
   the one that replaces it) is a searchable list of all jobs of the job
   list: type an id, a name, a state, a directory; the jobs that look the

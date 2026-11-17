@@ -266,7 +266,7 @@ class FilePickScreen(ModalScreen[str | None]):
       with Horizontal(id="fp-bar"):
         yield Button("↑ Up", id="fp-up", compact=True, tooltip="the directory above (Backspace)")
         yield Input(self.path, id="fp-path", tooltip="a directory or a file: Enter goes there (~: your home)")
-      yield Input(id="fp-filter", placeholder="filter: part of a name")
+      yield Input(id="fp-filter", placeholder="filter the files: a part of the name, or a pattern: run_123*.log, step_??.out, *.[oe]*")
       yield ClickTable(id="fp-list", cursor_type="row", zebra_stripes=True)
       yield Static(id="fp-status")
       yield Static(id="fp-preview", markup=False)
@@ -308,19 +308,21 @@ class FilePickScreen(ModalScreen[str | None]):
   def populate(self, select=""):
     table = self.query_one("#fp-list", ClickTable)
     table.clear()
-    text = self.query_one("#fp-filter", Input).value.strip().lower()
+    text = self.query_one("#fp-filter", Input).value.strip()
     if self.path != "/":
       table.add_row(Text("..", style="bold"), "", "", key="..")
-    shown = [e for e in self.entries if not text or text in e["name"].lower()]
+    # (the filter is for files: a part of the name, or a pattern, run_12*.log, step_??.out; directories stay, to go on)
+    shown = [e for e in self.entries if not text or e["dir"] or matches_name(e["name"], text)]
     shown.sort(key=lambda e: (not e["dir"], e["name"].lower()))
     for e in shown:
       name = Text(e["name"] + ("/" if e["dir"] else ""), style="bold blue" if e["dir"] else "" if can_read(e) else "dim")
       size = "" if e["dir"] else humanize.naturalsize(e["size"] or 0)
       table.add_row(name, size, datetime.fromtimestamp(e["mtime"]).strftime("%Y-%m-%d %H:%M"), key=e["name"])
     files = sum(not e["dir"] for e in shown)
+    all_files = sum(not e["dir"] for e in self.entries)
     self.query_one("#fp-status", Static).update(Text(
-      f"{self.path}: {len(shown)} of {len(self.entries)} entries, {files} files · Enter or a click: into a directory, "
-      "or choose the file", style="dim"))
+      f"{self.path}: {files} of {all_files} files" + (f" match {text}" if text else "")
+      + " · Enter or a click: into a directory, or choose the file", style="dim"))
     if select and select in [e["name"] for e in shown]:
       table.move_cursor(row=table.get_row_index(select))
     elif shown and self.path != "/":
@@ -390,8 +392,7 @@ class FilePickScreen(ModalScreen[str | None]):
     entry = next((e for e in self.entries if e["name"] == name), None)
     if entry is None:
       return
-    if entry["dir"]:
-      self.query_one("#fp-filter", Input).value = ""
+    if entry["dir"]: # (the filter stays: the same kind of files there)
       self.go(os.path.join(self.path, name))
     else:
       self.dismiss(os.path.join(self.path, name))
@@ -418,7 +419,6 @@ class FilePickScreen(ModalScreen[str | None]):
     if self.focused is not None and isinstance(self.focused, Input) and event is None:
       return # (Backspace while typing)
     if self.path != "/":
-      self.query_one("#fp-filter", Input).value = ""
       self.go(os.path.dirname(self.path.rstrip("/")) or "/")
 
   @on(Button.Pressed, "#fp-ok")

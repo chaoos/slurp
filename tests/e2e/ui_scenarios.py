@@ -1810,6 +1810,11 @@ async def t_progress(app, pilot):
   ds.query_one("#fp-filter").value = "progress"; await pilot.pause(0.3)
   rows = [str(k.value) for k in dt.rows]
   check("the filter: only the names with it", "progress.log" in rows and "slurm-9001.out" not in rows, rows)
+  ds.query_one("#fp-filter").value = "slurm-9*.out"; await pilot.pause(0.3)
+  rows = [str(k.value) for k in dt.rows]
+  check("a pattern: slurm-9*.out", "slurm-9001.out" in rows and "progress.log" not in rows
+        and all(r == ".." or r.startswith("slurm-9") and r.endswith(".out") for r in rows), rows)
+  ds.query_one("#fp-filter").value = "progress"; await pilot.pause(0.3)
   dt.focus(); dt.move_cursor(row=dt.get_row_index("progress.log")); await pilot.pause(0.3)
   ok = await until(pilot, lambda: "40/100" in pv(), 10)
   check("progress.log: 40/100 found, with timestamps", ok and "with timestamps" in pv(), pv())

@@ -298,7 +298,8 @@ show it, with the other job as a link, and the categories window has a column fo
   "FilePickScreen": ("Choose a file", """
 A directory of the cluster, to choose a file from (the progress file of a job, …). Enter or a click goes into a
 directory, or chooses the file; `..` or `Backspace` (**↑ Up**) goes up; the path at the top can be typed (Enter goes
-there; `~` is your home); the filter keeps the names that contain what you type. Under the list: the end of the
+there; `~` is your home); the filter keeps the files whose names contain what you type, or match a pattern
+(`run_123*.log`, `step_??.out`, `*.[oe]*`); directories stay listed, and the filter stays when you change directory. Under the list: the end of the
 file under the cursor, and (the progress file) whether slurp finds progress in it (`n/N` or `M%`). `Esc` cancels.
 """),
   "NotesScreen": ("Notes", """
