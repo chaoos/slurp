@@ -90,6 +90,7 @@ def set_progress_file(jid, path):
   state["file"] = path
   state["points"].clear() # another file, other points …
   state.pop("shape", None) # … and other lines
+  state.pop("total", None)
   files = dict(load_config().get("progress_files") or {})
   key = f"{tab_name()}|{jid}"
   if path:
@@ -275,10 +276,10 @@ def record_progress(job, progress):
   if progress is None:
     return None
   state = progress_state(job.jid)
-  if progress.shape and state.get("shape") != progress.shape: # (the structure of its progress lines, for the next reads)
-    if state.get("shape"):
-      state["points"].clear() # (another phase, another progress: the times seen of the old one do not count)
-    state["shape"] = progress.shape
+  if progress.shape and (state.get("shape"), state.get("total")) != (progress.shape, progress.total):
+    if state.get("shape"): # (another phase, another progress: the times seen of the old one do not count)
+      state["points"].clear()
+    state["shape"], state["total"] = progress.shape, progress.total # (its kind, for the next reads)
   points = state["points"]
   if not points or points[-1][1:] != (progress.current, progress.total):
     points.append((time.time(), progress.current, progress.total))
@@ -739,29 +740,39 @@ def similar(a, b):
   import difflib
   return a == b or difflib.SequenceMatcher(None, a, b, autojunk=False).ratio() >= SIMILAR
 
-def progress_lines(found, shape=""):
-  """Of the lines with n/N or M% (oldest first: (line, n, N, percent)), those of the progress: like the structure
-  of the progress so far (shape, from earlier reads); without one, or when it is no longer in the tail, the structure
-  the most lines share (a lone line of another structure, a "1/1" somewhere, is not progress; a new one that repeats
-  is: the program went on to another phase)"""
+def progress_lines(found, shape="", total=None):
+  """Of the lines with n/N or M% (oldest first: (line, n, N, percent)), those of the progress: alike in structure
+  (line_shape: the numbers aside) and with the same N. Read after read the job keeps its progress (shape, total):
+  a lone line of another structure or another N (a "checkpoint 1/1" in the log, a "step 1/50" among "step k/100")
+  is not progress; a new one that repeats after the last line of the progress so far is (another phase). Without
+  one kept: the latest line's kind if it repeats, else the kind most lines share. -> (lines, shape, total)"""
   if not found:
-    return [], ""
+    return [], shape, total
   shapes = [line_shape(f[0]) for f in found]
-  if shape:
-    like = [f for f, s in zip(found, shapes) if similar(s, shape)]
-    if like:
-      return like, shape
-  groups = [] # [representative shape, [indices]]
-  for i, s in enumerate(shapes):
-    group = next((g for g in groups if similar(s, g[0])), None)
-    if group is None:
-      groups.append([s, [i]])
+  def same(i, kind):
+    return found[i][2] == kind[1] and similar(shapes[i], kind[0])
+  def lines_of(kind):
+    return [i for i in range(len(found)) if same(i, kind)]
+  latest = (shapes[-1], found[-1][2])
+  kept = (shape, total) if shape and total is not None else None
+  kept_lines = lines_of(kept) if kept else []
+  if kept_lines:
+    after = [i for i in lines_of(latest) if i > kept_lines[-1]]
+    kind = latest if len(after) >= 2 else kept # (another phase: its lines repeat after the last of the kept one)
+  else:
+    kinds = []
+    for i in range(len(found)):
+      if not any(same(i, k) for k in kinds):
+        kinds.append((shapes[i], found[i][2]))
+    count = {k: len(lines_of(k)) for k in kinds}
+    if count[latest] >= 2 or (kept is None and max(count.values()) < 2):
+      kind = latest
     else:
-      group[1].append(i)
-  if shape and all(len(g[1]) < 2 for g in groups): # (only lone lines unlike the progress so far: none of them)
-    return [], shape
-  best = max(groups, key=lambda g: (len(g[1]), g[1][-1])) # (the most lines; of equal ones, the latest)
-  return [found[i] for i in best[1]], best[0]
+      best = max(kinds, key=lambda k: (count[k], lines_of(k)[-1]))
+      if count[best] < 2 and kept is not None: # (only lone lines unlike the progress so far: none of them)
+        return [], shape, total
+      kind = best
+  return [found[i] for i in lines_of(kind)], kind[0], kind[1]
 
 def output_progress(path, tail=None, job=None):
   """Latest valid n/N entry in the tail of a file (only its end is read, see progress_scan; here unless given),
@@ -796,8 +807,8 @@ def output_progress(path, tail=None, job=None):
           break
     if found is not None:
       found_lines.append((line.strip(), *found))
-  shape = progress_state(job.jid).get("shape", "") if job is not None else ""
-  lines, shape = progress_lines(found_lines, shape)
+  state = progress_state(job.jid) if job is not None else {}
+  lines, shape, _total = progress_lines(found_lines, state.get("shape", ""), state.get("total"))
   if not lines:
     return None
   line, current, total, percent = lines[-1]

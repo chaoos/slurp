@@ -512,10 +512,11 @@ step 450/1000            epoch 3/20, loss 0.41        [2026-11-17 14:03:12] 450/
   For a task of an array, slurp guesses the files of the other tasks from the name of the one chosen.
 - **The latest line counts**, n/N before M% in the same line (tqdm writes both: its n/N is exact). A count above its
   total, or a percentage over 100, is no progress.
-- **Only lines like the progress.** The progress lines of a file look alike (`step 450/1000 loss 0.41`, the numbers
-  aside); a line of another structure (`checkpoint 1/1 saved`, `copying 3/7 files`) is not progress, even if it is the
-  latest. slurp keeps the structure of a job's progress from read to read; a new one counts only when it repeats (the
-  program went on to another phase: then its pace starts anew).
+- **Only lines like the progress, with the same N.** The progress lines of a file look alike (`step 450/1000 loss
+  0.41`, the numbers aside) and count to the same N; a line of another structure (`checkpoint 1/1 saved`, `copying
+  3/7 files`) or another N (`step 1/50` among `step k/1000`) is not progress, even if it is the latest. slurp keeps the
+  kind of a job's progress (structure and N) from read to read; a new kind counts only when it repeats after it (the
+  program went on to another phase: then its pace starts anew). The current pace compares values of the same N only.
 - **Write it when it happens.** Programs often buffer what they print into a file: the progress then comes in chunks,
   late. In Python `print(..., flush=True)` or `PYTHONUNBUFFERED=1`; in C `fflush(stdout)`; `srun --unbuffered`.
 - **A time in the line helps** (`2026-11-17 14:03:12`, `2026-11-17T14:03:12`, or `14:03:12` for today): the pace

@@ -57,3 +57,33 @@ def test_the_current_pace_from_the_reads(check, monkeypatch):
   rate = p.estimate["recent"][0]
   check("after the reads: 5 steps per 10 s, the 1/1 not counted", abs(rate - 0.5) < 1e-9 and p.current == 25 and p.estimate["source"] == "seen at reloads",
         (rate, p.text, p.estimate))
+
+
+def test_n_stays_the_same(check):
+  """N is part of the progress: a line like it with another N is not, unless it repeats after it (another phase)"""
+  j = job("503")
+  old = [f"step {i}/100" for i in range(1, 9)]
+  p = J.record_progress(j, J.output_progress("x", tail="\n".join(old + ["step 1/50"]), job=j))
+  check("the same structure, a lone other N: not progress", p.current == 8 and p.total == 100, p.text)
+  p = J.record_progress(j, J.output_progress("x", tail="\n".join(old + ["step 9/100", "step 1/50", "step 10/100"]), job=j))
+  check("…also between lines of the progress", p.current == 10 and p.total == 100, p.text)
+  p = J.record_progress(j, J.output_progress("x", tail="\n".join(old + ["step 1/50", "step 2/50"]), job=j))
+  check("a new N that repeats after the progress so far: another phase, it takes over", p.current == 2 and p.total == 50, p.text)
+  check("…its points only; the times seen of the old phase gone", {t for _, _, t in p.points} == {50}
+        and [c for _, c, _ in J.progress_state("503")["points"]] == [2], (p.points, J.progress_state("503")["points"]))
+  p = J.output_progress("x", tail="\n".join(old + ["step 1/50", "step 2/50"]))
+  check("the first read too: the latest kind if it repeats, not the one most lines have", p.total == 50 and p.current == 2, p.text)
+  p = J.output_progress("x", tail="\n".join(old + ["step 1/50"]))
+  check("…a lone latest one: the kind most lines have", p.total == 100 and p.current == 8, p.text)
+
+
+def test_the_pace_keeps_its_n(check, monkeypatch):
+  """The current pace compares values of the same N only (the same kind of progress)"""
+  j = job("504")
+  clock = [2000.0]
+  monkeypatch.setattr(J.time, "time", lambda: clock[0])
+  for read, (n, stray) in enumerate(((10, ""), (15, "step 3/7"), (20, ""))):
+    clock[0] = 2000.0 + 10 * read
+    tail = "\n".join([f"step {i}/100" for i in range(1, n + 1)] + ([stray] if stray else []))
+    p = J.record_progress(j, J.output_progress("x", tail=tail, job=j))
+  check("a stray other N between the reads: not counted, 0.5/s", abs(p.estimate["recent"][0] - 0.5) < 1e-9 and p.total == 100, (p.text, p.estimate))
