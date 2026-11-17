@@ -229,7 +229,8 @@ moved up, job ids in log names, thread and binding settings, `module purge`, `wa
 (the original stays) and opens it. Fixes that need your decision (memory units, time limits, paths) are not made.
 """),
   "LinkScreen": ("Link", """
-A shell or drive of the cluster for your own terminal or file manager, through a relay: its state, logins, the
+A shell or drive of the cluster for your own terminal or file manager, through a relay: when it started and how long
+it is still valid (until when; its relay's end if that comes first, e.g. pinggy's hour), its state, logins, the
 password and slurp's host key, and the commands for your machine (Linux, macOS, Windows, PuTTY/WinSCP, ssh config),
 each with Copy. **New password** (the old one stops working), **Extend 1 h**, **Revoke** (no more logins, sessions end).
 A web link through Cloudflare has only its https address (no password): Revoke ends the tunnel, the address with it.

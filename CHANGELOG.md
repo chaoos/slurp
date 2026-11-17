@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Links (web, drive, shell) show when they started and how long they are
+  still valid: **Started** and **Valid** in the connection window's links
+  (sessions: when they started) and in the link window; until when, or
+  until slurp quits, the relay's end if sooner (pinggy's hour), yellow in
+  the last five minutes.
 - A web link that ends: the title bar counts down to it (⏱, left of **?**;
   a click opens the link), when it takes no more logins or its relay ends
   the tunnel (pinggy's free hour). Five minutes before, a warning: **Extend

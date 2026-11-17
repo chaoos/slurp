@@ -511,6 +511,39 @@ class LinkSetupScreen(ModalScreen):
       event.stop()
     self.dismiss(None)
 
+def clock(t, now):
+  """A time of day; with the date if it is not today"""
+  when = datetime.fromtimestamp(t)
+  return f"{when:%H:%M}" if when.date() == datetime.fromtimestamp(now).date() else f"{when:%Y-%m-%d %H:%M}"
+
+def span(seconds):
+  """1:02:03, 4:05"""
+  seconds = max(0, int(seconds))
+  return f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}" if seconds >= 3600 else f"{seconds // 60}:{seconds % 60:02d}"
+
+def link_times(link, now=None):
+  """(started, valid) of a link in words: when it was made (and how long ago); how long it still takes logins (until
+  when; or until slurp quits), and its relay's end if that comes first (pinggy's hour: then a new address); yellow in
+  the last five minutes. For the connection window and the link's window"""
+  now = now or time.time()
+  started = Text(f"{clock(link.created, now)} ({span(now - link.created)} ago)")
+  if not link.open(now):
+    return started, Text(f"no more logins: {link.why_closed()}" + ("; its sessions go on" if link.live_sessions else ""),
+                         style="yellow" if link.live_sessions else "dim")
+  ends = []
+  if link.expires is not None:
+    ends.append((link.expires, f"{span(link.expires - now)} more, until {clock(link.expires, now)}"))
+  if link.relay_state == "ready" and link.relay_until and link.relay_until > now:
+    ends.append((link.relay_until, f"relay until {clock(link.relay_until, now)} ({span(link.relay_until - now)}), then a new address"))
+  if not ends:
+    return started, Text("until slurp quits", style="green")
+  ends.sort()
+  soon = ends[0][0] - now <= 5 * 60
+  text = ends[0][1] + ("" if link.expires is not None else "; the link itself until slurp quits")
+  if len(ends) > 1:
+    text += f" · {ends[1][1]}"
+  return started, Text(text, style="bold yellow" if soon else "green")
+
 def link_state(link, now=None):
   """The state of a link in words, for its view and the connection window"""
   now = now or time.time()
@@ -602,9 +635,12 @@ class LinkScreen(ModalScreen):
       return
     link = self.link
     relay, logins = link_state(link)
+    started, valid = link_times(link)
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold", no_wrap=True)
     grid.add_column()
+    grid.add_row("Started", started)
+    grid.add_row("Valid", valid)
     grid.add_row("Relay", relay)
     grid.add_row("Logins", logins)
     if link.cloudflare:

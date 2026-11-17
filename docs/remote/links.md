@@ -89,7 +89,11 @@ key and the state; **New password**, **Extend 1 h**, **Revoke**.
 
 The **connection window** (click the status of the tab) lists the links of the
 tab and their sessions (shell or drive, since when, client, traffic, terminal
-size); a click on a link opens its window, on a session disconnects it.
+size), with **Started** (when each link was made, how long ago) and **Valid**
+(how long it still takes logins and until when, or until slurp quits; its
+relay's end if that comes first, e.g. pinggy's hour; yellow in the last five
+minutes; when it takes no more, why); the link window shows the same. A click on
+a link opens its window, on a session disconnects it.
 **Health** shows for every link and session what the status of the tab shows
 for its SSH login: green *healthy* (with the round trip of a heartbeat that
 slurp sends each client it has not heard from for 15 s), yellow *slow* or

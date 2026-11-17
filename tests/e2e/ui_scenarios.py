@@ -1166,7 +1166,10 @@ async def t_links_health(app, pilot):
     check("a slow heartbeat: slow", "slow 2000 ms" in b[1], b[1])
     check("a lost relay: relay lost", "relay lost" in row(f"link|{shell.id}")[1], row(f"link|{shell.id}")[1])
     check("a relay that reconnected lately: unstable", "unstable: relay reconnected 2×" in row(f"link|{shaky.id}")[1], row(f"link|{shaky.id}")[1])
-    check("a closed link: closed, and the way it went (as ready, via ssh-j.com)", row(f"link|{done.id}")[3] == "closed, was via ssh-j.com"
+    columns = [c.label.plain for c in table.ordered_columns]
+    check("Started and Valid columns: when each link was made, how long it still takes logins", columns[3:5] == ["Started", "Valid"]
+          and " ago)" in row(f"link|{drive.id}")[3] and row(f"link|{done.id}")[4].startswith("no more logins"), (columns, row(f"link|{drive.id}")))
+    check("a closed link: closed, and the way it went (as ready, via ssh-j.com)", row(f"link|{done.id}")[5] == "closed, was via ssh-j.com"
           and "closed" in row(f"link|{done.id}")[1], row(f"link|{done.id}"))
     check("a session without an answer for 12 s: no answer", re.search(r"no answer for 1[2-9] s", row(f"session|{shaky.id}|c1")[1]), row(f"session|{shaky.id}|c1")[1])
     styles = {key: table.get_row(key)[1].style for key in (f"link|{drive.id}", mine[0], f"link|{shell.id}")}

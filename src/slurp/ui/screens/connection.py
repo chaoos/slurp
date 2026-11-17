@@ -25,7 +25,7 @@ from ...cluster import remote # (remote.PING_*: the settings of the heartbeat, r
 from ...cluster.remote import connection_health, HEALTH_STYLES, in_background
 from ..widgets import ClickTable, open_clicked_url, url_text
 from ...links import share
-from .links import LinkScreen, link_state, drive_state_text
+from .links import clock, LinkScreen, link_state, link_times, drive_state_text
 from .dialogs import ConfirmScreen
 
 def process_tree(pid):
@@ -226,12 +226,13 @@ class ConnectionScreen(ModalScreen):
       return Text(f"{'●' if level else '○'} {words}", style=HEALTH_STYLES[level] if level else "dim")
     for link in links:
       relay, logins = link_state(link, now)
+      started, valid = link_times(link, now)
       what = (f"{link.kind}: {link.tab}" if link.kind == "drive" else # (a drive's folders: its sessions)
               "web: this slurp (all tabs)" if link.kind == "web" else f"{link.kind}: {link.title}")
       what = icons.label(link.kind if link.kind in ("drive", "shell", "web") else "", what)
       rows.append((f"link|{link.id}", (Text.assemble(link.id, (" ◀ this view", "bold green") if link.cloudflare and self.app.this_view_link(link) else ""),
                                        health(*share.link_health(link)),
-                                       what + (" (read only)" if link.read_only else ""), relay, logins,
+                                       what + (" (read only)" if link.read_only else ""), started, valid, relay, logins,
                                        "the address opens it (no logins)" if link.cloudflare else
                                        f"{len(link.live_sessions)} open, {link.logins} logins" + (f", {link.failures} wrong" if link.failures else ""))))
       sessions = [s for s in link.sessions if s.kind]
@@ -256,6 +257,7 @@ class ConnectionScreen(ModalScreen):
           health(level, words),
           Text.assemble(f"{s.path or '(folder not known yet)'} · {state}" if link.kind == "drive" else f"{s.kind} {state}",
                         (f" · reconnected {len(before)}×", "yellow") if before else ""),
+          Text(f"{clock(s.started, now)}", style="" if s.ended is None else "dim"), "",
           Text(f"{s.client or 'client ?'}" + (f", key {s.key[:20]}…" if s.key else ""), style="" if s.ended is None else "dim"),
           Text(f"{humanize.naturalsize(s.bytes_in)} in, {humanize.naturalsize(s.bytes_out)} out" + (f", {s.term} {s.size[0]}×{s.size[1]}" if s.term else ""),
                style="" if s.ended is None else "dim"),
@@ -266,7 +268,7 @@ class ConnectionScreen(ModalScreen):
     old_keys = [k for k, _ in (self.links_shown or [])]
     self.links_shown = signature
     if not table.columns:
-      for label in ("Link", "Health", "What", "Relay / client", "Logins / traffic", "Sessions"):
+      for label in ("Link", "Health", "What", "Started", "Valid", "Relay / client", "Logins / traffic", "Sessions"):
         table.add_column(label, key=label)
     if old_keys == [k for k, _ in rows] and table.row_count == len(rows):
       # the same rows, new values (traffic, durations): update the cells, the view (scrolling, cursor) stays as it is
