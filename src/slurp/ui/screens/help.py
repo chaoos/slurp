@@ -44,7 +44,7 @@ Your queued and running jobs and those that ended recently, of the active tab's 
   "JobScreen": ("Job window", """
 Everything about one job.
 
-- **Buttons:** Cancel job, Restart job (the original submission, another array range, or an edited command; with the
+- **Buttons:** Reload (`r`: the job, its files and progress from the cluster again), Cancel job, Restart job (the original submission, another array range, or an edited command; with the
   environment and script it was submitted with, if the cluster kept them), Run array, Array (the window of its array).
 - **Info:** state (with the pending reason or exit code), account, partition, nodes, times, node hours, the command.
 - **Checks:** what is wrong or could be better with the script and the job, most severe first; open an entry for why

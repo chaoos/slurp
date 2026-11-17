@@ -1768,6 +1768,13 @@ async def t_subtabs(app, pilot):
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.details["files"], 10)
   check("a job opens as a subtab", ok and app.current_mode != "_default" and vtabs(app) == ["Jobs", "job 9001"], vtabs(app))
   js = app.screen
+  before = js.details
+  await pilot.click("#reload-job"); await pilot.pause(0.05)
+  button = js.query_one("#reload-job")
+  busy = button.disabled and "Reloading" in str(button.label)
+  ok = await until(pilot, lambda: js.details is not before and not button.disabled, 15)
+  check("Reload: the job and its files from the cluster again; the button says so meanwhile, then is back",
+        ok and busy and "Reloading" not in str(button.label) and js.job.jid == "9001", (busy, str(button.label)))
   out = next(e for e in js.details["files"] if e.kind == "stdout"); js.open_entry(out)
   ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and len(vtabs(app)) == 3, 10)
   file_view = app.cluster.views[-1]

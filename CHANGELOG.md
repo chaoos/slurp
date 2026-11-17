@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The job window has a **Reload** button (as `r`): the job, its files and
+  progress from the cluster again; it says *Reloading …* meanwhile.
 - Progress also from `M%` lines (0 to 100, integer or not: `45%`,
   `12.5 %`), where a line has no `n/N`; shown as a percentage. A line with
   both (as tqdm writes) gives its `n/N`.

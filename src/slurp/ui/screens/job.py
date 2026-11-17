@@ -78,6 +78,8 @@ class JobScreen(SplitScreen):
 
   def compose_left(self):
     with Horizontal(id="job-actions"):
+      yield Button(icons.label("reload", "Reload"), id="reload-job", compact=True,
+                   tooltip="the job's state, times, files and progress again (r)")
       yield Button(icons.label("cancel_job", "Cancel job"), id="cancel-job", variant="error", compact=True)
       yield Button(icons.label("restart", "Restart job"), id="restart-job", variant="primary", compact=True)
       yield Button(icons.label("restart", "Run array"), id="run-array", tooltip="submit the array again with another range", compact=True)
@@ -355,14 +357,25 @@ class JobScreen(SplitScreen):
   @cluster_work("details")
   def load(self, refresh_job=False):
     job = self.job
-    if refresh_job:
-      jobs = annotate(load_jobs(None, jids=[job.jid]))
-      job = next((j for j in jobs if j.jid == job.jid), job)
-    details = load_details(job)
+    try:
+      if refresh_job:
+        jobs = annotate(load_jobs(None, jids=[job.jid]))
+        job = next((j for j in jobs if j.jid == job.jid), job)
+      details = load_details(job)
+    except BaseException: # (failed or aborted: the Reload button is back; the error is shown)
+      self.app.call_from_thread(self.reload_done)
+      raise
     if not get_current_worker().is_cancelled:
       self.app.call_from_thread(self.loaded, job, details)
+    else:
+      self.app.call_from_thread(self.reload_done)
+
+  def reload_done(self):
+    for button in self.query("#reload-job").results(Button):
+      button.label, button.disabled = icons.label("reload", "Reload"), False
 
   def loaded(self, job, details):
+    self.reload_done()
     self.job, self.details = job, details
     self.job.progress = details.get("progress")
     self.progress_at = time.monotonic()
@@ -729,7 +742,15 @@ class JobScreen(SplitScreen):
         self.app.open_link_setup("shell", title, cluster, self.app.link_argv(cluster, args))
     self.app.push_screen(ShellChoiceScreen(f"Shell on {node} (job {self.job.jid})"), chosen)
 
+  @on(Button.Pressed, "#reload-job")
+  def reload_pressed(self, event):
+    event.stop()
+    self.action_reload()
+
   def action_reload(self):
+    """The job from Slurm again, with its files and progress (the button says so meanwhile)"""
+    button = self.query_one("#reload-job", Button)
+    button.label, button.disabled = icons.label("reload", "Reloading …"), True
     self.load(refresh_job=True)
 
   def context(self):
