@@ -100,7 +100,7 @@ runs; everything else (the directory browser, a path in a text, files of the scr
 - `Space` / `b` a page down / up, `j` / `k` a line.
 - **Follow** (`f`) shows what is appended, like `tail -f`; **Watch** (`w`) reruns a command output every 5 s.
 - Paths and `file:line` references in the text open with Enter on them (or a click).
-- `l` opens the file in `less` (outside slurp; `q` comes back). `r` reloads.
+- `r` reloads.
 """),
   "DirScreen": ("Directory", """
 A directory of the cluster.

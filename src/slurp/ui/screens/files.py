@@ -2,14 +2,13 @@
 
 import codecs
 import os
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 
 import humanize
 from rich.text import Text
 from textual import on
-from textual.app import ComposeResult, SuspendNotSupported
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.coordinate import Coordinate
@@ -21,7 +20,7 @@ from textual.widgets.text_area import Selection
 
 from ...state import TAIL_BYTES
 from ...cluster.remote import (
-  cluster_work, conn, fs_getsize, fs_isdir, fs_isfile, fs_read, in_background, run_cmd, start_worker, tab_name
+  cluster_work, fs_getsize, fs_isdir, fs_isfile, fs_read, in_background, run_cmd, start_worker, tab_name
 )
 from ...cluster.paths import is_binary, resolve_path
 from ...cluster.storage import drive_dirs
@@ -837,7 +836,6 @@ class FileScreen(SplitScreen):
     Binding("r", "reload", "Reload"),
     Binding("w", "watch", "Watch"),
     Binding("A", "load_more", "Earlier part", show=False),
-    Binding("l", "less", "less"),
   ]
 
   def __init__(self, crumbs, path=None, text=None, refresher=None, follow=False, bases=(), env=None, at_end=None):
@@ -1320,22 +1318,4 @@ class FileScreen(SplitScreen):
     in_background(self, lambda: grep_offset(path, raw, offset, forward), found, group="search-file")
     self.update_status()
 
-  def action_less(self):
-    path = self.path
-    if path is None:
-      import tempfile
-      with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as tmp:
-        tmp.write(self.text or "")
-        path = tmp.name
-    try:
-      with self.app.suspend():
-        args = ["less", "-R", "+F" if self.following else "+G", path]
-        subprocess.run(conn().command_argv(args, interactive=True) if conn() else args)
-    except SuspendNotSupported:
-      self.notify("cannot suspend the terminal here", severity="error")
-    finally:
-      if path != self.path:
-        os.unlink(path)
-    if self.path:
-      self.poll()
 register_file_view("Markdown", is_markdown, open_markdown)

@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The text file view has no `l` (open in `less`) any more: it pages like
+  `less` itself.
 - The array window opens the job window of a task in a subtab of its own
   (a click on an id in By state, or on a task in Tasks).
 - Fixed: the **Array** line of a task's job window did nothing when the

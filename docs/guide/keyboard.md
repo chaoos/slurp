@@ -12,7 +12,7 @@ top-left `←` button to go back.
 | Script view | `r` check (all checks, the environment too); `x` explain the `#SBATCH` lines; `e` edit in place (`Ctrl+S` save, `Esc` stop editing); buttons `Test`, `Fixed copy…`, `Submit…` |
 | Everywhere | `F10` (or **☰ Menu** in the header) the menu; `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue (`/` searches it); `F3` options |
 | Categories | the tree (and *not categorized*): `n` new, `e` rename/move, `Del` delete; its jobs: `Enter` open, `c` categorize, `x` take out; `l` in the job list; `r` reload |
-| Text file | `/` search (the whole file); `n` / `N` next/previous; `g` / `G` start / end; `:` a line or `50%`; `Space` / `b` page down / up; `j` / `k` a line; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
+| Text file | `/` search (the whole file); `n` / `N` next/previous; `g` / `G` start / end; `:` a line or `50%`; `Space` / `b` page down / up; `j` / `k` a line; `f` follow; `A` the part before; `r` reload |
 | Directory | `/` search names (here as you type; `Ctrl+R` also in the subdirectories, in the background; `Esc` stops, then clears); `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |
 | Markdown | `r` reload; use the viewer's table of contents and link navigation |
