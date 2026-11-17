@@ -11,7 +11,7 @@ browser.
 ![The job list, newest first: queued and running jobs with progress and estimates, arrays as one row with the mix of their states, finished jobs with their checks](images/jobs.svg)
 
 ```bash
-python -m pip install "slurp[all] @ git+https://github.com/chaoos/slurp"
+pipx install "slurp-ui[all]"  # or: python -m pip install "slurp-ui[all]"
 slurp                         # on a login node, or on your own machine
                               # (+ adds a tab for a cluster over SSH)
 slurp --install-font          # once, where your terminal runs: its icons

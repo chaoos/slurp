@@ -1,0 +1,76 @@
+name: release
+
+# A tag v<version> (the version of src/slurp/__init__.py, e.g. v0.8.1) builds the package, publishes it to PyPI as
+# slurp-ui and makes a GitHub release with the same files. PyPI takes it through trusted publishing (no token here).
+# Once, on pypi.org: Your projects > Publishing > Add a pending publisher: project slurp-ui, owner chaoos, repository
+# slurp, workflow release.yml, environment pypi. Once, in the repository: Settings > Environments > New: pypi.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build twine
+      - name: The tag is the version of the package
+        run: |
+          version=$(python -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('src/slurp/__init__.py').read())[1])")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME, but the version is $version"; exit 1; }
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+      - name: It installs and runs
+        run: |
+          python -m venv /tmp/try
+          /tmp/try/bin/pip install "$(ls dist/*.whl)[all]"
+          /tmp/try/bin/slurp --version
+          /tmp/try/bin/pip check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/slurp-ui/
+    permissions:
+      id-token: write # (trusted publishing)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: The release, with the changes of this version from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v v="$version" '$0 ~ "^## " v "( |$)" {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "slurp $version" --notes-file notes.md

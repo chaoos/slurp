@@ -3,7 +3,7 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 [project]
-name = "slurp"
+name = "slurp-ui"  # (on PyPI; the command and the module are slurp: the name slurp is taken there)
 description = "All of slurm in one slurp: a terminal and browser UI for Slurm jobs, locally or on clusters over SSH"
 readme = "README.md"
 license = "GPL-3.0-only"

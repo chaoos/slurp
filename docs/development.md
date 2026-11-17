@@ -61,6 +61,28 @@ GitHub Actions runs on every push and pull request:
   3.12 (their logs and screenshots are kept as an artifact for 14 days).
 - **docs** (`.github/workflows/docs.yml`): builds this site with `mkdocs build --strict`, where a broken link, a
   missing anchor or a page left out of the navigation fails the build; from `main` it is published to GitHub Pages.
+- **release** (`.github/workflows/release.yml`): on a tag `v<version>`, see below.
+
+## Releases
+
+slurp is on PyPI as [`slurp-ui`](https://pypi.org/project/slurp-ui/) (the name `slurp` is taken there; the command and
+the module are `slurp`). A release:
+
+1. Set `__version__` in `src/slurp/__init__.py` (one number for slurp and its Windows helper).
+2. In `CHANGELOG.md`, turn **Unreleased** into `## <version> (beta), <date>` and start a new empty **Unreleased**.
+3. Commit, tag and push: `git tag v<version> && git push origin main v<version>`.
+
+The tag runs the release workflow: it checks that the tag is the version, builds the package (`python -m build`),
+checks it (`twine check --strict`), installs it with `[all]` in an empty venv and runs it, publishes it to PyPI and
+makes a GitHub release with the same files and the version's part of the changelog. PyPI takes it through trusted
+publishing, without a token. Set up once:
+
+- on pypi.org: *Your projects* → *Publishing* → *Add a pending publisher*: project `slurp-ui`, owner `chaoos`,
+  repository `slurp`, workflow `release.yml`, environment `pypi`
+- in the repository: *Settings* → *Environments* → *New environment* `pypi` (optionally with required reviewers, so
+  that a release waits for a click)
+
+To try a build locally: `python -m pip install build twine && python -m build && twine check --strict dist/*`.
 
 ## This site
 

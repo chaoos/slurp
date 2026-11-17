@@ -14,14 +14,10 @@ in a browser.
 
 ## Quick start
 
-slurp needs Python 3.11 or newer:
+slurp needs Python 3.11 or newer. It is on PyPI as `slurp-ui`:
 
 ```bash
-git clone https://github.com/chaoos/slurp.git
-cd slurp
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install ".[all]"
+pipx install "slurp-ui[all]"  # or: python -m pip install "slurp-ui[all]"
 slurp                         # on a login node, or on your own machine
                               # (+ adds a tab for a cluster over SSH)
 slurp --install-font          # once, where your terminal runs: its icons

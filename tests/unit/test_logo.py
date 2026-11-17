@@ -30,7 +30,8 @@ def test_logo(check, tmp_path, monkeypatch):
   stale = [name for name, make in logo.DOCS.items()
            if open(os.path.join(docs, name), "rb").read() != (lambda d: d.encode() if isinstance(d, str) else d)(make())]
   check("docs/images/ logo files are current (python tools/make_logo_files.py)", not stale, stale)
-  check("README and the docs' home page show the wordmark", 'src="docs/images/logo-wordmark.svg"' in open(os.path.join(REPO, "README.md")).read()
+  check("README (by its address on the docs site: it shows on PyPI too) and the docs' home page show the wordmark",
+        'src="https://chaoos.github.io/slurp/images/logo-wordmark.svg"' in open(os.path.join(REPO, "README.md")).read()
         and 'src="images/logo-wordmark.svg"' in open(os.path.join(REPO, "docs", "index.md")).read())
   setup = winhelper.setup_script()
   check("the helper's setup carries the icon, the tray loads it", "$IconData = '" in setup and "slurp.ico" in winhelper.SCRIPT.read_text())

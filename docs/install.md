@@ -6,23 +6,32 @@ no copy of slurp).
 
 ## Install
 
-Into a virtual environment, from a clone:
+slurp is on PyPI as [`slurp-ui`](https://pypi.org/project/slurp-ui/) (the command is `slurp`). In an environment of
+its own, with [pipx](https://pipx.pypa.io/):
+
+```bash
+pipx install "slurp-ui[all]"
+```
+
+Or into a virtual environment:
+
+```bash
+python3 -m venv ~/.venvs/slurp
+~/.venvs/slurp/bin/python -m pip install "slurp-ui[all]"   # or "slurp-ui" without the optional features
+~/.venvs/slurp/bin/slurp
+```
+
+The newest code, not released yet, from a clone:
 
 ```bash
 git clone https://github.com/chaoos/slurp.git
 cd slurp
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ".[all]"   # or "." without the optional features
+python -m pip install ".[all]"
 ```
 
-Or without a clone, in an environment of its own:
-
-```bash
-pipx install "slurp[all] @ git+https://github.com/chaoos/slurp"
-```
-
-`.[all]` includes the optional features:
+`[all]` includes the optional features:
 
 | Extra | What it adds | Package |
 |---|---|---|
@@ -65,9 +74,10 @@ Without the font the icons are boxes; **Options** → **Icons** switches them of
 
 ## Later: running and updating
 
-The `slurp` command lives in the virtual environment: activate it first (`source .venv/bin/activate`), or run
-`.venv/bin/slurp`. To update a clone: `git pull`, then `python -m pip install ".[all]"` again (not needed for an
-editable install, `-e`, see [Development](development.md)). After an update, quit the slurp that runs (`q`) and start
+pipx puts `slurp` on your PATH; from a virtual environment, activate it first or run its `bin/slurp`. To update:
+`pipx upgrade slurp-ui`, or `python -m pip install -U "slurp-ui[all]"` in the environment. To update a clone:
+`git pull`, then `python -m pip install ".[all]"` again (not needed for an editable install, `-e`, see
+[Development](development.md)). After an update, quit the slurp that runs (`q`) and start
 it again, or start a separate one with `slurp --new`: a new slurp that finds an older one running says so before it
 attaches.
 
