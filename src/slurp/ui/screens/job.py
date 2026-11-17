@@ -309,12 +309,14 @@ class JobScreen(SplitScreen):
     lines = [f"{progress.text}{share}: {progress.line}"]
     est = progress.estimate
     if job.running and progress.current < progress.total:
-      if "overall" in est:
-        rate, eta = est["overall"]
-        lines.append(f"on same pace (since the start): {rate_text(rate)}, done in {eta_text(eta)}")
+      # (the current pace when it can be told, from the last updates; else the average since the start)
       if "recent" in est:
         rate, eta, count = est["recent"]
         lines.append(f"on current pace (last {count} updates): {rate_text(rate)}, done in {eta_text(eta)}")
+      elif "overall" in est:
+        rate, eta = est["overall"]
+        lines.append(f"on same pace (since the start; too few updates for the current pace): {rate_text(rate)}, "
+                     f"done in {eta_text(eta)}")
       if not ("overall" in est or "recent" in est):
         lines.append("no estimate yet")
       else:

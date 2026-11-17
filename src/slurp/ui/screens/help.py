@@ -20,7 +20,8 @@ VIEW_HELP = {
 Your queued and running jobs and those that ended recently, of the active tab's cluster.
 
 - **Columns:** a click on a header sorts by it (again: the other way). **Progress** comes from `n/N` lines in the
-  output (or `M%`, 0 to 100, in lines without one); **Done: current pace** estimates the end at the recent rate (the job window also shows it at the average rate).
+  output (or `M%`, 0 to 100, in lines without one); **Done: current pace** estimates the end at the recent rate (the job window too; at the average rate since the start
+  while there are too few updates for that).
   **Checks** shows errors ✖ and warnings ⚠ the checks found for the job; **Err** marks error files that are not empty.
 - **Arrays** with ten or more tasks are one row: its state is the mix of the tasks' states (`30R 10PD 100CD`).
   `Space` (or ▸) lists the tasks under it, Enter opens the array window. `g` switches grouping off and on.

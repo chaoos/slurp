@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The job window's progress shows only the estimate on the current pace;
+  the one on the average pace since the start only while there are too
+  few updates for the current one.
 - The job window's **Shell…** is in its button bar (with Cancel job,
   Restart job, …), for a running job; it asks on which of the job's nodes
   (radio buttons) and where the shell opens. It was at the end of the

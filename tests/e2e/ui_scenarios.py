@@ -1718,9 +1718,10 @@ async def t_progress(app, pilot):
   check("job list: only the estimate on current pace", "eta_now" in app.job_column_keys and "eta" not in app.job_column_keys
         and "Done: current pace" in labels and "Done: same pace" not in labels, labels)
   t.focus(); t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter")
-  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen) and "on same pace (since the start)" in str(app.screen.query_one("#progress-line").render()), 10)
+  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen) and "on same pace (since the start" in str(app.screen.query_one("#progress-line").render()), 10)
   line = lambda: str(app.screen.query_one("#progress-line").render())
-  check("job window: estimate since the start, the file", ok and "done in" in line() and "slurm-9001.out" in line(), line())
+  check("job window: too few updates for the current pace: the estimate since the start, the file", ok and "done in" in line()
+        and "slurm-9001.out" in line() and "on current pace" not in line(), line())
   wd = app.jobs["9001"].rec["WorkDir"]
   now = datetime.now().replace(microsecond=0)
   with open(os.path.join(wd, "progress.log"), "w") as f:
@@ -1740,6 +1741,7 @@ async def t_progress(app, pilot):
         [(e.kind, e.label) for e in js.details["files"]][:5])
   check("the chosen file is used, with its timestamps: rate 1/min, done in ~50 min", ok and "timestamps in the file" in line()
         and "on current pace (last 4 updates): 1/min" in line() and ("~49 min" in line() or "~50 min" in line()) and "chosen for this job" in line(), repr(line()))
+  check("…only the current pace then (not the average since the start)", "on same pace" not in line(), repr(line()))
   with open(os.path.join(wd, "progress.log"), "a") as f:
     f.write(f"{datetime.now().replace(microsecond=0).isoformat()} INFO iteration 55/100\n")
   ok3 = await until(pilot, lambda: "55/100" in line(), 3 * JobScreen.PROGRESS_EVERY + 5)
