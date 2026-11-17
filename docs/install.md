@@ -81,4 +81,10 @@ pipx puts `slurp` on your PATH; from a virtual environment, activate it first or
 it again, or start a separate one with `slurp --new`: a new slurp that finds an older one running says so before it
 attaches.
 
+slurp tells you itself when there is a newer version: at the start it asks PyPI (at most once a day, in the
+background; offline nothing happens), says so, and the title bar shows **⬆ slurp <version>** until it quits. A click
+shows what changed, how slurp is installed on this machine (pipx, uv tool, pip, or a git checkout) and the command
+that updates it, to copy; then quit slurp and start it again. **Skip this version** stops the reminder until a newer
+one; `"update_check": false` in the config stops the check.
+
 When using tmux, enable the mouse (`set -g mouse on`) to click and scroll in slurp.

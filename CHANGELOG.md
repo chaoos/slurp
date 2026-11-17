@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- A newer slurp: at the start slurp asks PyPI (at most once a day, in the
+  background, offline nothing), says so and shows **⬆ slurp <version>** in
+  the title bar; it opens what changed, how slurp is installed here (pipx,
+  uv tool, pip, a git checkout) and the command that updates it (Copy),
+  then to start slurp again. Skip this version; `"update_check": false`.
 - **Run before login** (a tab's SSH settings, also for a `~/.ssh/config`
   destination): a command on this machine before every login, e.g. one
   that signs a key (`cscs-keygen`, `step ssh login`); it runs in the login

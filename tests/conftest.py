@@ -19,7 +19,9 @@ XDG = ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_DATA_HOME")
 
 
 def pytest_configure(config):
-  """The tests run against the installed slurp (as users get it); it must be this checkout's (pip install -e .)"""
+  """The tests run against the installed slurp (as users get it); it must be this checkout's (pip install -e .). slurp
+  does not ask PyPI for a newer version in the tests (test_update.py asks a fake one)"""
+  os.environ["SLURP_NO_UPDATE_CHECK"] = "1"
   import slurp
   here = os.path.realpath(os.path.join(ROOT, "src", "slurp"))
   got = os.path.dirname(os.path.realpath(slurp.__file__))

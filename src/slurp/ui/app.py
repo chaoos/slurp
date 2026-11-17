@@ -150,6 +150,8 @@ class Slurp(App):
   #topbar Header { dock: none; width: 1fr; height: 1; }
   #view-help { width: 3; min-width: 3; height: 1; text-style: bold; }
   #web-timer { width: auto; height: 1; padding: 0 1; display: none; color: $text-muted; background: transparent; }
+  #update { width: auto; height: 1; padding: 0 1; display: none; color: $success; text-style: bold; background: transparent; }
+  #update:hover { background: $surface-lighten-2; }
   #web-timer:hover { background: $surface-lighten-2; }
   #web-timer.-ending { color: $warning; text-style: bold; }
   /* code in Markdown (rule catalogue, guides, help, .md files): a framed block, the same in every theme (Textual's
@@ -299,8 +301,13 @@ class Slurp(App):
   def get_default_screen(self):
     return MainScreen()
 
+  new_version = None # a newer slurp on PyPI (update.py), asked at the start
+
   def on_mount(self):
     self.set_interval(0.25, self.tick)
+    from .. import update
+    if update.enabled():
+      in_background(self, update.latest_version, self.version_found, group="update", connection=None)
     self.view_kind = "web" if self.is_web else "terminal" # (under the session holder: of the active view)
     self.theme_applied = None
     self.apply_theme()
@@ -852,6 +859,10 @@ class Slurp(App):
     self.link_manager.tick()
     if self.spinner_frame % 4 == 0: # (each second) the countdown of a web link that ends, and its warning
       self.show_web_timer()
+      for button in self.screen.query("#update").results(Button): # (a newer slurp: in the title bar)
+        button.display = bool(self.new_version)
+        if self.new_version and str(button.label) != f"⬆ slurp {self.new_version}":
+          button.label = f"⬆ slurp {self.new_version}"
     if self.spinner_frame % 4 == 0: # (each second) the drives on this machine
       for c in self.clusters:
         if c.drive is not None:
@@ -1471,6 +1482,19 @@ class Slurp(App):
       self.web_warned.add(key)
       from .screens.links import WebEndingScreen
       self.push_screen(WebEndingScreen(link, what, left))
+
+  def version_found(self, version):
+    """A newer slurp: said once at the start, and the title bar has it (⬆) until slurp quits; skipped versions not"""
+    from .. import update, __version__
+    if not update.newer(version, __version__) or version == load_config().get("update_skip"):
+      return
+    self.new_version = version
+    self.notify(f"slurp {version} is available (this is {__version__}): ⬆ in the title bar says how to update", timeout=12)
+
+  def show_update(self):
+    from .screens.dialogs import UpdateScreen
+    if self.new_version:
+      self.push_screen(UpdateScreen(self.new_version))
 
   def show_web_deadline(self):
     """The web link that ends first, in its window"""

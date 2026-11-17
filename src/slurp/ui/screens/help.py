@@ -300,6 +300,13 @@ for the tab; while it is mounted they stay as they are (Unmount first).
 Where the shell opens: **in slurp** (a subtab with a terminal), or **from your own terminal** (a link: an ssh command
 and a password for the terminal on your machine, through a relay).
 """),
+  "UpdateScreen": ("A newer slurp", """
+slurp asks PyPI (`slurp-ui`) at the start, at most once a day, whether there is a newer version; then the title bar has
+**⬆ slurp <version>**, which opens this. It says what changed (the changelog), how slurp is installed here (pipx, uv
+tool, pip, or a git checkout) and the command that updates it (**Copy the command**), to run in a terminal. Then
+start slurp again: quit it (`q`) and run `slurp`; the running one stays as it is until then. **Skip this version**:
+no reminder until a newer one. No check at all: `"update_check": false` in the config.
+"""),
   "WebEndingScreen": ("A web link ends soon", """
 A web link (slurp in your browser) ends in a few minutes; the title bar counts down to it (⏱, left of ?).
 

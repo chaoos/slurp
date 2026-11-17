@@ -23,7 +23,7 @@ from textual.suggester import SuggestFromList
 
 from ...cluster.remote import in_background, run
 from ...cluster.jobs import compress_array_ids, env_summary, with_array_spec
-from ..widgets import bash_editor, command_args
+from ..widgets import bash_editor, command_args, open_clicked_url
 
 class ConfirmScreen(ModalScreen[bool]):
   """Confirmation dialog for an action that changes a Slurm job"""
@@ -691,6 +691,74 @@ class AddClusterScreen(ModalScreen):
 
   def action_cancel(self):
     self.dismiss(None)
+
+class UpdateScreen(ModalScreen):
+  """A newer slurp is there: what changed, the command that updates it (as it was installed here), and to start slurp
+  again; Skip this version (no reminder until a newer one)"""
+  DEFAULT_CSS = """
+  UpdateScreen { align: center middle; }
+  #up-dialog { width: 100; max-width: 96%; height: auto; border: thick $success; background: $surface; padding: 1 2; }
+  #up-title { text-style: bold; margin-bottom: 1; }
+  .up-text { height: auto; margin-bottom: 1; }
+  #up-command { height: auto; padding: 0 1; margin-bottom: 1; background: $boost; }
+  #up-buttons { height: auto; align-horizontal: right; }
+  #up-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "close", "Close")]
+
+  def __init__(self, version):
+    super().__init__()
+    from ... import update
+    self.version = version
+    self.how, self.command = update.how_to_update()
+
+  def compose(self) -> ComposeResult:
+    from ... import __version__, update
+    with Vertical(id="up-dialog"):
+      yield Static(f"slurp {self.version} is available (this is {__version__})", id="up-title", markup=False)
+      yield Static(Text.assemble("What changed: ", (update.CHANGELOG, f"underline link {update.CHANGELOG}"),
+                                 f" (and on PyPI: https://pypi.org/project/{update.PACKAGE}/)"), classes="up-text")
+      yield Static(f"slurp is installed here with {self.how}. To update it, run in a terminal:", classes="up-text", markup=False)
+      yield Static(self.command, id="up-command", markup=False)
+      yield Static("Then start slurp again: quit it (q; this ends slurp in the background too, with its shells, links "
+                   "and drives) and run slurp. Until then the running slurp stays as it is; the update changes nothing "
+                   "in it.", classes="up-text", markup=False)
+      with Horizontal(id="up-buttons"):
+        yield Button("Skip this version", id="up-skip", compact=True, tooltip="no reminder until a newer one")
+        yield Button("Close", id="up-close", compact=True)
+        yield Button(icons_label("copy", "Copy the command"), id="up-copy", variant="primary", compact=True)
+
+  def on_mount(self):
+    self.query_one("#up-copy", Button).focus()
+
+  def on_click(self, event):
+    open_clicked_url(self.app, event)
+
+  @on(Button.Pressed, "#up-copy")
+  def copy_pressed(self, event):
+    event.stop()
+    copy_text(self.app, self.command, "the update command")
+
+  @on(Button.Pressed, "#up-skip")
+  def skip(self, event):
+    event.stop()
+    from ...config import update_config
+    update_config(update_skip=self.version)
+    self.app.new_version = None
+    self.notify(f"no reminder of slurp {self.version} (a newer one is said again)", timeout=5)
+    self.dismiss()
+
+  @on(Button.Pressed, "#up-close")
+  def action_close(self, event=None):
+    if event is not None:
+      event.stop()
+    self.dismiss()
+
+
+def icons_label(icon, text):
+  from .. import icons
+  return icons.label(icon, text)
+
 
 CLIPBOARD_TOOLS = [ # (needed environment, command): the first one there gets the text
   ("WAYLAND_DISPLAY", ["wl-copy"]),
