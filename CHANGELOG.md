@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+## 0.8.1 (beta), 2026-11-17
+
+- On PyPI as `slurp-ui`: `pip install "slurp-ui[all]"` (or `pipx install`); the
+  command stays `slurp`. A tag `v<version>` publishes a release.
 - Files and directories always open in a subtab of their own, wherever they
   are opened (the files of a job, a path in a file, a file in a directory);
   where they were opened stays as it was. Opening one again shows its
