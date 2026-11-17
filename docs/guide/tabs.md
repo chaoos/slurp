@@ -15,8 +15,9 @@ window, each file or directory, each shell (on the cluster, on the node of a
 job, GDB). Quota and Health are windows over it.
 At the start no
 subtab is open, and while none is the tab shows its
-[overview](overview.md), from where **Jobs** opens the job list. When a
-subtab closes, the job list (if open) or the last subtab is shown. A file or
+[overview](overview.md), from where **Jobs** opens the job list. When the
+subtab shown closes, the one shown before it comes back (the job list, a
+subtab, or the overview). A file or
 directory always opens in a subtab of its own, wherever you open it (the
 files of a job, a path in a file, a file in a directory), and where you
 opened it stays as it was. A folder you enter in a directory view opens in
@@ -25,7 +26,8 @@ open in it, and back from its first window shows the job list (or the
 overview). Opening a job, file or directory again shows its subtab. Switching tabs keeps the subtabs. In a shell all keys go to the
 shell, except `Ctrl-]`, which goes back to the job list; `Ctrl-W` closes the
 subtab shown (outside a shell). Every tab can be closed, also the last one;
-then only the `+` button remains.
+then only the `+` button remains. Closing the tab shown goes back to the tab
+shown before it.
 
 Every window has a **?** at the right end of its top bar (dialogs in their
 top right corner), and the `?` key does the same: a window explains what the

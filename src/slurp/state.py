@@ -66,6 +66,7 @@ class ClusterSession:
   scope: str = "me"                    # whose jobs are listed: "me", "all" (all accounts) or an account
   views: list = field(default_factory=list) # the subtabs besides the job list
   current_view: str = "_default"       # mode shown ("_default": the job list, "overview": no subtab open, a view's mode)
+  view_history: list = field(default_factory=list) # the modes shown, the last one most recently (closing goes back)
   opened: bool = False                 # shown once (the first time: the overview, or the job list with start_page jobs)
   jobs_open: bool = False              # the job list is open as a subtab (closed: the overview, when nothing else is open)
   overview: dict = field(default_factory=dict) # what the overview loaded of its cluster (screens/overview.py)

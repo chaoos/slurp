@@ -1792,8 +1792,9 @@ async def t_subtabs(app, pilot):
   check("back: the subtab shown before", isinstance(app.screen, TerminalScreen) and app.screen.session is shells[0].session)
   proc = shells[0].session.proc
   await pilot.click(f"#view-close-{shells[0].id}"); await pilot.pause(0.8)
-  check("✕ closes a shell subtab and ends the shell", shells[0] not in app.cluster.views and proc.poll() is not None
-        and app.screen is app.main, vtabs(app))
+  check("✕ closes a shell subtab and ends the shell; the subtab shown before it comes back (the other shell)",
+        shells[0] not in app.cluster.views and proc.poll() is not None and isinstance(app.screen, TerminalScreen)
+        and app.screen.session is shells[1].session, vtabs(app))
   await pilot.click(f"#view-tab-{shells[1].id}"); await pilot.pause(0.3)
   await pilot.press("ctrl+w"); await pilot.pause(0.5)
   check("Ctrl-W in a shell goes to the shell (no close)", shells[1] in app.cluster.views)

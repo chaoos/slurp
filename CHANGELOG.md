@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Closing the tab or subtab shown goes back to the one shown before it, not
+  to its neighbour (a tab) or the job list (a subtab).
 - **Open a directory…** (the menu, `d`; was Login directory) asks which one:
   your home (the default), scratch, project, … (`$SCRATCH`, `$PROJECT`,
   `$STORE`, `$WORK`, those set on the cluster) or a path. Each time in a new

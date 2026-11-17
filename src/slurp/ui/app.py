@@ -263,6 +263,7 @@ class Slurp(App):
     # the tabs of the last run (from the config; a local tab the first time)
     saved = load_config()
     self.clusters = []
+    self.tab_history = [] # the tabs shown, the last one most recently (closing the tab shown goes back)
     for tab in saved.get("tabs", [{"destination": None}]):
       destination = tab.get("destination") or None
       cluster = ClusterSession(destination or "Local", destination)
@@ -401,6 +402,9 @@ class Slurp(App):
     elif cluster.destination and cluster.connection is None:
       cluster.connection = RemoteSSH(cluster.destination) # (not started: the tab's commands wait for Connect, never run here)
     self.cluster_index = index
+    if cluster in self.tab_history:
+      self.tab_history.remove(cluster)
+    self.tab_history.append(cluster) # (closing the tab shown goes back to the one shown before)
     remote.ssh_connection = cluster.connection
     if not cluster.opened:
       cluster.opened = True
@@ -532,8 +536,13 @@ class Slurp(App):
     return "_default" if load_config().get("start_page") == "jobs" else "overview"
 
   def home_mode(self, cluster, views=True):
-    """What a tab shows when the subtab shown goes away: its job list if open, else its last subtab (views), else the
-    overview"""
+    """What a tab shows when the subtab shown goes away: the one shown before it that is still open (views), else its
+    job list if open, else its last subtab (views), else the overview"""
+    if views:
+      for mode in reversed(cluster.view_history):
+        if (mode == "_default" and cluster.jobs_open) or any(v.mode == mode for v in cluster.views) \
+            or (mode == "overview" and not cluster.jobs_open):
+          return mode
     if cluster.jobs_open:
       return "_default"
     return cluster.views[-1].mode if views and cluster.views else "overview"
@@ -557,6 +566,16 @@ class Slurp(App):
       self.show_home()
     self.refresh_status()
 
+  def switch_mode(self, mode):
+    """(every subtab switch: remembered, so that closing one goes back to the one shown before)"""
+    if self.clusters:
+      history = self.cluster.view_history
+      if mode in history:
+        history.remove(mode)
+      history.append(mode)
+      del history[:-50]
+    return super().switch_mode(mode)
+
   def show_view(self, view):
     """Show a subtab of the active tab (None: the job list, opened if it is closed)"""
     mode = view.mode if view is not None else "_default"
@@ -567,6 +586,8 @@ class Slurp(App):
       self.switch_mode(mode)
       if view is None:
         self.call_after_refresh(self.focus_jobs)
+    elif isinstance(self.screen, TerminalScreen): # (its subtab clicked again: the keys go to the shell, not the button)
+      self.call_after_refresh(self.screen.query_one(TerminalView).focus)
     self.call_after_refresh(self.refresh_status)
 
   def close_view(self, view, cluster=None):
@@ -687,9 +708,13 @@ class Slurp(App):
     for view in list(cluster.views):
       self.close_view(view, cluster)
     self.clusters.pop(index)
+    if cluster in self.tab_history:
+      self.tab_history.remove(cluster)
     if current:
       if self.clusters:
-        self.activate_cluster(min(index, len(self.clusters) - 1), connect=False)
+        before = next((c for c in reversed(self.tab_history) if c in self.clusters), None) # (the tab shown before)
+        self.activate_cluster(self.clusters.index(before) if before is not None else min(index, len(self.clusters) - 1),
+                              connect=False)
       else: # no tab left: only the + button
         self.cluster_index = 0
         remote.ssh_connection = None
