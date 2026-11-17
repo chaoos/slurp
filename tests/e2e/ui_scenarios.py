@@ -7,6 +7,7 @@ set by configure() before a session starts, and check() (a soft check of the cur
 import urllib.parse
 import asyncio
 import getpass
+import json
 import logging
 import os
 import re
@@ -24,12 +25,13 @@ from slurp.cluster import remote
 from slurp.ui.screens import dialogs
 from textual.coordinate import Coordinate
 from textual.screen import Screen
-from textual.widgets import Markdown, RadioButton, TextArea
+from textual.widgets import Markdown, RadioButton, Select, TextArea
 from slurp.ui.app import Slurp
 from slurp.config import config_path, load_config, update_config
 from slurp.cluster.jobs import array_overview, ERR_SIZES, JobProgress, progress_state, set_progress_file
 from slurp.cluster.remote import HEALTH_STYLES
 from slurp.ui.screens.array import ArrayScreen, epoch
+from slurp.ui.screens.cancel import CancelScreen
 from slurp.ui.screens.categories import CategoriesScreen, CategorizeScreen, NONE, find_node
 from slurp.ui.screens.checks import FixPreviewScreen, GuidesScreen, RuleCatalogueScreen
 from slurp.ui.screens.clusterinfo import cluster_health, ClusterInfoScreen
@@ -2136,6 +2138,73 @@ async def t_large_log(app, pilot):
     for v in list(app.cluster.views): app.close_view(v)
     await pilot.pause(0.3)
 
+async def t_cancel_reason(app, pilot):
+  """Cancel a job: the dialog asks why (a list, or in your words), proposes the jobs that look like it for a
+  duplicate, shows the guide for a dependency; the reason is kept with the job, shown in its window and in the
+  categories window"""
+  calls = os.path.join(LAB, "scancel_calls")
+  if os.path.exists(calls): os.unlink(calls)
+  cluster = app.cluster
+  await until(pilot, lambda: cluster.loader is None and cluster.categories is not None, 30)
+  # (another job like 9001: the same name and directory, submitted again)
+  twin = cluster.jobs["9002"]
+  saved = dict(twin.rec)
+  twin.rec.update(JobName=cluster.jobs["9001"].rec["JobName"], WorkDir=cluster.jobs["9001"].rec["WorkDir"])
+  try:
+    js = await open_job(app, pilot, "9001")
+    js.query_one("#cancel-job").press()
+    ok = await until(pilot, lambda: isinstance(app.screen, CancelScreen), 5)
+    dlg = app.screen
+    check("Cancel job: asks why, with the command", ok and "scancel 9001" in dlg.dialog_message
+          and len(dlg.query("RadioButton")) >= 12, dlg.dialog_message if ok else type(app.screen).__name__)
+    choose = lambda key: setattr(next(b for b in dlg.query("RadioButton") if b.name == key), "value", True)
+    choose("dependency"); await pilot.pause(0.2)
+    hint = str(dlg.query_one("#cr-hint").render())
+    check("a dependency: says how Slurm does it, a button to the guide", "--dependency=afterok" in hint and dlg.query_one("#cr-guide").display, hint)
+    choose("other"); await pilot.pause(0.2)
+    await pilot.click("#cr-ok"); await pilot.pause(0.2)
+    check("another reason: it must be said", isinstance(app.screen, CancelScreen) and "say the reason" in str(dlg.query_one("#cr-error").render()))
+    choose("duplicate"); await pilot.pause(0.2)
+    sel = dlg.query_one("#cr-related")
+    options = [str(v) for _, v in sel._options if v is not Select.NULL]
+    check("submitted twice: the job that looks the same is proposed", sel.display and options[:1] == ["9002"], options)
+    sel.value = "9002"
+    dlg.query_one("#cr-details").value = "pressed submit twice"
+    await pilot.click("#cr-ok")
+    ok = await until(pilot, lambda: os.path.exists(calls), 10)
+    check("cancelled: scancel 9001", ok and open(calls).read().strip() == "9001")
+    ok = await until(pilot, lambda: (cluster.categories.cancel_reason_of("9001") or {}).get("related") == "9002", 10)
+    entry = cluster.categories.cancel_reason_of("9001") or {}
+    check("the reason kept with the job (on the cluster)", ok and entry.get("reason") == "duplicate" and entry.get("text") == "pressed submit twice"
+          and json.load(open(CATEGORIES_FILE))["clusters"]["lab"]["cancelled"]["9001"]["related"] == "9002", entry)
+    js.show_job(); await pilot.pause(0.3)
+    info = rendered(js.query_one("#info").content)
+    check("the job window: why, the details, the other job", "Cancelled because" in info and "Submitted twice by mistake: pressed submit twice" in info
+          and "the same as job 9002" in info, info[:600])
+    views = len(cluster.views)
+    await app.run_action("open_job('9002')"); await pilot.pause(0.5)
+    check("the other job, a link: its window in a subtab", isinstance(app.screen, JobScreen) and app.screen.job.jid == "9002" and len(cluster.views) == views + 1)
+    # in the categories window
+    from slurp.ui.screens.categories import change_categories
+    done = []
+    change_categories(app, cluster, ["assign", ["9001"], "reasons test"], lambda st, r: done.append(1))
+    await until(pilot, lambda: done, 10)
+    await menu(app, pilot, "categories")
+    ok = await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10); cs = app.screen
+    tree = cs.query_one("#cat-tree"); tree.move_cursor(find_node(tree, "reasons test")); await pilot.pause(0.6)
+    jt = cs.query_one("#cat-jobs")
+    row = [str(c) for c in jt.get_row("9001")] if ok and "9001" in [str(k.value) for k in jt.rows] else []
+    check("the categories window: a column with why", any("Submitted twice by mistake" in c for c in row), row)
+  finally:
+    twin.rec.clear(); twin.rec.update(saved)
+    from slurp.ui.screens.categories import change_categories
+    for op in (["delete", "reasons test"], ["cancel_reason", "9001", None]): # (one after the other)
+      undone = []
+      change_categories(app, cluster, op, lambda st, r: undone.append(1))
+      await until(pilot, lambda: undone, 10)
+    for v in list(app.cluster.views): app.close_view(v)
+    await pilot.pause(0.3)
+
 async def t_auto_refresh(app, pilot):
   """The job window and the array window refresh by themselves every refresh_seconds (here 2), counted down in the
   title bar"""
@@ -2554,19 +2623,28 @@ async def t_array_window(app, pilot):
   await pilot.press("escape"); await pilot.pause(0.3)
   check("← back to the array window", app.screen is scr)
   await pilot.click("#arr-cancel-pending"); await pilot.pause(0.3)
-  msg = str(app.screen.dialog_message) if isinstance(app.screen, ConfirmScreen) else ""
+  msg = str(app.screen.dialog_message) if isinstance(app.screen, CancelScreen) else ""
   check("cancelling the pending tasks asks first, with what and the command", "10 tasks (141-150)" in msg and "scancel --state=PENDING 9600" in msg, msg)
-  await pilot.click("#confirm-yes")
+  dlg = app.screen
+  if isinstance(dlg, CancelScreen):
+    next(b for b in dlg.query("RadioButton") if b.name == "allocation").value = True; await pilot.pause(0.1)
+    dlg.query_one("#cr-details").value = "array too small"
+    await pilot.click("#cr-ok")
   ok = await until(pilot, lambda: os.path.exists(calls), 10)
   check("and runs scancel --state=PENDING", ok and open(calls).read().strip() == "--state=PENDING 9600")
+  ok = await until(pilot, lambda: (app.cluster.categories.cancel_reason_of("9600") or {}).get("reason") == "allocation", 10)
+  entry = app.cluster.categories.cancel_reason_of("9600") or {}
+  check("the reason is kept with the array: what, details, which tasks", ok and entry.get("text") == "array too small" and entry.get("what") == "the pending tasks", entry)
+  await until(pilot, lambda: "Cancelled because" in rendered(scr.info_table), 10)
+  check("the array window shows it", "Wrong resources asked for" in rendered(scr.info_table), rendered(scr.info_table)[:300])
   for _ in range(3): # (the window may still be settling after the dialog before: click again)
     await pilot.click("#arr-cancel")
-    if await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 3):
+    if await until(pilot, lambda: isinstance(app.screen, CancelScreen), 3):
       break
-  msg = str(app.screen.dialog_message) if isinstance(app.screen, ConfirmScreen) else ""
+  msg = str(app.screen.dialog_message) if isinstance(app.screen, CancelScreen) else ""
   check("cancelling the whole array asks first", "running tasks included" in msg and "scancel 9600" in msg, msg)
-  await pilot.click("#confirm-no"); await pilot.pause(0.3)
-  check("No: nothing cancelled", open(calls).read().count("\n") == 1)
+  await pilot.click("#cr-back"); await pilot.pause(0.3)
+  check("Do not cancel: nothing cancelled", open(calls).read().count("\n") == 1)
   js = await open_job(app, pilot, "9500_1")
   b = js.query_one("#array-window")
   check("the job window of an array task has an Array button", b.display)

@@ -67,7 +67,7 @@ numbers: jobs and array tasks, by state, and how many of those that ended
 completed; node, CPU and GPU hours (nodes, CPUs and GPUs of Slurm's
 accounting, times the run time); from the first submit to the last end; the
 partitions and accounts. Below them are its jobs: a click opens one (an array: its window), in a subtab
-of its own. slurp
+of its own; **Cancelled because** says why a job was cancelled, as told when cancelling it. slurp
 asks Slurm for these jobs themselves (`sacct -j`), so old jobs count too, as
 long as Slurm's accounting keeps them; the ones it no longer knows are named.
 At the end of the tree, **not categorized** has the jobs of the job list

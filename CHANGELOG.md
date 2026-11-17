@@ -6,6 +6,14 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Cancelling a job or an array asks why: a list of the usual reasons
+  (submitted twice, with the jobs that look the same to name the one that
+  stays; the program hangs; wrong resources or account; a job it depends
+  on failed, with `--dependency` and the guide; a bug, wrong input,
+  replaced, too slow, out of memory or quota, waits too long, the
+  cluster, not needed, a test) or your own words. Kept with the job on
+  the cluster; shown in the job and array windows and in the categories
+  window.
 - Jobs have notes, in Markdown, like categories: **Notes…** (`o`) in the
   job window; shown there rendered, kept on the cluster.
 - Large text files (logs of millions of lines) work like `less`, without

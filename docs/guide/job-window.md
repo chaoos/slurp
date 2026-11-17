@@ -8,8 +8,13 @@ came out); the window shows them rendered under its details, and they are
 kept on the cluster with the categories. For a
 task of an array, a click on its **Array** line opens the array window in a
 subtab of its own. **Node hours (total)** is nodes ×
-elapsed time (for a running job so far, with the most it can take by its time limit). **Cancel job** and **Restart
-job** ask for confirmation; restart lets you use the original submission,
+elapsed time (for a running job so far, with the most it can take by its time limit). **Cancel job** asks why:
+submitted twice (slurp proposes the jobs that look the same, to name the one that stays), the program hangs, wrong
+resources or account, a job it depends on failed (with how `--dependency=afterok` does that for you, and the guide),
+a bug, wrong input, replaced by a newer job, too slow, out of memory or quota, waits too long, a problem of the
+cluster, not needed any more, a test, or your own words. The reason is kept with the job on the cluster and shown
+in its window (**Cancelled because**, the other job as a link), the array window and the categories window; you
+may also not say. **Restart job** asks for confirmation; restart lets you use the original submission,
 retry eligible array IDs, or edit a custom command (in a bash editor). If
 the cluster keeps them, restart also offers the environment the job was
 submitted with (`sacct --env-vars`: uenv, loaded modules, all variables; sbatch

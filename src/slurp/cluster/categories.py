@@ -56,9 +56,23 @@ def array_of(jid):
 
 MAX_NOTES = 20000 # characters of a category's notes at most
 
+def cancel_entry(jid, entry):
+  """Why a job was cancelled, as kept: {reason (a key of the list), label, text (details), related (a job id: the
+  one it duplicates, …), what (the pending tasks, …), at}; ValueError if it is not one"""
+  if not re.fullmatch(r"[0-9]+(_[0-9]+)?", str(jid)) or not isinstance(entry, dict):
+    raise ValueError(f"not a cancel reason of a job: {jid}")
+  out = {k: str(entry.get(k) or "")[:limit] for k, limit in
+         (("reason", 40), ("label", 200), ("text", 2000), ("related", 40), ("what", 200), ("at", 40))}
+  if out["related"] and not re.fullmatch(r"[0-9]+(_[0-9]+)?", out["related"]):
+    out["related"] = ""
+  if not (out["reason"] or out["text"]):
+    raise ValueError("no reason")
+  return {k: v for k, v in out.items() if v}
+
 class Store:
   """The categories of one Slurm cluster: their paths, the jobs in them ({jid: {category, name, added}}), notes of
-  categories (Markdown, {path: text}) and notes of jobs (Markdown, {jid: text}; of any job, in a category or not)"""
+  categories (Markdown, {path: text}), notes of jobs (Markdown, {jid: text}; of any job, in a category or not) and
+  why jobs were cancelled ({jid: {reason, label, text, related, what, at}})"""
 
   def __init__(self, cluster="default", data=None):
     data = data if isinstance(data, dict) else {}
@@ -88,12 +102,20 @@ class Store:
         pass
     self.job_notes = {str(jid): text[:MAX_NOTES] for jid, text in (data.get("job_notes") or {}).items()
                       if isinstance(text, str) and text.strip() and re.fullmatch(r"[0-9]+(_[0-9]+)?", str(jid))}
+    self.cancelled = {}
+    for jid, entry in (data.get("cancelled") or {}).items():
+      try:
+        self.cancelled[str(jid)] = cancel_entry(jid, entry)
+      except ValueError:
+        pass
 
   def to_data(self):
     return {"categories": sorted(self.paths), "jobs": dict(sorted(self.jobs.items())),
             **({"notes": dict(sorted(self.notes.items()))} if self.notes else {}),
             **({"job_notes": dict(sorted(self.job_notes.items(), key=lambda kv: [int(x) for x in kv[0].split("_")]))}
-               if self.job_notes else {})}
+               if self.job_notes else {}),
+            **({"cancelled": dict(sorted(self.cancelled.items(), key=lambda kv: [int(x) for x in kv[0].split("_")]))}
+               if self.cancelled else {})}
 
   # ---- reading
   def category_of(self, jid):
@@ -117,6 +139,12 @@ class Store:
   def notes_of(self, path):
     """The notes of a category (Markdown), "" if none"""
     return self.notes.get(path, "")
+
+  def cancel_reason_of(self, jid):
+    """Why a job was cancelled ({reason, label, text, related, what, at}; an array task: its own, else its array's),
+    None if not said"""
+    jid = str(jid)
+    return self.cancelled.get(jid) or self.cancelled.get(array_of(jid))
 
   def job_notes_of(self, jid):
     """The notes of a job (Markdown; an array task: its own), "" if none"""
@@ -143,6 +171,15 @@ class Store:
       self.job_notes[jid] = text[:MAX_NOTES]
     else:
       self.job_notes.pop(jid, None)
+    return jid
+
+  def cancel_reason(self, jid, entry):
+    """Why a job (an array: as a whole) was cancelled; None: not said (any more)"""
+    jid = str(jid)
+    if entry is None:
+      self.cancelled.pop(jid, None)
+    else:
+      self.cancelled[jid] = cancel_entry(jid, entry)
     return jid
 
   def add(self, path):
@@ -264,7 +301,7 @@ def cluster_name():
 def load(cluster):
   return Store(cluster, read_all()["clusters"].get(cluster))
 
-OPS = ("add", "assign", "unassign", "rename", "delete", "note", "job_note") # (the changes, by name: kept to be done later, see jobcache)
+OPS = ("add", "assign", "unassign", "rename", "delete", "note", "job_note", "cancel_reason") # (the changes, by name: kept to be done later, see jobcache)
 
 def apply_op(store, op):
   """[name, args...] on a store; its result"""

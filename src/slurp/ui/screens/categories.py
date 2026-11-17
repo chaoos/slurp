@@ -18,6 +18,7 @@ from ...cluster.jobs import fmt_time, is_time, load_jobs
 from ..widgets import ClickTable, state_text
 from .base import SplitScreen
 from .dialogs import ConfirmScreen
+from .cancel import short_reason
 
 def category_text(path, style=""):
   """a/b/c with the categories it is in dimmed"""
@@ -285,7 +286,8 @@ class CategoriesScreen(SplitScreen):
   #cat-jobs { height: 1fr; }
   """
   COLUMNS = [("job", "Job"), ("name", "Name"), ("category", "Category"), ("state", "State"), ("nodes", "Nodes"),
-             ("elapsed", "Elapsed"), ("node_h", "Node h"), ("gpu_h", "GPU h"), ("submit", "Submit"), ("end", "End")]
+             ("elapsed", "Elapsed"), ("node_h", "Node h"), ("gpu_h", "GPU h"), ("submit", "Submit"), ("end", "End"),
+             ("cancelled", "Cancelled because")]
 
   def __init__(self, path=""):
     super().__init__()
@@ -510,7 +512,8 @@ class CategoriesScreen(SplitScreen):
       if not jobs:
         state = (Text("not known to Slurm", style="dim") if jid in self.asked else Text("cluster not reachable", style="yellow")
                  if self.app.offline(self.cluster) else Text("asking Slurm …", style="yellow"))
-        table.add_row(jid, store.jobs[jid].get("name") or "", category_text(rel), state, "", "", "", "", "", "", key=jid)
+        table.add_row(jid, store.jobs[jid].get("name") or "", category_text(rel), state, "", "", "", "", "", "",
+                      short_reason(store.cancel_reason_of(jid)), key=jid)
         continue
       array = len(jobs) > 1 or "_" in jobs[0].jid and "_" not in jid
       first = jobs[0].rec
@@ -521,7 +524,7 @@ class CategoriesScreen(SplitScreen):
                     first.get("NNodes") or "", "" if array else first.get("Elapsed") or "", hours_text(m["node_hours"]),
                     hours_text(m["gpu_hours"]) if m["gpu_hours"] else "",
                     fmt_time(min(j.rec["Submit"] for j in jobs)) if is_time(first.get("Submit") or "") else "",
-                    fmt_time(max(ends)) if ends else "", key=jid)
+                    fmt_time(max(ends)) if ends else "", short_reason(store.cancel_reason_of(jid)), key=jid)
     if current is not None:
       try:
         table.move_cursor(row=table.get_row_index(current))

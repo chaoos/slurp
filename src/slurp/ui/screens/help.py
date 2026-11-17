@@ -52,6 +52,8 @@ to it; a click there switches automatic refreshing off (**⟳ off**) and on agai
 and the array window (kept). `r` reloads at once.
 
 - **Category:** a click on it opens the categories window at that category, in a subtab of its own.
+- **Cancel job** asks why (a list of the usual reasons, or your own words); the reason is kept with the job and shown
+  here (**Cancelled because**) and in the categories window.
 - **Notes…** (`o`): notes of the job, in Markdown (what this run was for, what came out); shown rendered under its
   details. Kept on the cluster with the categories, so slurp on the login node sees them too.
 - **Array** (a task of an array): a click on it opens the window of the array, in a subtab of its own.
@@ -281,6 +283,16 @@ has, the ones in the categories in it counted too), and for the one selected its
   "CategorizeScreen": ("Categorize", """
 Put the jobs in a category: pick one in the tree, or type a new one (`a/b` makes b in a, and a if it is new).
 An array goes in as a whole, with all its tasks. **Take out of its category** leaves them in none.
+"""),
+  "CancelScreen": ("Cancel a job", """
+Cancelling cannot be undone; the dialog shows the `scancel` command. It also asks **why** (you may also not say):
+submitted twice (slurp proposes the jobs that look the same, to name the one that stays), the program hangs, wrong
+resources or account, a job it depends on failed (with how Slurm does that for you: `--dependency=afterok`, and the
+guide), a bug, wrong input, replaced by a newer job, too slow, out of memory or quota, waits too long, a problem of
+the cluster, not needed any more, a test, or your own words. **Details** add to any of them.
+
+The reason is kept with the job, on the cluster (next to the categories): the job window (and the array window)
+show it, with the other job as a link, and the categories window has a column for it.
 """),
   "NotesScreen": ("Notes", """
 Notes of a category or a job, in Markdown: `# headings`, `**bold**`, `- lists`, `` `code` ``, `[links](https://…)`.

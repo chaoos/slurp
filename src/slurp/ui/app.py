@@ -2597,6 +2597,18 @@ class Slurp(App):
     else:
       self.push_screen(ArrayScreen(array_id, job))
 
+  def action_open_job(self, jid):
+    """A job by its id (a link in a text: the one a cancel reason names, …): its window, an array's window, in a
+    subtab of its own"""
+    jid = str(jid)
+    job = self.jobs.get(jid) or next((j for j in self.jobs.values() if j.jid.partition("_")[0] == jid), None)
+    if job is None:
+      self.notify(f"job {jid} is not in the job list (any more: its 'finished since' may be too short)", severity="warning")
+    elif "_" in job.jid and "_" not in jid:
+      self.open_array_subtab(jid, job)
+    else:
+      self.open_view(f"job {job.jid}", lambda: JobScreen(job), kind="job", key=f"job {job.jid}")
+
   def open_array_subtab(self, array_id, job=None):
     """The window of an array job in a subtab of its own, from wherever (the one open already: shown)"""
     job = job or next((j for j in self.jobs.values() if j.jid.partition("_")[0] == str(array_id)), None)

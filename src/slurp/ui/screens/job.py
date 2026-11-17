@@ -1,6 +1,7 @@
 """The job window"""
 
 import os
+import shlex
 import subprocess
 import time
 from datetime import datetime
@@ -29,11 +30,12 @@ from ...cluster.details import (
 from ...cluster.paths import job_vars
 from .. import icons
 from ..widgets import ClickTable, state_text, TimePlot
-from .dialogs import ConfirmScreen, RestartScreen, RunArrayScreen
+from .dialogs import RestartScreen, RunArrayScreen
 from .base import SplitScreen
 from .files import DirScreen, FileScreen, open_path
 from .links import ShellChoiceScreen
 from .checks import FindingsView
+from .cancel import reason_text
 from ...checks import engine as checks
 
 def node_hours_text(job):
@@ -227,6 +229,7 @@ class JobScreen(SplitScreen):
       state.append(f"  exit code {rec['ExitCode']}")
     store = self.app.cluster.categories if self.app.clusters else None
     category = store.category_of(job.jid) if store else ""
+    cancelled = store.cancel_reason_of(job.jid) if store else None
     def link(text, action, tip):
       return Text.assemble((text, Style(underline=True) + Style.from_meta({"@click": f"screen.{action}"})), (f"  {tip}", "dim"))
     rows = [
@@ -234,6 +237,7 @@ class JobScreen(SplitScreen):
       *([("Array", link(f"{job.jid.partition('_')[0]}  (task {array_task_id(job)})", "open_array_window",
                          "→ a click: the array"))] if array_task_id(job) is not None else []),
       *([("Category", link(category, "open_category", "→ a click: the category"))] if category else []),
+      *([("Cancelled because", reason_text(cancelled))] if cancelled else []),
       ("State", state),
       ("User / account", f"{rec['User']} / {rec['Account']}   partition {rec['Partition']}"),
       ("Nodes", f"{rec['NNodes']}  {rec['NodeList'] if rec['NodeList'] not in ('None assigned', '') else ''}"),
@@ -654,11 +658,19 @@ class JobScreen(SplitScreen):
   @on(Button.Pressed, "#cancel-job")
   def confirm_cancel(self, event):
     event.stop()
+    from .cancel import CancelScreen, related_jobs
     jid = self.job.rec["JobIDRaw"]
-    self.app.push_screen(
-      ConfirmScreen("Cancel job?", f"Cancel Slurm job {jid}? This cannot be undone.", "Cancel job"),
-      lambda confirmed: self.run_job_action("cancel", ["scancel", str(jid)]) if confirmed else None,
-    )
+    args = ["scancel", str(jid)]
+    def answered(answer):
+      if answer is not None:
+        self.cancel_reason = answer["reason"]
+        self.run_job_action("cancel", args)
+    self.app.push_screen(CancelScreen(f"Cancel job {self.job.jid}?", f"This cannot be undone.  {shlex.join(args)}", "Cancel job",
+                                      related_jobs(self.job, self.app.jobs.values())), answered)
+
+  cancel_reason = None # (said in the dialog: kept once the cancel worked)
+
+
 
   @on(Button.Pressed, "#restart-job")
   def confirm_restart(self, event):
@@ -774,6 +786,9 @@ class JobScreen(SplitScreen):
     if returncode == 0:
       if action == "cancel":
         self.notify(f"Cancellation requested for job {self.job.jid}")
+        from .cancel import keep_reason
+        keep_reason(self.app, self.app.cluster, self.job.jid, self.cancel_reason)
+        self.cancel_reason = None
         if self.is_mounted:
           self.load(refresh_job=True)
       else:

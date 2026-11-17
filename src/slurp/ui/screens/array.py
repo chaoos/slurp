@@ -22,7 +22,7 @@ from ...cluster.jobs import (
 )
 from ..widgets import ClickTable, state_text
 from .base import SplitScreen
-from .dialogs import ConfirmScreen, copy_text
+from .dialogs import copy_text
 from .job import JobScreen
 
 def epoch(value):
@@ -169,6 +169,11 @@ class ArrayScreen(SplitScreen):
     grid.add_column()
     rec = self.job.rec if self.job else {}
     grid.add_row("Array", Text(f"{self.array_id}  {rec.get('JobName', '')}", style="bold"))
+    store = self.app.cluster.categories if self.app.clusters else None
+    cancelled = store.cancel_reason_of(self.array_id) if store else None
+    if cancelled:
+      from .cancel import reason_text
+      grid.add_row("Cancelled because", reason_text(cancelled))
     if rec:
       grid.add_row("User / account", f"{rec.get('User', '')} / {rec.get('Account', '')}   partition {rec.get('Partition', '')}")
       grid.add_row("Submitted with", rec.get("SubmitLine", ""))
@@ -374,10 +379,13 @@ class ArrayScreen(SplitScreen):
                + (f": {len(hit)} task{'s' if len(hit) != 1 else ''} ({compress_array_ids(hit)[:200]})" if hit else "")
                + ("." if pending else ", running tasks included. Ended tasks are not affected."))
     args = ["scancel", *(["--state=PENDING"] if pending else []), self.array_id]
-    self.app.push_screen(ConfirmScreen(f"Cancel {what}?", message + f"\n\n{shlex.join(args)}", "Cancel " + ("pending" if pending else "array")),
-                         lambda ok: self.cancel(args, what) if ok else None)
+    from .cancel import CancelScreen, related_jobs
+    related = related_jobs(self.job, self.app.jobs.values()) if self.job else []
+    self.app.push_screen(CancelScreen(f"Cancel {what}?", message + f"\n\n{shlex.join(args)}", "Cancel " + ("pending" if pending else "array"),
+                                      related),
+                         lambda answer: self.cancel(args, what, answer["reason"]) if answer is not None else None)
 
-  def cancel(self, args, what):
+  def cancel(self, args, what, reason=None):
     def done(res):
       if res is None:
         return
@@ -385,6 +393,8 @@ class ArrayScreen(SplitScreen):
         self.notify(f"scancel failed: {(res.stderr or res.stdout).strip()[:300]}", severity="error", timeout=10)
       else:
         self.notify(f"cancelled {what} of job {self.array_id}", timeout=5)
+        from .cancel import keep_reason
+        keep_reason(self.app, self.app.cluster, self.array_id, reason, "the pending tasks" if "--state=PENDING" in args else "")
       self.action_reload()
     in_background(self, lambda: run_cmd(args, timeout=60, retry=False), done, group="array-cancel")
 
