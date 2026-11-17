@@ -81,7 +81,7 @@ def checks_cell(findings):
 
 def new_session(cluster):
   """The SSH session of a tab (not started): its destination, with its full SSH settings if it has them"""
-  return RemoteSSH(cluster.destination, sshsetup.ssh_args(cluster.ssh))
+  return RemoteSSH(cluster.destination, sshsetup.ssh_args(cluster.ssh), cluster.pre_login)
 
 
 class Slurp(App):
@@ -280,6 +280,7 @@ class Slurp(App):
       destination = tab.get("destination") or None
       cluster = ClusterSession(tab.get("name") or destination or "Local", destination)
       cluster.ssh = sshsetup.clean(tab.get("ssh")) if destination else None
+      cluster.pre_login = str(tab.get("pre_login") or "") if destination else ""
       cluster.since_value = tab.get("since") or "1d"
       cluster.scope = tab.get("scope") or "me"
       cluster.collapse_arrays = tab.get("collapse_arrays", True)
@@ -741,7 +742,8 @@ class Slurp(App):
   def save_tabs(self):
     """The open tabs (and which one is shown, and their choices) in the config, for the next start"""
     update_config(tabs=[{"destination": c.destination, "since": c.since_value, "scope": c.scope,
-                         "collapse_arrays": c.collapse_arrays, **({"ssh": c.ssh, "name": c.name} if c.ssh else {})}
+                         "collapse_arrays": c.collapse_arrays, **({"ssh": c.ssh, "name": c.name} if c.ssh else {}),
+                         **({"pre_login": c.pre_login} if c.pre_login else {})}
                         for c in self.clusters],
                   active=self.cluster_index)
 
@@ -751,6 +753,7 @@ class Slurp(App):
     if destination is None:
       return
     settings = sshsetup.clean(destination.get("ssh")) if isinstance(destination, dict) else None
+    pre_login = str(destination.get("pre_login") or "").strip() if isinstance(destination, dict) else ""
     if isinstance(destination, dict):
       destination = destination.get("destination") or ""
     self.main.remove_class("-no-tabs")
@@ -762,6 +765,8 @@ class Slurp(App):
       self.clusters.append(ClusterSession("Local" if not destination else destination))
     else:
       self.clusters.append(ClusterSession(destination, destination))
+    if self.clusters[-1].destination:
+      self.clusters[-1].pre_login = pre_login
     from ..cluster import jobcache
     jobcache.load(self.clusters[-1])
     self.refresh_cluster_tabs()
@@ -775,16 +780,19 @@ class Slurp(App):
       if result is None or cluster not in self.clusters:
         return
       settings = sshsetup.clean(result.get("ssh")) if isinstance(result, dict) else None
+      pre_login = str(result.get("pre_login") or "").strip() if isinstance(result, dict) else ""
+      if isinstance(result, dict) and not settings:
+        result = result.get("destination") or ""
       destination = settings["host"] if settings else str(result or "").strip()
       if not destination:
         self.notify("a tab of a cluster needs a destination (this machine: add a tab with an empty one)", severity="warning")
         return
-      changed = (destination, settings) != (cluster.destination, cluster.ssh)
-      cluster.destination, cluster.ssh = destination, settings
+      changed = (destination, settings, pre_login) != (cluster.destination, cluster.ssh, cluster.pre_login)
+      cluster.destination, cluster.ssh, cluster.pre_login = destination, settings, pre_login
       cluster.name = sshsetup.label(settings) if settings else destination
       c = cluster.connection
       if c is not None: # (the session takes them at its next login)
-        c.destination, c.ssh_options = destination, sshsetup.ssh_args(settings)
+        c.destination, c.ssh_options, c.pre_login = destination, sshsetup.ssh_args(settings), pre_login
       self.refresh_cluster_tabs()
       self.save_tabs()
       self.refresh_status()

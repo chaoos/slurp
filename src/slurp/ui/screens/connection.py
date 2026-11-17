@@ -403,6 +403,8 @@ class ConnectionScreen(ModalScreen):
     grid.add_row("Status", self.status())
     if cluster.ssh:
       grid.add_row("SSH settings", " ".join(sshsetup.ssh_args(cluster.ssh) + [cluster.destination]))
+    if cluster.pre_login:
+      grid.add_row("Before the login", Text(f"{cluster.pre_login}  (runs in the login pane before every login)"))
     if c is not None:
       grid.add_row("Logged in as", f"{c.user or '-'} on {c.hostname or '-'}" + (f" (home {c.home})" if c.home else ""))
       if c.groups:
@@ -483,7 +485,8 @@ class ConnectionScreen(ModalScreen):
         out = Text("\nCheck of the connection\n", style="bold underline")
         out.append_text(sshsetup.check_text(result))
         box.update(out)
-    in_background(self, lambda: sshsetup.check(cluster.destination, cluster.ssh), done, group="ssh-check", connection=None)
+    in_background(self, lambda: sshsetup.check(cluster.destination, cluster.ssh, pre_login=cluster.pre_login), done,
+                  group="ssh-check", connection=None)
 
   @on(Button.Pressed, "#conn-reconnect")
   def action_reconnect(self):

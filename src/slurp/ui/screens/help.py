@@ -349,6 +349,10 @@ and keys (suggested as you type; ssh, scp and your other tools use it too), or `
 The fallback, **Full SSH settings**: host, user, port, jump hosts (ProxyJump), identity files (only these are tried),
 the tab's name, and more ssh options, one `Key=Value` per line. They are kept with the tab.
 
+**Run before login** (both ways): a command on this machine before every login of the tab, e.g. one that signs your
+key for the day (`cscs-keygen`, `step ssh login`, `tsh login`). It runs in the login pane: answer it there (a
+password, a one-time code; `Ctrl-C` ends only it); when it ends, the SSH login follows as usual.
+
 **Check** tries the connection without logging in interactively (it can ask nothing, so nothing hangs, and it writes
 nothing, not even a host key): what ssh makes of the settings, the keys, the host name, the port and the server, and
 a login. It says whether it works, works with a prompt (a passphrase, a password or a code, a new host key: the

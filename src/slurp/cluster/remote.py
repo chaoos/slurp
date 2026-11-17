@@ -180,6 +180,22 @@ ui_thread_remote_calls = [] # remote commands run on the UI thread (they block i
 # stderr of the ssh process is the terminal of the login pane, which becomes its controlling terminal (/dev/tty, where
 # ssh asks for passwords); stdin and stdout are the command channel of the app
 CTTY_STDERR = "import fcntl, os, sys, termios; fcntl.ioctl(2, termios.TIOCSCTTY, 0); os.execvp(sys.argv[1], sys.argv[1:])"
+# A command before the login (e.g. one that signs a key): it runs in the login's terminal, with it as its input and
+# output (the user can answer it: a password, a one-time code), Ctrl-C is its own; when it ends, the login as above
+PRE_LOGIN = (
+  "import fcntl, os, signal, subprocess, sys, termios\n"
+  "fcntl.ioctl(2, termios.TIOCSCTTY, 0)\n"
+  "say = lambda text: os.write(2, text.replace('\\n', '\\r\\n').encode())\n"
+  "say('\\n$ ' + sys.argv[1] + '    (run before the login)\\n')\n"
+  "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+  "try:\n"
+  "  code = subprocess.run(['/bin/sh', '-c', sys.argv[1]], stdin=2, stdout=2, stderr=2,\n"
+  "                        preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL)).returncode\n"
+  "except OSError as e:\n"
+  "  code = str(e)\n"
+  "say(f'\\n[the command before the login ended' + ('' if code == 0 else f' with {code}') + '; the SSH login follows]\\n\\n')\n"
+  "signal.signal(signal.SIGINT, signal.SIG_DFL)\n"
+  "os.execvp(sys.argv[2], sys.argv[2:])\n")
 PING_INTERVAL = 15 # seconds without an answer from the cluster before a heartbeat is sent
 PING_SLOW = 5      # seconds without an answer to the heartbeat: shown as not responding
 PING_DEAD = 60     # seconds without an answer to the heartbeat: the session is given up and reconnected
@@ -191,9 +207,10 @@ class RemoteSSH:
   trip in the open session; no ssh process is started for it. The process is also the OpenSSH control master, so
   interactive shells (Shell, node shells, GDB) open as channels of the same connection, without a new login.
   A heartbeat notices a session that stops answering; the app then reconnects it."""
-  def __init__(self, destination, ssh_options=()):
+  def __init__(self, destination, ssh_options=(), pre_login=""):
     self.destination = destination
     self.ssh_options = list(ssh_options) # (a tab's full SSH settings: -l, -p, -J, -i, -o … before the destination)
+    self.pre_login = pre_login           # a command run before every login, in the login's terminal (e.g. signing a key)
     self.socket_dir = tempfile.mkdtemp(prefix=f"slurp-{os.getuid()}-")
     os.chmod(self.socket_dir, 0o700)
     self.control_path = os.path.join(self.socket_dir, "control")
@@ -272,8 +289,9 @@ class RemoteSSH:
       self.heartbeat_thread.start()
     argv = self.argv = ["ssh", "-M", "-S", self.control_path, "-o", "ControlMaster=yes", "-o", "ControlPersist=no",
                         "-T", "-x", "-a", *self.ssh_options, self.destination, "exec /bin/sh"]
-    self.event(f"session {generation}: connecting")
-    proc = subprocess.Popen([sys.executable, "-c", CTTY_STDERR, *argv], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    self.event(f"session {generation}: connecting" + (f" (first: {self.pre_login})" if self.pre_login else ""))
+    launcher = [sys.executable, "-c", PRE_LOGIN, self.pre_login] if self.pre_login else [sys.executable, "-c", CTTY_STDERR]
+    proc = subprocess.Popen([*launcher, *argv], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=tty, start_new_session=True, env=os.environ | {"TERM": "xterm-256color"})
     self.proc = proc
     # the shell keeps the results in a temporary directory, out() writes one result at a time (mkdir is the lock)

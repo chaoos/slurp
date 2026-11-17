@@ -297,10 +297,14 @@ def parse_ssh_log(log, result):
   return (auth[-1].split(",") if auth else []), offered, accepted
 
 
-def check(destination, settings=None, ssh="ssh", timeout=30):
-  """Check a destination (with full settings) without logging in interactively: a CheckResult"""
+def check(destination, settings=None, ssh="ssh", timeout=30, pre_login=""):
+  """Check a destination (with full settings) without logging in interactively: a CheckResult. pre_login: the
+  command the tab runs before its login (not run here: it may ask, e.g. for a one-time code)"""
   start = time.monotonic()
   result = CheckResult()
+  if pre_login:
+    result.add("info", f"the command before the login ({pre_login}) is not run by the check: if it signs a key, a key "
+               "not signed yet (or expired) shows as not accepted here, and the login runs it first")
   settings = clean(settings)
   if not shutil.which(ssh):
     result.add("error", "there is no ssh on this machine (install OpenSSH)")

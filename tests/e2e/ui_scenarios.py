@@ -3079,3 +3079,38 @@ async def t_ssh_edit(app, pilot):
   await pilot.press(*"pw123", "enter")
   ok = await until(pilot, lambda: cluster.connection.ready, 30)
   check("…and it logs in as before", ok)
+
+
+async def t_pre_login(app, pilot):
+  """Run before login: a command in the login pane before every login (e.g. one that signs a key), the user answers
+  it there; when it ends, the SSH login as usual"""
+  from slurp.ui.screens.dialogs import AddClusterScreen
+  cluster = app.cluster
+  signed = os.path.join(HERE, "signed-key")
+  if os.path.exists(signed): os.unlink(signed)
+  command = f"printf 'one-time code: '; read code; echo \"signed with $code\" > {signed}; exit 3"
+  app.edit_ssh_settings(cluster); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
+  dlg = app.screen
+  dlg.query_one("#ssh-pre-login").value = command
+  dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
+  check("saved with the tab", cluster.pre_login == command and cluster.connection.pre_login == command
+        and any(t.get("pre_login") == command for t in load_config().get("tabs") or []), cluster.pre_login)
+  app.disconnect(cluster); await pilot.pause(0.5)
+  app.connect_tab()
+  ok = await until(pilot, lambda: "one-time code:" in term(app), 15)
+  check("the login pane runs the command first, and it asks there", ok and "(run before the login)" in term(app), term(app)[-300:])
+  await pilot.press(*"42", "enter")
+  ok = await until(pilot, lambda: "passphrase" in term(app), 15)
+  check("it ends (said, with its exit code), then the SSH login as usual", ok and "ended with 3; the SSH login follows" in term(app)
+        and open(signed).read().strip() == "signed with 42", term(app)[-400:])
+  await pilot.press(*"pw123", "enter")
+  ok = await until(pilot, lambda: cluster.connection.ready, 30)
+  check("…and it logs in", ok)
+  app.action_connection(); await pilot.pause(0.8)
+  info = rendered(app.screen.query_one("#conn-info").content) if isinstance(app.screen, ConnectionScreen) else ""
+  check("the connection window says what runs before the login", "Before the login" in info and "one-time code" in info, info[:300])
+  await pilot.press("escape"); await pilot.pause(0.3)
+  app.edit_ssh_settings(cluster); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
+  app.screen.query_one("#ssh-pre-login").value = ""
+  app.screen.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
+  check("emptied: no command any more", cluster.pre_login == "" and cluster.connection.pre_login == "")

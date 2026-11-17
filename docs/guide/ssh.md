@@ -78,6 +78,12 @@ connection without logging in interactively (nothing can hang, nothing is writte
 says what works and precisely what does not (the name, the port, the server, the host key, the keys and what
 the server accepts), with `ssh -v`'s log; the connection window has the same **Check**. A tab can be added
 checked or not.
+
+**Run before login** (in the same dialog, for a `~/.ssh/config` destination too) is a command run on this machine
+before every login of the tab, e.g. one that signs a key first (`cscs-keygen`, `step ssh login`, `tsh login`). It
+runs in the login pane, where you answer it (a password, a one-time code; `Ctrl-C` ends only the command); when it
+returns, slurp shows how it ended and the SSH login follows as usual. The connection window shows it, and Check
+says that it does not run it (a key not signed yet shows as not accepted there).
 **Open a directory…** (in the menu, or `d`) asks which directory: your home (the default), scratch, project, … (`$SCRATCH`, `$PROJECT`, `$STORE` and `$WORK`, those set on the cluster) or a path, and opens it in a new subtab, each time another one. Its path at the top is an input (edit it, Enter goes there) with buttons for home, scratch, project, … next to it. The directory view shows the permissions of each entry as `ls -l` does (a `+` when it has extended ACL entries, which are listed in the **ACL** column), its owner and group, and in **You** what you cannot do with it: **no read** (red) or **no write** (yellow), as the cluster answers for your user (groups and ACLs count). `/` searches the names (a part of them, or `*.out`), here as you type, or with **Subdirectories** (`Ctrl+R`) in all directories below, in the background: the results come in as they are found while the window stays usable, and `Esc` stops the search. Each tab has a `✕`
 that closes it (after asking). Notifications name the tab they belong to.
 

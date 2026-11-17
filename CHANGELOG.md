@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- **Run before login** (a tab's SSH settings, also for a `~/.ssh/config`
+  destination): a command on this machine before every login, e.g. one
+  that signs a key (`cscs-keygen`, `step ssh login`); it runs in the login
+  pane, where the user answers it (Ctrl-C ends only it), then the SSH login
+  follows as usual.
 - Runtime diagnostics open in a subtab of their own (one per job and node;
   asked again, it measures again), not on top of the job window.
 - The job window's progress has a **?** next to Progress file…: what the

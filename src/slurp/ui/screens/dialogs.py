@@ -555,6 +555,9 @@ class AddClusterScreen(ModalScreen):
           yield Label("More ssh options, one per line: Key=Value (e.g. ForwardAgent=yes, ServerAliveInterval=30, "
                       "UserKnownHostsFile=…, PreferredAuthentications=…, ProxyCommand=…)")
           yield TextArea(id="ssh-options", soft_wrap=False)
+        yield Label("Run before login (optional)")
+        yield Input(placeholder="a command on this machine before every login, e.g. one that signs your key (cscs-keygen, step ssh login …)",
+                    id="ssh-pre-login", tooltip="it runs in the login pane: answer it there (a password, a code); then the login follows")
         if self.cluster is not None:
           yield Static(id="cluster-config")
         with VerticalScroll(id="cluster-check-scroll"):
@@ -573,6 +576,7 @@ class AddClusterScreen(ModalScreen):
     if cluster is None:
       return
     settings = cluster.ssh or {}
+    self.query_one("#ssh-pre-login", Input).value = cluster.pre_login or ""
     if settings:
       self.query_one("#cluster-full", Collapsible).collapsed = False
       for key in ("host", "user", "port", "jump", "name"):
@@ -644,9 +648,11 @@ class AddClusterScreen(ModalScreen):
 
   def result(self):
     settings = self.settings()
+    pre_login = self.query_one("#ssh-pre-login", Input).value.strip()
+    destination = self.query_one("#cluster-destination", Input).value.strip()
     if settings:
-      return {"ssh": settings}
-    return self.query_one("#cluster-destination", Input).value.strip()
+      return {"ssh": settings, **({"pre_login": pre_login} if pre_login else {})}
+    return {"destination": destination, "pre_login": pre_login} if pre_login else destination
 
   @on(Button.Pressed, "#cluster-check-button")
   def check_pressed(self, event):
@@ -665,7 +671,8 @@ class AddClusterScreen(ModalScreen):
       self.query_one("#cluster-check-button", Button).disabled = False
       if result is not None:
         self.query_one("#cluster-check", Static).update(sshsetup.check_text(result))
-    in_background(self, lambda: sshsetup.check(destination, settings), done, group="ssh-check", connection=None)
+    pre_login = self.query_one("#ssh-pre-login", Input).value.strip()
+    in_background(self, lambda: sshsetup.check(destination, settings, pre_login=pre_login), done, group="ssh-check", connection=None)
 
   @on(Button.Pressed, "#cluster-cancel")
   def cancel_pressed(self):
