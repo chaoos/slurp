@@ -194,6 +194,23 @@ def test_helper_script(check, links):
   d2.dirs = [("SCRATCH", "/s|x"), ("lower", "/l"), ("WORK", "relative"), ("STORE", "/ok")]
   check("drive: folders a Windows drive cannot have, or not absolute, are left out", parse_dirs(winhelper.link_url(d2), d2.path) == [("HOME", "/users/x"), ("STORE", "/ok")],
         parse_dirs(winhelper.link_url(d2), d2.path))
+  # the drive's name in Explorer: user@cluster:/path (n), set after the mapping, removed with it
+  d.origin = "roman@daint"
+  _q = dict(urllib.parse.parse_qsl(winhelper.link_url(d).split("?", 1)[1]))
+  ORIGIN_RE = re.search(r"Origin = \$\(if \(\[string\]\$q\['n'\] -cmatch '([^']+)'\)", PS)[1]
+  check("drive name: the link carries user@cluster, in the form the helper takes", _q.get("n") == "roman@daint"
+        and re.fullmatch(ORIGIN_RE, _q["n"]) and not re.fullmatch(ORIGIN_RE, "x;calc@y") and not re.fullmatch(ORIGIN_RE, "nobody"), _q.get("n"))
+  check("drive name: no origin, no n (the helper names it slurp:/path)", "n" not in dict(urllib.parse.parse_qsl(winhelper.link_url(d2).split("?", 1)[1]))
+        and '"slurp:$($m.Path)"' in ps_function("Set-DriveLabel"))
+  label = ps_function("Set-DriveLabel"); key = ps_function("Get-DriveLabelKey")
+  check("drive name: _LabelFromReg in the key of the UNC path under MountPoints2 (\\ as #), as Explorer renames a drive",
+        "'_LabelFromReg'" in label and '"$($c.Link.Origin):$($m.Path)"' in label and "CreateSubKey((Get-DriveLabelKey $m))" in label
+        and "Explorer\\MountPoints2\\' + $m.Unc.Replace('\\', '#')" in key, key)
+  mapping = PS.split("{ $_ -eq 'mapping' -or", 1)[1].split("'connected' {", 1)[0]
+  check("drive name: set right after a mapping, removed on unmapping", "[void]$c.Maps.Add($m)\nSet-DriveLabel $c $m" in mapping.replace("      ", "")
+        or ("[void]$c.Maps.Add($m)" in mapping and mapping.index("Set-DriveLabel $c $m") > mapping.index("[void]$c.Maps.Add($m)")),
+        mapping[:200])
+  check("drive name: …removed with the drive", "Remove-DriveLabel $m" in ps_function("Unmap-Drive"))
   check("drive: an old link (no folders) offers its login directory", parse_dirs(winhelper.link_url(sh.Link("drive", "d", "t", lambda: [], path="/users/y")), "/users/y") == [("HOME", "/users/y")])
 
   def resolve(dirs, text):

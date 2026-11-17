@@ -181,6 +181,7 @@ function Parse-Link([string]$url) {
     ReadOnly = ([string]$q['ro'] -eq '1')
     Title = (([string]$q['t']) -replace '[\x00-\x1f\x7f]', ' ')
     Path = (([string]$q['path']) -replace '[\x00-\x1f\x7f]', ' ')
+    Origin = $(if ([string]$q['n'] -cmatch '^[A-Za-z0-9._-]{1,64}@[A-Za-z0-9._-]{1,128}$') { [string]$q['n'] } else { '' })
     WebPort = 0
     Token = ''
     SlurpVersion = $(if ([string]$q['sv'] -cmatch '^[0-9][0-9A-Za-z.+-]{0,30}$') { [string]$q['sv'] } else { '' })
@@ -394,6 +395,27 @@ function Fail($c, $text) {
   if (-not $script:Quitting) { Show-Window $c }
 }
 
+# A mapped drive's name in Explorer: user@cluster:/path, not "slurp (\\sshfs.r\slurp@localhost!8000\users)". Explorer
+# takes it from _LabelFromReg in the key of the UNC path under MountPoints2 (\ as #), as when the drive is renamed
+function Get-DriveLabelKey($m) {
+  return 'Software\Microsoft\Windows\CurrentVersion\Explorer\MountPoints2\' + $m.Unc.Replace('\', '#')
+}
+
+function Set-DriveLabel($c, $m) {
+  if (-not $m.Unc) { return }
+  $label = $(if ($c.Link.Origin) { "$($c.Link.Origin):$($m.Path)" } else { "slurp:$($m.Path)" })
+  try {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey((Get-DriveLabelKey $m))
+    $key.SetValue('_LabelFromReg', $label, [Microsoft.Win32.RegistryValueKind]::String)
+    $key.Close()
+  } catch { Say $c "the drive's name stays as Windows makes it ($($_.Exception.Message))" }
+}
+
+function Remove-DriveLabel($m) {
+  if (-not $m.Unc) { return }
+  try { [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree((Get-DriveLabelKey $m), $false) } catch { }
+}
+
 function Unmap-Drive($c) {
   if (-not $c.Maps) { return }
   foreach ($m in @($c.Maps)) {
@@ -401,6 +423,7 @@ function Unmap-Drive($c) {
       $p = Start-Proc 'net.exe' "use $($m.Letter) /delete /y" $null -Capture
       $null = $p.WaitForExit(10000)
     } catch { }
+    Remove-DriveLabel $m
     Say $c "unmapped $($m.Letter)"
   }
   $c.Maps.Clear()
@@ -740,6 +763,7 @@ function Step($c) {
       $m = $c.Pending[0]
       $c.Pending.RemoveAt(0)
       [void]$c.Maps.Add($m)
+      Set-DriveLabel $c $m
       Say $c "mapped $($m.Letter) $($m.Path)"
       if ($c.Pending.Count -gt 0) { Begin-NetUse $c; return }
       $again = $c.Remap

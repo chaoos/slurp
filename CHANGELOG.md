@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- A drive mapped on Windows (the slurp helper) is named `user@cluster:/path`
+  in Explorer, not `slurp (\\sshfs.r\slurp@localhost!8000\users)`: the link
+  says whose files where, the helper sets the name after `net use` and
+  removes it with the drive. Set the helper up again for it.
 - Map a directory… on this machine: **Directory** chooses the directory of
   the cluster from a list (home, scratch, project, …, those set on the
   cluster) or as a path typed in; before, it was always the login directory.

@@ -15,7 +15,8 @@ connects through the relay, checks slurp's host key against the one in the
 link, and:
 
 - **drive**: maps a folder of the cluster (SSHFS-Win, `net use`) and opens
-  Explorer. Its list has `$HOME`, `$SCRATCH`, `$PROJECT`, `$STORE` and `$WORK`
+  Explorer, where the drive is named after it, `user@cluster:/path` (not
+  `slurp (\\sshfs.r\slurp@localhost!…)`; the name goes when it is unmapped). Its list has `$HOME`, `$SCRATCH`, `$PROJECT`, `$STORE` and `$WORK`
   (those that are set, with their paths) and `/`; or type a path (absolute,
   `$SCRATCH/run1`, or relative to `$HOME`). *Map another folder* (a right
   click on its row) maps more folders, on other letters, through the same

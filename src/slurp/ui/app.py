@@ -1103,6 +1103,12 @@ class Slurp(App):
       if link is not None:
         if dirs:
           link.dirs = list(dirs)
+        if kind == "drive": # (its name on the user's machine: user@cluster:/path)
+          import getpass
+          import socket
+          user = (cluster.connection.user if cluster.destination and cluster.connection else "") or getpass.getuser()
+          where = cluster.name.split("@")[-1] if cluster.destination else socket.gethostname().split(".")[0]
+          link.origin = f"{user}@{where}"
         self.push_screen(LinkScreen(link))
         self.refresh_status()
     self.push_screen(LinkSetupScreen(kind, title, cluster.name, argv, path=path, read_only_argv=read_only_argv), created)

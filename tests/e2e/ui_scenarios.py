@@ -2599,6 +2599,9 @@ async def t_links(app, pilot):
   check("drive link: the folders for the Windows helper, $HOME (the login directory) first, in its URL",
         link.dirs[:1] == [("HOME", home)] and all(p.startswith("/") for _, p in link.dirs)
         and urllib.parse.quote(f"HOME={home}", safe="") in wh.link_url(link), link.dirs)
+  user = app.cluster.connection.user
+  check("drive link: its name on Windows comes from user@cluster (n), the cluster's user and the tab's host",
+        link.origin == f"{user}@lab" and f"n={urllib.parse.quote(link.origin, safe='')}" in wh.link_url(link), link.origin)
   titles = [t for t, _, _ in client_commands(link)]
   check("drive commands: sshfs, SSHFS-Win (two steps), PuTTY/WinSCP, ssh config", any("sshfs" in t for t in titles)
         and sum("SSHFS-Win" in t for t in titles) == 2 and any("WinSCP" in t for t in titles) and any("config" in t for t in titles), titles)
