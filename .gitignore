@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Sublime Text: project and workspace files are personal
+*.sublime-project
+*.sublime-workspace
