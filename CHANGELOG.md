@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- New rule P09: the program that srun (or mpirun) starts on many tasks, or
+  an interpreter's script, is in `$HOME`, `$PROJECT` or `$STORE`, not on
+  `$SCRATCH`: at the start all ranks read it at once (a warning from 128
+  tasks, a hint from 16). Fix: copy it to scratch, or `srun --bcast`.
 - A newer slurp: at the start slurp asks PyPI (at most once a day, in the
   background, offline nothing), says so and shows **⬆ slurp <version>** in
   the title bar; it opens what changed, how slurp is installed here (pipx,

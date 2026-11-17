@@ -690,6 +690,64 @@ def p08(ctx):
     if info and info.exists and info.mtime > submitted + 60:
       yield F("P08", f"{os.path.basename(path)} was changed after submission (rebuilt?)", line)
 
+INTERPRETERS = ("python", "python3", "Rscript", "julia", "perl", "ruby", "bash", "sh")
+STAGED = r"\bsbcast\b|--bcast\b"
+MANY_TASKS, VERY_MANY_TASKS = 16, 128 # tasks from which P09 is said (info), and from which it warns
+
+def storage_of(path, env):
+  """The storage a path is on, of those a user has: ("HOME", root) …, or None (scratch, the software stacks, …)"""
+  for var in ("SCRATCH", "HOME", "PROJECT", "STORE", "WORK"):
+    root = (env.get(var) or "").rstrip("/")
+    if root and (path == root or path.startswith(root + "/")):
+      return var, root
+  return None
+
+@rule("P09", WARNING, "Program launched on many tasks from home or project storage",
+      "srun (or mpirun) starts the program of many tasks from $HOME, $PROJECT or $STORE, not from $SCRATCH (a script "
+      "of an interpreter: the script it runs).",
+      "At the start every task reads the program, and the libraries next to it, at the same moment: with hundreds or "
+      "thousands of ranks that is a storm of reads of one file on a filesystem made for small, interactive use. The job "
+      "starts slowly or times out, and home gets slow for everybody. Scratch is built for many readers at once.",
+      "Copy the program to scratch and run it from there, or let Slurm copy it to the nodes first: srun --bcast "
+      "(or sbcast to the node's local disk).",
+      "srun ./sim                              # in $HOME: 4096 ranks read it at once\n"
+      "cp $HOME/bin/sim $SCRATCH/run/ && srun $SCRATCH/run/sim\n"
+      "srun --bcast=/tmp/sim $HOME/bin/sim     # or: Slurm copies it to each node")
+def p09(ctx):
+  facts = ctx.facts
+  env = facts.env if facts else {}
+  if not env.get("SCRATCH") or ctx.script.uses(STAGED):
+    return
+  nodes, tpn, _, _ = ctx.counts()
+  tasks = to_int(ctx.opt("ntasks"), None) or ((nodes or 1) * (tpn or 1))
+  if tasks < MANY_TASKS:
+    return
+  resolved = (ctx.replay or {}).get("resolved", {})
+  seen = set()
+  for line, text, _launcher in ctx.script.launcher_lines():
+    try:
+      words = shlex.split(text)
+    except ValueError:
+      continue
+    from .engine import launched_program
+    prog, rest = launched_program(words)
+    if not prog:
+      continue
+    what = "program"
+    if os.path.basename(prog) in INTERPRETERS and rest: # (python script.py: the script)
+      script = next((w for w in rest if not w.startswith("-")), None)
+      if script and "/" in script or (script and "." in script):
+        prog, what = script, "script"
+    path = ctx.abspath(prog) if "/" in prog or what == "script" else resolved.get(prog)
+    if not path or path in seen:
+      continue
+    seen.add(path)
+    where = storage_of(path, env)
+    if where and where[0] != "SCRATCH":
+      yield F("P09", f"{tasks} tasks start the {what} {path}, which is in ${where[0]} ({where[1]}), not in $SCRATCH",
+              line, WARNING if tasks >= VERY_MANY_TASKS else INFO,
+              snippet=f"srun --bcast=/tmp/{os.path.basename(path)} …    # or: cp {path} $SCRATCH/ and run it there")
+
 # ===========================================================================
 # Q: quota and storage
 
