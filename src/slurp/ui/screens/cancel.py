@@ -224,13 +224,16 @@ class CancelScreen(ModalScreen[dict | None]):
     self.dismiss(None)
 
 
-def keep_reason(app, cluster, jid, reason, what=""):
-  """After the cancel worked: the reason with the job (on the cluster, see change_categories)"""
+def keep_reason(app, cluster, jid, reason, what="", after=None):
+  """After the cancel worked: the reason with the job (on the cluster, see change_categories); then after() (the
+  window shows it)"""
   if not reason:
     return
   from .categories import change_categories
   entry = dict(reason, **({"what": what} if what else {}))
   def kept(store, result):
+    if after is not None:
+      after()
     if app.main is not None:
       app.call_later(app.populate)
   change_categories(app, cluster, ["cancel_reason", jid, entry], kept, "keeping why the job was cancelled")

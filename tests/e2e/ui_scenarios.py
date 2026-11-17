@@ -2177,7 +2177,7 @@ async def t_cancel_reason(app, pilot):
     entry = cluster.categories.cancel_reason_of("9001") or {}
     check("the reason kept with the job (on the cluster)", ok and entry.get("reason") == "duplicate" and entry.get("text") == "pressed submit twice"
           and json.load(open(CATEGORIES_FILE))["clusters"]["lab"]["cancelled"]["9001"]["related"] == "9002", entry)
-    js.show_job(); await pilot.pause(0.3)
+    await until(pilot, lambda: "Cancelled because" in rendered(js.query_one("#info").content), 10)
     info = rendered(js.query_one("#info").content)
     check("the job window: why, the details, the other job", "Cancelled because" in info and "Submitted twice by mistake: pressed submit twice" in info
           and "the same as job 9002" in info, info[:600])

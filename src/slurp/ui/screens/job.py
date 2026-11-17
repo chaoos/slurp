@@ -787,7 +787,8 @@ class JobScreen(SplitScreen):
       if action == "cancel":
         self.notify(f"Cancellation requested for job {self.job.jid}")
         from .cancel import keep_reason
-        keep_reason(self.app, self.app.cluster, self.job.jid, self.cancel_reason)
+        keep_reason(self.app, self.app.cluster, self.job.jid, self.cancel_reason,
+                    after=lambda: self.show_job() if self.is_mounted else None)
         self.cancel_reason = None
         if self.is_mounted:
           self.load(refresh_job=True)

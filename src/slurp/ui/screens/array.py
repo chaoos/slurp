@@ -394,7 +394,8 @@ class ArrayScreen(SplitScreen):
       else:
         self.notify(f"cancelled {what} of job {self.array_id}", timeout=5)
         from .cancel import keep_reason
-        keep_reason(self.app, self.app.cluster, self.array_id, reason, "the pending tasks" if "--state=PENDING" in args else "")
+        keep_reason(self.app, self.app.cluster, self.array_id, reason, "the pending tasks" if "--state=PENDING" in args else "",
+                    after=lambda: self.show_info() if self.is_mounted else None)
       self.action_reload()
     in_background(self, lambda: run_cmd(args, timeout=60, retry=False), done, group="array-cancel")
 
