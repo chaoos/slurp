@@ -451,21 +451,25 @@ class ScriptScreen(SplitScreen):
     c = checks.counts(self.findings)
     problems = (f"The checks found {c[checks.ERROR]} errors and {c[checks.WARNING]} warnings. "
                 if c[checks.ERROR] or c[checks.WARNING] else "The checks found no errors or warnings. ")
-    self.app.push_screen(ConfirmScreen(f"Submit {os.path.basename(self.path)}?",
-                                       problems + f"sbatch {self.path}, run in {os.path.dirname(self.path)}.",
-                                       "Submit", variant="error" if c[checks.ERROR] else "primary"),
-                         lambda ok: self.submit() if ok else None)
+    from .dialogs import SubmitScriptScreen
+    script_array = (self.ctx.opt("array") or "") if self.ctx is not None else ""
+    uses_task_id = bool(re.search(r"SLURM_ARRAY_TASK_ID|%a", self.text))
+    self.app.push_screen(SubmitScriptScreen(self.path, problems, script_array, uses_task_id, errors=bool(c[checks.ERROR])),
+                         lambda args: self.submit(args) if args else None)
 
-  def submit(self):
+  def submit(self, args=None):
+    """Run the sbatch command (the dialog's, edited or not) in the script's directory"""
     cluster = self.app.cluster
+    args = args or ["sbatch", self.path]
     def run():
-      return run_cmd(["sbatch", self.path], timeout=60, cwd=os.path.dirname(self.path), retry=False)
+      return run_cmd(args, timeout=60, cwd=os.path.dirname(self.path), retry=False)
     def done(res):
       if res.returncode:
         self.notify(f"sbatch failed: {(res.stderr or res.stdout).strip()[:300]}", severity="error", timeout=12)
         return
       jid = (re.findall(r"\d+", res.stdout) or ["?"])[-1]
-      self.notify(f"submitted job {jid}", timeout=6)
+      array = next((a.split("=", 1)[1] for a in args if a.startswith("--array=")), None)
+      self.notify(f"submitted job {jid}" + (f" (array {array})" if array else ""), timeout=6)
       if cluster is self.app.cluster:
         self.app.reload_cluster(cluster)
     in_background(self, run, done, group="submit")

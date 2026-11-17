@@ -1,6 +1,7 @@
 """Dialogs: confirmations, commands to submit (interactive jobs, restarts, array ranges), new tabs"""
 
 import os
+import re
 import shlex
 import base64
 import shutil
@@ -276,6 +277,120 @@ class RunArrayScreen(ModalScreen[list[str] | None]):
     self.dismiss(args)
 
   @on(Button.Pressed, "#array-cancel")
+  def cancel_pressed(self, event):
+    event.stop()
+    self.dismiss(None)
+
+  def action_cancel(self):
+    self.dismiss(None)
+
+ARRAY_SPEC = re.compile(r"(\d+(-\d+(:\d+)?)?)(,\d+(-\d+(:\d+)?)?)*(%\d+)?")
+
+def array_task_count(spec):
+  """The number of tasks of an sbatch --array expression (1-100:2,200%10), None if it is not one"""
+  if not ARRAY_SPEC.fullmatch(spec or ""):
+    return None
+  ids = set()
+  for part in spec.split("%")[0].split(","):
+    m = re.fullmatch(r"(\d+)(?:-(\d+)(?::(\d+))?)?", part)
+    start = int(m[1]); stop = int(m[2]) if m[2] else start; step = int(m[3]) if m[3] else 1
+    if stop < start or step < 1:
+      return None
+    ids.update(range(start, stop + 1, step))
+  return len(ids)
+
+def without_array(args):
+  """An sbatch argv without its --array options"""
+  return [args[0], *with_array_spec(args, "x")[2:]] if args else args
+
+class SubmitScriptScreen(ModalScreen[list[str] | None]):
+  """Submit a job script: the sbatch command, editable, and an array range (empty: as the script says) that writes
+  its --array option; returns the argv to run, or None"""
+  DEFAULT_CSS = """
+  SubmitScriptScreen { align: center middle; }
+  #submit-dialog { width: 100; max-width: 95%; height: auto; max-height: 90%; border: thick $accent; background: $surface; padding: 1 2; }
+  #submit-title { text-style: bold; margin-bottom: 1; }
+  #submit-fields { height: auto; }
+  #submit-fields Label { padding: 1 1 0 0; }
+  #submit-array { width: 30; }
+  #submit-array-note { height: auto; margin: 1 0; }
+  #submit-command { height: auto; min-height: 3; max-height: 12; }
+  #submit-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #submit-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+
+  def __init__(self, path, problems, script_array="", uses_task_id=True, errors=False):
+    super().__init__()
+    self.path, self.problems, self.script_array = path, problems, script_array or ""
+    self.uses_task_id, self.errors = uses_task_id, errors
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="submit-dialog"):
+      yield Static(f"Submit {os.path.basename(self.path)}", id="submit-title", markup=False)
+      yield Static(self.problems + f" It is submitted in {os.path.dirname(self.path)}.", markup=False)
+      with Horizontal(id="submit-fields"):
+        yield Label("Array (task ids)")
+        yield Input(self.script_array, id="submit-array", placeholder="e.g. 1-100, 0-9:2, 1,5,7, 1-1000%50",
+                    tooltip="an array job: its task ids (sbatch --array); empty: not an array (or as the script says)")
+      yield Static(id="submit-array-note")
+      yield bash_editor(shlex.join(["sbatch", self.path]), "submit-command")
+      with Horizontal(id="submit-buttons"):
+        yield Button("Cancel", id="submit-cancel", compact=True)
+        yield Button("Submit", id="submit-submit", variant="error" if self.errors else "primary", compact=True)
+
+  def on_mount(self):
+    self.array_changed()
+    self.query_one("#submit-command").focus()
+
+  def command(self):
+    try:
+      return command_args(self.query_one("#submit-command", TextArea).text)
+    except ValueError:
+      return None
+
+  @on(Input.Changed, "#submit-array")
+  def array_changed(self, event=None):
+    """The range writes the command's --array option (the rest of the command, edited or not, stays)"""
+    spec = self.query_one("#submit-array", Input).value.strip()
+    note = self.query_one("#submit-array-note", Static)
+    count = array_task_count(spec) if spec else None
+    if spec and count is None:
+      note.update(Text("not an array range: ids like 1-100, 0-9:2 (every 2nd), 1,5,7, and %50 for at most 50 at a time",
+                       style="red"))
+      return
+    args = self.command() or ["sbatch", self.path]
+    args = without_array(args)
+    if spec and spec != self.script_array: # (the script's own --array needs no option)
+      args = with_array_spec(args, spec)
+    if not spec:
+      note.update(Text("not an array: one job" if not self.script_array else
+                       f"the script asks for --array={self.script_array} itself (sbatch cannot take it back)", style="dim"))
+    else:
+      limit = spec.split("%")[1] if "%" in spec else ""
+      text = Text(f"an array of {count} task{'s' if count != 1 else ''}" + (f", at most {limit} at a time" if limit else ""),
+                  style="green")
+      if not self.uses_task_id:
+        text.append(" · the script never uses $SLURM_ARRAY_TASK_ID: every task would do the same (B03)", style="bold yellow")
+      note.update(text)
+    editor = self.query_one("#submit-command", TextArea)
+    if self.command() != args: # (only when it changes: the user's line breaks stay otherwise)
+      editor.load_text(shlex.join(args))
+
+  @on(Button.Pressed, "#submit-submit")
+  def submit(self, event):
+    event.stop()
+    try:
+      args = command_args(self.query_one("#submit-command", TextArea).text)
+    except ValueError as e:
+      self.notify(f"invalid command: {e}", severity="error")
+      return
+    if not args or os.path.basename(args[0]) != "sbatch":
+      self.notify("the command must start with sbatch", severity="error")
+      return
+    self.dismiss(args)
+
+  @on(Button.Pressed, "#submit-cancel")
   def cancel_pressed(self, event):
     event.stop()
     self.dismiss(None)

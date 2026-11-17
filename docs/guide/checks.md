@@ -72,7 +72,11 @@ stops editing; **Check** checks the edited text, saved or not; unsaved changes a
 or quit, and Save asks before it overwrites a file changed meanwhile. Bash is
 highlighted with Textual's syntax extra (`pip install "textual[syntax]"`).
 **Edit outside** opens your `$VISUAL`/`$EDITOR` instead. **Test** runs `sbatch --test-only` (accepted? when would it
-start?). **Submit…** submits it after naming the errors found.
+start?). **Submit…** names the errors found and shows the `sbatch` command, which
+you can edit (more options, a dependency, …); **Array** makes it an array job
+(`1-100`, `0-9:2`, `1,5,7`, `%50` for at most 50 at a time): it writes the
+command's `--array`, says how many tasks that is, and warns when the script
+never uses `$SLURM_ARRAY_TASK_ID`.
 
 **New job script** (`n` in the job list) writes a commented script for the
 usual kinds of jobs (serial, OpenMP, MPI, hybrid MPI+OpenMP, GPU, array,

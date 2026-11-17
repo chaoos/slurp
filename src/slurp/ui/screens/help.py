@@ -133,7 +133,8 @@ A batch script with the findings of the checks below it.
 - **Reload** (`Ctrl+R`) reads the script from the file again and checks it, also while you edit (the editor gets the
   file, and you go on editing).
 - **Test** asks Slurm whether it accepts it and when it would start (`sbatch --test-only`). **Fixed copy…** writes a copy with the safe fixes.
-  **Submit…** submits it (after naming the errors found). `r` checks again.
+  **Submit…** shows the `sbatch` command to edit (after naming the errors found); **Array** makes it
+  an array job (`1-100`, `0-9:2`, `1,5,7`, `%50`: at most 50 at a time), written into the command's `--array`. `r` checks again.
 """),
   "RuleCatalogueScreen": ("Rule catalogue", """
 All rules of the checks, by category: what each finds, why it matters, how to fix it, often with an example.
@@ -282,6 +283,14 @@ for sshfs, SSHFS-Win, WinSCP).
   "ShellChoiceScreen": ("Shell", """
 Where the shell opens: **in slurp** (a subtab with a terminal), or **from your own terminal** (a link: an ssh command
 and a password for the terminal on your machine, through a relay).
+"""),
+  "SubmitScriptScreen": ("Submit a job script", """
+The `sbatch` command that submits the script, in its directory: edit it as you like (more options, a dependency,
+`--begin`, …); the first word stays `sbatch`. **Array** makes it an array job: task ids like `1-100`, `0-9:2` (every
+2nd), `1,5,7`, and `%50` for at most 50 at a time. The range writes the command's `--array` (the rest of the command
+stays as you edited it); empty: one job, or the array the script asks for itself. It says how many tasks that is,
+and warns when the script never uses `$SLURM_ARRAY_TASK_ID` (every task would do the same). The button is red when
+the checks found errors. `Esc` cancels.
 """),
   "OpenDirScreen": ("Open a directory", """
 Which directory of the tab's cluster to open, in a new subtab (each time another one): your home (the default:

@@ -617,12 +617,28 @@ async def t_checks_ui(app, pilot):
   ok = await until(pilot, lambda: any("would start at" in n.message for n in app._notifications), 10)
   check("Test: sbatch --test-only, when it would start", ok, notes(app)[-2:])
   calls = os.path.join(LAB, "sbatch_calls"); n0 = len(open(calls).read().splitlines()) if os.path.exists(calls) else 0
-  await pilot.click("#sc-submit"); ok = await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 5)
-  msg = str(app.screen.query_one("#confirm-message").render()) if ok else ""
-  check("Submit asks, with the errors found", ok and "errors" in msg, msg)
-  await pilot.click("#confirm-yes") if app.screen.query("#confirm-yes") else await pilot.press("enter")
+  await pilot.click("#sc-submit"); ok = await until(pilot, lambda: isinstance(app.screen, dialogs.SubmitScriptScreen), 5)
+  dlg = app.screen
+  msg = " ".join(str(w.render()) for w in dlg.query("Static")) if ok else ""
+  check("Submit asks, with the errors found, and the sbatch command to edit", ok and "errors" in msg
+        and dlg.command() == ["sbatch", dlg.path], (msg[:200], ok and dlg.command()))
+  arr = dlg.query_one("#submit-array"); arr.value = "1-4%2"; await pilot.pause(0.2)
+  note = str(dlg.query_one("#submit-array-note").render())
+  check("an array: the range writes --array into the command, and says how many tasks", dlg.command() == ["sbatch", "--array=1-4%2", dlg.path]
+        and "4 tasks" in note and "at most 2" in note, (dlg.command(), note))
+  arr.value = "1-x"; await pilot.pause(0.2)
+  check("a range that is none: said so, the command keeps the last good one", "not an array range" in str(dlg.query_one("#submit-array-note").render())
+        and "--array=1-4%2" in dlg.command())
+  editor = dlg.query_one("#submit-command")
+  editor.load_text(f"sbatch --array=1-4%2 --job-name=edited {dlg.path}"); await pilot.pause(0.1)
+  arr.value = "0-9:3"; await pilot.pause(0.2)
+  check("an edited command: the range changes only its --array", dlg.command() == ["sbatch", "--array=0-9:3", "--job-name=edited", dlg.path],
+        dlg.command())
+  await pilot.click("#submit-submit")
   ok = await until(pilot, lambda: os.path.exists(calls) and len(open(calls).read().splitlines()) > n0, 10)
-  check("Submit runs sbatch with the script", ok and "bad_job.sh" in open(calls).read().splitlines()[-1], open(calls).read().splitlines()[-1:] if os.path.exists(calls) else "")
+  last = open(calls).read().splitlines()[-1] if os.path.exists(calls) else ""
+  check("Submit runs that command: the script, the array, the edit", ok and "bad_job.sh" in last and "--array=0-9:3" in last
+        and "--job-name=edited" in last, last)
   await until(pilot, lambda: isinstance(app.screen, ScriptScreen), 5)
   check("one Check button (no separate Check environment)", not sc.query("#sc-env") and sc.query("#sc-check"))
   real_replay = environment.replay_environment

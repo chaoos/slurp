@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Submit… in the script view shows the `sbatch` command to edit, with an
+  **Array** field for an array job (`1-100`, `0-9:2`, `1,5,7`, `%50`): it
+  writes the command's `--array` (an edited command keeps its other edits),
+  says how many tasks, and warns when the script never uses
+  `$SLURM_ARRAY_TASK_ID`.
 - A text file opens at its top; a large one shows its first 1 MB (`G` or
   `f` read its end). A log that is followed (a running job's) still opens
   at its end.
