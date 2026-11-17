@@ -286,6 +286,9 @@ class Slurp(App):
     self.link_manager = ShareManager(self.link_event) # shells and drives for the user's own terminal
     # the tabs of the last run (from the config; a local tab the first time)
     saved = load_config()
+    from .restore import last_run_ended_badly, placeholders, session_started
+    self.fresh_start = last_run_ended_badly(saved) # (the last run crashed: its subtabs are not opened again)
+    session_started()
     self.clusters = []
     self.tab_history = [] # the tabs shown, the last one most recently (closing the tab shown goes back)
     for tab in saved.get("tabs", [{"destination": None}]):
@@ -297,10 +300,9 @@ class Slurp(App):
       cluster.scope = tab.get("scope") or "me"
       cluster.collapse_arrays = tab.get("collapse_arrays", True)
       views = tab.get("views")
-      if isinstance(views, dict) and (views.get("views") or views.get("jobs_open")):
+      if isinstance(views, dict) and (views.get("views") or views.get("jobs_open")) and not self.fresh_start:
         cluster.pending_views = views
-        from .restore import placeholders
-        placeholders(self, cluster, views) # (there at once; opened when it is connected and its job list loaded)
+        placeholders(self, cluster, views) # (there at once; opened when it is connected)
       self.clusters.append(cluster)
     self.cluster_index = min(max(int(saved.get("active", 0) or 0), 0), max(len(self.clusters) - 1, 0))
     from ..cluster import jobcache
@@ -367,6 +369,9 @@ class Slurp(App):
 
   def on_mount(self):
     self.set_interval(0.25, self.tick)
+    if self.fresh_start and any((t.get("views") or {}).get("views") for t in load_config().get("tabs", []) if isinstance(t, dict)):
+      self.call_later(lambda: self.notify("slurp did not end cleanly last time: it starts without the subtabs it had open",
+                                          title="slurp", severity="warning", timeout=10))
     from .. import update
     if update.enabled():
       in_background(self, update.latest_version, self.version_found, group="update", connection=None)
@@ -421,6 +426,8 @@ class Slurp(App):
     """End the shells, logins and remote shells of all tabs (their subtabs are kept for the next start first)"""
     try:
       self.save_tabs()
+      from .restore import session_ended
+      session_ended() # (a clean end: the subtabs open again at the next start)
     except Exception as e:
       log.debug(f"keeping the tabs at the end: {e!r}")
     for cluster in self.clusters:
@@ -865,10 +872,13 @@ class Slurp(App):
 
   def restore_views(self, cluster=None):
     """The subtabs of the last run of a tab, opened again when it is ready (connected, its job list loaded)"""
-    from .restore import restore
+    from .restore import give_up, restore
     cluster = cluster or (self.cluster if self.clusters else None)
     if cluster is not None and any(v.pending for v in cluster.views):
-      restore(self, cluster)
+      try:
+        restore(self, cluster)
+      except Exception as e:
+        give_up(self, cluster, repr(e))
 
   def add_cluster(self, destination):
     """A new tab: a destination (a Host of ~/.ssh/config, user@host; empty: this machine), or {"ssh": full settings}

@@ -111,15 +111,67 @@ def spec_title(spec):
   return kind or "?", "file"
 
 
+def last_run_ended_badly(saved):
+  """Did the last run of slurp end without its shutdown (a crash, killed)? Then its subtabs are not opened again:
+  they may be what made it crash. (A slurp that still runs, another one, has not ended: not counted.)"""
+  last = saved.get("session")
+  if not isinstance(last, dict) or last.get("clean", True):
+    return False
+  try:
+    pid = int(last.get("pid") or 0)
+  except (TypeError, ValueError):
+    return True
+  if pid == os.getpid(): # (the same process started the app again: the tests)
+    return False
+  try:
+    os.kill(pid, 0) # (still running: another slurp)
+    return False
+  except ProcessLookupError:
+    return True
+  except OSError: # (running, another user's: not ours to judge)
+    return False
+
+
+def session_started():
+  """(this run has started: unclean until its shutdown says otherwise)"""
+  from ..config import update_config
+  update_config(session={"pid": os.getpid(), "clean": False})
+
+
+def session_ended():
+  from ..config import update_config
+  update_config(session={"pid": os.getpid(), "clean": True})
+
+
 def placeholders(app, cluster, saved):
   """The kept subtabs of a tab as placeholders, at the start: shown at once (title, icon), opened when it is connected"""
   from ..state import View
-  for spec in (saved or {}).get("views") or []:
-    if not isinstance(spec, dict):
-      continue
-    type(app).next_view_id += 1
-    title, icon = spec_title(spec)
-    cluster.views.append(View(type(app).next_view_id, title, "window", spec_key(spec), icon=icon, kept=spec, pending=True))
+  views = []
+  try:
+    for spec in (saved or {}).get("views") or []:
+      if not isinstance(spec, dict) or not isinstance(spec.get("type"), str):
+        raise ValueError(f"not a kept subtab: {spec!r}")
+      type(app).next_view_id += 1
+      title, icon = spec_title(spec)
+      views.append(View(type(app).next_view_id, str(title), "window", spec_key(spec), icon=str(icon), kept=spec, pending=True))
+  except Exception as e: # (what was kept cannot be read: a fresh start for this tab, without subtabs)
+    log.warning(f"{cluster.name}: the subtabs of the last run cannot be read ({e}): starting without them")
+    cluster.pending_views = None
+    return False
+  cluster.views.extend(views)
+  return True
+
+
+def give_up(app, cluster, why):
+  """Opening the kept subtabs again went wrong: they go (the tab as at a fresh start), said once"""
+  for view in [v for v in cluster.views if v.pending]:
+    cluster.views.remove(view)
+  cluster.pending_views, cluster.restoring = None, False
+  log.warning(f"{cluster.name}: opening the subtabs of the last run failed: {why}")
+  app.notify("the subtabs of the last run could not be opened again: starting without them", title=cluster.name,
+             severity="warning", timeout=8)
+  app.refresh_status()
+  app.save_tabs()
 
 
 def connected(cluster):

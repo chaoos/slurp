@@ -29,7 +29,8 @@ for the next start: starting slurp again, a tab's job windows, array windows, fi
 categories, the guides and the rule catalogue are there at once, in their order (muted: not open yet). A click on
 one before the tab is connected says to connect first and shows the overview, where **Connect** is; once the tab
 is connected and its job list loaded, each opens in its place, and the one shown before is shown (shells end with
-slurp and are not kept; a file that is gone is left out). In a shell all keys go to the
+slurp and are not kept; a file that is gone is left out). If slurp did not end cleanly the last time (it crashed,
+or was killed), it starts without them, and says so; the same when what was kept cannot be read or opened. In a shell all keys go to the
 shell, except `Ctrl-]`, which goes back to the job list; `Ctrl-W` closes the
 subtab shown (outside a shell). Every tab can be closed, also the last one;
 then only the `+` button remains. Closing the tab shown goes back to the tab

@@ -138,3 +138,67 @@ def test_the_start_with_placeholders_on_the_overview(check, home, start_on_overv
     finally:
       restore.ready = real_ready
   asyncio.run(main())
+
+
+def dead_pid():
+  import subprocess
+  p = subprocess.Popen(["true"]); p.wait()
+  return p.pid
+
+
+def test_when_the_last_run_ended_badly(check):
+  from slurp.ui.restore import last_run_ended_badly
+  import os
+  check("no record, or a clean end: not", not last_run_ended_badly({}) and not last_run_ended_badly({"session": {"pid": 1, "clean": True}}))
+  check("not clean, its process gone: a crash", last_run_ended_badly({"session": {"pid": dead_pid(), "clean": False}}))
+  check("not clean, but still running (another slurp): not", not last_run_ended_badly({"session": {"pid": os.getppid(), "clean": False}}))
+  check("this very process (the app started again): not", not last_run_ended_badly({"session": {"pid": os.getpid(), "clean": False}}))
+  check("nonsense: a crash", last_run_ended_badly({"session": {"pid": "x", "clean": False}}))
+
+
+def test_a_fresh_start_after_a_crash(check, home):
+  """The last run crashed (it did not end, its process is gone): a fresh start, without the subtabs, said so; the
+  next start is clean again"""
+  from slurp.config import update_config
+  kept = {"views": [{"type": "rules", "rule": "", "title": "Rule catalogue", "icon": "rules"}], "shown": 0, "jobs_open": False}
+  update_config(tabs=[{"destination": None, "views": kept}], active=0, session={"pid": dead_pid(), "clean": False})
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(140, 40)) as pilot:
+      await until(pilot, lambda: app.main is not None); await pilot.pause(0.5)
+      notes = [str(n.message) for n in app._notifications]
+      check("no subtabs (the tab itself stays), and why", not app.cluster.views and app.cluster.pending_views is None
+            and any("did not end cleanly" in n for n in notes), ([v.title for v in app.cluster.views], notes))
+      check("this run counts as started", load_config()["session"]["clean"] is False)
+  asyncio.run(main())
+  check("ended cleanly: recorded; nothing kept to open (it was not)", load_config()["session"]["clean"] is True
+        and not ((load_config()["tabs"][0].get("views") or {}).get("views")), load_config()["tabs"][0].get("views"))
+
+
+def test_what_cannot_be_read_or_opened(check, home):
+  """Kept subtabs that cannot be read: that tab starts fresh (the others not); opening them fails: they go, said so"""
+  from slurp.config import update_config
+  good = {"views": [{"type": "rules", "rule": "", "title": "Rule catalogue", "icon": "rules"}], "shown": 0, "jobs_open": False}
+  update_config(tabs=[{"destination": None, "views": {"views": ["nonsense", 3]}}, {"destination": None, "name": "Two", "views": good}], active=0)
+  from slurp.ui import restore
+  real_ready, real_restore = restore.ready, restore.restore
+  restore.ready = lambda app, cluster: False
+  async def main():
+    app = Slurp()
+    try:
+      async with app.run_test(size=(140, 40)) as pilot:
+        await until(pilot, lambda: app.main is not None); await pilot.pause(0.3)
+        check("unreadable: that tab without subtabs; the other one keeps its own", not app.clusters[0].views
+              and [v.title for v in app.clusters[1].views] == ["Rule catalogue"], [[v.title for v in c.views] for c in app.clusters])
+        app.activate_cluster(1, connect=False); await pilot.pause(0.2)
+        restore.ready = real_ready
+        def broken(app, cluster):
+          raise RuntimeError("boom")
+        restore.restore = broken
+        app.restore_views(); await pilot.pause(0.3)
+        notes = [str(n.message) for n in app._notifications]
+        check("opening them fails: they go, the tab as at a fresh start, said so", not app.cluster.views
+              and any("could not be opened again" in n for n in notes) and app.current_mode in ("_default", "overview"), (notes[-2:], app.current_mode))
+    finally:
+      restore.ready, restore.restore = real_ready, real_restore
+  asyncio.run(main())

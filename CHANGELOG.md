@@ -13,6 +13,8 @@ version may need the helper of the same version).
   catalogue are there at once (muted); a click before the tab is connected
   says to connect first and shows the overview; once connected, each opens
   in its place, and the one shown before is shown. Shells are not kept.
+  After a run that did not end cleanly (a crash, killed), or when what was
+  kept cannot be read or opened, slurp starts without them, and says so.
 - The overview is the first subtab of every tab, always there (it cannot
   be closed): **Overview** at the left of the subtabs shows it any time;
   with all other subtabs closed it is the only one.
