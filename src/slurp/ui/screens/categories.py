@@ -352,6 +352,7 @@ class CategoriesScreen(SplitScreen):
     # own move to its first line must not change what is shown)
     self.refilling = True
     def restore():
+      tree.last_line # (builds the tree's lines, which it does only when drawn: a subtab shown again is not yet)
       self.refilling = False
       tree.move_cursor(find_node(tree, self.path) or tree.root)
     self.call_after_refresh(restore)
@@ -360,7 +361,8 @@ class CategoriesScreen(SplitScreen):
 
   @on(Tree.NodeHighlighted, "#cat-tree")
   def highlighted(self, event):
-    if self.refilling:
+    # (a late one from the refill, for a line the cursor has left: not a choice)
+    if self.refilling or event.node is not self.query_one("#cat-tree", Tree).cursor_node:
       return
     path = event.node.data or ""
     if path != self.path:
