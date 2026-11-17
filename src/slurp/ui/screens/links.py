@@ -149,8 +149,82 @@ def warning_text(relay, kind):
     return Text(DIRECT_NOTE.format(host=host, port=port or "(a free one)"), style="yellow")
   return Text(OWN_NOTE.format(relay=f"sshj://{rest}" if rtype == "ssh-j" else relay), style="dim")
 
+EXTEND_CHOICES = [("1 hour", 3600), ("2 hours", 2 * 3600), ("4 hours", 4 * 3600), ("8 hours", 8 * 3600),
+                  ("12 hours", 12 * 3600), ("1 day", 86400), ("2 days", 2 * 86400), ("1 week", 7 * 86400)]
+
+def end_text(timestamp):
+  """When a link ends, with the day when it is not today"""
+  when = datetime.fromtimestamp(timestamp)
+  return f"{when:%H:%M}" if when.date() == datetime.now().date() else f"{when:%a %d %b %H:%M}"
+
+class ExtendScreen(ModalScreen[int | None]):
+  """How much longer a link lives: a choice of durations, added to its end (from now, if it ended); dismissed with
+  the seconds, or None"""
+  DEFAULT_CSS = """
+  ExtendScreen { align: center middle; }
+  #ex-dialog { width: 70; max-width: 95%; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+  #ex-title { text-style: bold; margin-bottom: 1; }
+  #ex-row { height: auto; }
+  #ex-row Label { padding: 1 1 0 0; }
+  #ex-for { width: 1fr; }
+  #ex-until { height: auto; margin-top: 1; }
+  #ex-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #ex-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+  def __init__(self, link):
+    super().__init__()
+    self.link = link
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="ex-dialog"):
+      yield Static(f"Extend the lifetime of link {self.link.id}", id="ex-title", markup=False)
+      with Horizontal(id="ex-row"):
+        yield Label("Longer by")
+        yield Select(EXTEND_CHOICES, value=3600, allow_blank=False, id="ex-for")
+      yield Static(id="ex-until")
+      with Horizontal(id="ex-buttons"):
+        yield Button("Cancel", id="ex-cancel", compact=True)
+        yield Button("Extend", id="ex-ok", variant="primary", compact=True)
+
+  def on_mount(self):
+    self.show_until()
+    self.query_one("#ex-for", Select).focus()
+
+  @on(Select.Changed, "#ex-for")
+  def show_until(self, event=None):
+    end = self.link.expires
+    base = max(end or 0, time.time())
+    seconds = self.query_one("#ex-for", Select).value
+    self.query_one("#ex-until", Static).update(Text.assemble(
+      (f"now until {end_text(end)}" if end and end > time.time() else "ended", "dim"), " → ",
+      (f"until {end_text(base + seconds)}", "bold")))
+
+  @on(Button.Pressed, "#ex-ok")
+  def ok(self, event):
+    event.stop()
+    self.dismiss(self.query_one("#ex-for", Select).value)
+
+  @on(Button.Pressed, "#ex-cancel")
+  def action_cancel(self, event=None):
+    if event is not None:
+      event.stop()
+    self.dismiss(None)
+
+def extend_link(screen, link, done=None):
+  """Ask how much longer, then extend the link (and done())"""
+  def chosen(seconds):
+    if not seconds:
+      return
+    screen.app.link_manager.extend(link, seconds)
+    screen.app.notify(f"link {link.id} extended: until {end_text(link.expires)}", timeout=5)
+    if done is not None:
+      done()
+  screen.app.push_screen(ExtendScreen(link), chosen)
+
 class WebEndingScreen(ModalScreen):
-  """A web link ends in a few minutes: it takes no more logins then (Extend by 1 h), or its relay ends its tunnel
+  """A web link ends in a few minutes: it takes no more logins then (Extend lifetime…), or its relay ends its tunnel
   (pinggy's free hour: the web view gets a new address; nothing to extend)"""
   DEFAULT_CSS = """
   WebEndingScreen { align: center middle; }
@@ -183,7 +257,7 @@ class WebEndingScreen(ModalScreen):
         yield Button("Not now" if self.what == "expiry" else "Close", id="we-close", compact=True)
         yield Button("Its window", id="we-window", compact=True)
         if self.what == "expiry":
-          yield Button("Extend by 1 h", id="we-extend", variant="primary", compact=True)
+          yield Button("Extend lifetime…", id="we-extend", variant="primary", compact=True)
 
   def on_mount(self):
     self.query_one("#we-extend" if self.what == "expiry" else "#we-close", Button).focus()
@@ -191,9 +265,13 @@ class WebEndingScreen(ModalScreen):
   @on(Button.Pressed, "#we-extend")
   def extend(self, event):
     event.stop()
-    self.app.link_manager.extend(self.link, 3600)
-    self.notify(f"web link {self.link.id} extended: until {datetime.fromtimestamp(self.link.expires):%H:%M}", timeout=5)
-    self.dismiss()
+    def done(seconds):
+      if not seconds:
+        return
+      self.app.link_manager.extend(self.link, seconds)
+      self.app.notify(f"web link {self.link.id} extended: until {end_text(self.link.expires)}", timeout=5)
+      self.dismiss()
+    self.app.push_screen(ExtendScreen(self.link), done)
 
   @on(Button.Pressed, "#we-window")
   def window(self, event):
@@ -622,7 +700,7 @@ class LinkScreen(ModalScreen):
       with Horizontal(id="lv-buttons"):
         if link.auth == "password":
           yield Button("New password", id="lv-password", tooltip="the old one stops working", compact=True)
-        yield Button("Extend 1 h", id="lv-extend", compact=True)
+        yield Button("Extend lifetime…", id="lv-extend", compact=True, tooltip="how much longer it takes logins")
         yield Button(icons.label("revoke", "Revoke"), id="lv-revoke", variant="error", tooltip="no more logins, and its sessions end", compact=True)
         yield Button("Close", id="lv-close", variant="primary", tooltip="the link stays (see the connection window)", compact=True)
 
@@ -641,6 +719,9 @@ class LinkScreen(ModalScreen):
     grid.add_column()
     grid.add_row("Started", started)
     grid.add_row("Valid", valid)
+    extend = self.query("#lv-extend")
+    if extend:
+      extend.first().display = link.expiry is not None and not link.revoked
     grid.add_row("Relay", relay)
     grid.add_row("Logins", logins)
     if link.cloudflare:
@@ -739,8 +820,7 @@ class LinkScreen(ModalScreen):
   @on(Button.Pressed, "#lv-extend")
   def extend(self, event):
     event.stop()
-    self.app.link_manager.extend(self.link, 3600)
-    self.refresh_view()
+    extend_link(self, self.link, self.refresh_view)
 
   @on(Button.Pressed, "#lv-revoke")
   def revoke(self, event):

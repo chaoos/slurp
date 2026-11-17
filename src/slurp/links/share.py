@@ -785,8 +785,9 @@ class ShareManager:
     audit(f"link {link.id}: new password")
 
   def extend(self, link, seconds):
+    """A longer lifetime: seconds more, from its end (from now, if it has ended)"""
     if link.expiry is not None:
-      link.expiry = max(link.expiry, int(time.time() - link.created) + seconds)
+      link.expiry = int(max(link.expires, time.time()) - link.created) + seconds
       audit(f"link {link.id}: extended to {datetime.fromtimestamp(link.expires).isoformat(timespec='seconds')}")
 
   def active(self):

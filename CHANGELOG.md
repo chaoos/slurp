@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Links: **Extend lifetime…** (instead of *Extend 1 h*) asks how much
+  longer: 1, 2, 4, 8, 12 hours, a day, two, a week, added to the link's
+  end, and says until when. A link without a time limit has no such
+  button.
 - The job window's progress and diagnostics (the runtime queries and the memory plot) have titles of their own
   (**Progress**, **Diagnostics**), like Checks, Files and Steps.
 - **Options** (`F3`) → *Progress of jobs*: how much of the end of a file

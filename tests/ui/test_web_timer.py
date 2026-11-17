@@ -5,7 +5,7 @@ import time
 
 from slurp.links import share as sh
 from slurp.ui.app import Slurp
-from slurp.ui.screens.links import LinkScreen, WebEndingScreen
+from slurp.ui.screens.links import ExtendScreen, LinkScreen, WebEndingScreen
 
 
 async def until(pilot, cond, t=5):
@@ -43,10 +43,32 @@ def test_the_countdown_and_the_warning(check):
       ok = await until(pilot, lambda: isinstance(app.screen, WebEndingScreen) and app.screen.query("#we-close"))
       check("5 min before: the warning, Extend offered", ok and app.screen.what == "expiry" and app.screen.query("#we-extend"))
       before = link.expires
-      app.screen.query_one("#we-extend").press(); await pilot.pause(0.3) # (not a click: a notification can take it)
-      check("Extend: an hour from now", link.expires > before + 50 * 60 and abs(link.expires - time.time() - 3600) < 5, link.expires - time.time())
-      ok = await until(pilot, lambda: str(timer.label).startswith("⏱ 59:") or str(timer.label).startswith("⏱ 1:00:"))
+      check("the button: Extend lifetime…", str(app.screen.query_one("#we-extend").label) == "Extend lifetime…")
+      app.screen.query_one("#we-extend").press() # (not a click: a notification can take it)
+      ok = await until(pilot, lambda: isinstance(app.screen, ExtendScreen))
+      ex = app.screen
+      options = [label for label, _ in ex.query_one("#ex-for")._options]
+      check("it asks how much longer: 1 hour, 2 hours, 8 hours, … a week; 1 hour first", ok and options[:3] == ["1 hour", "2 hours", "4 hours"]
+            and "8 hours" in options and options[-1] == "1 week" and ex.query_one("#ex-for").value == 3600, options)
+      ex.query_one("#ex-for").value = 2 * 3600; await pilot.pause(0.2)
+      check("it says until when", "→ until" in str(ex.query_one("#ex-until").render()), str(ex.query_one("#ex-until").render()))
+      ex.query_one("#ex-ok").press(); await pilot.pause(0.3)
+      check("2 hours more, from its end (not from now)", abs(link.expires - (before + 2 * 3600)) < 2, (link.expires - before) / 3600)
+      check("…and the warning is gone", not isinstance(app.screen, (WebEndingScreen, ExtendScreen)))
+      ok = await until(pilot, lambda: str(timer.label).startswith("⏱ 2:03:") or str(timer.label).startswith("⏱ 2:04:"))
       check("the countdown follows; no warning now", ok and not isinstance(app.screen, WebEndingScreen) and not timer.has_class("-ending"), str(timer.label))
+      app.push_screen(LinkScreen(link)); await pilot.pause(0.3)
+      ls = app.screen
+      check("the link's window: Extend lifetime…", str(ls.query_one("#lv-extend").label) == "Extend lifetime…" and ls.query_one("#lv-extend").display)
+      before = link.expires
+      ls.query_one("#lv-extend").press(); ok = await until(pilot, lambda: isinstance(app.screen, ExtendScreen))
+      app.screen.query_one("#ex-for").value = 86400; app.screen.query_one("#ex-ok").press(); await pilot.pause(0.3)
+      check("…a day more", ok and abs(link.expires - before - 86400) < 2 and app.screen is ls, (link.expires - before) / 3600)
+      before = link.expires
+      ls.query_one("#lv-extend").press(); await until(pilot, lambda: isinstance(app.screen, ExtendScreen))
+      app.screen.query_one("#ex-cancel").press(); await pilot.pause(0.3)
+      check("Cancel: as it was", link.expires == before and app.screen is ls)
+      await pilot.press("escape"); await pilot.pause(0.2)
       link.expiry = None # (no time limit) …
       link.relay_state, link.relay_until = "ready", time.time() + 3 * 60 # … but the relay's hour ends in 3 min
       ok = await until(pilot, lambda: isinstance(app.screen, WebEndingScreen) and app.screen.query("#we-close"))

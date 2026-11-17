@@ -85,7 +85,7 @@ or **your public key**, and for a drive **Read only**. A link stops taking
 logins when it is used, expires, is revoked, or after 5 wrong passwords; open
 sessions go on. The **link window** shows the commands for each kind of
 client with copy buttons (and a `~/.ssh/config` entry), the password, the host
-key and the state; **New password**, **Extend 1 h**, **Revoke**.
+key and the state; **New password**, **Extend lifetime…** (how much longer: 1 hour up to a week, added to its end), **Revoke**.
 
 The **connection window** (click the status of the tab) lists the links of the
 tab and their sessions (shell or drive, since when, client, traffic, terminal

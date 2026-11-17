@@ -59,8 +59,8 @@ by itself. Quitting asks when other views are attached, and closes them all.
 When a web link ends, the title bar counts down to it (⏱, left of **?**; a click
 opens the link): when it takes no more logins (its time limit), or when its relay
 ends the tunnel (the free pinggy relay keeps one for an hour, then a new address).
-Five minutes before, slurp warns: a time limit can be extended by an hour right
-there; the relay's hour cannot (a relay without one, Cloudflare or your own,
+Five minutes before, slurp warns: a time limit can be extended right there
+(**Extend lifetime…**: 1 hour up to a week); the relay's hour cannot (a relay without one, Cloudflare or your own,
 avoids it).
 
 When no web link is left (revoked, expired), the web view stops listening.

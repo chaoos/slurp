@@ -252,7 +252,7 @@ moved up, job ids in log names, thread and binding settings, `module purge`, `wa
 A shell or drive of the cluster for your own terminal or file manager, through a relay: when it started and how long
 it is still valid (until when; its relay's end if that comes first, e.g. pinggy's hour), its state, logins, the
 password and slurp's host key, and the commands for your machine (Linux, macOS, Windows, PuTTY/WinSCP, ssh config),
-each with Copy. **New password** (the old one stops working), **Extend 1 h**, **Revoke** (no more logins, sessions end).
+each with Copy. **New password** (the old one stops working), **Extend lifetime…** (how much longer: 1 hour, 2, 4, 8, 12 hours, a day, two, a week; added to its end), **Revoke** (no more logins, sessions end).
 A web link through Cloudflare has only its https address (no password): Revoke ends the tunnel, the address with it.
 
 **On your Windows computer** (password links): the slurp helper opens the link with one click. **Open on my
@@ -301,6 +301,10 @@ directory, or chooses the file; `..` or `Backspace` (**↑ Up**) goes up; the pa
 there; `~` is your home); the filter keeps the files whose names contain what you type, or match a pattern
 (`run_123*.log`, `step_??.out`, `*.[oe]*`); directories stay listed, and the filter stays when you change directory. Under the list: the end of the
 file under the cursor, and (the progress file) whether slurp finds progress in it (`n/N` or `M%`). `Esc` cancels.
+"""),
+  "ExtendScreen": ("Extend the lifetime of a link", """
+How much longer the link takes logins: 1 hour, 2, 4, 8 or 12 hours, a day, two days or a week, added to its end (to
+now, if it has ended). It says until when. Sessions that are open go on either way; this is about new logins.
 """),
   "NotesScreen": ("Notes", """
 Notes of a category or a job, in Markdown: `# headings`, `**bold**`, `- lists`, `` `code` ``, `[links](https://…)`.
@@ -371,7 +375,7 @@ no reminder until a newer one. No check at all: `"update_check": false` in the c
 A web link (slurp in your browser) ends in a few minutes; the title bar counts down to it (⏱, left of ?).
 
 - **It takes no more logins then** (its time limit): a browser that is open goes on, but reloading the page or a new
-  browser needs a login. **Extend by 1 h** keeps it usable.
+  browser needs a login. **Extend lifetime…** keeps it usable (how much longer: 1 hour to a week).
 - **Its relay ends the tunnel** (the free pinggy relay keeps one for an hour): slurp opens a new one, with a new
   address, so a browser on the old one loses slurp. That cannot be extended; a relay without a time limit (Cloudflare,
   your own) avoids it.
