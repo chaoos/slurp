@@ -1995,6 +1995,23 @@ async def open_job(app, pilot, jid):
   await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.details["files"], 10)
   return app.screen
 
+async def t_shell_button(app, pilot):
+  """The Shell button of a running job's window asks where the shell opens (it opened the categorize dialog: its
+  handler had slipped onto action_categorize); also when the window is scrolled to its end"""
+  js = await open_job(app, pilot, "9001")
+  js.query_one("#details").scroll_end(animate=False); await pilot.pause(0.3)
+  button = js.query_one("#shell"); button.scroll_visible(animate=False); await pilot.pause(0.3)
+  await pilot.click("#shell")
+  ok = await until(pilot, lambda: isinstance(app.screen, (ShellChoiceScreen, CategorizeScreen)), 5)
+  check("Shell: where the shell opens (not Categorize)", ok and isinstance(app.screen, ShellChoiceScreen), type(app.screen).__name__)
+  await pilot.press("escape"); await pilot.pause(0.3)
+  await pilot.press("c")
+  ok = await until(pilot, lambda: isinstance(app.screen, CategorizeScreen), 5)
+  check("c still categorizes the job", ok, type(app.screen).__name__)
+  await pilot.press("escape"); await pilot.pause(0.3)
+  for v in list(app.cluster.views): app.close_view(v)
+  await pilot.pause(0.3)
+
 async def t_ended_progress(app, pilot):
   """A job that ended keeps its progress file in the job window: where it got to, and how it ended"""
   js = await open_job(app, pilot, "9009") # (FAILED; its output ends with step 28/100)

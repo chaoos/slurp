@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Fixed: the **Shell** button of a running job's window opened the
+  categorize dialog (its handler was on the wrong method since categories
+  came); `s` worked.
 - The job window keeps the progress file of a job that ended: the last
   `n/N` or `M%` line of its file (where it got to: a failed job at
   `873/1000`) and how it ended, instead of an empty bar of its end state;

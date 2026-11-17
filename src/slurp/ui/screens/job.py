@@ -745,11 +745,11 @@ class JobScreen(SplitScreen):
       return self.job.running
     return True
 
-  @on(Button.Pressed, "#shell")
   def action_categorize(self):
     """c: this job (an array task: the task) in a category"""
     self.app.categorize_jobs([self.job.jid], after=self.show_job)
 
+  @on(Button.Pressed, "#shell")
   def action_shell(self):
     if not self.job.running:
       self.notify("the job is not running", severity="error")
