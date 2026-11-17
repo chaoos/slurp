@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The directory view searches names (`/`): a part of them or a pattern
+  (`*.out`), here as you type, or with **Subdirectories** (`Ctrl+R`) in all
+  directories below, in the background (on a cluster a round trip per batch
+  of directories): the results come in with their paths while the window
+  stays usable; `Esc` stops the search, then shows the directory again.
 - The rule catalogue has a search (`/`, at the top): only the rules with all
   its words (id, title, texts, example), as you type; `Esc` shows all again.
 - Rules by software stack: the module rules (E01, E04) apply on clusters

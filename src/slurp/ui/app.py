@@ -203,8 +203,11 @@ class Slurp(App):
   #presets Button { margin-right: 1; min-width: 8; }
   #fstatus { height: 1; padding: 0 1; background: $panel; }
   #text { height: 1fr; }
-  #search, #dfilter, #jfilter { dock: bottom; display: none; }
-  #search.visible, #dfilter.visible, #jfilter.visible { display: block; }
+  #search, #dsearch, #jfilter { dock: bottom; display: none; }
+  #search.visible, #dsearch.visible, #jfilter.visible { display: block; }
+  #dsearch { height: 1; background: $panel; }
+  #dfilter { width: 1fr; height: 1; border: none; padding: 0 1; }
+  #drecursive { width: auto; margin-left: 1; }
   #dstatus { height: 1; padding: 0 1; background: $panel; color: $text-muted; }
   #dbar { height: 1; background: $panel; }
   #dpath { width: 1fr; height: 1; border: none; padding: 0 1; background: $boost; }

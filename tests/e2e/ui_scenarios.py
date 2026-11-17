@@ -2728,5 +2728,14 @@ async def t_dir_permissions(app, pilot):
     if acl:
       check("over SSH: the extended ACL, + after the permissions", row("shared")[3].endswith("+") and "u:root:r--" in row("shared")[6],
             row("shared"))
+    # the search in the subdirectories, on the cluster (batches of find over SSH)
+    os.makedirs(os.path.join(d, "deep", "er", "est"), exist_ok=True)
+    with open(os.path.join(d, "deep", "er", "est", "needle.dat"), "w") as f: f.write("x")
+    ds = app.screen
+    await pilot.press("slash", *"needle"); await pilot.press("ctrl+r")
+    ok = await until(pilot, lambda: ds.searching is None and ds.results, 20)
+    check("over SSH: the search in the subdirectories finds deep/er/est/needle.dat (and not into closed/)",
+          ok and [e["name"] for e in ds.results] == ["deep/er/est/needle.dat"], [e["name"] for e in ds.results or []])
+    await pilot.press("escape"); await pilot.pause(0.3)
   finally:
     os.chmod(os.path.join(d, "closed"), 0o700); os.chmod(os.path.join(d, "secret"), 0o600)

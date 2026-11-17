@@ -14,7 +14,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.coordinate import Coordinate
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Input, MarkdownViewer, OptionList, Static, TextArea
+from textual.widgets import Button, Checkbox, DataTable, Input, MarkdownViewer, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 from textual.widgets.text_area import Selection
 
@@ -25,7 +25,7 @@ from ...cluster.remote import (
 )
 from ...cluster.paths import is_binary, resolve_path
 from ...cluster.storage import drive_dirs
-from ...cluster.listing import can_read, can_write, listing, mode_text, short_acl
+from ...cluster.listing import can_read, can_write, listing, matches_name, mode_text, search, short_acl
 from .. import icons
 from ..widgets import clean, ClickTable, crumb_title, PathArea
 from .base import SplitScreen
@@ -242,6 +242,7 @@ def access_text(entry):
     marks.append(("no write", "yellow"))
   return Text(" ").join(Text(text, style=style) for text, style in marks)
 DIR_LIMIT = 20000 # entries listed at most
+SEARCH_LIMIT = 5000 # matches of a search in the subdirectories at most
 
 class DirScreen(SplitScreen):
   """Directory browser: click (or Enter) a subdirectory to enter it, a file to open it"""
@@ -250,7 +251,8 @@ class DirScreen(SplitScreen):
   BINDINGS = [
     Binding("escape", "back", "Back"),
     Binding("backspace,u", "parent", "Parent"),
-    Binding("slash", "filter", "Filter"),
+    Binding("slash", "filter", "Search"),
+    Binding("ctrl+r", "recursive", "Subdirectories", show=False, priority=True),
     Binding("f", "follow", "Follow"),
     Binding("r", "reload", "Reload"),
     Binding("full_stop", "hidden", "Hidden files"),
@@ -265,7 +267,10 @@ class DirScreen(SplitScreen):
     self.bases, self.env = list(bases), env # passed on to the files opened from here (e.g. the job's WorkDir)
     self.entries = []
     self.this = None # the directory itself (its permissions, what the user may do)
-    self.pattern = ""
+    self.results = None   # the search's matches in the subdirectories (None: no such search; the listing is shown)
+    self.searching = None # (directories looked at, still to look at) while a search runs
+    self.search_gen = 0   # (results of an older search are dropped)
+    self.search_timer = None
     self.show_hidden = True
     self.following = False
     self.sort_column, self.sort_reverse = "name", False
@@ -277,7 +282,10 @@ class DirScreen(SplitScreen):
       yield Horizontal(id="dplaces")
     yield Static(id="dstatus")
     yield ClickTable(id="dir", cursor_type="row", zebra_stripes=True)
-    yield Input(id="dfilter", placeholder="filter names (Enter: apply, Esc: clear)")
+    with Horizontal(id="dsearch"):
+      yield Input(id="dfilter", placeholder="search names: a part of them, or *.out, run_? … (Esc: all again)")
+      yield Checkbox("Subdirectories", id="drecursive", compact=True,
+                     tooltip="search the subdirectories too, in the background (Ctrl+R)")
 
   def on_mount(self):
     self.sub_title = crumb_title(self.crumbs)
@@ -366,31 +374,57 @@ class DirScreen(SplitScreen):
       except Exception:
         pass
     table.clear()
-    if self.path != "/":
+    if self.path != "/" and self.results is None:
       table.add_row(Text(icons.label("folder", "../"), style="bold"), "", "", "", "", "", "", key="..")
     keys = {"name": lambda e: e["name"].lower(), "size": lambda e: e["size"] or 0, "mtime": lambda e: e["mtime"],
             "mode": mode_text, "owner": lambda e: (e["owner"], e["group"]),
             "you": lambda e: (can_read(e), can_write(e)), "acl": lambda e: short_acl(e["acl"])}
-    shown = [e for e in self.entries if (self.show_hidden or not e["name"].startswith("."))
-             and self.pattern.lower() in e["name"].lower()]
+    shown = self.shown()
     shown.sort(key=keys[self.sort_column], reverse=self.sort_reverse)
     shown.sort(key=lambda e: not e["dir"]) # directories first
     for e in shown:
-      style = "bold blue" if e["dir"] else ""
-      if e["name"].startswith(".") or not can_read(e):
-        style += " dim"
-      name = Text(icons.label(icons.file_kind(e["name"], e["dir"]), e["name"] + ("/" if e["dir"] else "") + (" @" if e["link"] else "")),
-                  style=style.strip())
-      size = humanize.naturalsize(e["size"]) if e["size"] is not None else ""
-      mtime = datetime.fromtimestamp(e["mtime"]).strftime("%Y-%m-%d %H:%M:%S") if e["mtime"] else ""
-      table.add_row(name, size, mtime, Text(mode_text(e), style="bold" if e["acl"] else ""),
-                    f"{e['owner']}:{e['group']}", access_text(e), Text(short_acl(e["acl"]), style="cyan"), key=e["name"])
+      self.add_entry(table, e)
     if current is not None:
       try:
         table.move_cursor(row=table.get_row_index(current))
       except Exception:
         pass
-    status = Text(f"{len(shown)} of {len(self.entries)} entries")
+    self.show_status(len(shown))
+
+  def shown(self):
+    """The entries shown: the search's matches in the subdirectories, or the listing (filtered by the search)"""
+    if self.results is not None:
+      return [e for e in self.results if self.show_hidden or not os.path.basename(e["name"]).startswith(".")]
+    text = self.query_one("#dfilter", Input).value if self.query_one("#dsearch").has_class("visible") else ""
+    return [e for e in self.entries if (self.show_hidden or not e["name"].startswith(".")) and (not text.strip() or matches_name(e["name"], text))]
+
+  def add_entry(self, table, e):
+    style = "bold blue" if e["dir"] else ""
+    if os.path.basename(e["name"]).startswith(".") or not can_read(e):
+      style += " dim"
+    name = Text(icons.label(icons.file_kind(os.path.basename(e["name"]), e["dir"]), e["name"] + ("/" if e["dir"] else "") + (" @" if e["link"] else "")),
+                style=style.strip())
+    size = humanize.naturalsize(e["size"]) if e["size"] is not None else ""
+    mtime = datetime.fromtimestamp(e["mtime"]).strftime("%Y-%m-%d %H:%M:%S") if e["mtime"] else ""
+    table.add_row(name, size, mtime, Text(mode_text(e), style="bold" if e["acl"] else ""),
+                  f"{e['owner']}:{e['group']}", access_text(e), Text(short_acl(e["acl"]), style="cyan"), key=e["name"])
+
+  def show_status(self, count=None):
+    if count is None:
+      count = len(self.shown())
+    text = self.query_one("#dfilter", Input).value.strip()
+    if self.results is not None:
+      status = Text(f"{count} found for '{text}' here and in the subdirectories")
+      if self.searching is not None:
+        done, left = self.searching
+        status.append(f" · searching: {done} directories looked at, {left} to go (Esc stops)", style="bold yellow")
+      elif len(self.results) >= SEARCH_LIMIT:
+        status.append(f" · stopped at {SEARCH_LIMIT}: say more precisely what you look for", style="yellow")
+      if self.pick is not None:
+        status = Text("choose a file (Enter or click) · Esc: cancel · ") + status
+      self.query_one("#dstatus", Static).update(status)
+      return
+    status = Text(f"{count} of {len(self.entries)} entries")
     if self.this is not None:
       status.append(f" · {mode_text(self.this)} {self.this['owner']}:{self.this['group']}")
       if self.this["acl"]:
@@ -403,15 +437,15 @@ class DirScreen(SplitScreen):
       status = Text("choose a file (Enter or click) · Esc: cancel · ") + status
     if len(self.entries) >= DIR_LIMIT:
       status += f" (only the first {DIR_LIMIT} are listed)"
-    if self.pattern:
-      status += f" · filter '{self.pattern}'"
+    if text:
+      status += f" · search '{text}'"
     status += " · following (f)" if self.following else ""
     self.query_one("#dstatus", Static).update(status)
 
   def open(self, name):
     path = os.path.dirname(self.path) if name == ".." else os.path.join(self.path, name)
     if self.pick is not None:
-      entry = next((e for e in self.entries if e["name"] == name), None)
+      entry = next((e for e in (self.results if self.results is not None else self.entries) if e["name"] == name), None)
       if name == ".." or entry and entry["dir"]:
         self.enter(path)
       else:
@@ -439,13 +473,17 @@ class DirScreen(SplitScreen):
     self.populate()
 
   def action_back(self):
-    search, path = self.query_one("#dfilter", Input), self.query_one("#dpath", Input)
+    bar, path = self.query_one("#dsearch"), self.query_one("#dpath", Input)
     if path.has_focus: # (Esc while editing the path: as it was)
       path.value = self.path
       self.query_one("#dir").focus()
-    elif search.has_class("visible"):
-      search.remove_class("visible")
-      self.pattern = ""
+    elif self.searching is not None: # (first Esc: the search stops, its results stay)
+      self.stop_search()
+      self.show_status()
+    elif bar.has_class("visible"): # (then: no search, the listing again)
+      bar.remove_class("visible")
+      self.query_one("#dfilter", Input).value = ""
+      self.results = None
       self.populate()
       self.query_one("#dir").focus()
     else:
@@ -456,20 +494,95 @@ class DirScreen(SplitScreen):
       self.open("..")
 
   def action_filter(self):
-    search = self.query_one("#dfilter", Input)
-    search.add_class("visible")
-    search.value = self.pattern
-    search.focus()
+    self.query_one("#dsearch").add_class("visible")
+    self.query_one("#dfilter", Input).focus()
+
+  def action_recursive(self):
+    if self.query_one("#dsearch").has_class("visible"):
+      box = self.query_one("#drecursive", Checkbox)
+      box.value = not box.value
+
+  def recursive(self):
+    return self.query_one("#drecursive", Checkbox).value
 
   @on(Input.Changed, "#dfilter")
   def filter_changed(self, event):
-    self.pattern = event.value
-    self.populate()
+    if not self.recursive(): # (this directory: filtered as you type)
+      self.populate()
+      return
+    if self.search_timer is not None: # (the subdirectories: searched when the typing pauses)
+      self.search_timer.stop()
+    self.search_timer = self.set_timer(0.5, self.start_search)
 
   @on(Input.Submitted, "#dfilter")
   def filter_submitted(self, event):
-    event.input.remove_class("visible")
+    if self.recursive() and (self.results is None or self.search_text != event.value.strip()):
+      self.start_search()
     self.query_one("#dir").focus()
+
+  @on(Checkbox.Changed, "#drecursive")
+  def recursive_changed(self, event):
+    if event.value:
+      self.start_search()
+    else:
+      self.stop_search()
+      self.results = None
+      self.populate()
+
+  search_text = ""
+
+  def start_search(self):
+    """Search the subdirectories for the names in the search field, in the background: the matches come in batches
+    (each a round trip on a cluster), the table and the status follow; a new search, Esc or leaving stops it"""
+    if self.search_timer is not None:
+      self.search_timer.stop()
+      self.search_timer = None
+    self.stop_search()
+    text = self.query_one("#dfilter", Input).value.strip()
+    self.search_text = text
+    if not text or not self.recursive():
+      self.results = None
+      self.populate()
+      return
+    self.results, self.searching = [], (0, 1)
+    self.populate()
+    gen, root = self.search_gen, self.path
+    def found(matches, done, left):
+      self.app.call_from_thread(self.search_found, gen, matches, done, left)
+    def body():
+      search(root, text, found, SEARCH_LIMIT)
+      self.app.call_from_thread(self.search_done, gen)
+    start_worker(self, body, "search", exclusive=True, name=f"searching {root}")
+
+  def search_found(self, gen, matches, done, left):
+    if gen != self.search_gen or self.results is None:
+      return
+    table = self.query_one("#dir", ClickTable)
+    for e in matches:
+      e["name"] = os.path.relpath(e["name"], self.path)
+      self.results.append(e)
+      if self.show_hidden or not os.path.basename(e["name"]).startswith("."):
+        self.add_entry(table, e) # (added as they come; sorted when the search is done)
+    self.searching = (done, left)
+    self.show_status()
+
+  def search_done(self, gen):
+    if gen != self.search_gen:
+      return
+    self.searching = None
+    self.populate()
+
+  def stop_search(self):
+    """The search running stops (its results stay)"""
+    self.search_gen += 1
+    for w in list(self.app.workers):
+      if w.node is self and w.group == "search":
+        getattr(w, "abort", None) and w.abort.set()
+        w.cancel()
+    self.searching = None
+
+  def on_unmount(self):
+    self.stop_search()
 
   def action_follow(self):
     self.following = not self.following

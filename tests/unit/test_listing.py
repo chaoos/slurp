@@ -81,3 +81,39 @@ def test_getfacl_output(check):
           "other::---\n\n")
   check("extended entries only, names unescaped, #effective dropped", listing.parse_getfacl(text, "/d") == {
         "": ["mask::rwx", "default:user:bob:rwx"], "a b": ["user:bob:rw-", "mask::r--"]}, listing.parse_getfacl(text, "/d"))
+
+
+def test_search_in_the_subdirectories(check, tmp_path):
+  import threading
+  from slurp.cluster import remote
+  root = tmp_path / "r"
+  for d in ("a/b/c", "a/run_1", "x y/deep/er"):
+    (root / d).mkdir(parents=True)
+  for f in ("a/b/c/result.out", "a/b/notes.txt", "x y/deep/er/Result.OUT", "top.out", "a/run_1/log"):
+    (root / f).write_text("x")
+  os.symlink(str(root), root / "a" / "loop") # (a symlink back up: not followed)
+  calls = []
+  def run(text, limit=5000):
+    got = []
+    count = listing.search(str(root), text, lambda m, done, left: (got.extend(m), calls.append((done, left))), limit)
+    return sorted(os.path.relpath(e["name"], root) for e in got), count
+  names, n = run("out")
+  check("a part of the name, any case, all depths, with spaces in paths", names == ["a/b/c/result.out", "top.out", "x y/deep/er/Result.OUT"]
+        and n == 3, names)
+  check("batches: the found callback per round trip, with directories looked at and to go", calls and calls[-1][1] == 0, calls)
+  check("a glob: *.txt", run("*.txt")[0] == ["a/b/notes.txt"])
+  check("run_?: directories match too", run("run_?")[0] == ["a/run_1"])
+  check("the symlink back up is not searched (no loop): each file once", run("result")[0].count("a/b/c/result.out") == 1)
+  check("the limit", run("*", limit=3)[1] == 3)
+  entry = next(e for e in listing.search_batch([str(root)], "top.out")[0])
+  check("what a match has: as the listing", entry["mode"].startswith("-rw") and entry["access"].startswith("rw") and entry["size"] == 1, entry)
+  stop = threading.Event(); stop.set()
+  remote._thread.cancel = stop
+  try:
+    listing.search(str(root), "out", lambda *a: None)
+    cancelled = False
+  except remote.Cancelled:
+    cancelled = True
+  finally:
+    del remote._thread.cancel
+  check("a cancelled worker stops the search", cancelled)

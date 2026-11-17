@@ -147,3 +147,65 @@ def short_acl(entries):
   """user:bob:r-x → u:bob:r-x, default:group:p:rwx → d:g:p:rwx (for a column)"""
   return " ".join(e.replace("default:", "d:").replace("user:", "u:").replace("group:", "g:").replace("mask:", "m:")
                   .replace("other:", "o:") for e in entries)
+
+# ---------------------------------------------------------------------------
+# search: names that match, in a directory and its subdirectories
+
+# One round trip for a batch of directories: their subdirectories (D, to look into next; symlinks are not followed,
+# so no loops) and their entries whose name matches the pattern (case-insensitive glob), with what the listing has
+SEARCH_SCRIPT = r"""
+pat=$1; shift
+find "$@" -mindepth 1 -maxdepth 1 \( -type d -printf 'D\t%p\0' \) , \( -iname "$pat" \( \
+  \( -readable -printf r -o -printf - \) , \( -writable -printf w -o -printf - \) , \
+  \( -executable -printf x -o -printf - \) , -printf '\t%Y\t%s\t%T@\t%y\t%M\t%u\t%g\t%p\0' \) \) 2>/dev/null
+true
+"""
+SEARCH_BATCH = 100       # directories per round trip
+SEARCH_ARGS = 100_000    # bytes of their paths per round trip at most
+
+def name_pattern(text):
+  """The glob a search text means: a glob as it is (*.out, run_?), else the names that contain it"""
+  text = text.strip()
+  return text if any(c in text for c in "*?[") else f"*{text}*"
+
+def matches_name(name, text):
+  import fnmatch
+  return fnmatch.fnmatch(name.lower(), name_pattern(text).lower())
+
+def search_batch(dirs, text):
+  """([matching entries, name: the full path], [subdirectories]) of a batch of directories (worker)"""
+  from .remote import run_cmd
+  res = run_cmd(["sh", "-c", SEARCH_SCRIPT, "sh", name_pattern(text), *dirs], timeout=300)
+  matches, subdirs = [], []
+  for record in (res.stdout or "").split("\0"):
+    if record.startswith("D\t"):
+      subdirs.append(record[2:])
+      continue
+    fields = record.split("\t", 8)
+    if len(fields) != 9:
+      continue
+    access, kind, size, mtime, own, mode, owner, group, path = fields
+    matches.append({"name": path, "dir": kind == "d", "size": int(size) if kind != "d" else None, "mtime": float(mtime),
+                    "link": own == "l", "mode": mode, "owner": owner, "group": group, "access": access, "acl": []})
+  return matches, subdirs
+
+def search(root, text, found, limit=5000):
+  """Look for names that match text under root, breadth first, a batch of directories per round trip; found(matches,
+  directories looked at, directories still to look at) after each batch (from the worker). Stops at limit matches,
+  or when the worker is cancelled (remote.check_cancelled). The number of matches"""
+  from .remote import check_cancelled
+  queue, done, count = [os.path.normpath(root)], 0, 0
+  while queue and count < limit:
+    check_cancelled()
+    batch, size = [], 0
+    while queue and len(batch) < SEARCH_BATCH and size < SEARCH_ARGS:
+      batch.append(queue.pop(0))
+      size += len(batch[-1]) + 1
+    matches, subdirs = search_batch(batch, text)
+    check_cancelled()
+    queue += subdirs
+    done += len(batch)
+    matches = matches[:limit - count]
+    count += len(matches)
+    found(matches, done, len(queue))
+  return count

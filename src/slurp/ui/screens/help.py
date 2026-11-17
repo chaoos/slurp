@@ -88,7 +88,11 @@ A directory of the cluster.
   directory; **no write** in yellow), as the cluster answers for you (groups and ACLs count), and the extended ACL
   entries (`u:bob:r-x`: user bob, `g:` group, `m:` mask, `d:` default for new entries). The line above them shows
   the same of the directory itself.
-- A click on a header sorts by that column; `/` filters by name; `.` shows hidden files.
+- A click on a header sorts by that column; `.` shows hidden files.
+- `/` searches by name: a part of the names or a pattern (`*.out`, `run_?`), any case. Here, as you type; with
+  **Subdirectories** (`Ctrl+R`) in all directories below, in the background: the results come in as they are found
+  (with their paths from here), the window stays usable, and it stops at 5000. `Esc` stops a search that runs, then
+  shows the directory again.
 - `Backspace` or `u` goes to the parent; `f` follows (lists again every few seconds); `r` reloads.
 """),
   "MarkdownScreen": ("Markdown", """

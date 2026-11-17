@@ -13,7 +13,7 @@ top-left `←` button to go back.
 | Everywhere | `F10` (or **☰ Menu** in the header) the menu; `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue (`/` searches it); `F3` options |
 | Categories | the tree (and *not categorized*): `n` new, `e` rename/move, `Del` delete; its jobs: `Enter` open, `c` categorize, `x` take out; `l` in the job list; `r` reload |
 | Text file | `/` search; `n` / `N` next/previous; `f` follow; `A` the part before; `l` open in `less`; `r` reload |
-| Directory | `/` filter; `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
+| Directory | `/` search names (here as you type; `Ctrl+R` also in the subdirectories, in the background; `Esc` stops, then clears); `f` follow; `.` toggle hidden files; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |
 | Markdown | `r` reload; use the viewer's table of contents and link navigation |
 | Shell (subtab) | mouse wheel or `Shift+PgUp`/`Shift+PgDn` scroll back; drag to select, right-click on it to copy; `Ctrl-]` back to the job list; `Ctrl-D` exits the shell, Enter starts it again; `✕` of the subtab closes it; **ⓘ Help** copy, paste, keys, closing |
