@@ -13,7 +13,8 @@ import shlex
 
 from .engine import strip_comment, referenced_paths, launched_program, LAUNCHERS, SKIP_PROGRAMS
 
-SETUP = re.compile(r"^\s*(module\s|ml\s|source\s|\.\s|export\s|cd\s|unset\s|[A-Za-z_]\w*=)")
+SETUP = re.compile(r"^\s*(module\s|ml\s|source\s|\.\s|export\s|cd\s|unset\s|[A-Za-z_]\w*=|"
+                   r"(conda|mamba|micromamba)\s+activate\s|spack\s+(load|env\s+activate)\s)")
 
 def setup_lines(script):
   """The lines of the script that set up the environment and are safe to run"""

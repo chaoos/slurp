@@ -33,7 +33,8 @@ severe first; each opens to show why it matters, how to fix it and the link
 to the catalogue. It checks the script as submitted (or as the accounting
 stored it), the record, the paths and programs, your quota where the job
 writes, and the end of its logs, and then, a few seconds later, its
-environment: the script's setup lines (module loads, exports, sources, `cd`;
+environment: the script's setup lines (module loads, exports, sources, `cd`,
+`conda`/`mamba activate`, `spack load`;
 never its commands) are replayed on the login node in a clean environment, as
 after a fresh login, and the programs are checked: found at all (G01), shared
 libraries (`ldd`), GPU code (`cuobjdump`). A job with a uenv (`--uenv`,

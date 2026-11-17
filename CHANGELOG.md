@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The environment check also replays `conda activate`, `mamba activate`,
+  `micromamba activate`, `spack load` and `spack env activate`: a program of
+  such an environment was checked without it (P05: libraries missing).
 - The environment check (P05: shared libraries with `ldd`; P06, B02, E04)
   runs in the job's uenv: with `--uenv` and `--view` the replay of the
   script's setup runs in `uenv run` with them, as the job does. Before, it

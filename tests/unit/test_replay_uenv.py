@@ -80,3 +80,11 @@ def test_in_a_container_the_programs_are_not_looked_at(check, world):
   check("--environment: no program looked at, no P05, no E04 (its modules are in the container)",
         r["container"] == "environment" and not r["libs"] and not f, ([(x.rule.id, x.evidence) for x in f], r))
 
+
+def test_environment_activations_are_replayed(check):
+  text = ("#!/bin/bash -l\nsource $HOME/miniforge/etc/profile.d/conda.sh\nconda activate sim-env\nmamba activate other\n"
+          "spack load hdf5\nspack env activate ./env\npython run.py\nconda install numpy\n")
+  lines = [t for _, t in environment.setup_lines(c.make_context(text, "/x/job.sh").script)]
+  check("conda/mamba activate and spack load / env activate are set up before ldd; installing is not run",
+        lines == ["source $HOME/miniforge/etc/profile.d/conda.sh", "conda activate sim-env", "mamba activate other",
+                  "spack load hdf5", "spack env activate ./env"], lines)
