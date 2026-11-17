@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Submit… and Run array say which ids an array range gives, the first
+  and the last, and warn when a step misses the end (`1-100:2`: the last
+  id is 99, not 100).
 - Checks: paths of a script must not only exist but be readable. P02 says
   when a sourced file, an input or a Python script cannot be read (no r)
   or a `cd`/`--chdir` directory cannot be entered (no x); P03 a script run

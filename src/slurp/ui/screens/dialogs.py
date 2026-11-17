@@ -255,12 +255,17 @@ class RunArrayScreen(ModalScreen[list[str] | None]):
       state = state[0].rstrip("+") if state else ""
       if state in ("RUNNING", "COMPLETED", "PENDING", "COMPLETING", "CONFIGURING"):
         busy.setdefault(state.lower(), []).append(i)
+    shown, off = array_ids_text(array_range(start, stop, step))
     if busy:
-      warning.update(Text("Warning: the range overlaps tasks of this array that are " + "; ".join(
+      text = Text("Warning: the range overlaps tasks of this array that are " + "; ".join(
         f"{state} ({compress_array_ids(tasks)})" for state, tasks in busy.items()) + ". They would run again.",
-        style="bold yellow"))
+        style="bold yellow")
     else:
-      warning.update(Text(f"{len(ids)} tasks, none of them running, queued or completed", style="green"))
+      text = Text(f"{len(ids)} task{'s' if len(ids) != 1 else ''}, none of them running, queued or completed", style="green")
+    text.append(f"\n{shown}")
+    if off:
+      text.append(f" · {off}", style="bold yellow")
+    warning.update(text)
     self.query_one("#array-command", TextArea).load_text(shlex.join(with_array_spec(self.args, array_range(start, stop, step))))
 
   @on(Button.Pressed, "#array-submit")
@@ -286,18 +291,56 @@ class RunArrayScreen(ModalScreen[list[str] | None]):
 
 ARRAY_SPEC = re.compile(r"(\d+(-\d+(:\d+)?)?)(,\d+(-\d+(:\d+)?)?)*(%\d+)?")
 
-def array_task_count(spec):
-  """The number of tasks of an sbatch --array expression (1-100:2,200%10), None if it is not one"""
+def array_parts(spec):
+  """The ranges of an sbatch --array expression (1-100:2,200%10): [(start, stop, step, last)], last the last id the
+  range gets (with a step not always its stop: 1-10:4 is 1, 5, 9); None if it is not one"""
   if not ARRAY_SPEC.fullmatch(spec or ""):
     return None
-  ids = set()
+  parts = []
   for part in spec.split("%")[0].split(","):
     m = re.fullmatch(r"(\d+)(?:-(\d+)(?::(\d+))?)?", part)
     start = int(m[1]); stop = int(m[2]) if m[2] else start; step = int(m[3]) if m[3] else 1
     if stop < start or step < 1:
       return None
+    parts.append((start, stop, step, start + (stop - start) // step * step))
+  return parts
+
+def array_task_count(spec):
+  """The number of tasks of an sbatch --array expression (1-100:2,200%10), None if it is not one"""
+  parts = array_parts(spec)
+  if parts is None:
+    return None
+  if sum((stop - start) // step + 1 for start, stop, step, _ in parts) > 2_000_000: # (no set of millions: as if apart)
+    return sum((stop - start) // step + 1 for start, stop, step, _ in parts)
+  ids = set()
+  for start, stop, step, _ in parts:
     ids.update(range(start, stop + 1, step))
   return len(ids)
+
+def array_ids_text(spec):
+  """Which ids an --array expression gives: (the first and the last id, with the first few; a warning for each range
+  whose last id is not its end, or "")"""
+  parts = array_parts(spec)
+  if not parts:
+    return "", ""
+  first, last = min(p[0] for p in parts), max(p[3] for p in parts)
+  few = []
+  for start, stop, step, _ in sorted(parts):
+    for i in range(start, min(stop, start + 4 * step) + 1, step):
+      if i not in few:
+        few.append(i)
+  few = sorted(few)
+  count = array_task_count(spec)
+  if count == 1:
+    ids = f"id {first}"
+  elif count <= 4:
+    ids = "ids " + ", ".join(map(str, sorted(set(few) | {last})[:count]))
+  else:
+    ids = f"ids {', '.join(map(str, few[:3]))}, …, {last}"
+  ids += f" (first {first}, last {last})" if count > 1 else ""
+  off = [f"{start}-{stop}:{step}: the last id is {end}, not {stop} (steps of {step} from {start} do not reach {stop})"
+         for start, stop, step, end in parts if end != stop]
+  return ids, "; ".join(off)
 
 def without_array(args):
   """An sbatch argv without its --array options"""
@@ -368,8 +411,11 @@ class SubmitScriptScreen(ModalScreen[list[str] | None]):
                        f"the script asks for --array={self.script_array} itself (sbatch cannot take it back)", style="dim"))
     else:
       limit = spec.split("%")[1] if "%" in spec else ""
-      text = Text(f"an array of {count} task{'s' if count != 1 else ''}" + (f", at most {limit} at a time" if limit else ""),
+      ids, off = array_ids_text(spec)
+      text = Text(f"an array of {count} task{'s' if count != 1 else ''}, {ids}" + (f", at most {limit} at a time" if limit else ""),
                   style="green")
+      if off:
+        text.append(f" · {off}", style="bold yellow")
       if not self.uses_task_id:
         text.append(" · the script never uses $SLURM_ARRAY_TASK_ID: every task would do the same (B03)", style="bold yellow")
       note.update(text)

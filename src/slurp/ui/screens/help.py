@@ -371,8 +371,9 @@ Memory in binary units (MiB, GiB), as `free -h` and `nvidia-smi` show it.
 The `sbatch` command that submits the script, in its directory: edit it as you like (more options, a dependency,
 `--begin`, …); the first word stays `sbatch`. **Array** makes it an array job: task ids like `1-100`, `0-9:2` (every
 2nd), `1,5,7`, and `%50` for at most 50 at a time. The range writes the command's `--array` (the rest of the command
-stays as you edited it); empty: one job, or the array the script asks for itself. It says how many tasks that is,
-and warns when the script never uses `$SLURM_ARRAY_TASK_ID` (every task would do the same). The button is red when
+stays as you edited it); empty: one job, or the array the script asks for itself. It says how many tasks that is
+and which ids, the first and the last (with a step the last is not always the end: `1-100:2` ends at 99, said in
+yellow), and warns when the script never uses `$SLURM_ARRAY_TASK_ID` (every task would do the same). The button is red when
 the checks found errors. `Esc` cancels.
 """),
   "OpenDirScreen": ("Open a directory", """
@@ -409,8 +410,9 @@ done: it is charged all the time it runs.
   "CommandScreen": ("Command", "A command to run, editable before it runs."),
   "GdbCommandScreen": ("GDB", "The GDB command for the core dump, editable; Run opens it in a shell subtab."),
   "RunArrayScreen": ("Run array", """
-Submits the array again with another range (start, stop, step). It warns when the range covers tasks that are
-running, queued or completed.
+Submits the array again with another range (start, stop, step). It says which ids that is (the first and the last:
+with a step the last is not always stop) and warns when the range covers tasks that are running, queued or
+completed.
 """),
   "RestartScreen": ("Restart job", """
 How to submit the job again: as it was submitted (with its original environment and script, if the cluster kept

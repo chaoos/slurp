@@ -75,8 +75,10 @@ highlighted with Textual's syntax extra (`pip install "textual[syntax]"`).
 start?). **Submit…** names the errors found and shows the `sbatch` command, which
 you can edit (more options, a dependency, …); **Array** makes it an array job
 (`1-100`, `0-9:2`, `1,5,7`, `%50` for at most 50 at a time): it writes the
-command's `--array`, says how many tasks that is, and warns when the script
-never uses `$SLURM_ARRAY_TASK_ID`.
+command's `--array`, says how many tasks that is and which ids (the first and
+the last: with a step the last is not always the end, `1-100:2` ends at 99,
+which it warns of), and warns when the script never uses
+`$SLURM_ARRAY_TASK_ID`.
 
 **New job script** (`n` in the job list) writes a commented script for the
 usual kinds of jobs (serial, OpenMP, MPI, hybrid MPI+OpenMP, GPU, array,

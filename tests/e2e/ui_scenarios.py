@@ -632,7 +632,12 @@ async def t_checks_ui(app, pilot):
   arr = dlg.query_one("#submit-array"); arr.value = "1-4%2"; await pilot.pause(0.2)
   note = str(dlg.query_one("#submit-array-note").render())
   check("an array: the range writes --array into the command, and says how many tasks", dlg.command() == ["sbatch", "--array=1-4%2", dlg.path]
-        and "4 tasks" in note and "at most 2" in note, (dlg.command(), note))
+        and "4 tasks" in note and "at most 2" in note and "first 1, last 4" in note, (dlg.command(), note))
+  arr.value = "1-10:4"; await pilot.pause(0.2)
+  note = str(dlg.query_one("#submit-array-note").render())
+  check("a step that misses the end: the first and last id, and a warning", "3 tasks" in note and "ids 1, 5, 9" in note
+        and "the last id is 9, not 10" in note, note)
+  arr.value = "1-4%2"; await pilot.pause(0.2)
   arr.value = "1-x"; await pilot.pause(0.2)
   check("a range that is none: said so, the command keeps the last good one", "not an array range" in str(dlg.query_one("#submit-array-note").render())
         and "--array=1-4%2" in dlg.command())
@@ -1714,6 +1719,7 @@ async def t_array(app, pilot):
         and "pending (3)" in w() and ed.text == "sbatch --array=0-9 job.sh" and ed.language == "bash", (w(), ed.text))
   scr.query_one("#array-start").value = "4"; scr.query_one("#array-step").value = "2"; await pilot.pause(0.2)
   check("4-9 step 2: no overlap, the command follows", "none of them" in w() and ed.text == "sbatch --array=4-9:2 job.sh", (w(), ed.text))
+  check("and which ids: 4, 6, 8, the last 8 not 9", "ids 4, 6, 8 (first 4, last 8)" in w() and "the last id is 8, not 9" in w(), w())
   scr.query_one("#array-stop").value = "2"; await pilot.pause(0.2)
   check("stop < start: an error", "must be numbers" in w())
   scr.query_one("#array-stop").value = "9"; await pilot.pause(0.2)
