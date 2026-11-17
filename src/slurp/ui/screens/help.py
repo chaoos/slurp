@@ -56,7 +56,8 @@ Everything about one job.
 - **Memory** (running jobs): Query current memory, in MiB/GiB as `free -h` and `nvidia-smi` show it. CPU: the job's cgroup
   (what Slurm counts against `--mem`), its processes (PSS, RSS) and the nodes as `free` shows them; GPU: the job's
   processes and every GPU's used/total as in `nvidia-smi`. Repeated queries with plots.
-- **Progress:** the latest `n/N` (or `M%`) line with two estimates of the end; **Progress file…** picks another log file.
+- **Progress:** the latest `n/N` (or `M%`) line with two estimates of the end (a job that ended: where its file got to
+  and how it ended); **Progress file…** picks another log file.
 - **Files:** output, error, script, working directory and files the job names; Enter opens one.
 - **Steps** of the job; for a running job **Run on the nodes** (a command on every node, or one) and **Shell** (`s`).
 """),

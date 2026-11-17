@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The job window keeps the progress file of a job that ended: the last
+  `n/N` or `M%` line of its file (where it got to: a failed job at
+  `873/1000`) and how it ended, instead of an empty bar of its end state;
+  **Progress file…** picks another file for it too.
 - Query current memory shows the right numbers. Memory is in binary units
   (MiB, GiB) as `free -h` and `nvidia-smi` show it (it was decimal GB: an
   80 GB GPU of 81559 MiB showed as 85.5 GB). CPU: the job's cgroup (what

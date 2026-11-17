@@ -257,17 +257,18 @@ class JobScreen(SplitScreen):
 
   def show_progress(self):
     job = self.job
-    progress = progress_for_job(job)
+    # (a job that ended: where its progress file got to, else the bar of its end state)
+    progress = job.progress if job.running or job.progress is not None else progress_for_job(job)
     progress_view = self.query_one("#job-progress", Vertical)
     chosen = PROGRESS.get((tab_name(), job.jid), {}).get("file")
     self.query_one("#progress-stdout", Button).display = bool(chosen)
-    if progress is not None or job.running:
+    if progress is not None or job.running or chosen:
       progress_view.display = True
-      self.query_one("#progress-file", Button).display = job.running
+      self.query_one("#progress-file", Button).display = not job.state.startswith("PENDING") # (running or ended)
       if progress is None:
         self.query_one("#progress-bar", ProgressBar).update(total=None)
         self.query_one("#progress-line", Static).update(
-          f"no n/N or M% line in the end of {chosen or job.stdout_path() or 'the output file'} (yet)")
+          f"no n/N or M% line in the end of {chosen or job.stdout_path() or 'the output file'}" + (" (yet)" if job.running else ""))
       else:
         self.query_one("#progress-bar", ProgressBar).update(total=max(progress.total, 1), progress=progress.current)
         self.query_one("#progress-line", Static).update(self.progress_text(job, progress, chosen))
@@ -316,6 +317,11 @@ class JobScreen(SplitScreen):
         lines.append("no estimate yet")
       else:
         lines.append(f"(times: {est['source']})")
+    if progress.path and not job.running and not job.state.startswith("PENDING"): # (where it got to: and how it ended)
+      state = job.state.split()[0].rstrip("+") if job.state else "?"
+      exit_code = job.rec.get("ExitCode") or ""
+      lines.append(f"the job ended {state}" + (f" (exit code {exit_code})" if exit_code and exit_code != "0:0" else "")
+                   + (" here" if progress.current < progress.total else ""))
     if progress.path:
       lines.append(f"from {progress.path}" + (" (chosen for this job)" if chosen else ""))
     return "\n".join(lines)

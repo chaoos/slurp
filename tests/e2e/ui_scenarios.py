@@ -27,7 +27,7 @@ from textual.screen import Screen
 from textual.widgets import Markdown, RadioButton, TextArea
 from slurp.ui.app import Slurp
 from slurp.config import config_path, load_config, update_config
-from slurp.cluster.jobs import array_overview, ERR_SIZES, JobProgress, progress_state
+from slurp.cluster.jobs import array_overview, ERR_SIZES, JobProgress, progress_state, set_progress_file
 from slurp.cluster.remote import HEALTH_STYLES
 from slurp.ui.screens.array import ArrayScreen, epoch
 from slurp.ui.screens.categories import CategoriesScreen, CategorizeScreen, NONE
@@ -1994,6 +1994,26 @@ async def open_job(app, pilot, jid):
   t = app.main.query_one("#jobs"); t.focus(); t.move_cursor(row=t.get_row_index(jid)); await pilot.press("enter")
   await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.details["files"], 10)
   return app.screen
+
+async def t_ended_progress(app, pilot):
+  """A job that ended keeps its progress file in the job window: where it got to, and how it ended"""
+  js = await open_job(app, pilot, "9009") # (FAILED; its output ends with step 28/100)
+  line = lambda: str(js.query_one("#progress-line").render())
+  ok = await until(pilot, lambda: "the job ended" in line(), 10)
+  check("an ended job: its progress file's last line, and that it ended there (FAILED, exit code)",
+        ok and "step 28/100 done" in line() and "the job ended FAILED (exit code 1:0) here" in line()
+        and "slurm-9009.out" in line() and js.query_one("#job-progress").display, (line(), repr(js.job.progress)[:300], js.job.state))
+  bar = js.query_one("#progress-bar")
+  check("…the bar where it got to (not 0 of 1)", bar.total == 100 and bar.progress == 28, (bar.total, bar.progress))
+  check("…and another file can be chosen for it", js.query_one("#progress-file").display)
+  wd = js.job.rec["WorkDir"]
+  other = os.path.join(wd, "train.log"); open(other, "w").write("epoch 3\nvalidation 62.5% done\n")
+  set_progress_file("9009", other); js.load()
+  ok = await until(pilot, lambda: "62.5%" in line(), 10)
+  check("a file chosen for an ended job: its progress (M% too)", ok and "(chosen for this job)" in line() and js.query_one("#progress-stdout").display, line())
+  set_progress_file("9009", None); js.load(); await pilot.pause(0.5)
+  for v in list(app.cluster.views): app.close_view(v)
+  await pilot.pause(0.3)
 
 async def t_memory(app, pilot):
   calls = os.path.join(LAB, "srun_calls")

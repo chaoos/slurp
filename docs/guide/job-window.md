@@ -20,7 +20,9 @@ with or without decimals, in a line without `n/N`), and estimates when the job r
 `N`: **on same pace** (the average rate since the job started) and **on current
 pace** (the rate of the last few `n/N` lines), each with the remaining time and the time of day. The
 times are the timestamps of the lines if they have one, else the times slurp
-saw a new `n`. **Progress file…** picks another (log) file for this job, in
+saw a new `n`. A job that ended keeps its progress: the last line of its
+progress file (where it got to) and how it ended ("the job ended FAILED (exit
+code 1:0) here"). **Progress file…** picks another (log) file for this job, in
 the directory browser; **Use stdout** goes back. For a task of an array, the
 progress files of the other tasks are guessed from the name of the chosen one:
 the index of the task (or its job id) in the name marks the task, other digits
