@@ -19,7 +19,7 @@ ITEMS = [
   ("scratch", "Old files in scratch", "X", "scratch"),
   None,
   ("cluster_shell", "Shell on the cluster", "t", "shell"),
-  ("login_dir", "Login directory", "d", "folder"),
+  ("login_dir", "Open a directory…", "d", "folder"),
   ("cluster_drive", "Login directory as a drive", "F", "drive"),
   ("interactive_job", "Interactive job", "i", "interactive"),
   ("new_script", "New job script", "n", "new_script"),

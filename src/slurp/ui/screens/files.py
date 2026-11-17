@@ -9,10 +9,13 @@ from datetime import datetime
 import humanize
 from rich.text import Text
 from textual import on
-from textual.app import SuspendNotSupported
+from textual.app import ComposeResult, SuspendNotSupported
 from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
 from textual.coordinate import Coordinate
-from textual.widgets import DataTable, Input, MarkdownViewer, Static, TextArea
+from textual.screen import ModalScreen
+from textual.widgets import Button, DataTable, Input, MarkdownViewer, OptionList, Static, TextArea
+from textual.widgets.option_list import Option
 from textual.widgets.text_area import Selection
 
 
@@ -21,6 +24,7 @@ from ...cluster.remote import (
   cluster_work, conn, fs_getsize, fs_isdir, fs_isfile, fs_read, fs_scandir, in_background, start_worker, tab_name
 )
 from ...cluster.paths import is_binary, resolve_path
+from ...cluster.storage import drive_dirs
 from .. import icons
 from ..widgets import clean, ClickTable, crumb_title, PathArea
 from .base import SplitScreen
@@ -123,6 +127,108 @@ class MarkdownScreen(SplitScreen):
   def action_back(self):
     self.pop_back()
 
+PLACE_LABELS = {"HOME": "Home", "SCRATCH": "Scratch", "PROJECT": "Project", "STORE": "Store", "WORK": "Work"}
+
+def home_of(cluster):
+  """The login directory of a tab ("" while its session is not ready)"""
+  if cluster.destination:
+    return cluster.connection.home if cluster.connection and cluster.connection.ready else ""
+  return os.path.expanduser("~")
+
+def with_places(node, cluster, then):
+  """then(places) with the places of a tab: [(label, path)] of its home, $SCRATCH, $PROJECT, $STORE and $WORK (those
+  set on the cluster), looked up in the background the first time (then kept with the tab)"""
+  home = home_of(cluster)
+  if cluster.places is not None or not home:
+    then(cluster.places or ([("Home", home)] if home else []))
+    return
+  def found(dirs):
+    if dirs:
+      cluster.places = [(PLACE_LABELS.get(var, var.title()), path) for var, path in dirs]
+    then(cluster.places or [("Home", home)])
+  in_background(node, lambda: drive_dirs(home), found, group="places", name="looking up the directories",
+                connection=cluster.connection if cluster.destination else None)
+
+def expand_path(text, home):
+  """A path typed in: ~ and ~/… are in home, a relative path is relative to home"""
+  text = text.strip()
+  if text == "~" or text.startswith("~/"):
+    text = home + text[1:]
+  elif not text.startswith("/"):
+    text = os.path.join(home, text)
+  return os.path.normpath(text)
+
+class OpenDirScreen(ModalScreen[str | None]):
+  """Which directory to open (dismissed with its path, or None): the places of the tab (home first, the default) or
+  a path typed in"""
+  DEFAULT_CSS = """
+  OpenDirScreen { align: center middle; }
+  #opendir-dialog { width: 80; max-width: 95%; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+  #opendir-title { text-style: bold; margin-bottom: 1; }
+  #opendir-places { height: auto; max-height: 10; margin-bottom: 1; }
+  #opendir-path { width: 1fr; }
+  #opendir-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #opendir-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+  def __init__(self, cluster):
+    super().__init__()
+    self.cluster = cluster
+    self.home = home_of(cluster)
+    self.places = []
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="opendir-dialog"):
+      yield Static(f"Open a directory on {self.cluster.name}", id="opendir-title", markup=False)
+      yield OptionList(id="opendir-places")
+      yield Input(placeholder="or a path (~/… and relative paths are in your home)", id="opendir-path")
+      with Horizontal(id="opendir-buttons"):
+        yield Button("Cancel", id="opendir-cancel", compact=True)
+        yield Button("Open", id="opendir-open", variant="primary", compact=True)
+
+  def on_mount(self):
+    self.show_places([("Home", self.home)], looking=True)
+    self.query_one("#opendir-places", OptionList).focus()
+    with_places(self, self.cluster, self.show_places)
+
+  def show_places(self, places, looking=False):
+    self.places = places
+    options = self.query_one("#opendir-places", OptionList)
+    highlighted = options.highlighted or 0
+    width = max((len(label) for label, _ in places), default=0) + 2
+    options.clear_options()
+    for i, (label, path) in enumerate(places):
+      options.add_option(Option(Text.assemble((label.ljust(width), "bold"), (path, "dim")), id=str(i)))
+    if looking:
+      options.add_option(Option(Text("looking up $SCRATCH, $PROJECT, … ", style="dim italic"), disabled=True))
+    options.highlighted = min(highlighted, len(places) - 1) if places else None
+
+  @on(OptionList.OptionSelected, "#opendir-places")
+  def place_chosen(self, event):
+    event.stop()
+    self.dismiss(self.places[int(event.option.id)][1])
+
+  @on(Button.Pressed, "#opendir-open")
+  @on(Input.Submitted, "#opendir-path")
+  def open_pressed(self, event):
+    event.stop()
+    typed = self.query_one("#opendir-path", Input).value.strip()
+    if typed:
+      self.dismiss(expand_path(typed, self.home))
+      return
+    highlighted = self.query_one("#opendir-places", OptionList).highlighted
+    if highlighted is not None and highlighted < len(self.places):
+      self.dismiss(self.places[highlighted][1])
+
+  @on(Button.Pressed, "#opendir-cancel")
+  def cancel_pressed(self, event):
+    event.stop()
+    self.dismiss(None)
+
+  def action_cancel(self):
+    self.dismiss(None)
+
 DIR_COLUMNS = [("name", "Name"), ("size", "Size"), ("mtime", "Modified")]
 DIR_LIMIT = 20000 # entries listed at most
 
@@ -151,8 +257,12 @@ class DirScreen(SplitScreen):
     self.show_hidden = True
     self.following = False
     self.sort_column, self.sort_reverse = "name", False
+    self.cluster, self.places = None, []
 
   def compose_left(self):
+    with Horizontal(id="dbar"):
+      yield Input(self.path, id="dpath", tooltip="The directory: edit and Enter to go there (~ is your home)")
+      yield Horizontal(id="dplaces")
     yield Static(id="dstatus")
     yield ClickTable(id="dir", cursor_type="row", zebra_stripes=True)
     yield Input(id="dfilter", placeholder="filter names (Enter: apply, Esc: clear)")
@@ -163,9 +273,55 @@ class DirScreen(SplitScreen):
     for key, label in DIR_COLUMNS:
       table.add_column(label, key=key)
     self.timer = self.set_interval(2.0, self.action_reload, pause=True)
-    self.query_one("#dstatus", Static).update(f"{self.path} · listing …")
+    self.query_one("#dstatus", Static).update("listing …")
     self.action_reload()
     table.focus()
+    self.cluster = self.app.cluster if self.app.clusters else None
+    if self.cluster is not None:
+      with_places(self, self.cluster, self.show_places)
+
+  def show_places(self, places):
+    """The places of the tab as buttons next to the path (home, scratch, project, …)"""
+    self.places = places
+    bar = self.query_one("#dplaces", Horizontal)
+    bar.remove_children()
+    bar.mount_all(Button(label, id=f"dplace-{i}", compact=True, tooltip=path) for i, (label, path) in enumerate(places))
+
+  @on(Button.Pressed, "#dplaces Button")
+  def place_pressed(self, event):
+    event.stop()
+    self.go(self.places[int(event.button.id.removeprefix("dplace-"))][1])
+
+  @on(Input.Submitted, "#dpath")
+  def path_submitted(self, event):
+    event.stop()
+    home = home_of(self.cluster) if self.cluster is not None else ""
+    path = expand_path(event.value, home or "/")
+    event.input.value = self.path
+    self.query_one("#dir").focus()
+    if path != self.path:
+      self.go(path)
+
+  def go(self, path):
+    """To another directory (from the path or a place): here (← comes back), in place while picking a file; a file
+    opens in a subtab"""
+    if self.pick is None:
+      open_path(self.app, self.base_crumbs, path, bases=self.bases, env=self.env, here=True)
+      return
+    def went(isdir):
+      if isdir:
+        self.enter(path)
+      elif isdir is not None:
+        self.notify(f"{path} is not a directory", severity="warning")
+    in_background(self, lambda: fs_isdir(path), went, group="go")
+
+  def enter(self, path):
+    """Show another directory in this view (picking a file)"""
+    self.path = os.path.normpath(path)
+    self.crumbs = [*self.base_crumbs, self.path.rstrip("/") + "/"]
+    self.sub_title = crumb_title(self.crumbs)
+    self.query_one("#dpath", Input).value = self.path
+    self.action_reload()
 
   def scan(self):
     entries = []
@@ -229,7 +385,7 @@ class DirScreen(SplitScreen):
         table.move_cursor(row=table.get_row_index(current))
       except Exception:
         pass
-    status = f"{self.path} · {len(shown)} of {len(self.entries)} entries"
+    status = f"{len(shown)} of {len(self.entries)} entries"
     if self.pick is not None:
       status = "choose a file (Enter or click) · Esc: cancel · " + status
     if len(self.entries) >= DIR_LIMIT:
@@ -244,10 +400,7 @@ class DirScreen(SplitScreen):
     if self.pick is not None:
       entry = next((e for e in self.entries if e["name"] == name), None)
       if name == ".." or entry and entry["dir"]:
-        self.path = os.path.normpath(path)
-        self.crumbs = [*self.base_crumbs, self.path.rstrip("/") + "/"]
-        self.sub_title = crumb_title(self.crumbs)
-        self.action_reload()
+        self.enter(path)
       else:
         pick, self.pick = self.pick, None
         self.app.pop_screen()
@@ -273,8 +426,11 @@ class DirScreen(SplitScreen):
     self.populate()
 
   def action_back(self):
-    search = self.query_one("#dfilter", Input)
-    if search.has_class("visible"):
+    search, path = self.query_one("#dfilter", Input), self.query_one("#dpath", Input)
+    if path.has_focus: # (Esc while editing the path: as it was)
+      path.value = self.path
+      self.query_one("#dir").focus()
+    elif search.has_class("visible"):
       search.remove_class("visible")
       self.pattern = ""
       self.populate()

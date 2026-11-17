@@ -57,6 +57,7 @@ class ClusterSession:
   loaded: bool = False
   listed: bool = False                 # the list of the current load is shown, the files of its jobs are being read
   drive: object | None = None          # mounts.LocalDrive: the login directory as a drive on this machine
+  places: list | None = None           # [(label, path)]: home, $SCRATCH, $PROJECT, … on the cluster (None: not looked up)
   loader: object | None = None         # worker loading the job list
   accounts: list | None = None         # Slurm accounts of the user (sacctmgr), None: not asked yet
   since_value: str = "1d"              # finished jobs listed: within this time (e.g. 1d, 3d12h, 2w, 1mo), "off": none

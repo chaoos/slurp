@@ -26,7 +26,7 @@ from ..cluster import slurm as sl
 
 from ..state import ClusterSession, collector, is_local_destination, log, View
 from ..cluster.remote import (
-  command_exists, connection_health, CURRENT, HEALTH_STYLES, in_background, RemoteSSH, run, run_cmd, SLURM_ENV, start_worker
+  command_exists, connection_health, CURRENT, fs_isdir, fs_isfile, HEALTH_STYLES, in_background, RemoteSSH, run, run_cmd, SLURM_ENV, start_worker
 )
 from ..cluster.jobs import (
   annotate, array_task_id, compress_array_ids, duration_text, fmt_time, is_time, load_jobs, pace_eta, progress_for_job, slurm_accounts
@@ -38,7 +38,7 @@ from .widgets import ClickTable, err_text, SPINNING, STATE_STYLES, state_text, u
 from .terminal import SWITCH_KEY, TerminalSession, TerminalView
 from .screens.dialogs import ConfirmScreen, InteractiveJobScreen
 from .screens.base import SplitScreen
-from .screens.files import open_path
+from .screens.files import DirScreen, home_of, open_path, OpenDirScreen
 from .screens import hdf5, core # noqa: F401 (they register the views of HDF5 files and core dumps, in this order)
 from .screens.shell import TerminalHelpScreen, TerminalScreen
 from .screens.job import JobScreen
@@ -205,7 +205,12 @@ class Slurp(App):
   #text { height: 1fr; }
   #search, #dfilter, #jfilter { dock: bottom; display: none; }
   #search.visible, #dfilter.visible, #jfilter.visible { display: block; }
-  #dstatus { height: 1; padding: 0 1; background: $panel; }
+  #dstatus { height: 1; padding: 0 1; background: $panel; color: $text-muted; }
+  #dbar { height: 1; background: $panel; }
+  #dpath { width: 1fr; height: 1; border: none; padding: 0 1; background: $boost; }
+  #dpath:focus { background: $surface; }
+  #dplaces { width: auto; height: 1; }
+  #dplaces Button { margin-left: 1; min-width: 6; }
   #dir { height: 1fr; }
   #hstatus, #hpage { height: 1; padding: 0 1; background: $panel; }
   #hbody { height: 1fr; }
@@ -231,7 +236,7 @@ class Slurp(App):
     Binding("r", "reload", "Reload"),
     # (in the menu, with their keys: not in the footer)
     Binding("t", "cluster_shell", "Shell", show=False),
-    Binding("d", "login_dir", "Home dir", show=False),
+    Binding("d", "login_dir", "Open a directory", show=False),
     Binding("F", "cluster_drive", "Drive", show=False),
     Binding("W", "web_access", "Web", show=False),
     Binding("i", "interactive_job", "Interactive job", show=False),
@@ -1336,16 +1341,30 @@ class Slurp(App):
       in_background(self, lambda: holder.control("info", text=text), lambda _: None, group="web-info")
 
   def action_login_dir(self):
-    """Browse the login directory of the active cluster."""
+    """Open a directory of the active cluster (home, $SCRATCH, $PROJECT, … or a path, asked in a dialog) in a new
+    subtab: each time another one"""
     cluster = self.cluster
     if cluster.destination and (cluster.connection is None or not cluster.connection.ready):
       self.notify(f"{cluster.name}: log in first", severity="warning")
       return
-    path = cluster.connection.home if cluster.connection else os.path.expanduser("~")
-    if not path:
-      self.notify(f"{cluster.name}: login directory is not available yet", severity="warning")
+    home = home_of(cluster)
+    if not home:
+      self.notify(f"{cluster.name}: the login directory is not available yet", severity="warning")
       return
-    open_path(self, [cluster.name], path, [path])
+    def chosen(path):
+      if not path or cluster is not self.cluster:
+        return
+      def work():
+        if fs_isdir(path):
+          type(self).next_dir_view += 1
+          key = f"dir {self.next_dir_view}" # (a key of its own: never an open subtab instead)
+          return lambda: self.in_new_subtab(lambda: self.open_window(DirScreen([cluster.name], path, bases=[home])), key=key)
+        return lambda: self.notify(f"{path} is not a directory" if fs_isfile(path) else f"{path} does not exist",
+                                   severity="warning")
+      in_background(self, work, lambda show: show() if show else None, group="open", name=f"opening {path}")
+    self.push_screen(OpenDirScreen(cluster), chosen)
+
+  next_dir_view = 0
 
   def restart_shell(self):
     if not self.shell:

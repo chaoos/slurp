@@ -3,8 +3,8 @@
 The top line of every window is the header: **☰ Menu** (`F10`) at its left,
 the title of slurp with its version, and **?** (the help of the window) at its
 right. The menu has what slurp does for the tab, each with its key (the job
-list, health, quota, old files in scratch, shells, the login directory and
-the drive, interactive job, new job script, categories, this slurp in your
+list, health, quota, old files in scratch, shells, a directory (home, scratch,
+project, … or a path) and the drive, interactive job, new job script, categories, this slurp in your
 browser, the guides, the rule catalogue, options, about). Under the header
 are the tabs, then the subtabs. The toolbar of the job list has **Reload**,
 the time window of finished jobs, whose jobs are listed and **group arrays**.

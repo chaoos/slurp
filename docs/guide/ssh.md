@@ -71,7 +71,7 @@ list as it was loaded; `r` (or **Reload**) loads it again. While a list
 loads, the old one stays visible, the footer shows the progress, and `a` (or
 the **Abort** button, which replaces **Reload** meanwhile) stops it.
 **Shell on the cluster** (in the menu, or `t`) opens a login shell on the cluster of the tab in a subtab. The **+** tab button adds another local or remote connection.
-`d` opens the login directory in the directory browser. Each tab has a `✕`
+**Open a directory…** (in the menu, or `d`) asks which directory: your home (the default), scratch, project, … (`$SCRATCH`, `$PROJECT`, `$STORE` and `$WORK`, those set on the cluster) or a path, and opens it in a new subtab, each time another one. Its path at the top is an input (edit it, Enter goes there) with buttons for home, scratch, project, … next to it. Each tab has a `✕`
 that closes it (after asking). Notifications name the tab they belong to.
 
 **Interactive job** (in the menu, or `i`) shows an `sbatch` command for a job that only

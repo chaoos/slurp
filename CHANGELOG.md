@@ -6,6 +6,12 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- **Open a directory…** (the menu, `d`; was Login directory) asks which one:
+  your home (the default), scratch, project, … (`$SCRATCH`, `$PROJECT`,
+  `$STORE`, `$WORK`, those set on the cluster) or a path. Each time in a new
+  subtab. The directory view shows its path as an input (edit it, Enter goes
+  there) with buttons for home, scratch, project, … next to it.
+
 ## 0.8.1 (beta), 2026-11-17
 
 - On PyPI as `slurp-ui`: `pip install "slurp-ui[all]"` (or `pipx install`); the
