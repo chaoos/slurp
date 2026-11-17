@@ -6,6 +6,14 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- New rule S10: Slurm variables the job does not get. Slurm sets some only
+  when the job asks for something (`$SLURM_ARRAY_TASK_ID` in arrays,
+  `$SLURM_CPUS_PER_TASK` with `--cpus-per-task`, `$SLURM_MEM_PER_NODE` with
+  `--mem`, …): used without it they are empty (a warning for a job, a hint
+  for a script, which may still get it on the command line); a `SLURM_`
+  name close to one Slurm sets is a typo. A default (`${…:-1}`), a test
+  (`-n`) or the script setting it is fine. S06 knows the variables only the
+  job's environment has (`SLURMD_NODENAME`, `ENVIRONMENT`, …).
 - New rule Q07: the job's logs (`--output`, `--error`, or the default
   `slurm-%j.out` in the working directory) are in `$HOME`, `$PROJECT` or
   `$STORE`, not on `$SCRATCH`; the fix names the scratch path to use (a

@@ -13,7 +13,7 @@ The rules, by category:
 
 | | Category | Examples |
 |---|---|---|
-| S | Script syntax and hygiene | Windows line endings, `#SBATCH` after the first command (ignored), misspelled options, `$VARS` in `#SBATCH`, `cd` without a check, background programs without `wait` |
+| S | Script syntax and hygiene | Windows line endings, `#SBATCH` after the first command (ignored), misspelled options, `$VARS` in `#SBATCH`, `cd` without a check, background programs without `wait`, variables nobody sets, Slurm variables the job does not get (`$SLURM_ARRAY_TASK_ID` without `--array`, `$SLURM_CPUS_PER_TASK` without `--cpus-per-task`) or misspelled |
 | R | Requests that make no sense | `--mem=4` (4 MB), `--time=2:00` (2 minutes), more CPUs/GPUs/memory than a node has, time over the partition's maximum, unknown partition or account |
 | B | Beginner mistakes | several nodes but no `srun`, arrays that never use `$SLURM_ARRAY_TASK_ID`, logs without `%j`, results left in the node's `/tmp`, `srun` in a loop, the same job twice, dependencies that can never be met, heavy work on the login node |
 | P | Paths, files, programs | the log directory does not exist (the job fails without a log), missing directories and inputs, programs missing or not executable, built for another CPU, shared libraries not found, GPU code for other GPUs, changed since submission, the program of many tasks in home or project instead of scratch |

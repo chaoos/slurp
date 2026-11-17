@@ -125,7 +125,9 @@ def s05(ctx):
 KNOWN_VARS = {"HOME", "USER", "PATH", "PWD", "SHELL", "HOSTNAME", "LANG", "TMPDIR", "OLDPWD", "RANDOM", "SECONDS",
               "LD_LIBRARY_PATH", "PYTHONPATH", "OMP_NUM_THREADS", "BASH_SOURCE", "LINENO", "PPID", "UID", "IFS",
               "CUDA_VISIBLE_DEVICES", "SCRATCH", "LOGNAME", "BASH_REMATCH", "FUNCNAME", "PIPESTATUS", "MODULEPATH",
-              "LOADEDMODULES", "CONDA_PREFIX", "VIRTUAL_ENV", "REPLY", "OPTARG", "OPTIND", "EPOCHSECONDS"}
+              "LOADEDMODULES", "CONDA_PREFIX", "VIRTUAL_ENV", "REPLY", "OPTARG", "OPTIND", "EPOCHSECONDS",
+              # (only the job's environment has these: Slurm and the GPU plugins set them on the node)
+              "ENVIRONMENT", "SLURMD_NODENAME", "ROCR_VISIBLE_DEVICES", "GPU_DEVICE_ORDINAL", "ZE_AFFINITY_MASK"}
 
 @rule("S06", WARNING, "Variables that are never set",
       "Variables the script uses but nobody sets: not the script, not Slurm (SLURM_*), not the login environment. "
@@ -143,7 +145,7 @@ def s06(ctx):
     t = re.sub(r"'[^']*'", "''", t) # nothing is expanded in single quotes
     for m in re.finditer(r"\$\{?([A-Za-z_]\w*)", t):
       name = m.group(1)
-      if name in known or name.startswith(("SLURM_", "SBATCH_", "SRUN_", "PMI_", "OMPI_", "MPI", "BASH")) or name in reported:
+      if name in known or name.startswith(("SLURM_", "SLURMD_", "SBATCH_", "SRUN_", "PMI_", "OMPI_", "MPI", "BASH")) or name in reported:
         continue
       close = difflib.get_close_matches(name, sorted(known), 1, 0.8)
       if close or (ctx.facts and ctx.facts.env):
@@ -151,6 +153,73 @@ def s06(ctx):
         yield F("S06", f"${name} is not set" + (f" (did you mean ${close[0]}?)" if close else
                                                  " by the script or the login environment"), line,
                 WARNING if close else INFO)
+
+# The variables Slurm sets in a job (sbatch and srun, OUTPUT ENVIRONMENT VARIABLES); and the ones only set when the
+# job asks for something: {variable: (options that make Slurm set it)}
+SLURM_JOB_VARS = {
+  "SLURM_ARRAY_JOB_ID", "SLURM_ARRAY_TASK_COUNT", "SLURM_ARRAY_TASK_ID", "SLURM_ARRAY_TASK_MAX", "SLURM_ARRAY_TASK_MIN",
+  "SLURM_ARRAY_TASK_STEP", "SLURM_CLUSTER_NAME", "SLURM_CONTAINER", "SLURM_CONTAINER_ID", "SLURM_CPU_BIND",
+  "SLURM_CPU_BIND_LIST", "SLURM_CPU_BIND_TYPE", "SLURM_CPU_BIND_VERBOSE", "SLURM_CPU_FREQ_REQ", "SLURM_CPUS_ON_NODE",
+  "SLURM_CPUS_PER_GPU", "SLURM_CPUS_PER_TASK", "SLURM_DIST_PLANESIZE", "SLURM_DISTRIBUTION", "SLURM_EXPORT_ENV",
+  "SLURM_GPU_BIND", "SLURM_GPU_FREQ", "SLURM_GPUS", "SLURM_GPUS_ON_NODE", "SLURM_GPUS_PER_NODE", "SLURM_GPUS_PER_SOCKET",
+  "SLURM_GPUS_PER_TASK", "SLURM_GTIDS", "SLURM_HET_SIZE", "SLURM_JOB_ACCOUNT", "SLURM_JOB_CPUS_PER_NODE",
+  "SLURM_JOB_DEPENDENCY", "SLURM_JOB_END_TIME", "SLURM_JOB_GID", "SLURM_JOB_GPUS", "SLURM_JOB_GROUP", "SLURM_JOB_ID",
+  "SLURM_JOB_LICENSES", "SLURM_JOB_NAME", "SLURM_JOB_NODELIST", "SLURM_JOB_NUM_NODES", "SLURM_JOB_PARTITION",
+  "SLURM_JOB_QOS", "SLURM_JOB_RESERVATION", "SLURM_JOB_START_TIME", "SLURM_JOB_STDERR", "SLURM_JOB_STDIN",
+  "SLURM_JOB_STDOUT", "SLURM_JOB_UID", "SLURM_JOB_USER", "SLURM_JOBID", "SLURM_LAUNCH_NODE_IPADDR", "SLURM_LOCALID",
+  "SLURM_MEM_BIND", "SLURM_MEM_PER_CPU", "SLURM_MEM_PER_GPU", "SLURM_MEM_PER_NODE", "SLURM_MPI_TYPE", "SLURM_NNODES",
+  "SLURM_NODE_ALIASES", "SLURM_NODEID", "SLURM_NODELIST", "SLURM_NPROCS", "SLURM_NTASKS", "SLURM_NTASKS_PER_CORE",
+  "SLURM_NTASKS_PER_GPU", "SLURM_NTASKS_PER_NODE", "SLURM_NTASKS_PER_SOCKET", "SLURM_OVERCOMMIT", "SLURM_PRIO_PROCESS",
+  "SLURM_PROCID", "SLURM_PROFILE", "SLURM_RESTART_COUNT", "SLURM_SHARDS_ON_NODE", "SLURM_SRUN_COMM_HOST",
+  "SLURM_SRUN_COMM_PORT", "SLURM_STEP_ID", "SLURM_STEP_LAUNCHER_PORT", "SLURM_STEP_NODELIST", "SLURM_STEP_NUM_NODES",
+  "SLURM_STEP_NUM_TASKS", "SLURM_STEP_TASKS_PER_NODE", "SLURM_STEPID", "SLURM_SUBMIT_DIR", "SLURM_SUBMIT_HOST",
+  "SLURM_TASK_PID", "SLURM_TASKS_PER_NODE", "SLURM_THREADS_PER_CORE", "SLURM_TOPOLOGY_ADDR", "SLURM_TOPOLOGY_ADDR_PATTERN",
+  "SLURM_TRES_PER_TASK", "SLURM_UMASK", "SLURM_WORKING_DIR", "SLURM_CONF", "SLURM_HINT", "SLURM_EXCLUSIVE",
+}
+SLURM_CONDITIONAL = {
+  **{v: ("array",) for v in ("SLURM_ARRAY_JOB_ID", "SLURM_ARRAY_TASK_ID", "SLURM_ARRAY_TASK_COUNT", "SLURM_ARRAY_TASK_MIN",
+                             "SLURM_ARRAY_TASK_MAX", "SLURM_ARRAY_TASK_STEP")},
+  "SLURM_CPUS_PER_TASK": ("cpus-per-task",), "SLURM_NTASKS_PER_NODE": ("ntasks-per-node",),
+  "SLURM_NTASKS_PER_SOCKET": ("ntasks-per-socket",), "SLURM_NTASKS_PER_CORE": ("ntasks-per-core",),
+  "SLURM_NTASKS_PER_GPU": ("ntasks-per-gpu",), "SLURM_GPUS_PER_TASK": ("gpus-per-task",),
+  "SLURM_GPUS_PER_NODE": ("gpus-per-node",), "SLURM_GPUS_PER_SOCKET": ("gpus-per-socket",), "SLURM_GPUS": ("gpus",),
+  "SLURM_CPUS_PER_GPU": ("cpus-per-gpu",), "SLURM_MEM_PER_GPU": ("mem-per-gpu",), "SLURM_MEM_PER_NODE": ("mem",),
+  "SLURM_MEM_PER_CPU": ("mem-per-cpu",), "SLURM_JOB_RESERVATION": ("reservation",),
+  "SLURM_JOB_DEPENDENCY": ("dependency",), "SLURM_JOB_LICENSES": ("licenses",),
+}
+
+@rule("S10", WARNING, "Slurm variables this job does not get",
+      "$SLURM_… variables that Slurm sets only when the job asks for something (SLURM_ARRAY_TASK_ID: only in arrays, "
+      "SLURM_CPUS_PER_TASK: only with --cpus-per-task, SLURM_MEM_PER_NODE: only with --mem, …), used where it does "
+      "not; or a SLURM_ name Slurm does not set that is close to one it does (a typo). They are not in the login "
+      "environment either, only in the job's.",
+      "The variable is empty in the job: OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK sets nothing (OpenMP then takes every "
+      "core of the node), input_${SLURM_ARRAY_TASK_ID}.dat is input_.dat, a typo is empty everywhere.",
+      "Request it (#SBATCH --cpus-per-task=…, --array=…), give a default (${SLURM_CPUS_PER_TASK:-1}), or fix the name.",
+      "#SBATCH --nodes=1\nexport OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK   # empty: no --cpus-per-task\n"
+      "#SBATCH --cpus-per-task=16                      # then it is 16")
+def s10(ctx):
+  reported = set(ctx.script.assignments()) # (set by the script itself)
+  tested = set(re.findall(r"-[nz]\s+\"?\$\{?(SLURM_\w+)", ctx.script.text)) # (a script that asks whether it is set)
+  for line, t in ctx.script.code_lines():
+    t = re.sub(r"'[^']*'", "''", t) # (nothing is expanded in single quotes)
+    for m in re.finditer(r"\$\{?(SLURM_\w+)(:?[-=?+])?", t):
+      name, default = m.group(1), m.group(2)
+      if name in reported or (default and m.group(0).startswith("${")):
+        continue
+      if name not in SLURM_JOB_VARS:
+        close = difflib.get_close_matches(name, sorted(SLURM_JOB_VARS), 1, 0.85)
+        if close:
+          reported.add(name)
+          yield F("S10", f"${name} is no variable Slurm sets (did you mean ${close[0]}?)", line)
+        continue
+      needs = SLURM_CONDITIONAL.get(name)
+      if needs and name not in tested and not any(ctx.opt(o) is not None for o in needs):
+        reported.add(name)
+        known = ctx.job is not None # (a job: how it was submitted is known; a script may still get it from the command line)
+        yield F("S10", f"${name} is only set with --{needs[0]}, which this {'job' if known else 'script'} does not have"
+                + ("" if known else " (unless you submit with it)") + ": it is empty",
+                line, WARNING if known else INFO, snippet=f"#SBATCH --{needs[0]}=…")
 
 @rule("S07", WARNING, "cd without a check",
       "cd to a directory without set -e and without || exit.",
