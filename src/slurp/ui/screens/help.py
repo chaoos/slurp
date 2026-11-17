@@ -20,7 +20,7 @@ VIEW_HELP = {
 Your queued and running jobs and those that ended recently, of the active tab's cluster.
 
 - **Columns:** a click on a header sorts by it (again: the other way). **Progress** comes from `n/N` lines in the
-  output; **Done: current pace** estimates the end at the recent rate (the job window also shows it at the average rate).
+  output (or `M%`, 0 to 100, in lines without one); **Done: current pace** estimates the end at the recent rate (the job window also shows it at the average rate).
   **Checks** shows errors ✖ and warnings ⚠ the checks found for the job; **Err** marks error files that are not empty.
 - **Arrays** with ten or more tasks are one row: its state is the mix of the tasks' states (`30R 10PD 100CD`).
   `Space` (or ▸) lists the tasks under it, Enter opens the array window. `g` switches grouping off and on.
@@ -54,7 +54,7 @@ Everything about one job.
   threads run; **Fixed copy…** writes a copy of the script with the safe fixes; **What changed** (failed jobs)
   compares with the last run that worked.
 - **Memory** (running jobs): Query current memory (CPU and GPU), and repeated queries with plots.
-- **Progress:** the latest `n/N` line with two estimates of the end; **Progress file…** picks another log file.
+- **Progress:** the latest `n/N` (or `M%`) line with two estimates of the end; **Progress file…** picks another log file.
 - **Files:** output, error, script, working directory and files the job names; Enter opens one.
 - **Steps** of the job; for a running job **Run on the nodes** (a command on every node, or one) and **Shell** (`s`).
 """),

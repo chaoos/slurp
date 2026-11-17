@@ -11,7 +11,7 @@ from datetime import datetime
 
 from . import slurm as sl
 
-from ..state import log, OLD_STEP_NAMES, PROGRESS_PATTERN, PROGRESS_TAIL_BYTES, PROGRESS_TAIL_LINES
+from ..state import log, OLD_STEP_NAMES, PROGRESS_PATTERN, PROGRESS_PERCENT, PROGRESS_TAIL_BYTES, PROGRESS_TAIL_LINES
 from .remote import conn, fs_getsize, fs_read, fs_scandir, run, run_cmd, run_many, SLURM_ENV, tab_name
 from .paths import existing_files, expand_vars, job_vars, read_text
 
@@ -60,6 +60,12 @@ class JobProgress:
   points: list = field(default_factory=list) # (epoch seconds or None, n, N) of the n/N lines in the tail, oldest first
   path: str = ""                             # the file it was read from
   estimate: dict = field(default_factory=dict)
+  percent: bool = False                      # an M% line (current: M, total: 100), not n/N
+
+  @property
+  def text(self):
+    """3/10, or 45.5%"""
+    return f"{self.current:g}%" if self.percent else f"{self.current}/{self.total}"
 
 PROGRESS = {} # (tab, job id) -> {"file": progress file chosen for the job or None, "points": [(epoch seen, n, N)]}
 
@@ -692,7 +698,8 @@ def err_status(job, sizes=None):
 
 def output_progress(path, tail=None):
   """Latest valid n/N entry in the tail of a file (only its last PROGRESS_TAIL_BYTES are read, here unless given),
-  with the n/N points of the tail and their timestamps (if the lines have one)"""
+  with the n/N points of the tail and their timestamps (if the lines have one). A line without n/N may say M% (0 to
+  100, integer or not): M of 100 (a line with both, as tqdm writes: its n/N, which is exact)"""
   if not path:
     return None
   if tail is None:
@@ -703,25 +710,35 @@ def output_progress(path, tail=None):
       return None
   latest, points = None, []
   for line in tail.splitlines()[-PROGRESS_TAIL_LINES * 20:]:
+    found = None
     for match in reversed(list(PROGRESS_PATTERN.finditer(line))):
       try:
         current, total = map(int, match.groups())
       except ValueError: # extremely long digit sequences
         continue
       if current <= total:
-        latest = (current, total, line.strip())
-        points.append((line_time(line), current, total))
+        found = (current, total, False)
         break
+    if found is None:
+      for match in reversed(list(PROGRESS_PERCENT.finditer(line))):
+        value = float(match.group(1))
+        if value <= 100:
+          found = (int(value) if value.is_integer() else value, 100, True)
+          break
+    if found is not None:
+      latest = (*found, line.strip())
+      points.append((line_time(line), found[0], found[1]))
   if latest is None:
     return None
-  return JobProgress(*latest, points=points[-50:], path=path)
+  current, total, percent, line = latest
+  return JobProgress(current, total, line, points=points[-50:], path=path, percent=percent)
 
 PROGRESS_CHUNK = 200 # files per command that reads the progress
 PROGRESS_LINES_SCRIPT = (
-  # for each file: a marker, then the last lines of its tail that have an n/N (\r too ends a line, as progress bars
-  # write), so only these come back over the connection, not the whole tails
+  # for each file: a marker, then the last lines of its tail that have an n/N or M% (\r too ends a line, as progress
+  # bars write), so only these come back over the connection, not the whole tails
   'for f; do printf "\\n%s\\n" "$0"; tail -c {bytes} -- "$f" 2>/dev/null | tr "\\r" "\\n" | tail -n {lines} '
-  '| grep -E "[0-9][[:space:]]*/[[:space:]]*[0-9]" | tail -n 60; done')
+  '| grep -E "[0-9][[:space:]]*/[[:space:]]*[0-9]|[0-9][[:space:]]?%" | tail -n 60; done')
 
 def progress_tails(paths):
   """The progress lines of many files in one round trip and few processes: {path: text with the last n/N lines

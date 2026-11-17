@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Progress also from `M%` lines (0 to 100, integer or not: `45%`,
+  `12.5 %`), where a line has no `n/N`; shown as a percentage. A line with
+  both (as tqdm writes) gives its `n/N`.
 - Submit… in the script view shows the `sbatch` command to edit, with an
   **Array** field for an array job (`1-100`, `0-9:2`, `1,5,7`, `%50`): it
   writes the command's `--array` (an edited command keeps its other edits),

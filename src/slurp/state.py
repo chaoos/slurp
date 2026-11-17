@@ -14,6 +14,7 @@ TAIL_BYTES = 1024*1024 # files larger than this are shown from their end (more o
 PROGRESS_TAIL_BYTES = 64*1024
 PROGRESS_TAIL_LINES = 30
 PROGRESS_PATTERN = re.compile(r"(?<!\d)(\d+)\s*/\s*(\d+)(?!\d)")
+PROGRESS_PERCENT = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d+)?)\s?%") # M% (0 to 100, integer or not), where no n/N is
 STEP_NAME = "slurp"  # job name of the steps that run commands on the nodes
 OLD_STEP_NAMES = (STEP_NAME, "slurm_tui") # also of earlier versions
 PRESETS = {

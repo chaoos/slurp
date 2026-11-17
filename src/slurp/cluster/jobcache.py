@@ -27,14 +27,16 @@ def job_data(job):
   progress = job.progress
   return {"rec": job.rec, "steps": job.steps, "queued": job.queued, "reason": job.reason, "command": job.command,
           "err": list(job.err), "script": job.script,
-          "progress": None if progress is None else {"current": progress.current, "total": progress.total, "line": progress.line}}
+          "progress": None if progress is None else {"current": progress.current, "total": progress.total, "line": progress.line,
+                                                   "percent": progress.percent}}
 
 def job_from(data):
   p = data.get("progress")
   return Job(rec=dict(data["rec"]), steps=list(data.get("steps") or []), queued=bool(data.get("queued")),
              reason=data.get("reason") or "", command=data.get("command") or "", err=tuple(data.get("err") or (None, 0)),
              script=data.get("script"), annotated=True,
-             progress=JobProgress(int(p["current"]), int(p["total"]), p.get("line") or "") if p else None)
+             progress=JobProgress(p["current"] if p.get("percent") else int(p["current"]), int(p["total"]), p.get("line") or "",
+                                  percent=bool(p.get("percent"))) if p else None)
 
 def save(cluster, jobs=None):
   """Write the tab's list (jobs: the list just loaded; default: what the tab has) and its categories"""

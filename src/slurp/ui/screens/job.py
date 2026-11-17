@@ -121,7 +121,7 @@ class JobScreen(SplitScreen):
         with Horizontal(id="progress-top"):
           yield ProgressBar(total=1, show_eta=False, id="progress-bar")
           yield Button("Progress file…", id="progress-file", compact=True,
-                       tooltip="choose the (log) file checked for n/N lines, for this job")
+                       tooltip="choose the (log) file checked for n/N or M% lines, for this job")
           yield Button("Use stdout", id="progress-stdout", compact=True)
         yield Static(id="progress-line", markup=False)
         yield Static(id="progress-age")
@@ -223,7 +223,7 @@ class JobScreen(SplitScreen):
       if progress is None:
         self.query_one("#progress-bar", ProgressBar).update(total=None)
         self.query_one("#progress-line", Static).update(
-          f"no n/N line in the end of {chosen or job.stdout_path() or 'the output file'} (yet)")
+          f"no n/N or M% line in the end of {chosen or job.stdout_path() or 'the output file'} (yet)")
       else:
         self.query_one("#progress-bar", ProgressBar).update(total=max(progress.total, 1), progress=progress.current)
         self.query_one("#progress-line", Static).update(self.progress_text(job, progress, chosen))
@@ -258,7 +258,8 @@ class JobScreen(SplitScreen):
     self.show_progress_age()
 
   def progress_text(self, job, progress, chosen):
-    lines = [f"{progress.current}/{progress.total} ({progress.current / max(progress.total, 1):.0%}): {progress.line}"]
+    share = "" if progress.percent else f" ({progress.current / max(progress.total, 1):.0%})"
+    lines = [f"{progress.text}{share}: {progress.line}"]
     est = progress.estimate
     if job.running and progress.current < progress.total:
       if "overall" in est:

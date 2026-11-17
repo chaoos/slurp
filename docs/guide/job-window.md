@@ -15,7 +15,8 @@ array task, **Run array** submits the array again with another range (start,
 stop, step) and warns when the range covers tasks that are running, queued or
 completed.
 
-The progress shows the latest `n/N` line, and estimates when the job reaches
+The progress shows the latest `n/N` line (or `M%`: a number from 0 to 100,
+with or without decimals, in a line without `n/N`), and estimates when the job reaches
 `N`: **on same pace** (the average rate since the job started) and **on current
 pace** (the rate of the last few `n/N` lines), each with the remaining time and the time of day. The
 times are the timestamps of the lines if they have one, else the times slurp
