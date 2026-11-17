@@ -496,12 +496,29 @@ class Slurp(App):
       self.cluster.views.append(view)
     self.show_view(view)
 
+  new_subtab = None # (while in_new_subtab runs: the key of the subtab a window opens in)
+
+  def in_new_subtab(self, show, key=""):
+    """Run show (that opens a window): the window opens in a subtab of its own, also from within a subtab (every
+    file and directory view, see open_path); a subtab that shows key already is shown instead"""
+    view = self.find_view(key)
+    if view is not None:
+      self.show_view(view)
+      return
+    self.new_subtab = key
+    try:
+      show()
+    finally:
+      self.new_subtab = None
+
   def open_window(self, screen, title=""):
-    """A window: from the job list it opens as a subtab, within a subtab it opens on top of it (← goes back)"""
-    if self.current_mode in ("_default", "overview") and not isinstance(self.screen, ModalScreen):
+    """A window: from the job list it opens as a subtab, within a subtab it opens on top of it (← goes back); in a
+    subtab of its own in in_new_subtab"""
+    new = self.new_subtab is not None
+    if (new or self.current_mode in ("_default", "overview")) and not isinstance(self.screen, ModalScreen) and self.clusters:
       crumbs = getattr(screen, "crumbs", None)
       self.open_view(title or (crumbs[-1] if crumbs else "") or type(screen).__name__, lambda: screen,
-                     icon=getattr(screen, "icon_name", ""))
+                     key=self.new_subtab or "", icon=getattr(screen, "icon_name", ""))
     else:
       self.push_screen(screen)
 

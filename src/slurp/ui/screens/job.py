@@ -738,15 +738,16 @@ class JobScreen(SplitScreen):
   def open_entry(self, e):
     bases, env = self.context()
     crumbs = ["Jobs", self.job.jid]
+    key = f"text {self.job.jid} {e.kind} {e.label}" # (a text of the job, as a file: a subtab of its own, once)
     if e.kind == "sacct":
       job = self.job
-      in_background(self, lambda: sacct_all(job), lambda text: self.app.open_window(
-        FileScreen([*crumbs, e.label], text=text, refresher=lambda: sacct_all(job), bases=bases, env=env)) if text is not None else None,
-        group="sacct")
+      in_background(self, lambda: sacct_all(job), lambda text: self.app.in_new_subtab(lambda: self.app.open_window(
+        FileScreen([*crumbs, e.label], text=text, refresher=lambda: sacct_all(job), bases=bases, env=env)), key=key)
+        if text is not None else None, group="sacct")
     elif e.path:
       open_path(self.app, crumbs, e.path, bases, env, follow=self.job.running and e.kind in ("stdout", "stderr", "progress"))
     elif e.text is not None:
-      self.app.open_window(FileScreen([*crumbs, e.label], text=e.text, bases=bases, env=env))
+      self.app.in_new_subtab(lambda: self.app.open_window(FileScreen([*crumbs, e.label], text=e.text, bases=bases, env=env)), key=key)
 
   @on(OptionList.OptionSelected, "#files")
   def file_selected(self, event):

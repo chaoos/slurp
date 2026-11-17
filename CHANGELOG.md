@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Files and directories always open in a subtab of their own, wherever they
+  are opened (the files of a job, a path in a file, a file in a directory);
+  where they were opened stays as it was. Opening one again shows its
+  subtab. A folder entered in a directory view stays in that subtab (`←`
+  goes back).
 - A plain button (Close, Cancel, a tab not shown, …) has a box of its own, a
   shade lighter than the window, like the coloured ones: before, only its
   word showed, and the coloured button next to it looked much bigger.

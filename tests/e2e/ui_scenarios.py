@@ -1737,10 +1737,17 @@ async def t_subtabs(app, pilot):
   check("a job opens as a subtab", ok and app.current_mode != "_default" and vtabs(app) == ["Jobs", "job 9001"], vtabs(app))
   js = app.screen
   out = next(e for e in js.details["files"] if e.kind == "stdout"); js.open_entry(out)
-  ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and vtabs(app) == ["Jobs", "job 9001"], 10)
-  check("a file of the job opens within its subtab", ok and len(app.screen_stack) == 2 and vtabs(app) == ["Jobs", "job 9001"], vtabs(app))
-  await pilot.press("escape"); await pilot.pause(0.3)
-  check("Esc: back to the job window", app.screen is js)
+  ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and len(vtabs(app)) == 3, 10)
+  file_view = app.cluster.views[-1]
+  check("a file of the job: a subtab of its own, shown; the job's stays", ok and vtabs(app)[:2] == ["Jobs", "job 9001"]
+        and "slurm-9001.out" in vtabs(app)[2] and app.current_mode == file_view.mode, vtabs(app))
+  app.show_view(app.cluster.views[0]); await pilot.pause(0.3)
+  check("the job's subtab: still the job window", app.screen is js)
+  js.open_entry(out); await pilot.pause(0.5)
+  check("the file again: its subtab, not another", app.current_mode == file_view.mode and len(app.cluster.views) == 2, vtabs(app))
+  app.close_view(file_view); await pilot.pause(0.3)
+  app.show_view(app.cluster.views[0]); await pilot.pause(0.3)
+  check("its subtab closed: the job's stays", app.screen is js and vtabs(app) == ["Jobs", "job 9001"], vtabs(app))
   await pilot.press("escape"); await pilot.pause(0.3)
   check("Esc at the job window: the job list, the subtab stays", app.screen is app.main and vtabs(app) == ["Jobs", "job 9001"])
   t.focus(); t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter"); await pilot.pause(0.5)

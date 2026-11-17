@@ -511,7 +511,8 @@ class H5Screen(SplitScreen):
       target = h5_link_target(self.path, data["file"])
       def checked(ok):
         if ok:
-          self.app.open_window(H5Screen(self.crumbs, target, start=data["target"], bases=self.bases, env=self.env))
+          self.app.in_new_subtab(lambda: self.app.open_window(H5Screen(self.crumbs, target, start=data["target"], bases=self.bases,
+                                                                       env=self.env)))
         elif ok is not None:
           self.notify(f"{target} of the external link does not exist or is no HDF5 file", severity="warning")
       in_background(self, lambda: fs_isfile(target) and is_hdf5(target), checked, group="link")

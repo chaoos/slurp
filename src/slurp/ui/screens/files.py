@@ -37,13 +37,20 @@ FILE_VIEWS = []
 def register_file_view(name, matches, open_view):
   FILE_VIEWS.append(FileView(name, matches, open_view))
 
-def open_path(app, crumbs, path, bases=(), env=None, follow=False):
-  """Open a directory or dispatch a file to its first matching specialized view. What the path is (and what the
-  view needs) is found out in a worker: on a remote cluster that takes round trips, which must not block the UI.
-  A view's open() runs in the worker and returns what to do on the UI thread."""
+def open_path(app, crumbs, path, bases=(), env=None, follow=False, here=False):
+  """Open a directory or dispatch a file to its first matching specialized view, in a subtab of its own (one per
+  path: open already, its subtab is shown). here: a directory opens where it is opened (a folder entered in a
+  directory view: ← goes back); a file still gets a subtab. What the path is (and what the view needs) is found
+  out in a worker: on a remote cluster that takes round trips, which must not block the UI. A view's open() runs in
+  the worker and returns what to do on the UI thread."""
   def work():
     if fs_isdir(path):
-      return lambda: app.open_window(DirScreen(crumbs, path, bases=bases, env=env))
+      show = lambda: app.open_window(DirScreen(crumbs, path, bases=bases, env=env))
+      return show if here else (lambda: app.in_new_subtab(show, key=f"path {os.path.normpath(path)}"))
+    show = file_view()
+    return (lambda: app.in_new_subtab(show, key=f"path {os.path.normpath(path)}")) if show is not None else None
+
+  def file_view():
     if not fs_isfile(path):
       return lambda: app.notify(f"{path} does not exist (yet)", severity="warning")
     for view in FILE_VIEWS:
@@ -246,7 +253,7 @@ class DirScreen(SplitScreen):
         self.app.pop_screen()
         pick(path)
       return
-    open_path(self.app, self.crumbs, path, bases=self.bases, env=self.env)
+    open_path(self.app, self.crumbs, path, bases=self.bases, env=self.env, here=True)
 
   @on(DataTable.RowSelected, "#dir")
   def selected(self, event):
