@@ -300,6 +300,19 @@ for the tab; while it is mounted they stay as they are (Unmount first).
 Where the shell opens: **in slurp** (a subtab with a terminal), or **from your own terminal** (a link: an ssh command
 and a password for the terminal on your machine, through a relay).
 """),
+  "SshCheckScreen": ("Check of a connection", """
+The check of an SSH connection, in a terminal, as the tab's login goes:
+
+1. what needs no login: what ssh makes of the destination and settings (`ssh -G`), the keys (there, permissions, a
+   passphrase), the host's name, the port, and the server's greeting; when one of these fails, it stops there;
+2. the command before the login (Run before login), if there is one: answer it here;
+3. the login itself (`ssh -v`, its verbose log to a file): answer what it asks, a new host key (yes: it is kept, as
+   at any login), a passphrase, a password, a one-time code.
+
+Then the verdict and the findings (the server's methods, the keys tried, a changed host key, …) with the end of ssh's
+log. All keys go to the terminal while it runs (`Ctrl-]` closes); then **Again** checks once more, `Esc` or **Close**
+closes.
+"""),
   "UpdateScreen": ("A newer slurp", """
 slurp asks PyPI (`slurp-ui`) at the start, at most once a day, whether there is a newer version; then the title bar has
 **⬆ slurp <version>**, which opens this. It says what changed (the changelog), how slurp is installed here (pipx, uv
@@ -360,11 +373,11 @@ the tab's name, and more ssh options, one `Key=Value` per line. They are kept wi
 key for the day (`cscs-keygen`, `step ssh login`, `tsh login`). It runs in the login pane: answer it there (a
 password, a one-time code; `Ctrl-C` ends only it); when it ends, the SSH login follows as usual.
 
-**Check** tries the connection without logging in interactively (it can ask nothing, so nothing hangs, and it writes
-nothing, not even a host key): what ssh makes of the settings, the keys, the host name, the port and the server, and
-a login. It says whether it works, works with a prompt (a passphrase, a password or a code, a new host key: the
-login asks), or what is wrong, precisely, with ssh's verbose log. **Add** adds the tab, checked or not; the login runs
-in the pane on the right.
+**Check…** tries the connection in a window with a terminal, as the tab's login goes: what needs no login (what ssh
+makes of the settings, the keys, the host name, the port and the server), the command before the login if there is
+one, and the login itself, where you answer what it asks (a host key, a passphrase, a password, a code). Then whether
+it works, or what is wrong, precisely, with the end of ssh's verbose log. **Add** adds the tab, checked or not; the
+login runs in the pane on the right.
 
 From a tab's overview (**SSH settings…**) the same dialog shows the tab's settings, filled in, with the blocks of your
 `~/.ssh/config` that apply (with their file and line) and what ssh makes of it all (`ssh -G`); **Save** changes the tab

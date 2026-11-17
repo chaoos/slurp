@@ -6,6 +6,13 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- **Check…** of an SSH connection (the add dialog, SSH settings…, the
+  connection window) opens a window with a terminal and goes as the tab's
+  login: what needs no login, the command before the login, the login
+  itself, where you answer what it asks (passphrase, password, code, a new
+  host key), then the verdict and the findings with ssh's log. Fixed: with
+  much output the dialog's buttons were out of reach; the dialog keeps
+  them in view.
 - New rule S10: Slurm variables the job does not get. Slurm sets some only
   when the job asks for something (`$SLURM_ARRAY_TASK_ID` in arrays,
   `$SLURM_CPUS_PER_TASK` with `--cpus-per-task`, `$SLURM_MEM_PER_NODE` with

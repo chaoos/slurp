@@ -76,6 +76,13 @@ def configure(work, home, out):
     if os.path.exists(os.path.join(LAB, name)): os.unlink(os.path.join(LAB, name))
 
 def term(app): s = app.shell; return "\n".join(s.vt.display) if s and s.vt else ""
+def check_term(screen):
+  """the text of the terminal of a check window (SshCheckScreen), its history and screen"""
+  s = getattr(screen, "session", None)
+  if not s or not s.vt:
+    return ""
+  history = ["".join(ch.data for ch in row) for row in (s.vt.history or [])] # (a list of pyte chars per line)
+  return "\n".join(history + list(s.vt.display))
 def sterm(app):
   """the screen of the shell subtab shown"""
   scr = app.screen
@@ -2991,10 +2998,17 @@ async def t_ssh_setup(app, pilot):
   for key, value in (("host", "127.0.0.1"), ("port", port), ("user", user), ("identities", relay)):
     dlg.query_one(f"#ssh-{key}").value = value
   dlg.query_one("#ssh-options").load_text("\n".join(known + ["ServerAliveInterval=5"]))
+  from slurp.ui.screens.dialogs import SshCheckScreen
   dlg.query_one("#cluster-check-button").press()
-  ok = await until(pilot, lambda: "works" in str(dlg.query_one("#cluster-check").render()), 30)
-  text = str(dlg.query_one("#cluster-check").render())
-  check("Check in the dialog: the verdict, the findings, the verbose log", ok and "✔ works: the login works" in text and "ssh -v" in text, text[:300])
+  ok = await until(pilot, lambda: isinstance(app.screen, SshCheckScreen) and "works" in check_term(app.screen), 30)
+  text = check_term(app.screen) if ok else ""
+  check("Check…: a window with a terminal, as the login goes: what needs no login, the login, the verdict, ssh's log",
+        ok and "1. what needs no login" in text and f"port {port} answers" in text and "slurp-check: logged in" in text
+        and "✔ works: the login works" in text and "ssh -v" in text, text[-600:])
+  await until(pilot, lambda: app.screen.session.done, 10); await pilot.pause(0.5)
+  check("…done: the keys back to the window (Close has the focus), Esc closes", app.focused is app.screen.query_one("#sc-close"))
+  await pilot.press("escape"); await pilot.pause(0.3)
+  check("…back in the dialog, its buttons there", app.screen is dlg and dlg.query_one("#cluster-confirm").region.height > 0)
   n = len(app.clusters)
   calls = os.path.join(LAB, "ssh_calls.log")
   before = len(open(calls).read().splitlines()) if os.path.exists(calls) else 0
@@ -3014,8 +3028,10 @@ async def t_ssh_setup(app, pilot):
   info = rendered(cs.query_one("#conn-info").content) if isinstance(cs, ConnectionScreen) else ""
   check("the connection window shows the SSH settings", f"-p {port}" in info and "SSH settings" in info, info[:400])
   cs.query_one("#conn-check-button").press()
-  ok = await until(pilot, lambda: "works" in str(cs.query_one("#conn-check").render()), 30)
-  check("…and Check there: the same diagnostics", ok and "Check of the connection" in str(cs.query_one("#conn-check").render()))
+  ok = await until(pilot, lambda: isinstance(app.screen, SshCheckScreen) and "works" in check_term(app.screen), 30)
+  check("…and Check… there: the same check in a terminal", ok and "1. what needs no login" in check_term(app.screen))
+  await until(pilot, lambda: app.screen.session.done, 10); await pilot.pause(0.5)
+  await pilot.press("escape"); await pilot.pause(0.3)
   await pilot.press("escape"); await pilot.pause(0.3)
   # a tab can be added unchecked, also one that does not work
   await pilot.click("#cluster-add"); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
@@ -3109,6 +3125,18 @@ async def t_pre_login(app, pilot):
   app.action_connection(); await pilot.pause(0.8)
   info = rendered(app.screen.query_one("#conn-info").content) if isinstance(app.screen, ConnectionScreen) else ""
   check("the connection window says what runs before the login", "Before the login" in info and "one-time code" in info, info[:300])
+  from slurp.ui.screens.dialogs import SshCheckScreen
+  app.screen.query_one("#conn-check-button").press()
+  ok = await until(pilot, lambda: isinstance(app.screen, SshCheckScreen) and "one-time code:" in check_term(app.screen), 30)
+  check("Check…: the command before the login runs in its terminal and asks", ok, check_term(app.screen)[-300:] if ok else "")
+  await pilot.press(*"77", "enter")
+  ok = await until(pilot, lambda: "passphrase" in check_term(app.screen), 20)
+  check("…then the login asks for the passphrase there", ok and open(signed).read().strip() == "signed with 77", check_term(app.screen)[-400:])
+  await pilot.press(*"pw123", "enter")
+  ok = await until(pilot, lambda: "works" in check_term(app.screen), 30)
+  check("…the answer taken: it works", ok and "slurp-check: logged in" in check_term(app.screen), check_term(app.screen)[-400:])
+  await until(pilot, lambda: app.screen.session.done, 10); await pilot.pause(0.5)
+  await pilot.press("escape"); await pilot.pause(0.3)
   await pilot.press("escape"); await pilot.pause(0.3)
   app.edit_ssh_settings(cluster); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
   app.screen.query_one("#ssh-pre-login").value = ""

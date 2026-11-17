@@ -297,36 +297,30 @@ def parse_ssh_log(log, result):
   return (auth[-1].split(",") if auth else []), offered, accepted
 
 
-def check(destination, settings=None, ssh="ssh", timeout=30, pre_login=""):
-  """Check a destination (with full settings) without logging in interactively: a CheckResult. pre_login: the
-  command the tab runs before its login (not run here: it may ask, e.g. for a one-time code)"""
-  start = time.monotonic()
-  result = CheckResult()
-  if pre_login:
-    result.add("info", f"the command before the login ({pre_login}) is not run by the check: if it signs a key, a key "
-               "not signed yet (or expired) shows as not accepted here, and the login runs it first")
-  settings = clean(settings)
+def precheck(destination, settings, result, ssh="ssh"):
+  """The checks that need no login: ssh, the settings, what OpenSSH makes of them (ssh -G), the keys, the host's
+  name, port and greeting (directly; through a jump host ssh does it). (destination, host), or None: stopped (said)"""
   if not shutil.which(ssh):
     result.add("error", "there is no ssh on this machine (install OpenSSH)")
     result.summary = "no ssh"
-    return result
+    return None
   errors = option_errors(settings or {})
   for e in errors:
     result.add("error", e)
   if errors:
     result.summary = "the settings are not valid"
-    return result
+    return None
   dest = target(destination, settings)
   if not dest:
     result.add("error", "no destination: a Host of ~/.ssh/config, user@host, or the host of the full settings")
     result.summary = "no destination"
-    return result
+    return None
   # 1. what OpenSSH makes of it
   conf, err = effective_config(destination, settings, ssh)
   if conf is None:
     result.add("error", f"ssh does not take these settings: {err}")
     result.summary = "the settings are not valid"
-    return result
+    return None
   result.config = conf
   one = lambda key: (conf.get(key) or [""])[0]
   host, port, user = one("hostname"), one("port") or "22", one("user")
@@ -364,8 +358,7 @@ def check(destination, settings=None, ssh="ssh", timeout=30, pre_login=""):
     if not addrs:
       result.add("error", f"the host name {host} is not known: {err} (a typo? the VPN or the network not there?)")
       result.summary = f"{host} is not known"
-      result.seconds = time.monotonic() - start
-      return result
+      return None
     result.add("ok", f"{host} is {', '.join(addrs[:3])}" + (" …" if len(addrs) > 3 else ""))
     banner, err = tcp_banner(host, port)
     if not banner:
@@ -374,10 +367,26 @@ def check(destination, settings=None, ssh="ssh", timeout=30, pre_login=""):
               "cannot be reached on port {}: " + err)
       result.add("error", f"{host} " + what.format(port))
       result.summary = f"{host}:{port} cannot be reached"
-      result.seconds = time.monotonic() - start
-      return result
+      return None
     result.add("ok" if banner.startswith("SSH-") else "warn",
                f"port {port} answers: {banner[:80]}" if banner.startswith("SSH-") else f"port {port} answers, but not as an SSH server: {banner[:80]}")
+  return dest, host
+
+
+def check(destination, settings=None, ssh="ssh", timeout=30, pre_login=""):
+  """Check a destination (with full settings) without logging in interactively: a CheckResult. pre_login: the
+  command the tab runs before its login (not run here: it may ask, e.g. for a one-time code)"""
+  start = time.monotonic()
+  result = CheckResult()
+  if pre_login:
+    result.add("info", f"the command before the login ({pre_login}) is not run by the check: if it signs a key, a key "
+               "not signed yet (or expired) shows as not accepted here, and the login runs it first")
+  settings = clean(settings)
+  found = precheck(destination, settings, result, ssh)
+  if found is None:
+    result.seconds = time.monotonic() - start
+    return result
+  dest, host = found
   # 3. a login that cannot ask (no password, passphrase or host key question: nothing hangs)
   base = [ssh, "-v", "-o", "BatchMode=yes", "-o", f"ConnectTimeout={min(timeout, 15)}", "-o", "ControlMaster=no",
           "-o", "ControlPath=none", "-o", "NumberOfPasswordPrompts=0"]
@@ -405,13 +414,25 @@ def check(destination, settings=None, ssh="ssh", timeout=30, pre_login=""):
     log, code = attempt(["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "GlobalKnownHostsFile=/dev/null"])
     log = first + "\n--- again, the host key not checked (nothing kept) ---\n" + log
   result.log = log
+  evaluate(log, code, result)
+  result.seconds = time.monotonic() - start
+  return result
+
+
+def evaluate(log, code, result, batch=True):
+  """The verdict and the findings of a login (ssh -v's log, its exit code); batch: it could not ask anything"""
   methods, offered, accepted = parse_ssh_log(log, result)
   if code == 0 or "Authenticated to" in log:
-    result.verdict, result.summary = "ok", "the login works (without asking)"
-    result.add("ok", "logged in without a password, passphrase or question (keys or the agent)")
+    result.verdict, result.summary = ("ok", "the login works (without asking)") if batch else ("ok", "the login works")
+    result.add("ok", "logged in without a password, passphrase or question (keys or the agent)" if batch else "logged in")
   elif any(f.level == "error" for f in result.findings):
     result.verdict = "error"
     result.summary = next(f.text for f in result.findings if f.level == "error")
+  elif not batch and ("Permission denied" in log or methods): # (it asked, and what was given was not taken)
+    result.verdict = "error"
+    result.summary = "not logged in: the server did not take what was given (password, code, passphrase or key)"
+    result.add("error", f"not logged in; the server takes {', '.join(methods) or '?'}"
+               + (f"; keys tried: {', '.join(offered)}" if offered else ""))
   elif "Permission denied" in log or methods:
     asks = [m for m in methods if m in ("password", "keyboard-interactive")]
     if accepted:
@@ -436,7 +457,6 @@ def check(destination, settings=None, ssh="ssh", timeout=30, pre_login=""):
     last = [l for l in log.splitlines() if l.strip() and not l.startswith("debug")]
     result.summary = last[-1] if last else f"ssh ended with {code}"
     result.add("error", f"ssh ended with {code}: {result.summary}")
-  result.seconds = time.monotonic() - start
   return result
 
 

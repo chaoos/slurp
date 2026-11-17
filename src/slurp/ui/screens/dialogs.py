@@ -496,6 +496,84 @@ class RestartScreen(ModalScreen[dict | None]):
   def action_cancel(self):
     self.dismiss(None)
 
+class SshCheckScreen(ModalScreen):
+  """The check of an SSH connection in a terminal, as the tab's login goes (cluster/sshcheck.py): what needs no login,
+  the command before the login, the login itself (answer what it asks: a host key, a passphrase, a password, a
+  code), then the verdict and the findings; Again, Close (Ctrl-] while it runs: the keys go to the terminal)"""
+  DEFAULT_CSS = """
+  SshCheckScreen { align: center middle; }
+  #sc-dialog { width: 96%; height: 92%; border: thick $accent; background: $surface; padding: 0 1; }
+  #sc-title { text-style: bold; height: 1; margin: 1 0 0 0; }
+  #sc-status { height: 1; color: $text-muted; }
+  #sc-buttons { height: auto; align-horizontal: right; margin: 1 0 0 0; }
+  #sc-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "close", "Close"), Binding("ctrl+right_square_bracket", "close", "Close", priority=True)]
+
+  def __init__(self, destination, settings=None, pre_login=""):
+    super().__init__()
+    import json
+    from ...cluster import sshsetup
+    self.what = sshsetup.label(settings) if settings else destination
+    self.args = [sys.executable, "-m", "slurp.cluster.sshcheck",
+                 json.dumps({"destination": destination, "ssh": settings or None, "pre_login": pre_login or ""})]
+    self.session = None
+
+  def compose(self) -> ComposeResult:
+    from ..terminal import TerminalView
+    with Vertical(id="sc-dialog"):
+      yield Static(f"Check of the connection to {self.what}", id="sc-title", markup=False)
+      yield Static(id="sc-status")
+      yield TerminalView(session=self.new_session())
+      with Horizontal(id="sc-buttons"):
+        yield Button("Again", id="sc-again", compact=True, tooltip="check again from the start")
+        yield Button("Close", id="sc-close", variant="primary", compact=True, tooltip="close (Ctrl-] while it runs)")
+
+  def new_session(self):
+    from ..terminal import TerminalSession
+    self.session = TerminalSession(self.app, self.args, f"check {self.what}")
+    return self.session
+
+  def on_mount(self):
+    from ..terminal import TerminalView
+    view = self.query_one(TerminalView)
+    view.focus()
+    self.call_after_refresh(view.attach)
+    self.focused_done = False
+    self.set_interval(0.3, self.show_status)
+
+  def show_status(self):
+    s = self.session
+    if s is not None and s.done:
+      self.query_one("#sc-status", Static).update(Text("done · Again checks once more, Esc or Close closes", style="green"))
+      if not self.focused_done:
+        self.focused_done = True
+        self.query_one("#sc-close", Button).focus()
+    else:
+      self.query_one("#sc-status", Static).update(Text("running · answer what it asks in the terminal (it has the keys) · "
+                                                       "Ctrl-] closes", style="yellow"))
+
+  @on(Button.Pressed, "#sc-again")
+  def again(self, event):
+    event.stop()
+    from ..terminal import TerminalView
+    if self.session is not None and not self.session.done:
+      self.session.terminate()
+    view = self.query_one(TerminalView)
+    view.own_session = self.new_session()
+    self.focused_done = False
+    view.focus()
+    self.call_after_refresh(view.attach)
+
+  @on(Button.Pressed, "#sc-close")
+  def action_close(self, event=None):
+    if event is not None:
+      event.stop()
+    if self.session is not None and not self.session.done:
+      self.session.terminate()
+    self.dismiss()
+
+
 class AddClusterScreen(ModalScreen):
   """A new tab. The main way: an SSH destination, a Host of ~/.ssh/config (its user, jump hosts and keys are there;
   suggested as you type) or user@host; empty: this machine. The fallback: the full SSH settings (user, host, port,
@@ -506,7 +584,7 @@ class AddClusterScreen(ModalScreen):
   DEFAULT_CSS = """
   AddClusterScreen { align: center middle; }
   #cluster-dialog { width: 100; max-width: 98%; height: auto; max-height: 96%; border: thick $accent; background: $surface; padding: 1 2; }
-  #cluster-body { height: auto; max-height: 1fr; }
+  #cluster-body { height: auto; max-height: 80vh; } /* (the buttons below stay in view, whatever is above) */
   #cluster-title { text-style: bold; margin-bottom: 1; }
   #cluster-destination { width: 1fr; }
   #cluster-hint { height: auto; color: $text-muted; margin-bottom: 1; }
@@ -517,9 +595,6 @@ class AddClusterScreen(ModalScreen):
   #ssh-port { width: 12; }
   #ssh-options { height: 5; }
   #cluster-config { height: auto; margin-bottom: 1; }
-  #cluster-check-scroll { height: auto; max-height: 18; border: round $panel-lighten-2; display: none; }
-  #cluster-check-scroll.-shown { display: block; }
-  #cluster-check { height: auto; padding: 0 1; }
   #cluster-actions { height: auto; align-horizontal: right; margin-top: 1; }
   #cluster-actions Button { margin-left: 1; }
   """
@@ -560,12 +635,10 @@ class AddClusterScreen(ModalScreen):
                     id="ssh-pre-login", tooltip="it runs in the login pane: answer it there (a password, a code); then the login follows")
         if self.cluster is not None:
           yield Static(id="cluster-config")
-        with VerticalScroll(id="cluster-check-scroll"):
-          yield Static(id="cluster-check")
       with Horizontal(id="cluster-actions"):
         yield Button("Cancel", id="cluster-cancel", compact=True)
-        yield Button("Check", id="cluster-check-button", compact=True,
-                     tooltip="try the connection without logging in interactively, and say what is wrong")
+        yield Button("Check…", id="cluster-check-button", compact=True,
+                     tooltip="try the connection in a terminal, as the login goes (answer what it asks), and say what is wrong")
         yield Button("Save" if self.cluster else "Add", id="cluster-confirm", variant="primary", compact=True,
                      tooltip="the tab takes these settings (the next login uses them)" if self.cluster else
                      "add the tab (checked or not); it logs in")
@@ -656,23 +729,18 @@ class AddClusterScreen(ModalScreen):
 
   @on(Button.Pressed, "#cluster-check-button")
   def check_pressed(self, event):
+    """The check in a window with a terminal, as the login goes (it may ask: a passphrase, a password, a code)"""
     event.stop()
     from ...cluster import sshsetup
     destination, settings = self.query_one("#cluster-destination", Input).value.strip(), self.settings()
-    box = self.query_one("#cluster-check-scroll")
-    box.add_class("-shown")
-    if not destination and not settings:
-      self.query_one("#cluster-check", Static).update(Text("this machine: nothing to check (no SSH)", style="green"))
+    errors = sshsetup.option_errors(settings) if settings else []
+    if errors:
+      self.notify("; ".join(errors), severity="error")
       return
-    what = sshsetup.label(settings) if settings else destination
-    self.query_one("#cluster-check", Static).update(Text(f"checking {what} … (name, port, server, a login that asks nothing)", style="dim"))
-    self.query_one("#cluster-check-button", Button).disabled = True
-    def done(result):
-      self.query_one("#cluster-check-button", Button).disabled = False
-      if result is not None:
-        self.query_one("#cluster-check", Static).update(sshsetup.check_text(result))
-    pre_login = self.query_one("#ssh-pre-login", Input).value.strip()
-    in_background(self, lambda: sshsetup.check(destination, settings, pre_login=pre_login), done, group="ssh-check", connection=None)
+    if not destination and not settings:
+      self.notify("this machine: nothing to check (no SSH)", timeout=4)
+      return
+    self.app.push_screen(SshCheckScreen(destination, settings, self.query_one("#ssh-pre-login", Input).value.strip()))
 
   @on(Button.Pressed, "#cluster-cancel")
   def cancel_pressed(self):

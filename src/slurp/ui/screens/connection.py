@@ -136,11 +136,10 @@ class ConnectionScreen(ModalScreen):
         yield Static(id="conn-links-title")
         yield ClickTable(id="conn-links", cursor_type="row", zebra_stripes=True)
         yield Static(id="conn-info")
-        yield Static(id="conn-check")
       with Horizontal(id="conn-buttons"):
         if self.cluster.destination:
-          yield Button("Check", id="conn-check-button", compact=True,
-                       tooltip="try the connection from scratch without logging in interactively, and say what is wrong")
+          yield Button("Check…", id="conn-check-button", compact=True,
+                       tooltip="try the connection from scratch in a terminal, as the login goes, and say what is wrong")
           yield Button(icons.label("reconnect", "Reconnect"), id="conn-reconnect", variant="primary", tooltip="end the session and log in again (R)", compact=True)
           yield Button(icons.label("disconnect", "Disconnect"), id="conn-disconnect", variant="error", compact=True)
         yield Button("Close", id="conn-close", compact=True)
@@ -473,20 +472,11 @@ class ConnectionScreen(ModalScreen):
 
   @on(Button.Pressed, "#conn-check-button")
   def check_pressed(self, event):
-    """The check of the add dialog for this tab's destination: name, port, server, a login that asks nothing"""
+    """The check of the add dialog for this tab: in a window with a terminal, as the login goes"""
     event.stop()
+    from .dialogs import SshCheckScreen
     cluster = self.cluster
-    box = self.query_one("#conn-check", Static)
-    box.update(Text("\nChecking the connection from scratch … (name, port, server, a login that asks nothing)", style="dim"))
-    self.query_one("#conn-check-button", Button).disabled = True
-    def done(result):
-      self.query_one("#conn-check-button", Button).disabled = False
-      if result is not None:
-        out = Text("\nCheck of the connection\n", style="bold underline")
-        out.append_text(sshsetup.check_text(result))
-        box.update(out)
-    in_background(self, lambda: sshsetup.check(cluster.destination, cluster.ssh, pre_login=cluster.pre_login), done,
-                  group="ssh-check", connection=None)
+    self.app.push_screen(SshCheckScreen(cluster.destination, cluster.ssh, cluster.pre_login))
 
   @on(Button.Pressed, "#conn-reconnect")
   def action_reconnect(self):
