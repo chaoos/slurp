@@ -11,8 +11,15 @@ from dataclasses import dataclass, field
 log = logging.getLogger("slurp")
 
 TAIL_BYTES = 1024*1024 # files larger than this are shown from their end (more on request, in parts this size)
-PROGRESS_TAIL_BYTES = 64*1024
-PROGRESS_TAIL_LINES = 30
+PROGRESS_TAIL_BYTES = 64*1024 # of a file, its end read for the progress (Options: progress_tail_kib) …
+PROGRESS_TAIL_LINES = 30      # … of these, the last PROGRESS_TAIL_LINES * 20 lines (Options: progress_tail_lines)
+PROGRESS_PACE_POINTS = 6      # the current pace: over the last so many progress values (Options: progress_pace_points)
+# (what can be set: (key, default, smallest, largest, above this it gets slow))
+PROGRESS_SETTINGS = {
+  "progress_tail_kib": (PROGRESS_TAIL_BYTES // 1024, 4, 65536, 1024),
+  "progress_tail_lines": (PROGRESS_TAIL_LINES * 20, 20, 200000, 5000),
+  "progress_pace_points": (PROGRESS_PACE_POINTS, 2, 200, 50),
+}
 PROGRESS_PATTERN = re.compile(r"(?<!\d)(\d+)\s*/\s*(\d+)(?!\d)")
 PROGRESS_PERCENT = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d+)?)\s?%") # M% (0 to 100, integer or not), where no n/N is
 STEP_NAME = "slurp"  # job name of the steps that run commands on the nodes

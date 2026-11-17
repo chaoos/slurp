@@ -31,7 +31,7 @@ completed.
 
 The progress shows the latest `n/N` line (or `M%`: a number from 0 to 100,
 with or without decimals, in a line without `n/N`), and estimates when the job reaches
-`N` **on current pace** (the rate of the last few `n/N` lines), with the remaining time and the time of day;
+`N` **on current pace** (the rate of the last few `n/N` lines: 6, or as set in **Options**, `F3`), with the remaining time and the time of day;
 while there are too few lines for that, **on same pace** (the average rate since the job started). The
 times are the timestamps of the lines if they have one, else the times slurp
 saw a new `n`. The **?** next to **Progress file…** explains it all in the window: what the progress is and

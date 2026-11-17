@@ -1668,6 +1668,17 @@ async def t_options(app, pilot):
     op.query_one("#op-theme").value = "nord"; op.query_one("#op-theme-web").value = "gruvbox"
     op.query_one("#op-scrollback").value = "500"; op.query_one("#op-copy").value = "terminal"
     op.query_one("#op-muted").select("R07")
+    check("Progress: the defaults (64 KiB, 600 lines, 6 values), no warning", [op.query_one(f"#op-{k}").value for k in
+          ("progress_tail_kib", "progress_tail_lines", "progress_pace_points")] == ["64", "600", "6"] and not op.query_one("#op-progress-warning").display)
+    op.query_one("#op-progress_tail_kib").value = "4096"; await pilot.pause(0.2)
+    warning = lambda: str(op.query_one("#op-progress-warning").render())
+    check("much more: a warning that it gets slower, at once", op.query_one("#op-progress-warning").display and "4096 KiB is a lot" in warning()
+          and "slower" in warning(), warning())
+    op.query_one("#op-progress_tail_lines").value = "5"; await pilot.pause(0.2)
+    check("out of range: said", "20 to 200000 lines" in warning(), warning())
+    await pilot.click("#op-save"); await pilot.pause(0.3)
+    check("…and not saved", isinstance(app.screen, OptionsScreen))
+    op.query_one("#op-progress_tail_lines").value = "2000"; op.query_one("#op-progress_pace_points").value = "10"
     for b in op.query(".op-forget"):
       if b.name in ("drive:lab", "progress_files"):
         b.press()
@@ -1679,6 +1690,9 @@ async def t_options(app, pilot):
           ok and cfg.get("theme") == "nord" and cfg.get("theme_web") == "gruvbox" and cfg.get("terminal_scrollback") == 500
           and cfg.get("copy") == "terminal" and "R07" in cfg.get("checks_muted", []) and cfg.get("drive_mounts") == {}
           and cfg.get("progress_files") == {}, {k: cfg.get(k) for k in ("theme", "theme_web", "terminal_scrollback", "copy", "checks_muted", "drive_mounts")})
+    from slurp.cluster.jobs import progress_scan
+    check("the progress settings: kept, and used from now on", cfg.get("progress_tail_kib") == 4096 and cfg.get("progress_tail_lines") == 2000
+          and progress_scan() == {"bytes": 4096 * 1024, "lines": 2000, "pace": 10}, (progress_scan(), cfg.get("progress_tail_kib")))
     check("the terminal's theme applies at once", app.theme == "nord", app.theme)
     app.active_view_changed("web"); await pilot.pause(0.3)
     check("a browser becomes the active view: its theme", app.theme == "gruvbox", app.theme)
@@ -1695,7 +1709,8 @@ async def t_options(app, pilot):
   finally:
     import json
     cfg = load_config()
-    for k in ("theme", "theme_web", "terminal_scrollback", "copy", "checks_muted", "drive_mounts", "progress_files", "link_relay"):
+    for k in ("theme", "theme_web", "terminal_scrollback", "copy", "checks_muted", "drive_mounts", "progress_files", "link_relay",
+              "progress_tail_kib", "progress_tail_lines", "progress_pace_points"):
       if k in before: cfg[k] = before[k]
       else: cfg.pop(k, None)
     open(config_path(), "w").write(json.dumps(cfg))

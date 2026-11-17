@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- **Options** (`F3`) → *Progress of jobs*: how much of the end of a file
+  is read for the progress (KiB, of it the last lines), and over how many
+  progress values the current pace goes; high values are said to slow the
+  job list and the job window down.
 - In the notes of categories and jobs, web addresses and the paths that
   exist on the cluster are links: a click opens the page, or the file or
   directory in slurp.

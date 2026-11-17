@@ -463,6 +463,10 @@ The settings slurp keeps in `config.json` (the path is shown at the bottom), to 
 - **Copying:** for a terminal and for a browser: when copying cannot be confirmed (no clipboard tool here; in a
   browser always), ask how to get the text, or only send it (OSC 52) without asking.
 - **Links:** the relay of links for your own terminal and browser.
+- **Progress of jobs:** how much of the end of a job's file is read for its progress (KiB, of it the last lines), and
+  over how many progress values the current pace goes. More finds progress further back in a file that writes much
+  else, and smooths the pace; but every running job's file is read that far at each reload and every 10 s in the job
+  window: high values make slurp slow (it warns), over SSH most of all.
 - **Checks:** the rules not to report.
 - **What slurp remembers:** drives on this machine, progress files and patterns, the tabs of the next start; Forget
   removes them (on Save).
@@ -472,9 +476,10 @@ The settings slurp keeps in `config.json` (the path is shown at the bottom), to 
 def progress_help_markdown():
   """What the progress of a job is, why it helps, how to get it, and how its estimates are made (the ? next to
   Progress file… in the job window)"""
-  from ...state import PROGRESS_TAIL_BYTES, PROGRESS_TAIL_LINES
+  from ...cluster.jobs import progress_scan
   from .job import JobScreen
-  kib, lines, every = PROGRESS_TAIL_BYTES // 1024, PROGRESS_TAIL_LINES * 20, JobScreen.PROGRESS_EVERY
+  scan = progress_scan()
+  kib, lines, pace, every = scan["bytes"] // 1024, scan["lines"], scan["pace"], JobScreen.PROGRESS_EVERY
   return f"""# Progress of a job
 
 **What it is.** slurp reads how far a running job is from a file it writes: the latest line with a count like
@@ -513,9 +518,14 @@ progress bars write). A file is never read as a whole: a large log costs nothing
 {every} s while the job runs (the line below the bar says when). The job list reads the files of all running jobs at
 each reload, in one command, which sends back only their lines with n/N or M%.
 
+How much (the KiB, the lines, and the progress values of the current pace) is set in the **Options** (F3,
+*Progress*). More finds progress further back in a file that writes much else, and smooths the current pace over
+more steps; but every running job's file is read that far at each reload and every {every} s in the job window: much
+more makes the job list and the job window slow, over SSH most of all.
+
 ## The estimates of when it is done
 
-- **On current pace** (shown when it can be told): the rate of the last 6 different progress values, from the first
+- **On current pace** (shown when it can be told): the rate of the last {pace} different progress values, from the first
   of them to the latest: (latest n − first n) / (the time between them); done in (N − n) / that rate. The times are the
   timestamps in the lines when at least two of them have one (with the same N); else the times slurp saw a new n (at
   its reads, so a little late). It needs two values: right after the start, or with progress that rarely moves, it is

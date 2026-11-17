@@ -1,5 +1,6 @@
 """Options (F3): the settings slurp keeps in config.json, to see and change"""
 
+from rich.text import Text
 from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -9,10 +10,15 @@ from textual.widgets.selection_list import Selection
 
 from ...checks import engine as checks
 from ...config import config_path, load_config, update_config
+from ...state import PROGRESS_SETTINGS
 from .. import icons
 
 ICON_CHOICES = [("icons (slurp's icon font or a Nerd Font)", ""), ("Unicode symbols (uneven in most fonts)", "symbols"),
                 ("none", "none")]
+
+# (the progress settings: key, label, unit)
+PROGRESS_FIELDS = [("progress_tail_kib", "End of a file read", "KiB"), ("progress_tail_lines", "Of it, the last", "lines"),
+                   ("progress_pace_points", "Current pace over", "progress values")]
 
 COPY_CHOICES = [("ask how to get it, when this machine has no clipboard tool", ""),
                 ("send it to the terminal only (OSC 52), never ask", "terminal")]
@@ -77,6 +83,20 @@ class OptionsScreen(ModalScreen):
           scrollback = c.get("terminal_scrollback")
           yield Input(str(scrollback if isinstance(scrollback, int) else 10000), type="integer", id="op-scrollback")
         yield Static("Lines a shell keeps above its screen (0: none), for shells opened from now on.", classes="op-note")
+        yield Static("Progress of jobs", classes="op-section")
+        for key, label, unit in PROGRESS_FIELDS:
+          default, low, high, _slow = PROGRESS_SETTINGS[key]
+          value = c.get(key, default)
+          with Horizontal(classes="op-row"):
+            yield Label(label)
+            yield Input(str(value if isinstance(value, int) else default), type="integer", id=f"op-{key}",
+                        tooltip=f"{low} to {high} {unit}; default {default}")
+        yield Static("How the progress of a job (n/N or M%) is read from its file: only the file's end (KiB), of it "
+                     "the last lines, and the current pace over the last progress values. More finds progress further "
+                     "back and smooths the pace, but slows slurp down: every running job's file is read that far at "
+                     "each reload of the job list and every 10 s in the job window, over SSH most of all.",
+                     classes="op-note")
+        yield Static(id="op-progress-warning", classes="op-note")
         yield Static("Copying", classes="op-section")
         with Horizontal(classes="op-row"):
           yield Label("Copy in a terminal")
@@ -123,6 +143,37 @@ class OptionsScreen(ModalScreen):
         yield Button("Cancel", id="op-cancel", compact=True)
         yield Button("Save", id="op-save", variant="primary", compact=True)
 
+  def on_mount(self):
+    self.progress_warning()
+
+  def progress_values(self):
+    """{key: the number typed} of the progress settings (None: not a number)"""
+    out = {}
+    for key, *_ in PROGRESS_FIELDS:
+      try:
+        out[key] = int(self.query_one(f"#op-{key}", Input).value)
+      except ValueError:
+        out[key] = None
+    return out
+
+  @on(Input.Changed, "#op-progress_tail_kib, #op-progress_tail_lines, #op-progress_pace_points")
+  def progress_warning(self, event=None):
+    """Said at once: values out of range, or so high that slurp gets slow"""
+    said = []
+    for key, label, unit in PROGRESS_FIELDS:
+      value = self.progress_values()[key]
+      default, low, high, slow = PROGRESS_SETTINGS[key]
+      if value is None or not low <= value <= high:
+        said.append((f"{label}: {low} to {high} {unit}", "bold red"))
+      elif value > slow and key != "progress_pace_points":
+        said.append((f"{label}: {value} {unit} is a lot: the job list and the job window get slower (above {slow} "
+                     "noticeably, with many running jobs and over SSH)", "bold yellow"))
+      elif value > slow:
+        said.append((f"{label}: over {value} values the current pace follows changes slowly", "yellow"))
+    warning = self.query_one("#op-progress-warning", Static)
+    warning.update(Text("\n").join(Text(t, style=s) for t, s in said) if said else "")
+    warning.display = bool(said)
+
   @on(Button.Pressed, ".op-forget")
   def forget_pressed(self, event):
     event.stop()
@@ -141,7 +192,14 @@ class OptionsScreen(ModalScreen):
     except ValueError:
       self.notify("the scrollback is a number of lines", severity="error")
       return
-    changes = {"theme": theme, "theme_web": web or None, "terminal_scrollback": scrollback,
+    values = self.progress_values()
+    for key, label, unit in PROGRESS_FIELDS:
+      default, low, high, _slow = PROGRESS_SETTINGS[key]
+      if values[key] is None or not low <= values[key] <= high:
+        self.notify(f"{label}: {low} to {high} {unit}", severity="error")
+        return
+    changes = {**{key: (None if values[key] == PROGRESS_SETTINGS[key][0] else values[key]) for key in values},
+               "theme": theme, "theme_web": web or None, "terminal_scrollback": scrollback,
                "copy": self.query_one("#op-copy", Select).value or None,
                "copy_web": self.query_one("#op-copy-web", Select).value or None,
                "link_relay": self.query_one("#op-relay", Input).value.strip() or None,

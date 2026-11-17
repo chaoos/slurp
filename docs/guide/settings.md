@@ -13,11 +13,17 @@ of its session (green, yellow, red; grey when not connected).
 **Options** (`F3`) shows the settings and changes them: the two themes, the
 icons, the scrollback of shells, what Copy does without a clipboard tool (for a terminal
 and for a browser), the relay of
-links, the rules the checks do not report, and what slurp remembers (drives on
+links, the rules the checks do not report, how the progress of jobs is read
+(how much of the end of a file, of it how many lines, and over how many
+progress values the current pace goes: more finds progress further back and
+smooths the pace, but makes the job list and the job window slower; the window
+warns about high values), and what slurp remembers (drives on
 this machine, progress files and patterns, the tabs of the next start), with
 Forget. Save writes `config.json`; the settings below are the same, by hand: `"terminal_scrollback"` (lines a shell keeps
 above its screen, default 10000, 0 for none), `"checks_muted"` (rule ids the
-checks do not report), `"link_relay"` (the relay of links), `"copy"`.
+checks do not report), `"link_relay"` (the relay of links), `"copy"`,
+`"progress_tail_kib"` (default 64), `"progress_tail_lines"` (600),
+`"progress_pace_points"` (6).
 
 ## Icons
 

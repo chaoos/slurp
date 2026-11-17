@@ -11,7 +11,7 @@ from datetime import datetime
 
 from . import slurm as sl
 
-from ..state import log, OLD_STEP_NAMES, PROGRESS_PATTERN, PROGRESS_PERCENT, PROGRESS_TAIL_BYTES, PROGRESS_TAIL_LINES
+from ..state import log, OLD_STEP_NAMES, PROGRESS_PATTERN, PROGRESS_PERCENT, PROGRESS_SETTINGS
 from .remote import conn, fs_getsize, fs_read, fs_scandir, run, run_cmd, run_many, SLURM_ENV, tab_name
 from .paths import existing_files, expand_vars, job_vars, read_text
 
@@ -220,6 +220,30 @@ def job_start(job):
   except ValueError:
     return None
 
+_scan_cache = {}
+
+def progress_scan():
+  """How the progress is read, as set in the Options (else the defaults): {"bytes": the end of a file read, "lines":
+  of it the last lines, "pace": the current pace over the last so many progress values} (the config is read again only
+  when it changed)"""
+  from ..config import config_path, load_config
+  path = config_path()
+  try:
+    stamp = (path, os.stat(path).st_mtime)
+  except OSError:
+    stamp = (path, None)
+  if _scan_cache.get("stamp", "none") != stamp:
+    c = load_config()
+    def value(key):
+      default, low, high, _slow = PROGRESS_SETTINGS[key]
+      try:
+        return min(max(int(c.get(key, default)), low), high)
+      except (TypeError, ValueError):
+        return default
+    _scan_cache.update(stamp=stamp, value={"bytes": value("progress_tail_kib") * 1024, "lines": value("progress_tail_lines"),
+                                           "pace": value("progress_pace_points")})
+  return _scan_cache["value"]
+
 def estimate_progress(job, progress):
   """When the job will reach N/N: from the average rate since the start of the job, and from the rate of the last
   few progress points. The points are the timestamps of the n/N lines if they have them, else the times the app saw
@@ -238,7 +262,7 @@ def estimate_progress(job, progress):
   for t, c in points:
     if not recent or c != recent[-1][1]:
       recent.append((t, c))
-  recent = recent[-6:]
+  recent = recent[-progress_scan()["pace"]:]
   if len(recent) >= 2 and recent[-1][1] > recent[0][1] and recent[-1][0] > recent[0][0]:
     rate = (recent[-1][1] - recent[0][1]) / (recent[-1][0] - recent[0][0])
     est["recent"] = (rate, recent[-1][0] + (total - recent[-1][1]) / rate, len(recent))
@@ -697,7 +721,7 @@ def err_status(job, sizes=None):
     return ("missing", 0)
 
 def output_progress(path, tail=None):
-  """Latest valid n/N entry in the tail of a file (only its last PROGRESS_TAIL_BYTES are read, here unless given),
+  """Latest valid n/N entry in the tail of a file (only its end is read, see progress_scan; here unless given),
   with the n/N points of the tail and their timestamps (if the lines have one). A line without n/N may say M% (0 to
   100, integer or not): M of 100 (a line with both, as tqdm writes: its n/N, which is exact)"""
   if not path:
@@ -705,11 +729,12 @@ def output_progress(path, tail=None):
   if tail is None:
     try:
       size = fs_getsize(path)
-      tail = fs_read(path, max(0, size - PROGRESS_TAIL_BYTES), PROGRESS_TAIL_BYTES).decode("utf-8", errors="replace")
+      scan = progress_scan()["bytes"]
+      tail = fs_read(path, max(0, size - scan), scan).decode("utf-8", errors="replace")
     except OSError:
       return None
   latest, points = None, []
-  for line in tail.splitlines()[-PROGRESS_TAIL_LINES * 20:]:
+  for line in tail.splitlines()[-progress_scan()["lines"]:]:
     found = None
     for match in reversed(list(PROGRESS_PATTERN.finditer(line))):
       try:
@@ -731,20 +756,21 @@ def output_progress(path, tail=None):
   if latest is None:
     return None
   current, total, percent, line = latest
-  return JobProgress(current, total, line, points=points[-50:], path=path, percent=percent)
+  return JobProgress(current, total, line, points=points[-max(50, 2 * progress_scan()["pace"]):], path=path, percent=percent)
 
 PROGRESS_CHUNK = 200 # files per command that reads the progress
 PROGRESS_LINES_SCRIPT = (
   # for each file: a marker, then the last lines of its tail that have an n/N or M% (\r too ends a line, as progress
   # bars write), so only these come back over the connection, not the whole tails
   'for f; do printf "\\n%s\\n" "$0"; tail -c {bytes} -- "$f" 2>/dev/null | tr "\\r" "\\n" | tail -n {lines} '
-  '| grep -E "[0-9][[:space:]]*/[[:space:]]*[0-9]|[0-9][[:space:]]?%" | tail -n 60; done')
+  '| grep -E "[0-9][[:space:]]*/[[:space:]]*[0-9]|[0-9][[:space:]]?%" | tail -n {keep}; done')
 
 def progress_tails(paths):
   """The progress lines of many files in one round trip and few processes: {path: text with the last n/N lines
   of its tail (output_progress parses it as the tail) or None (cannot be read)}"""
   marker = f"==slurp-progress-{os.urandom(6).hex()}=="
-  script = PROGRESS_LINES_SCRIPT.format(bytes=PROGRESS_TAIL_BYTES, lines=PROGRESS_TAIL_LINES * 20)
+  scan = progress_scan()
+  script = PROGRESS_LINES_SCRIPT.format(bytes=scan["bytes"], lines=scan["lines"], keep=max(60, 2 * scan["pace"]))
   chunks = [paths[i:i + PROGRESS_CHUNK] for i in range(0, len(paths), PROGRESS_CHUNK)]
   return chunks, [["sh", "-c", script, marker, *chunk] for chunk in chunks], marker
 
