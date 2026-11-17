@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- New rule Q07: the job's logs (`--output`, `--error`, or the default
+  `slurm-%j.out` in the working directory) are in `$HOME`, `$PROJECT` or
+  `$STORE`, not on `$SCRATCH`; the fix names the scratch path to use (a
+  warning from 128 tasks, else a hint).
 - New rule P09: the program that srun (or mpirun) starts on many tasks, or
   an interpreter's script, is in `$HOME`, `$PROJECT` or `$STORE`, not on
   `$SCRATCH`: at the start all ranks read it at once (a warning from 128

@@ -888,6 +888,45 @@ def q06(ctx):
     n = int(info.file)
     yield F("Q06", f"{wd} holds {'more than 100000' if n > 100000 else n} entries")
 
+@rule("Q07", INFO, "Logs not on scratch",
+      "The job's log files (--output, --error, or the default slurm-%j.out in the working directory) are in $HOME, "
+      "$PROJECT or $STORE, not on $SCRATCH.",
+      "Logs grow while the job runs, and everything the tasks print ends up there: big runs write a lot. On home they "
+      "fill the small quota (then even logging in fails) and many jobs writing at once slow it down for everybody; "
+      "project storage is for what you keep, not for logs of every run. Scratch is made for job output.",
+      "Point --output and --error to scratch, with the actual path (#SBATCH lines take no variables like $SCRATCH).",
+      "#SBATCH --output=/users/me/logs/%x-%j.out                  # home\n"
+      "#SBATCH --output=/capstor/scratch/cscs/me/logs/%x-%j.out   # scratch (the logs/ directory must exist)")
+def q07(ctx):
+  env = ctx.facts.env if ctx.facts else {}
+  scratch = (env.get("SCRATCH") or "").rstrip("/")
+  if not scratch:
+    return
+  known_dir = ctx.job is not None or ctx.opt("chdir") # (else a relative path depends on where it is submitted from)
+  nodes, tpn, _, _ = ctx.counts()
+  tasks = to_int(ctx.opt("ntasks"), None) or ((nodes or 1) * (tpn or 1))
+  severity = WARNING if tasks >= VERY_MANY_TASKS else ""
+  def place(path):
+    where = storage_of(path, env)
+    return where if where and where[0] != "SCRATCH" else None
+  for name in ("output", "error"):
+    value = ctx.opt(name)
+    if not value or value == "/dev/null" or (not value.startswith("/") and not known_dir):
+      continue
+    path = ctx.abspath(output_pattern(value, ctx))
+    where = place(path) if path else None
+    if where:
+      yield F("Q07", f"--{name} writes to {path}, in ${where[0]} ({where[1]}), not on scratch ({scratch})",
+              ctx.directive_line(name), severity, snippet=f"#SBATCH --{name}={scratch}/logs/{os.path.basename(value)}")
+  if ctx.opt("output") is None and known_dir:
+    wd = ctx.workdir()
+    where = place(wd) if wd else None
+    cds = ctx.script.uses(r"\bcd\s+[\"']?(\$SCRATCH|\$\{SCRATCH\}|" + re.escape(scratch) + ")")
+    if where and not (where[0] == "HOME" and not cds): # (that: Q03, the whole job in home)
+      yield F("Q07", f"no --output: the log slurm-<job id>.out goes to the working directory {wd}, in ${where[0]}"
+                     + (" (the script changes to scratch only after Slurm opened it)" if cds else ""), ctx.directive_line("chdir"), severity,
+              snippet=f"#SBATCH --output={scratch}/logs/%x-%j.out")
+
 @rule("B09", WARNING, "Heavy work on the login node",
       "Your processes on the login node that keep CPUs busy for a long time.",
       "Login nodes are shared by everybody: heavy work there slows down everybody's editing, compiling and "

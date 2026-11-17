@@ -115,7 +115,8 @@ A job script should run the same for anyone, any time: log in, `sbatch job.sh`, 
 
 ## Filesystems and quotas
 
-- **$HOME**: small, backed up: sources, scripts, small results. Not for job output ([Q03](rule:Q03)).
+- **$HOME**: small, backed up: sources, scripts, small results. Not for job output, logs included ([Q03](rule:Q03),
+  [Q07](rule:Q07): `--output` and `--error` on scratch).
 - **$SCRATCH**{f" ({facts.env.get('SCRATCH')})" if facts and facts.env.get('SCRATCH') else ''}: big and fast, not backed up{f', files unused for {site["scratch_purge_days"]} days are deleted' if site.get('scratch_purge_days') else ''}
   ([Q04](rule:Q04), [Q05](rule:Q05)). Run jobs here, and start the programs of large runs from here: with many
   ranks all read the program at the same moment, which scratch takes and home does not ([P09](rule:P09); or
