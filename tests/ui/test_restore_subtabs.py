@@ -104,3 +104,35 @@ def test_what_is_kept(check):
   shell = View(1, "shell", "shell", session=types.SimpleNamespace(done=False))
   check("a shell: not kept", view_spec(app, shell) is None)
   check("no window: nothing", view_spec(app, View(2, "x", "window")) is None)
+
+
+def test_the_start_with_placeholders_on_the_overview(check, home, start_on_overview):
+  """slurp starts on the overview with kept subtabs not open yet (the default start page): it starts, shows the
+  overview, and never switches to a placeholder"""
+  from slurp.config import update_config
+  update_config(tabs=[{"destination": None, "views": {"views": [{"type": "rules", "rule": "", "title": "Rule catalogue", "icon": "rules"},
+                                                                {"type": "path", "path": str(home / "runs"), "title": "runs/", "icon": "folder"}],
+                                                      "shown": 1, "jobs_open": False}}], active=0)
+  from slurp.ui import restore
+  real_ready = restore.ready
+  restore.ready = lambda app, cluster: False
+  async def main():
+    app = Slurp()
+    try:
+      async with app.run_test(size=(140, 40)) as pilot:
+        await until(pilot, lambda: app.main is not None); await pilot.pause(0.5)
+        check("it starts: the overview, the placeholders in the bar", isinstance(app.screen, OverviewScreen)
+              and [v.title for v in app.cluster.views] == ["Rule catalogue", "runs/"] and all(v.pending for v in app.cluster.views),
+              type(app.screen).__name__)
+        app.show_view(None); await pilot.pause(0.2)
+        await pilot.press("ctrl+w"); await pilot.pause(0.3)
+        check("closing the job list: the overview again, not a placeholder", isinstance(app.screen, OverviewScreen), type(app.screen).__name__)
+        restore.ready = real_ready
+        app.restore_views()
+        ok = await until(pilot, lambda: not any(v.pending for v in app.cluster.views) and not app.cluster.restoring, 10)
+        await pilot.pause(0.5) # (the one shown before is being shown)
+        check("then opened, and the one shown before shown", ok and [v.title for v in app.cluster.views][0] == "Rule catalogue"
+              and isinstance(app.screen, DirScreen), type(app.screen).__name__)
+    finally:
+      restore.ready = real_ready
+  asyncio.run(main())

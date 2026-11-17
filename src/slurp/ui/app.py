@@ -498,7 +498,7 @@ class Slurp(App):
       cluster.jobs_open = self.start_page() == "_default"
       cluster.current_view = self.home_mode(cluster)
     mode = cluster.current_view
-    if not (mode == "_default" and cluster.jobs_open or mode == "overview" or any(v.mode == mode for v in cluster.views)):
+    if not (mode == "_default" and cluster.jobs_open or mode == "overview" or any(v.mode == mode and not v.pending for v in cluster.views)):
       mode = cluster.current_view = self.home_mode(cluster)
     if self.current_mode != mode:
       self.switch_mode(mode)
@@ -634,11 +634,12 @@ class Slurp(App):
     overview is always there), else its job list if open, else its last subtab (views), else the overview"""
     if views:
       for mode in reversed(cluster.view_history):
-        if (mode == "_default" and cluster.jobs_open) or any(v.mode == mode for v in cluster.views) or mode == "overview":
+        if (mode == "_default" and cluster.jobs_open) or any(v.mode == mode and not v.pending for v in cluster.views) or mode == "overview":
           return mode
     if cluster.jobs_open:
       return "_default"
-    return cluster.views[-1].mode if views and cluster.views else "overview"
+    opened = [v for v in cluster.views if not v.pending] # (a placeholder has no window yet)
+    return opened[-1].mode if views and opened else "overview"
 
   def show_home(self, views=True):
     """The job list (if open), the last subtab (views: when one closed; not for Back), or the overview of the tab"""
@@ -661,6 +662,11 @@ class Slurp(App):
 
   def switch_mode(self, mode):
     """(every subtab switch: remembered, so that closing one goes back to the one shown before)"""
+    if mode not in self._modes and mode not in (self.DEFAULT_MODE, "overview"): # (a placeholder, a closed subtab: never)
+      log.warning(f"no subtab {mode} to show: the overview instead")
+      mode = "overview"
+      if self.clusters:
+        self.cluster.current_view = mode
     if self.clusters:
       history = self.cluster.view_history
       if mode in history:
