@@ -260,7 +260,7 @@ has, the ones in the categories in it counted too), and for the one selected its
   and GPU hours (from Slurm's accounting: nodes, CPUs, GPUs times run time); from the first submit to the last end;
   partitions, accounts. Slurm is asked for the jobs themselves (`sacct -j`), so old jobs count too, as long as its
   accounting keeps them.
-- **Jobs:** a click (Enter) opens a job (an array: its window). **Categorize…** (`c`) puts it in a category,
+- **Jobs:** a click (Enter) opens a job (an array: its window), in a subtab of its own. **Categorize…** (`c`) puts it in a category,
   **Take job out** (`x`) takes it out of its category.
 - **not categorized** (at the end of the tree): the jobs of the job list (queued, and those finished since …) that
   are in no category, with their numbers; `c` sorts them in.

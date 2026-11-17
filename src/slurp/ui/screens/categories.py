@@ -534,12 +534,13 @@ class CategoriesScreen(SplitScreen):
     jobs = self.jobs_of(jid)
     if not jobs:
       return
+    # (in a subtab of its own: the one that shows it already, if open)
     if len(jobs) > 1 or ("_" in jobs[0].jid and "_" not in jid):
-      from .array import ArrayScreen
-      self.app.push_screen(ArrayScreen(jid, jobs[0]))
+      self.app.open_array_subtab(jid, jobs[0])
     else:
       from .job import JobScreen
-      self.app.push_screen(JobScreen(jobs[0]))
+      job = jobs[0]
+      self.app.open_view(f"job {job.jid}", lambda: JobScreen(job), kind="job", key=f"job {job.jid}")
 
   def selected_job(self):
     table = self.query_one("#cat-jobs", ClickTable)

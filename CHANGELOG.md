@@ -6,6 +6,7 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The categories window opens a job (or an array) in a subtab of its own.
 - Submit… and Run array say which ids an array range gives, the first
   and the last, and warn when a step misses the end (`1-100:2`: the last
   id is 99, not 100).

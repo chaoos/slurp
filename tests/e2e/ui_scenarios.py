@@ -1267,6 +1267,16 @@ async def t_categories(app, pilot):
   jt = cs.query_one("#cat-jobs")
   check("a category selected: its jobs only", [str(k.value) for k in jt.rows] == ["9003"] and "proj X/tests" in rendered(cs.query_one("#cat-info").render()))
   app.save_screenshot(filename="categories.svg", path=OUT)
+  # a job of it: its window in a subtab of its own; the categories stay in theirs
+  views = len(cluster.views)
+  jt.focus(); jt.move_cursor(row=0); await pilot.press("enter")
+  ok = await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.job.jid == "9003", 10)
+  check("a job in the categories window: its window in a new subtab", ok and len(cluster.views) == views + 1
+        and cluster.views[-1].key == "job 9003", [v.key for v in cluster.views])
+  app.close_view(cluster.views[-1]); app.show_view(app.find_view("categories")); await pilot.pause(0.4)
+  check("closed: back to the categories", app.screen is cs, type(app.screen).__name__)
+  check("and still at the category chosen", cs.path == "proj X/tests" and tree.cursor_node.data == "proj X/tests", cs.path)
+  tree.focus()
   await pilot.press("e"); await pilot.pause(0.4)
   app.screen.query_one("#nm-path").value = "proj X/checks"; await pilot.press("enter")
   ok = await until(pilot, lambda: cluster.categories.category_of("9003") == "proj X/checks", 10); await pilot.pause(0.4)
