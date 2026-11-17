@@ -6,6 +6,15 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Query current memory shows the right numbers. Memory is in binary units
+  (MiB, GiB) as `free -h` and `nvidia-smi` show it (it was decimal GB: an
+  80 GB GPU of 81559 MiB showed as 85.5 GB). CPU: the job's cgroup (what
+  Slurm counts against `--mem`, with its page cache), else the PSS of its
+  processes (RSS counted shared memory in every process), with PSS, RSS and
+  each node as `free` shows it. GPU: the job's processes, or the used
+  memory of its GPUs where the driver reports none per process (`[N/A]`; it
+  counted 0), and every GPU's used/total as in `nvidia-smi`. The memory
+  watch's file has `cpu_job_bytes` (was `cpu_rss_bytes`).
 - A drive mapped on Windows (the slurp helper) is named `user@cluster:/path`
   in Explorer, not `slurp (\\sshfs.r\slurp@localhost!8000\users)`: the link
   says whose files where, the helper sets the name after `net use` and

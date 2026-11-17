@@ -234,26 +234,37 @@ def amd_table(lines):
   return rows
 
 def parse_gpu_probe(lines, pids):
-  """Memory of the job's processes (bytes, None if unknown) and [(gpu, name, used, total bytes)] of a node"""
-  proc, devices = None, []
+  """The GPU memory of a node: (bytes of the job's processes or None if unknown, [(gpu, name, used, total bytes)],
+  how the job's bytes were found). nvidia-smi's per process numbers are [N/A] on some systems (MIG, some drivers):
+  then the GPUs the job's processes run on count with their used memory (the job has them to itself)."""
+  proc, devices, how = None, [], "processes"
+  uuids, unknown = set(), False
   amd_proc, amd_dev = [], []
   for line in lines:
     key, _, value = line.partition("=")
     if key == "GPU":
-      pid, sep, memory = value.partition(",")
-      match = re.match(r"\s*(\d+)", memory)
-      if sep and pid.strip() in pids and match:
-        proc = (proc or 0) + int(match.group(1)) * 1024**2
+      f = [c.strip() for c in value.split(",")]
+      pid, memory = f[0], f[-1]
+      if pid in pids:
+        if len(f) >= 3:
+          uuids.add(f[1])
+        if memory.isdigit():
+          proc = (proc or 0) + int(memory) * 1024**2
+        else:
+          unknown = True
       elif proc is None:
         proc = 0
     elif key == "GPUDEV":
       f = [c.strip() for c in value.split(",")]
-      if len(f) == 4 and f[2].isdigit() and f[3].isdigit():
-        devices.append((f[0], f[1], int(f[2]) * 1024**2, int(f[3]) * 1024**2))
+      if len(f) >= 4 and f[2].isdigit() and f[3].isdigit():
+        devices.append((f[0], f[1], int(f[2]) * 1024**2, int(f[3]) * 1024**2, f[4] if len(f) > 4 else ""))
     elif key == "AMDPROC":
       amd_proc.append(value)
     elif key == "AMDDEV":
       amd_dev.append(value)
+  if unknown: # (the driver does not tell per process: the job's GPUs, as nvidia-smi's table shows them)
+    mine = [d for d in devices if d[4] in uuids]
+    proc, how = (sum(d[2] for d in mine), "its GPUs") if mine else (None, "processes")
   if amd_proc or amd_dev:
     proc = 0
     for row in amd_table(amd_proc):
@@ -265,43 +276,66 @@ def parse_gpu_probe(lines, pids):
       total = next((v for k, v in row.items() if "vram" in k and "total" in k and "used" not in k), "")
       name = next((v for k, v in row.items() if "series" in k or "product" in k or "name" in k), "")
       if used.isdigit() and total.isdigit():
-        devices.append((row.get("device", "?"), name, int(used), int(total)))
-  return proc, devices
+        devices.append((row.get("device", "?"), name, int(used), int(total), ""))
+  return proc, [d[:4] for d in devices], how
+
+def parse_memory_probe(output):
+  """{node: what the memory probe found there} (scripts/memory_probe.sh)"""
+  nodes, node = {}, None
+  ints = lambda text: [int(v) for v in text.split(",") if v.strip().lstrip("-").isdigit()]
+  for line in output.splitlines():
+    if line.startswith("== "):
+      node = line[3:].strip()
+      nodes[node] = {"cpu_kib": None, "pss_kib": None, "cgroup": None, "node": None, "pids": set(), "gpu_lines": [],
+                     "gpu_error": ""}
+      continue
+    if node is None:
+      continue
+    key, _, value = line.partition("=")
+    data = nodes[node]
+    if key == "CPU_KIB" and value.isdigit():
+      data["cpu_kib"] = int(value)
+    elif key == "CPU_PSS_KIB" and value.isdigit():
+      data["pss_kib"] = int(value)
+    elif key == "CGROUP_KIB" and len(ints(value)) == 3:
+      data["cgroup"] = ints(value) # used, anon, file
+    elif key == "NODE_KIB" and len(ints(value)) == 4:
+      data["node"] = ints(value) # total, available, free, buff/cache
+    elif key == "CPU_UNAVAILABLE":
+      data["cpu_error"] = value
+    elif key == "JOB_PIDS":
+      data["pids"] = {pid for pid in value.split(",") if pid.isdigit()}
+    elif key == "GPU_UNAVAILABLE":
+      data["gpu_error"] = value
+    elif key in ("GPU", "GPUDEV", "AMDPROC", "AMDDEV"):
+      data["gpu_lines"].append(line)
+  for data in nodes.values():
+    data["gpu_bytes"], data["gpus"], data["gpu_how"] = parse_gpu_probe(data["gpu_lines"], data["pids"])
+  return nodes
 
 def current_memory_usage(job):
-  """Query current process RSS and per-job GPU usage; called only by the detail button."""
+  """The job's memory now, on all its nodes (the job window's Query current memory, and the memory watch):
+  CPU: its cgroup (what Slurm counts against --mem, with the page cache in it), else the PSS of its processes, else
+  their RSS, else sstat's estimate; the processes (PSS, RSS) and the nodes (as free) besides. GPU: its processes on
+  the GPUs, and every GPU's used and total, the numbers of nvidia-smi's table. Bytes."""
   fields = ["JobID", "MaxRSS", "AveRSS"]
   rows = parsable(run(["sstat", "-a", "-j", job.rec["JobIDRaw"], "-P", "-n", "-o", ",".join(fields)]), fields)
   sstat = {row["JobID"].partition(".")[2]: row for row in rows}
   tasks, other, err = run_script_on_nodes(job, "memory_probe.sh", job.rec["JobIDRaw"])
   if err:
     log.warning(f"memory query of job {job.jid}: {err[:300]}")
-  output = "\n".join(line for task in sorted(tasks) for line in tasks[task])
-  nodes = {}
-  node = None
-  for line in output.splitlines():
-    if line.startswith("== "):
-      node = line[3:].strip()
-      nodes[node] = {"cpu_kib": None, "pids": set(), "gpu_lines": [], "gpu_error": ""}
-    elif node and line.startswith("CPU_KIB="):
-      try:
-        nodes[node]["cpu_kib"] = int(line.partition("=")[2])
-      except ValueError:
-        pass
-    elif node and line.startswith("CPU_UNAVAILABLE="):
-      nodes[node]["cpu_error"] = line.partition("=")[2]
-    elif node and line.startswith("JOB_PIDS="):
-      nodes[node]["pids"] = {pid for pid in line.partition("=")[2].split(",") if pid.isdigit()}
-    elif node and line.startswith("GPU_UNAVAILABLE="):
-      nodes[node]["gpu_error"] = line.partition("=")[2]
-    elif node and line.split("=", 1)[0] in ("GPU", "GPUDEV", "AMDPROC", "AMDDEV"):
-      nodes[node]["gpu_lines"].append(line)
-  for data in nodes.values():
-    data["gpu_bytes"], data["gpus"] = parse_gpu_probe(data["gpu_lines"], data["pids"])
-
-  cpu_values = [node_data["cpu_kib"] for node_data in nodes.values() if node_data["cpu_kib"] is not None]
-  cpu_bytes = sum(cpu_values) * 1024 if cpu_values else None
-  cpu_source = "ps"
+  nodes = parse_memory_probe("\n".join(line for task in sorted(tasks) for line in tasks[task]))
+  total = lambda values: sum(values) * 1024 if values and None not in values else None
+  cgroup = total([d["cgroup"][0] if d["cgroup"] else None for d in nodes.values()])
+  pss = total([d["pss_kib"] for d in nodes.values()])
+  rss_values = [d["cpu_kib"] for d in nodes.values() if d["cpu_kib"] is not None]
+  rss = sum(rss_values) * 1024 if rss_values else None
+  if cgroup is not None:
+    cpu_bytes, cpu_source = cgroup, "cgroup"
+  elif pss is not None:
+    cpu_bytes, cpu_source = pss, "PSS"
+  else:
+    cpu_bytes, cpu_source = rss, "RSS"
   if cpu_bytes is None:
     step_counts = {step["JobID"].partition(".")[2]: int(step["NTasks"] or 0) for step in job.steps}
     estimates = [sl.sacct_bytes(row.get("AveRSS") or "") * step_counts.get(step, 0)
@@ -310,12 +344,16 @@ def current_memory_usage(job):
     if estimates:
       cpu_bytes = sum(estimates)
       cpu_source = "sstat estimate"
-  cpu_partial = len(cpu_values) < len(nodes)
+  cpu_partial = len(rss_values) < len(nodes)
+  cache = sum(d["cgroup"][2] for d in nodes.values() if d["cgroup"]) * 1024 if cgroup is not None else None
+  node_mem = [(name, *(v * 1024 for v in d["node"])) for name, d in nodes.items() if d["node"]]
   gpu_nodes = [node_data for node_data in nodes.values() if not node_data["gpu_error"] and node_data["gpu_bytes"] is not None]
   gpu_bytes = sum(node_data["gpu_bytes"] for node_data in gpu_nodes) if gpu_nodes else None
   gpu_partial = len(gpu_nodes) < len(nodes)
+  gpu_how = "its GPUs" if any(d["gpu_how"] == "its GPUs" for d in gpu_nodes) else "processes"
   gpus = [(name, *gpu) for name, data in nodes.items() for gpu in data["gpus"]]
-  return {"cpu_bytes": cpu_bytes, "cpu_source": cpu_source, "cpu_partial": cpu_partial, "gpu_bytes": gpu_bytes,
+  return {"cpu_bytes": cpu_bytes, "cpu_source": cpu_source, "cpu_partial": cpu_partial, "cpu_cache": cache,
+          "cpu_pss": pss, "cpu_rss": rss, "nodes": node_mem, "gpu_bytes": gpu_bytes, "gpu_how": gpu_how,
           "gpu_partial": gpu_partial, "gpu_errors": [d["gpu_error"] for d in nodes.values() if d["gpu_error"]],
           "gpus": gpus, "sstat": sstat}
 
@@ -355,7 +393,7 @@ def record_memory(watch, result):
     new = not os.path.exists(watch["file"])
     with open(watch["file"], "a") as f:
       if new:
-        f.write("time,cpu_rss_bytes,gpu_job_bytes,gpu_used_bytes,gpu_total_bytes\n")
+        f.write("time,cpu_job_bytes,gpu_job_bytes,gpu_used_bytes,gpu_total_bytes\n")
       f.write(",".join([datetime.fromtimestamp(sample[0]).isoformat(timespec="seconds"),
                         *("" if v is None else str(v) for v in sample[1:])]) + "\n")
   except OSError as e:

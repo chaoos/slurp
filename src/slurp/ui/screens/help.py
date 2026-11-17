@@ -53,7 +53,9 @@ Everything about one job.
   after a fresh login, the programs found and their libraries. **Placement** (running jobs) shows where tasks and
   threads run; **Fixed copy…** writes a copy of the script with the safe fixes; **What changed** (failed jobs)
   compares with the last run that worked.
-- **Memory** (running jobs): Query current memory (CPU and GPU), and repeated queries with plots.
+- **Memory** (running jobs): Query current memory, in MiB/GiB as `free -h` and `nvidia-smi` show it. CPU: the job's cgroup
+  (what Slurm counts against `--mem`), its processes (PSS, RSS) and the nodes as `free` shows them; GPU: the job's
+  processes and every GPU's used/total as in `nvidia-smi`. Repeated queries with plots.
 - **Progress:** the latest `n/N` (or `M%`) line with two estimates of the end; **Progress file…** picks another log file.
 - **Files:** output, error, script, working directory and files the job names; Enter opens one.
 - **Steps** of the job; for a running job **Run on the nodes** (a command on every node, or one) and **Shell** (`s`).

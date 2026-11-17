@@ -29,8 +29,20 @@ not there yet are looked for again at every reload. Only the end of the file is
 read (64 kB), every 10 seconds while the job runs (the window shows when it was
 last read); a chosen file is also listed among the job's files as `progress`.
 
-For a running job, press **Query current memory** to request current CPU RSS
-and GPU process memory. The query is the script `src/slurp/scripts/memory_probe.sh`,
+For a running job, press **Query current memory** to see the job's memory now,
+in binary units (MiB, GiB) as `free -h` and `nvidia-smi` show it:
+
+- **CPU:** the job's cgroup on its nodes, the memory Slurm counts against
+  `--mem` and the out-of-memory killer acts on (with how much of it is page
+  cache); where there is none, the PSS of its processes (shared memory counted
+  once), else their RSS. Then the processes' PSS and RSS, and each node as `free`
+  shows it (used = total − available, available, buff/cache): with the node to
+  itself the job is most of *used*; other jobs and the system are in it too.
+- **GPU:** the memory of the job's processes on the GPUs (`nvidia-smi
+  --query-compute-apps`); where the driver does not report it per process
+  (`[N/A]`: MIG, some drivers), the used memory of the GPUs the job's processes
+  run on. Then every GPU's used and total, the numbers of `nvidia-smi`'s table.
+ The query is the script `src/slurp/scripts/memory_probe.sh`,
 run on every node of the job as a step (`srun --overlap --input=all … bash -s`)
 with the script on stdin, so nothing is copied to the cluster. Every query is
 kept: the dropdown next to it repeats it every 1, 5, 15, 30 or 60 minutes (also

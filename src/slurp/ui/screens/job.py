@@ -61,6 +61,48 @@ def node_hours_text(job):
       text.append(f", at most {nodes * limit:.2f} at the time limit", style="dim")
   return text
 
+def memory_text(value, fmt="%.1f"):
+  """Bytes in binary units (KiB, MiB, GiB), as free -h and nvidia-smi show them (not the decimal kB, MB, GB)"""
+  return humanize.naturalsize(value, binary=True, format=fmt)
+
+CPU_SOURCES = {"cgroup": "the job's cgroup: what Slurm counts against --mem",
+               "PSS": "the job's processes, PSS: shared memory counted once",
+               "RSS": "the job's processes, RSS: shared memory counted in every process",
+               "sstat estimate": "sstat's estimate"}
+
+def cpu_memory_text(result):
+  """The CPU memory of a query: the job's (and what it is), its processes, the nodes as free shows them"""
+  cpu = result["cpu_bytes"]
+  if cpu is None:
+    return "unavailable"
+  lines = [f"{memory_text(cpu)} ({CPU_SOURCES.get(result['cpu_source'], result['cpu_source'])}"
+           + (f"; {memory_text(result['cpu_cache'])} of it page cache" if result.get("cpu_cache") else "")
+           + (", partial" if result["cpu_partial"] else "") + ")"]
+  procs = [f"{memory_text(result[k])} {name}" for k, name in (("cpu_pss", "PSS"), ("cpu_rss", "RSS"))
+           if result.get(k) is not None and result["cpu_source"] != name]
+  if procs:
+    lines.append("the processes: " + ", ".join(procs))
+  for node, total, available, free, cache in (result.get("nodes") or [])[:8]:
+    lines.append(f"{node} (as free): used {memory_text(total - available)} of {memory_text(total)}, "
+                 f"available {memory_text(available)}, buff/cache {memory_text(cache)}")
+  return "\n".join(lines)
+
+def gpu_memory_text(result):
+  """The GPU memory of a query: the job's, and every GPU's used and total (the numbers of nvidia-smi's table)"""
+  gpu, gpus = result["gpu_bytes"], result.get("gpus") or []
+  if gpu is None:
+    errors = result["gpu_errors"]
+    lines = [f"unavailable ({errors[0]})" if errors else "unavailable"] if not gpus else []
+  else:
+    how = ("the GPUs of the job: the driver does not report its processes" if result.get("gpu_how") == "its GPUs"
+           else "processes of the job")
+    lines = [f"{memory_text(gpu)} ({how}" + (", partial" if result["gpu_partial"] else "") + ")"]
+  if gpus:
+    used, total = sum(g[3] for g in gpus), sum(g[4] for g in gpus)
+    lines.append(f"GPUs of the nodes (as nvidia-smi): {memory_text(used)} of {memory_text(total)} used ({used / max(total, 1):.0%})")
+    lines += [f"  {node} GPU {idx} {name}: {memory_text(u)} / {memory_text(t)}" for node, idx, name, u, t in gpus[:16]]
+  return "\n".join(lines)
+
 class JobScreen(SplitScreen):
   """Details, files and steps of one job, commands on its nodes"""
   SHOW_BACK = True
@@ -110,7 +152,7 @@ class JobScreen(SplitScreen):
           yield Select(MEMORY_EVERY, value=0, allow_blank=False, id="memory-every",
                        tooltip="query the memory again and again; every query is kept and written to a file", compact=True)
           yield Static(id="memory-watch-status")
-        size = lambda v: humanize.naturalsize(v, format="%.3g")
+        size = lambda v: memory_text(v, "%.3g")
         with Horizontal(classes="memory-plot"):
           yield Label("CPU", classes="memory-plot-label")
           yield TimePlot(color="cyan", fmt=size, id="spark-cpu")
@@ -194,9 +236,9 @@ class JobScreen(SplitScreen):
     state_name = job.state.split()[0].rstrip("+") if job.state else ""
     if not job.queued and state_name in (FAILED_JOB_STATES | {"COMPLETED"}):
       peak_cpu, peak_gpu = peak_job_memory(job)
-      rows.append(("Peak CPU memory (Slurm DB)", humanize.naturalsize(peak_cpu) if peak_cpu else "not reported"))
+      rows.append(("Peak CPU memory (Slurm DB)", memory_text(peak_cpu) if peak_cpu else "not reported"))
       if peak_gpu:
-        rows.append(("Peak GPU memory (Slurm DB)", humanize.naturalsize(peak_gpu)))
+        rows.append(("Peak GPU memory (Slurm DB)", memory_text(peak_gpu)))
     for key, val in rows:
       grid.add_row(key, val)
     self.query_one("#info", Static).update(grid)
@@ -329,7 +371,7 @@ class JobScreen(SplitScreen):
       ntasks = int(s["NTasks"] or 0)
       total = sl.sacct_bytes(live.get("AveRSS") or s["AveRSS"]) * ntasks
       table.add_row(step, s["JobName"], state_text(s["State"]), s["ExitCode"], s["Elapsed"], s["NTasks"], s["NNodes"],
-                    humanize.naturalsize(maxrss) if maxrss else "", humanize.naturalsize(total) if total else "",
+                    memory_text(maxrss) if maxrss else "", memory_text(total) if total else "",
                     s["SubmitLine"], key=s["JobID"])
     if not self.job.steps:
       table.add_row("", "no steps", *[""]*8)
@@ -538,7 +580,7 @@ class JobScreen(SplitScreen):
       values = [s[index] for s in samples if s[index] is not None]
       self.query_one(f"#spark-{key}", TimePlot).set_data([(s[0], s[index]) for s in samples])
       self.query_one(f"#spark-{key}-text", Static).update(
-        f"{humanize.naturalsize(values[-1])} now\nmin {humanize.naturalsize(min(values))}\nmax {humanize.naturalsize(max(values))}"
+        f"{memory_text(values[-1])} now\nmin {memory_text(min(values))}\nmax {memory_text(max(values))}"
         if values else "-")
 
   def memory_loaded(self, result):
@@ -553,28 +595,8 @@ class JobScreen(SplitScreen):
       self.app.show_warnings()
       return
     self.details["sstat"] = result["sstat"]
-    cpu = result["cpu_bytes"]
-    cpu_text = f"{humanize.naturalsize(cpu)} RSS" if cpu is not None else "unavailable"
-    if cpu is not None and result["cpu_source"] != "ps":
-      cpu_text += f" ({result['cpu_source']})"
-    if cpu is not None and result["cpu_partial"]:
-      cpu_text += " (partial)"
-    gpu = result["gpu_bytes"]
-    if gpu is None:
-      errors = result["gpu_errors"]
-      gpu_text = f"unavailable ({errors[0]})" if errors else "unavailable"
-    else:
-      gpu_text = humanize.naturalsize(gpu) + " (processes of the job)"
-      if result["gpu_partial"]:
-        gpu_text += " (partial)"
-    gpus = result.get("gpus") or []
-    if gpus:
-      used, total = sum(g[3] for g in gpus), sum(g[4] for g in gpus)
-      gpu_text = (gpu_text + "\n" if gpu is not None else "") + \
-        f"GPUs of the nodes: {humanize.naturalsize(used)} of {humanize.naturalsize(total)} used ({used / max(total, 1):.0%})\n" + \
-        "\n".join(f"  {node} GPU {idx} {name}: {humanize.naturalsize(u)} / {humanize.naturalsize(t)}" for node, idx, name, u, t in gpus[:16])
-    self.query_one("#memory-cpu", Static).update(cpu_text)
-    self.query_one("#memory-gpu", Static).update(gpu_text)
+    self.query_one("#memory-cpu", Static).update(cpu_memory_text(result))
+    self.query_one("#memory-gpu", Static).update(gpu_memory_text(result))
     self.query_one("#memory-query", Button).disabled = not self.job.running
     self.show_steps()
     self.app.show_warnings()

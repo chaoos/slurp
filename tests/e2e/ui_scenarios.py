@@ -2001,12 +2001,15 @@ async def t_memory(app, pilot):
   js = await open_job(app, pilot, "9001")
   js.query_one("#memory-query").scroll_visible(); await pilot.pause(0.3)
   await pilot.click("#memory-query")
-  ok = await until(pilot, lambda: "RSS" in str(js.query_one("#memory-cpu").render()), 30)
+  ok = await until(pilot, lambda: "PSS" in str(js.query_one("#memory-cpu").render()), 30)
   call = open(calls).read() if os.path.exists(calls) else ""
   check("memory query: the probe script runs through srun with the script on stdin (bash -s), on all nodes",
         ok and "--input=all" in call and "bash -s -- 9001" in call and "--overlap" in call, (call, str(js.query_one("#memory-cpu").render())))
-  check("CPU memory of the job's processes", "RSS" in str(js.query_one("#memory-cpu").render()) and "0 Bytes" not in str(js.query_one("#memory-cpu").render()) and "unavailable" not in str(js.query_one("#memory-cpu").render()),
-        str(js.query_one("#memory-cpu").render()))
+  text = str(js.query_one("#memory-cpu").render())
+  check("CPU memory of the job's processes (no job cgroup in the lab: their PSS, and their RSS), in binary units",
+        "(the job's processes, PSS" in text and "the processes: " in text and " RSS" in text and "iB" in text
+        and "unavailable" not in text and " 0 Bytes" not in text, text)
+  check("…and the node as free shows it (used, available, buff/cache)", "(as free): used " in text and "available" in text, text)
   for v in list(app.cluster.views): app.close_view(v)
   await pilot.pause(0.3)
 
@@ -2022,7 +2025,7 @@ async def t_memory_watch(app, pilot):
   check("every 5 min: the first measurement at once, the next counted down", ok and "1 measurement" in status() and "next in 4:" in status(), status())
   path = w["file"]
   rows = open(path).read().splitlines() if os.path.exists(path) else []
-  check("measurements written to a file (CSV)", rows[:1] == ["time,cpu_rss_bytes,gpu_job_bytes,gpu_used_bytes,gpu_total_bytes"] and len(rows) == 2
+  check("measurements written to a file (CSV)", rows[:1] == ["time,cpu_job_bytes,gpu_job_bytes,gpu_used_bytes,gpu_total_bytes"] and len(rows) == 2
         and path.startswith(os.environ["XDG_DATA_HOME"]), rows)
   await pilot.click("#view-jobs"); await pilot.pause(0.3)
   w["due"] = 0 # due now: measured while the job window is not shown
@@ -2039,7 +2042,7 @@ async def t_memory_watch(app, pilot):
   bottom = lines[plot.size.height - 2][plot.LABEL:]
   tops = lines[0][plot.LABEL:]
   check("bars from zero: a rising series is low on the left, full on the right; max and times labelled",
-        bottom.strip() and tops.rstrip().endswith("█") and tops[0] == " " and "4 GB" in lines[0] and ":" in lines[-1], lines)
+        bottom.strip() and tops.rstrip().endswith("█") and tops[0] == " " and "3.73 GiB" in lines[0] and ":" in lines[-1], lines)
   b = js.query_one("#memory-query")
   b.scroll_visible(); await pilot.pause(0.3)
   await pilot.click("#memory-query")
