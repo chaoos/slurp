@@ -2092,20 +2092,45 @@ async def t_ended_progress(app, pilot):
   await pilot.pause(0.3)
 
 async def t_memory(app, pilot):
+  """Query runtime diagnostics: on which node (all, or one), then the job's memory, CPU, GPU, I/O, disks and
+  processes there, measured by the probe as a step of the job; the memory row shows its memory"""
+  from slurp.ui.screens.diagnostics import DiagnosticsScreen, NodeChoiceScreen
   calls = os.path.join(LAB, "srun_calls")
   if os.path.exists(calls): os.unlink(calls)
   js = await open_job(app, pilot, "9001")
-  js.query_one("#memory-query").scroll_visible(); await pilot.pause(0.3)
-  await pilot.click("#memory-query")
-  ok = await until(pilot, lambda: "PSS" in str(js.query_one("#memory-cpu").render()), 30)
+  js.query_one("#diagnostics").scroll_visible(); await pilot.pause(0.3)
+  await pilot.click("#diagnostics")
+  ok = await until(pilot, lambda: isinstance(app.screen, NodeChoiceScreen), 5)
+  radios = [str(b.label) for b in app.screen.query("RadioButton")] if ok else []
+  check("it asks on which node: all of them (chosen) or one of the job's", ok and radios[0].startswith("All nodes")
+        and radios[1:] == js.details["nodes"] and app.screen.node == "", radios)
+  await pilot.click("#nc-ok")
+  ok = await until(pilot, lambda: isinstance(app.screen, DiagnosticsScreen) and "Memory" in str(app.screen.query_one("#diag-text").render()), 30)
+  ds = app.screen
+  text = str(ds.query_one("#diag-text").render()) if ok else ""
   call = open(calls).read() if os.path.exists(calls) else ""
-  check("memory query: the probe script runs through srun with the script on stdin (bash -s), on all nodes",
-        ok and "--input=all" in call and "bash -s -- 9001" in call and "--overlap" in call, (call, str(js.query_one("#memory-cpu").render())))
-  text = str(js.query_one("#memory-cpu").render())
-  check("CPU memory of the job's processes (no job cgroup in the lab: their PSS, and their RSS), in binary units",
-        "(the job's processes, PSS" in text and "the processes: " in text and " RSS" in text and "iB" in text
-        and "unavailable" not in text and " 0 Bytes" not in text, text)
-  check("…and the node as free shows it (used, available, buff/cache)", "(as free): used " in text and "available" in text, text)
+  check("the probe runs through srun as a step of the job, the script on stdin, measuring (full), on all nodes",
+        ok and "--input=all" in call and "bash -s -- 9001 full" in call and "--overlap" in call, (call[-300:], text[:200]))
+  check("the diagnostics: memory (the processes, the node as free), CPU (the node, its load), local disks, the processes",
+        "processes: " in text and "node (as free): used " in text and "CPU" in text and "load " in text
+        and "Local disks" in text and "Busiest processes of the job" in text and "iB" in text, text)
+  status = str(ds.query_one("#diag-status").render())
+  check("…measured when, on all nodes", "measured at" in status and "on all " in status, status)
+  ds.query_one("#diag-text").update(""); await pilot.press("r")
+  ok = await until(pilot, lambda: "Memory" in str(ds.query_one("#diag-text").render()), 30)
+  check("r: again", ok)
+  await pilot.press("escape"); await pilot.pause(0.3)
+  cpu = str(js.query_one("#memory-cpu").render())
+  check("the memory row shows its memory (all nodes: the job's PSS here)", app.screen is js and "(the job's processes, PSS" in cpu
+        and "unavailable" not in cpu, cpu)
+  node = js.details["nodes"][0]
+  await pilot.click("#diagnostics"); await until(pilot, lambda: isinstance(app.screen, NodeChoiceScreen), 5)
+  app.screen.query("RadioButton")[1].value = True; await pilot.pause(0.2)
+  await pilot.click("#nc-ok")
+  ok = await until(pilot, lambda: isinstance(app.screen, DiagnosticsScreen) and "Memory" in str(app.screen.query_one("#diag-text").render()), 30)
+  call = open(calls).read().splitlines()[-1] if os.path.exists(calls) else ""
+  check("one node: srun -w that node", ok and f"-w {node}" in call and node in str(app.screen.query_one("#diag-status").render()), call)
+  await pilot.press("escape"); await pilot.pause(0.3)
   for v in list(app.cluster.views): app.close_view(v)
   await pilot.pause(0.3)
 
@@ -2139,11 +2164,14 @@ async def t_memory_watch(app, pilot):
   tops = lines[0][plot.LABEL:]
   check("bars from zero: a rising series is low on the left, full on the right; max and times labelled",
         bottom.strip() and tops.rstrip().endswith("█") and tops[0] == " " and "3.73 GiB" in lines[0] and ":" in lines[-1], lines)
-  b = js.query_one("#memory-query")
+  from slurp.ui.screens.diagnostics import DiagnosticsScreen, NodeChoiceScreen
+  b = js.query_one("#diagnostics")
   b.scroll_visible(); await pilot.pause(0.3)
-  await pilot.click("#memory-query")
+  await pilot.click("#diagnostics"); await until(pilot, lambda: isinstance(app.screen, NodeChoiceScreen), 5)
+  await pilot.click("#nc-ok")
   ok = await until(pilot, lambda: len(w["samples"]) == 3, 30)
-  check("a query by hand is kept too", ok and len(open(path).read().splitlines()) == 4)
+  check("diagnostics of all nodes are kept as a measurement too", ok and len(open(path).read().splitlines()) == 4)
+  await until(pilot, lambda: isinstance(app.screen, DiagnosticsScreen), 5); await pilot.press("escape"); await pilot.pause(0.3)
   js.query_one("#memory-every").value = 0
   for v in list(app.cluster.views): app.close_view(v)
   await pilot.pause(0.3)

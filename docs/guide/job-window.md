@@ -31,20 +31,29 @@ not there yet are looked for again at every reload. Only the end of the file is
 read (64 kB), every 10 seconds while the job runs (the window shows when it was
 last read); a chosen file is also listed among the job's files as `progress`.
 
-For a running job, press **Query current memory** to see the job's memory now,
-in binary units (MiB, GiB) as `free -h` and `nvidia-smi` show it:
+For a running job, **Query runtime diagnostics…** asks on which node (all of
+them, the default, or one) and opens a window with what the job does there now,
+measured over one second, with **Again** (`r`):
 
-- **CPU:** the job's cgroup on its nodes, the memory Slurm counts against
-  `--mem` and the out-of-memory killer acts on (with how much of it is page
-  cache); where there is none, the PSS of its processes (shared memory counted
-  once), else their RSS. Then the processes' PSS and RSS, and each node as `free`
-  shows it (used = total − available, available, buff/cache): with the node to
-  itself the job is most of *used*; other jobs and the system are in it too.
-- **GPU:** the memory of the job's processes on the GPUs (`nvidia-smi
-  --query-compute-apps`); where the driver does not report it per process
-  (`[N/A]`: MIG, some drivers), the used memory of the GPUs the job's processes
-  run on. Then every GPU's used and total, the numbers of `nvidia-smi`'s table.
- The query is the script `src/slurp/scripts/memory_probe.sh`,
+- **Memory**, in binary units (MiB, GiB) as `free -h` and `nvidia-smi` show it:
+  the job's cgroup on its nodes, the memory Slurm counts against `--mem` and the
+  out-of-memory killer acts on, with its limit and how much of it is page cache;
+  out-of-memory kills (red) and how often it hit its limit; where there is no
+  cgroup, the PSS of its processes (shared memory counted once), else their RSS.
+  Then the processes' PSS and RSS, each node as `free` shows it (used = total −
+  available, available, buff/cache), and swap.
+- **CPU**: how many of the job's CPUs are busy (yellow when most are idle), and
+  the node's use and load average.
+- **GPUs**: the memory of the job's processes (`nvidia-smi --query-compute-apps`;
+  where the driver does not report it per process, `[N/A]`, the used memory of
+  the GPUs they run on), and per GPU its memory, how busy it is (yellow: hardly),
+  memory bandwidth, temperature, power and its limit, and clock; `rocm-smi` on AMD.
+- **I/O** of the job (read and written per second), the **local disks** (`/tmp`,
+  `/dev/shm`, which counts as memory, `$TMPDIR`), and its **busiest processes**
+  (CPU %, memory, threads, state: `D` waits for I/O).
+
+The job window's memory row shows the memory of the last diagnostics.
+The diagnostics and the memory queries are the script `src/slurp/scripts/memory_probe.sh`,
 run on every node of the job as a step (`srun --overlap --input=all … bash -s`)
 with the script on stdin, so nothing is copied to the cluster. Every query is
 kept: the dropdown next to it repeats it every 1, 5, 15, 30 or 60 minutes (also

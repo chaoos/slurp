@@ -55,9 +55,9 @@ Everything about one job.
   after a fresh login, the programs found and their libraries. **Placement** (running jobs) shows where tasks and
   threads run; **Fixed copy…** writes a copy of the script with the safe fixes; **What changed** (failed jobs)
   compares with the last run that worked.
-- **Memory** (running jobs): Query current memory, in MiB/GiB as `free -h` and `nvidia-smi` show it. CPU: the job's cgroup
-  (what Slurm counts against `--mem`), its processes (PSS, RSS) and the nodes as `free` shows them; GPU: the job's
-  processes and every GPU's used/total as in `nvidia-smi`. Repeated queries with plots.
+- **Runtime diagnostics** (running jobs): on a node of the job or all of them, its memory, CPU and GPU use and load,
+  I/O, local disks and busiest processes, in a window of its own; the memory row shows its memory (MiB/GiB, as
+  `free -h` and `nvidia-smi`). Repeated memory queries with plots (every 1 to 60 min).
 - **Progress:** the latest `n/N` (or `M%`) line with two estimates of the end (a job that ended: where its file got to
   and how it ended); **Progress file…** picks another log file.
 - **Files:** output, error, script, working directory and files the job names; Enter opens one.
@@ -295,6 +295,24 @@ for the tab; while it is mounted they stay as they are (Unmount first).
   "ShellChoiceScreen": ("Shell", """
 Where the shell opens: **in slurp** (a subtab with a terminal), or **from your own terminal** (a link: an ssh command
 and a password for the terminal on your machine, through a relay).
+"""),
+  "NodeChoiceScreen": ("On which node", """
+The node of the job to query: all of them (the default) or one. Arrow keys and Space choose; `Esc` cancels.
+"""),
+  "DiagnosticsScreen": ("Runtime diagnostics", """
+What a running job does now on a node (or all its nodes), measured over one second by a step of the job (`srun
+--overlap`): **Again** (`r`) measures again.
+
+- **Memory:** the job's cgroup (what Slurm counts against `--mem`) and its limit, with the page cache in it;
+  out-of-memory kills (red) and how often it hit its limit; its processes' PSS and RSS; the node as `free` shows it;
+  swap.
+- **CPU:** how many of the job's CPUs are busy (yellow: most are idle), the node's use and load average.
+- **GPUs:** the memory of the job's processes; per GPU its memory, how busy it is (yellow: hardly), memory bandwidth,
+  temperature, power and its limit, clock (`nvidia-smi`; `rocm-smi` on AMD).
+- **I/O** of the job (read and written per second), the **local disks** (`/tmp`, `/dev/shm`, which counts as memory,
+  `$TMPDIR`), and its **busiest processes** (CPU %, memory, threads, state: `D` waits for I/O).
+
+Memory in binary units (MiB, GiB), as `free -h` and `nvidia-smi` show it.
 """),
   "SubmitScriptScreen": ("Submit a job script", """
 The `sbatch` command that submits the script, in its directory: edit it as you like (more options, a dependency,

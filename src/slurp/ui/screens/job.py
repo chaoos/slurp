@@ -23,7 +23,7 @@ from ...cluster.jobs import (
   annotate, array_ids_not_running_or_completed, array_task_id, array_task_states, compress_array_ids, eta_text, expand_array_spec, FAILED_JOB_STATES, guess_array_progress, is_time, load_jobs, original_array_spec, original_submission, output_progress, PROGRESS, progress_for_job, progress_path, progress_pattern, progress_state, rate_text, record_progress, restart_args, set_array_pattern, set_progress_file, with_array_spec
 )
 from ...cluster.details import (
-  current_memory_usage, load_details, MEMORY_EVERY, memory_watch, peak_job_memory, record_memory, run_on_nodes, sacct_all
+  load_details, MEMORY_EVERY, memory_watch, peak_job_memory, record_memory, run_on_nodes, sacct_all
 )
 from ...cluster.paths import job_vars
 from .. import icons
@@ -144,7 +144,8 @@ class JobScreen(SplitScreen):
         yield Button("Rule catalogue", id="checks-catalogue", compact=True)
       yield FindingsView(id="job-checks")
       with Horizontal(id="memory-controls"):
-        yield Button("Query current memory", id="memory-query", variant="primary", compact=True)
+        yield Button(icons.label("health", "Query runtime diagnostics…"), id="diagnostics", variant="primary", compact=True,
+                     tooltip="on a node of the job (or all): memory, CPU and GPU use and load, I/O, local disks, its busiest processes")
         yield Label("CPU:")
         yield Static(id="memory-cpu", markup=False)
         yield Label("GPU:")
@@ -245,7 +246,7 @@ class JobScreen(SplitScreen):
       grid.add_row(key, val)
     self.query_one("#info", Static).update(grid)
     self.query_one("#memory-controls", Horizontal).display = job.running
-    self.query_one("#memory-query", Button).disabled = not job.running
+    self.query_one("#diagnostics", Button).disabled = not job.running
     self.show_progress()
     self.query_one("#nodes").display = job.running
     self.query_one("#checks-placement", Button).display = job.running
@@ -535,24 +536,32 @@ class JobScreen(SplitScreen):
       self.live = live
       self.run_checks()
 
-  @on(Button.Pressed, "#memory-query")
-  def memory_query_pressed(self, event):
+  @on(Button.Pressed, "#diagnostics")
+  def diagnostics_pressed(self, event):
     event.stop()
     if not self.job.running:
       return
-    self.query_one("#memory-query", Button).disabled = True
-    self.query_one("#memory-cpu", Static).update("querying …")
-    self.query_one("#memory-gpu", Static).update("querying …")
-    self.query_current_memory()
+    nodes = list(self.details["nodes"] or [])
+    if not nodes:
+      self.notify("the nodes of the job are not known yet, try again in a moment", severity="warning")
+      return
+    from .diagnostics import ALL, DiagnosticsScreen, NodeChoiceScreen
+    job = self.job
+    def chosen(node):
+      if node is None:
+        return
+      self.app.push_screen(DiagnosticsScreen(job, node, done=lambda result: self.diagnosed(node, result)))
+    self.app.push_screen(NodeChoiceScreen(f"Runtime diagnostics of job {job.jid}: on which node?", nodes, ALL), chosen)
 
-  @cluster_work("current-memory")
-  def query_current_memory(self):
-    try:
-      result = current_memory_usage(self.job)
-    except Exception as e:
-      result = {"error": str(e)}
-    if not get_current_worker().is_cancelled:
-      self.app.call_from_thread(self.memory_loaded, result)
+  def diagnosed(self, node, result):
+    """The memory of a diagnostics query in the memory row (of all nodes: also kept as a measurement of the watch)"""
+    if not self.is_mounted or "error" in result:
+      return
+    if not node:
+      self.memory_loaded(result["memory"])
+    else:
+      self.query_one("#memory-cpu", Static).update(f"{node}: " + cpu_memory_text(result["memory"]))
+      self.query_one("#memory-gpu", Static).update(f"{node}: " + gpu_memory_text(result["memory"]))
 
   shown_samples = -1
 
@@ -601,13 +610,12 @@ class JobScreen(SplitScreen):
     if "error" in result:
       self.query_one("#memory-cpu", Static).update(f"unavailable ({result['error']})")
       self.query_one("#memory-gpu", Static).update("unavailable")
-      self.query_one("#memory-query", Button).disabled = not self.job.running
       self.app.show_warnings()
       return
-    self.details["sstat"] = result["sstat"]
+    if result.get("sstat"):
+      self.details["sstat"] = result["sstat"]
     self.query_one("#memory-cpu", Static).update(cpu_memory_text(result))
     self.query_one("#memory-gpu", Static).update(gpu_memory_text(result))
-    self.query_one("#memory-query", Button).disabled = not self.job.running
     self.show_steps()
     self.app.show_warnings()
 

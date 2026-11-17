@@ -290,7 +290,8 @@ def parse_memory_probe(output):
     if line.startswith("== "):
       node = line[3:].strip()
       nodes[node] = {"cpu_kib": None, "pss_kib": None, "cgroup": None, "node": None, "pids": set(), "gpu_lines": [],
-                     "gpu_error": ""}
+                     "gpu_error": "", "node_cpu": None, "loadavg": None, "job_cpu": None, "job_io": None, "limit": None,
+                     "events": None, "swap": None, "disks": [], "procs": [], "gpu_load": [], "amd_load": []}
       continue
     if node is None:
       continue
@@ -312,9 +313,58 @@ def parse_memory_probe(output):
       data["gpu_error"] = value
     elif key in ("GPU", "GPUDEV", "AMDPROC", "AMDDEV"):
       data["gpu_lines"].append(line)
+    elif key == "NODE_CPU" and len(ints(value)) == 2:
+      data["node_cpu"] = ints(value) # busy %, CPUs
+    elif key == "LOADAVG":
+      data["loadavg"] = value.split(",")
+    elif key == "JOB_CPU":
+      cores, _, cpus = value.partition(",")
+      try:
+        data["job_cpu"] = (float(cores), int(cpus) if cpus.isdigit() else None)
+      except ValueError:
+        pass
+    elif key == "JOB_IO" and len(ints(value)) == 2:
+      data["job_io"] = ints(value) # bytes/s read, written
+    elif key == "CGROUP_LIMIT_KIB":
+      data["limit"] = None if value == "max" else (int(value) if value.isdigit() else None)
+      data["limited"] = value != "max"
+    elif key == "MEM_EVENTS" and len(ints(value)) == 3:
+      data["events"] = ints(value) # oom_kill, max, high
+    elif key == "SWAP_KIB" and len(ints(value)) == 2:
+      data["swap"] = ints(value)
+    elif key == "DISK":
+      f = value.split(",")
+      if len(f) == 4 and all(v.isdigit() for v in f[1:]):
+        data["disks"].append((f[0], *map(int, f[1:])))
+    elif key == "PROC":
+      f = value.split("|", 6)
+      if len(f) == 7:
+        try:
+          data["procs"].append({"pid": f[0], "cpu": float(f[1]), "rss_kib": int(f[2] or 0), "threads": int(f[3] or 0),
+                                "state": f[4], "name": f[5], "cmd": f[6].strip()})
+        except ValueError:
+          pass
+    elif key == "GPULOAD":
+      f = [c.strip() for c in value.split(",")]
+      if len(f) == 7:
+        number = lambda v: float(v) if v.replace(".", "", 1).isdigit() else None
+        data["gpu_load"].append({"index": f[0], "util": number(f[1]), "mem_util": number(f[2]), "temp": number(f[3]),
+                                 "power": number(f[4]), "power_limit": number(f[5]), "clock": number(f[6])})
+    elif key == "AMDLOAD":
+      data["amd_load"].append(value)
   for data in nodes.values():
     data["gpu_bytes"], data["gpus"], data["gpu_how"] = parse_gpu_probe(data["gpu_lines"], data["pids"])
   return nodes
+
+def runtime_diagnostics(job, node=None):
+  """What the job does on one node (node) or on all its nodes now: memory (as current_memory_usage, also its limit
+  and out-of-memory kills), CPU (cores used of its CPUs, the node's use and load), GPU memory and load, I/O, local
+  disks, its busiest processes; measured over one second. {"nodes": {node: ...}, "memory": the memory summary}"""
+  tasks, other, err = run_script_on_nodes(job, "memory_probe.sh", job.rec["JobIDRaw"], "full", node=node, timeout=120)
+  nodes = parse_memory_probe("\n".join(line for task in sorted(tasks) for line in tasks[task]))
+  if not nodes:
+    return {"error": (err or " ".join(other) or "no answer from the node(s)")[:300]}
+  return {"nodes": nodes, "memory": memory_summary(job, nodes, {}), "node": node, "time": time.time()}
 
 def current_memory_usage(job):
   """The job's memory now, on all its nodes (the job window's Query current memory, and the memory watch):
@@ -328,6 +378,10 @@ def current_memory_usage(job):
   if err:
     log.warning(f"memory query of job {job.jid}: {err[:300]}")
   nodes = parse_memory_probe("\n".join(line for task in sorted(tasks) for line in tasks[task]))
+  return memory_summary(job, nodes, sstat)
+
+def memory_summary(job, nodes, sstat):
+  """The job's memory over the nodes of a memory probe (bytes): the CPU and GPU numbers the job window shows"""
   total = lambda values: sum(values) * 1024 if values and None not in values else None
   cgroup = total([d["cgroup"][0] if d["cgroup"] else None for d in nodes.values()])
   pss = total([d["pss_kib"] for d in nodes.values()])

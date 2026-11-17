@@ -86,3 +86,47 @@ def test_the_jobs_cgroup(check, tmp_path):
   check("v1: the memory controller's job cgroup, with total_rss and total_cache",
         probe("12:memory:/slurm/uid_1000/job_4242/step_0/task_0\n11:cpu,cpuacct:/slurm/uid_1000/job_4242\n", v1)
         == "10485760,8388608,2097152")
+
+
+def test_runtime_diagnostics_of_a_node(check):
+  from slurp.ui.screens.diagnostics import diagnostics_text
+  out = "\n".join(["== nid001", "NODE_KIB=527767304,401234567,350000000,40000000", "CGROUP_KIB=62914560,58720256,4194304",
+                   "CPU_KIB=25165824", "CPU_PSS_KIB=17825792", "JOB_PIDS=100,101", "GPU=100, GPU-aaa, 40000",
+                   "GPUDEV=0, NVIDIA H100, 40512, 81559, GPU-aaa", "GPUDEV=1, NVIDIA H100, 512, 81559, GPU-bbb",
+                   "NODE_CPU=35,288", "LOADAVG=101.5,99.0,80.2,104/2300", "JOB_CPU=20.50,72", "JOB_IO=13107200,1048576",
+                   "CGROUP_LIMIT_KIB=67108864", "MEM_EVENTS=2,40,0", "SWAP_KIB=0,0",
+                   "DISK=/tmp,419430400,3221225,416209175", "DISK=/dev/shm,263883652,204800,263678852",
+                   "PROC=100|1980.5|20971520|64|R|python|python train.py --epochs 10", "PROC=101|0.0|10240|1|D|tar|tar xf data.tar",
+                   "GPULOAD=0, 97, 45, 64, 420.50, 700.00, 1980", "GPULOAD=1, 0, 0, 30, 70.00, 700.00, 345"])
+  from slurp.cluster.details import parse_memory_probe
+  d = parse_memory_probe(out)["nid001"]
+  check("parsed: the node's and job's CPU, load, I/O, limit, events, disks, processes, GPU load",
+        d["node_cpu"] == [35, 288] and d["job_cpu"] == (20.5, 72) and d["job_io"] == [13107200, 1048576]
+        and d["limit"] == 67108864 and d["events"] == [2, 40, 0] and len(d["disks"]) == 2 and d["procs"][0]["cpu"] == 1980.5
+        and d["gpu_load"][0]["util"] == 97 and d["gpu_load"][0]["power_limit"] == 700, d)
+  text = diagnostics_text({"nodes": {"nid001": d}})
+  plain = text.plain
+  check("memory: the job of its limit, the out-of-memory kills", "job (its cgroup, as Slurm counts it): 60.0 GiB of 64.0 GiB limit (94%)" in plain
+        and "out-of-memory kills in the job: 2" in plain, plain[:400])
+  check("CPU: the job's CPUs busy (most idle: said), the node and its load", "job: 20.5 of its 72 CPUs busy (28%) · most of its CPUs are idle" in plain
+        and "node: 35% of 288 CPUs busy · load 101.5 / 99.0 / 80.2" in plain, plain)
+  check("GPUs: memory, busy, bandwidth, temperature, power, clock; an idle one said", "GPU 0 NVIDIA H100: 39.6 GiB / 79.6 GiB · busy 97% · memory bandwidth 45% · 64 °C · 420 / 700 W · 1980 MHz" in plain
+        and "GPU 1 NVIDIA H100: 512.0 MiB / 79.6 GiB · busy 0%" in plain and "hardly used" in plain, plain)
+  check("I/O, disks (/dev/shm counts as memory), the busiest processes; D: waits for I/O", "read 12.5 MiB/s, written 1.0 MiB/s" in plain
+        and "/dev/shm: 200.0 MiB of 251.7 GiB used (counts as memory)" in plain and "python train.py --epochs 10" in plain
+        and "(waits for I/O)" in plain, plain)
+  styles = {str(span.style) for span in text.spans}
+  check("what is wrong stands out (red, yellow)", "bold red" in styles and "yellow" in styles and "bold yellow" in styles, styles)
+
+
+def test_the_probe_script_full(check, tmp_path):
+  bin_ = tmp_path / "bin"; bin_.mkdir()
+  (bin_ / "scontrol").write_text(f"#!/bin/sh\necho 'PID JOBID STEPID LOCALID GLOBALID'\necho '{os.getpid()} 42 0 0 0'\n")
+  (bin_ / "scontrol").chmod(0o755)
+  env = {"PATH": f"{bin_}:/usr/bin:/bin", "SLURM_STEP_ID": "7"}
+  out = subprocess.run(["bash", "-s", "--", "42", "full"], stdin=open(PROBE), capture_output=True, text=True, env=env, timeout=30).stdout
+  keys = {l.split("=", 1)[0] for l in out.splitlines() if "=" in l}
+  check("full: the node's CPU and load, swap, the local disks, the processes (measured over a second)",
+        {"NODE_CPU", "LOADAVG", "SWAP_KIB", "DISK", "PROC"} <= keys, sorted(keys))
+  quick = subprocess.run(["bash", "-s", "--", "42"], stdin=open(PROBE), capture_output=True, text=True, env=env, timeout=30).stdout
+  check("without full (the memory watch): only the memory, at once", "NODE_CPU" not in quick and "PROC=" not in quick and "NODE_KIB" in quick)

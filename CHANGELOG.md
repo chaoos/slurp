@@ -6,6 +6,13 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- **Query runtime diagnostics…** replaces Query current memory in the job
+  window: on which node (all, or one: radio buttons), then a window with
+  what the job does there, measured over one second: memory (its cgroup and
+  limit, out-of-memory kills, PSS/RSS, the node as `free`, swap), CPU (the
+  job's CPUs busy, the node's use and load), GPUs (memory, busy, bandwidth,
+  temperature, power, clock), I/O, local disks and the busiest processes;
+  what looks wrong in red or yellow; **Again** (`r`).
 - The job window's progress shows only the estimate on the current pace;
   the one on the average pace since the start only while there are too
   few updates for the current one.
