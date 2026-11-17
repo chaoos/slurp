@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- A plain button (Close, Cancel, a tab not shown, …) has a box of its own, a
+  shade lighter than the window, like the coloured ones: before, only its
+  word showed, and the coloured button next to it looked much bigger.
 - Icons in front of tabs, buttons, menu items, the states of jobs and the
   files of a folder: the Material Design icons of Nerd Fonts, every one a
   cell wide. A terminal draws them from slurp's icon font (8 KB): install it

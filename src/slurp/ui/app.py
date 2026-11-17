@@ -83,6 +83,22 @@ class Slurp(App):
   ENABLE_COMMAND_PALETTE = False # (Textual's palette and its ⭘ in the header: the menu of the job list has what slurp does)
   CSS = """
   Button { min-width: 6; } /* (all buttons are compact: one line, as wide as their label) */
+  /* a plain button has a box of its own, as a coloured one (Textual's is the colour of the window: only its word showed) */
+  Button.-style-default.-textual-compact { background: $surface-lighten-1; }
+  Button.-style-default.-textual-compact:hover { background: $surface-lighten-2; }
+  Button.-style-default.-textual-compact.-primary { background: $primary; }
+  Button.-style-default.-textual-compact.-primary:hover { background: $primary-darken-2; }
+  Button.-style-default.-textual-compact.-success { background: $success; }
+  Button.-style-default.-textual-compact.-success:hover { background: $success-darken-2; }
+  Button.-style-default.-textual-compact.-warning { background: $warning; }
+  Button.-style-default.-textual-compact.-warning:hover { background: $warning-darken-2; }
+  Button.-style-default.-textual-compact.-error { background: $error; }
+  Button.-style-default.-textual-compact.-error:hover { background: $error-darken-2; }
+  /* (marks, not buttons to look at: the ✕ of tabs, the ? of windows) */
+  Button.-style-default.-textual-compact.cluster-close, Button.-style-default.-textual-compact.view-close,
+  Button.-style-default.-textual-compact.help-corner, #view-help, #about { background: transparent; }
+  Button.-style-default.-textual-compact.cluster-close:hover, Button.-style-default.-textual-compact.view-close:hover,
+  Button.-style-default.-textual-compact.help-corner:hover, #view-help:hover, #about:hover { background: $surface-lighten-2; }
   HeaderIcon { display: none; }
   #toolbar { height: auto; padding: 0 1; }
   #toolbar > * { margin-right: 1; }
