@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The overview is the first subtab of every tab, always there (it cannot
+  be closed): **Overview** at the left of the subtabs shows it any time;
+  with all other subtabs closed it is the only one.
 - Links: **Extend lifetime…** (instead of *Extend 1 h*) asks how much
   longer: 1, 2, 4, 8, 12 hours, a day, two, a week, added to the link's
   end, and says until when. A link without a time limit has no such

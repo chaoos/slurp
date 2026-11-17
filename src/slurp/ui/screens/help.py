@@ -198,7 +198,8 @@ categories (`K`), this slurp in your browser (`W`), the guides (`F1`), the rule 
 about slurp, and quit (`q`). Enter or a click does the item; `Esc` or a click elsewhere closes the menu.
 """),
   "OverviewScreen": ("Overview", """
-What a tab shows while none of its subtabs is open: at the start, and when the last one is closed. In its middle:
+The first subtab of every tab, always there (it cannot be closed): what a tab shows at the start, and when its other
+subtabs are closed; **Overview** at the left of the subtabs shows it any time. In its middle:
 the cluster (its site, the Slurm version, its nodes and partitions), its health (healthy, degraded or unhealthy, and
 why), the SSH session, and the ways on: **Jobs** (`j`, with how many run and wait; *No Slurm available* where there
 is none), **Quota** (`Q`) and **Health** (`C`, everything about the nodes and partitions). Below them the site's

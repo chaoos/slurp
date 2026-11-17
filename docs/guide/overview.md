@@ -1,6 +1,7 @@
 # The overview
 
-While none of its subtabs is open, a tab shows its **overview**: at the start, and when the last subtab closes. In its
+Every tab has its **overview** as its first subtab, always there (it has no ✕): a tab shows it at the start, and when
+its other subtabs close; **Overview** at the left of the subtabs shows it any time. In its
 middle, a few lines about the cluster and the ways on.
 
 ![The overview of a cluster: what it is, its health, the SSH session, and Jobs, Quota, Health](../images/overview.svg)

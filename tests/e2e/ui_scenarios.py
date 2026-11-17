@@ -1885,8 +1885,8 @@ async def t_progress(app, pilot):
   await pilot.press("escape"); await pilot.pause(0.3)
 
 def vtabs(app):
-  """the subtabs shown (the job list's only while it is open)"""
-  return [str(b.label) for b in app.screen.query("#view-tabs Button.view-tab") if b.display]
+  """the subtabs shown (the job list's only while it is open), besides the overview (always there, the first)"""
+  return [str(b.label) for b in app.screen.query("#view-tabs Button.view-tab") if b.display and b.id != "view-overview"]
 
 async def t_subtabs(app, pilot):
   t = app.screen.query_one("#jobs"); t.focus(); t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter")

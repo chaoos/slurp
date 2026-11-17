@@ -139,6 +139,7 @@ class Slurp(App):
   #view-tabs { height: 1; padding: 0 1; background: $boost; }
   #view-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 0; }
   #view-tabs Button.view-close { width: 3; min-width: 3; padding: 0; margin-right: 1; color: $text-muted; }
+  #view-tabs #view-overview { margin-right: 1; }
   #view-tabs Button.view-close:hover { color: $error; }
   #shell-bar { height: 1; background: $panel; }
   #shell-status { width: 1fr; height: 1; padding: 0 1; background: $panel; }
@@ -487,7 +488,7 @@ class Slurp(App):
       cluster.jobs_open = self.start_page() == "_default"
       cluster.current_view = self.home_mode(cluster)
     mode = cluster.current_view
-    if not (mode == "_default" and cluster.jobs_open or any(v.mode == mode for v in cluster.views)):
+    if not (mode == "_default" and cluster.jobs_open or mode == "overview" or any(v.mode == mode for v in cluster.views)):
       mode = cluster.current_view = self.home_mode(cluster)
     if self.current_mode != mode:
       self.switch_mode(mode)
@@ -608,16 +609,16 @@ class Slurp(App):
       self.push_screen(screen)
 
   def start_page(self):
-    """What a tab shows the first time: "overview" (no subtab open, the default) or "_default" (its job list open)"""
+    """What a tab shows the first time: "overview" (its first subtab, always there: the default) or "_default" (its
+    job list, opened)"""
     return "_default" if load_config().get("start_page") == "jobs" else "overview"
 
   def home_mode(self, cluster, views=True):
-    """What a tab shows when the subtab shown goes away: the one shown before it that is still open (views), else its
-    job list if open, else its last subtab (views), else the overview"""
+    """What a tab shows when the subtab shown goes away: the one shown before it that is still open (views; the
+    overview is always there), else its job list if open, else its last subtab (views), else the overview"""
     if views:
       for mode in reversed(cluster.view_history):
-        if (mode == "_default" and cluster.jobs_open) or any(v.mode == mode for v in cluster.views) \
-            or (mode == "overview" and not cluster.jobs_open):
+        if (mode == "_default" and cluster.jobs_open) or any(v.mode == mode for v in cluster.views) or mode == "overview":
           return mode
     if cluster.jobs_open:
       return "_default"
@@ -651,6 +652,15 @@ class Slurp(App):
       history.append(mode)
       del history[:-50]
     return super().switch_mode(mode)
+
+  def show_overview(self):
+    """The overview of the active tab: its first subtab, always there (it cannot be closed)"""
+    if not self.clusters:
+      return
+    self.cluster.current_view = "overview"
+    if self.current_mode != "overview":
+      self.switch_mode("overview")
+    self.call_after_refresh(self.refresh_status)
 
   def show_view(self, view):
     """Show a subtab of the active tab (None: the job list, opened if it is closed)"""
@@ -716,13 +726,15 @@ class Slurp(App):
     if not jobs:
       return
     jobs.first().variant = "primary" if self.current_mode == "_default" else "default"
+    for b in bar.query("#view-overview"):
+      b.variant = "primary" if self.current_mode == "overview" else "default"
     for b in (*jobs, *bar.query("#view-close-jobs")):
       if b.display != self.cluster.jobs_open:
         b.display = self.cluster.jobs_open
     wanted = {str(v.id) for v in self.cluster.views}
     have = set()
     for b in bar.query("Button.view-tab, Button.view-close"): # remove only the buttons of closed subtabs (ids stay unique)
-      if b.id in ("view-jobs", "view-close-jobs"):
+      if b.id in ("view-jobs", "view-close-jobs", "view-overview"):
         continue
       vid = b.id.rsplit("-", 1)[1]
       if vid not in wanted or getattr(b, "removing", False):

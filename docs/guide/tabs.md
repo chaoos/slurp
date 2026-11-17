@@ -13,9 +13,10 @@ Every tab is a cluster (or this machine). Under the tabs, each tab has its
 subtabs, each with a `✕`: **Jobs** (the job list), and one for each job
 window, each file or directory, each shell (on the cluster, on the node of a
 job, GDB). Quota and Health are windows over it.
-At the start no
-subtab is open, and while none is the tab shows its
-[overview](overview.md), from where **Jobs** opens the job list. When the
+The first subtab
+of every tab is its [overview](overview.md), always there (it cannot be
+closed); at the start, and while no other subtab is open, it is shown, and
+**Jobs** there opens the job list. When the
 subtab shown closes, the one shown before it comes back (the job list, a
 subtab, or the overview). A file or
 directory always opens in a subtab of its own, wherever you open it (the

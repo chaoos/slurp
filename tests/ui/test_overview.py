@@ -31,6 +31,11 @@ def test_overview_at_the_start(check, quiet, start_on_overview):
       check("at the start no subtab is open: the overview", isinstance(ov, OverviewScreen) and not app.cluster.jobs_open
             and not app.cluster.views, type(ov).__name__)
       check("…the job list's subtab is not there", not ov.query_one("#view-jobs").display and not ov.query_one("#view-close-jobs").display)
+      bar = ov.query_one("#view-tabs")
+      check("the overview: the only subtab, shown, without ✕", ov.query_one("#view-overview").display
+            and ov.query_one("#view-overview").variant == "primary" and not bar.query("#view-close-overview"))
+      await pilot.press("ctrl+w"); await pilot.pause(0.3)
+      check("Ctrl-W does not close it", isinstance(app.screen, OverviewScreen))
       card = ov.query_one("#ov-card")
       middle = ov.query_one("#ov-middle").region
       check("a card in the middle of the window", abs(card.region.x + card.region.width / 2 - (middle.x + middle.width / 2)) <= 2
@@ -43,6 +48,12 @@ def test_overview_at_the_start(check, quiet, start_on_overview):
       app.show_view(None); await pilot.pause(0.4)
       check("opening the job list: a subtab with ✕", app.screen is app.main and app.cluster.jobs_open
             and app.main.query_one("#view-jobs").display and app.main.query_one("#view-close-jobs").display)
+      tabs = [b for b in app.main.query_one("#view-tabs").children if b.display]
+      check("the overview stays, the leftmost subtab", tabs and tabs[0].id == "view-overview" and tabs[1].id == "view-jobs"
+            and app.main.query_one("#view-overview").variant == "default", [b.id for b in tabs])
+      await pilot.click("#view-overview"); await pilot.pause(0.3)
+      check("a click on it: the overview, the job list stays open", isinstance(app.screen, OverviewScreen) and app.cluster.jobs_open)
+      app.show_view(None); await pilot.pause(0.3)
       await pilot.click("#view-close-jobs"); await pilot.pause(0.4)
       check("its ✕ closes it: the overview again", isinstance(app.screen, OverviewScreen) and not app.cluster.jobs_open)
       await pilot.click("#ov-quota"); await pilot.pause(0.5)
