@@ -36,7 +36,7 @@ from slurp.ui.screens.clusterinfo import cluster_health, ClusterInfoScreen
 from slurp.ui.screens.overview import OverviewScreen
 from slurp.ui.screens.connection import ConnectionScreen
 from slurp.ui.screens.dialogs import CommandScreen, ConfirmScreen, CopyScreen, RestartScreen, RunArrayScreen
-from slurp.ui.screens.files import DirScreen, FileScreen, open_path
+from slurp.ui.screens.files import DirScreen, FileScreen, open_path, OpenDirScreen
 from slurp.ui.screens.help import AboutScreen, VIEW_HELP, ViewHelpScreen
 from slurp.ui.screens.job import JobScreen
 from slurp.ui.screens.links import DriveScreen, link_state, LinkScreen, LinkSetupScreen, ShellChoiceScreen
@@ -2684,3 +2684,32 @@ async def t_drive(app, pilot):
   app.mount_drive(cluster, busy, False); await pilot.pause(1)
   check("a directory that is not empty is refused", drive.state != "mounted" and any("not empty" in m for _, m in notes(app)))
   update_config(drive_mounts=None)
+
+
+async def t_dir_permissions(app, pilot):
+  """Open a directory… over SSH: the places of the cluster; the directory view lists permissions, owners, ACLs and
+  what the user cannot do, found on the cluster (one find, getfacl)"""
+  home = app.cluster.connection.home
+  d = os.path.join(home, "perms"); shutil.rmtree(d, ignore_errors=True); os.makedirs(os.path.join(d, "closed"))
+  for name in ("mine", "secret", "readonly", "shared"):
+    with open(os.path.join(d, name), "w") as f: f.write("x")
+  os.chmod(os.path.join(d, "secret"), 0); os.chmod(os.path.join(d, "readonly"), 0o444); os.chmod(os.path.join(d, "closed"), 0)
+  acl = shutil.which("setfacl") and subprocess.run(["setfacl", "-m", "u:root:r--", os.path.join(d, "shared")]).returncode == 0
+  try:
+    app.action_login_dir()
+    ok = await until(pilot, lambda: isinstance(app.screen, OpenDirScreen) and app.cluster.places is not None, 30)
+    check("the dialog: the places of the cluster, home first", ok and app.screen.places[0] == ("Home", home), app.screen.places)
+    path = app.screen.query_one("#opendir-path"); path.value = "perms"; path.focus(); await pilot.press("enter")
+    ok = await until(pilot, lambda: isinstance(app.screen, DirScreen) and app.screen.path == d and app.screen.entries, 10)
+    table = app.screen.query_one("#dir")
+    row = lambda name: [str(c) for c in table.get_row(name)]
+    check("a relative path: in home, in a subtab", ok and app.screen.query_one("#dpath").value == d)
+    if os.geteuid() != 0:
+      check("over SSH: permissions as ls -l, what the user cannot do", ok and row("readonly")[3] == "-r--r--r--"
+            and row("readonly")[5] == "no write" and row("secret")[5] == "no read no write"
+            and row("closed")[5] == "no read no write" and row("mine")[5] == "", [row(n) for n in ("readonly", "secret", "mine")])
+    if acl:
+      check("over SSH: the extended ACL, + after the permissions", row("shared")[3].endswith("+") and "u:root:r--" in row("shared")[6],
+            row("shared"))
+  finally:
+    os.chmod(os.path.join(d, "closed"), 0o700); os.chmod(os.path.join(d, "secret"), 0o600)

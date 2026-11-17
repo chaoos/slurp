@@ -83,7 +83,12 @@ A directory of the cluster.
 - Enter opens an entry: folders here (← goes back), files in a subtab of their own (the directory stays), in the
   matching view (text, Markdown, HDF5, core dumps, batch scripts in the script view with their checks). A file
   open already: its subtab.
-- A click on a header sorts by name, size or time; `/` filters by name; `.` shows hidden files.
+- The columns: size, time, the permissions as `ls -l` shows them (a `+` when there are extended ACL entries), owner
+  and group, **You**: what you cannot do (**no read** in red: you cannot read the file or list and enter the
+  directory; **no write** in yellow), as the cluster answers for you (groups and ACLs count), and the extended ACL
+  entries (`u:bob:r-x`: user bob, `g:` group, `m:` mask, `d:` default for new entries). The line above them shows
+  the same of the directory itself.
+- A click on a header sorts by that column; `/` filters by name; `.` shows hidden files.
 - `Backspace` or `u` goes to the parent; `f` follows (lists again every few seconds); `r` reloads.
 """),
   "MarkdownScreen": ("Markdown", """

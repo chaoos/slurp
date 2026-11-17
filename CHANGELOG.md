@@ -11,6 +11,12 @@ version may need the helper of the same version).
   `$STORE`, `$WORK`, those set on the cluster) or a path. Each time in a new
   subtab. The directory view shows its path as an input (edit it, Enter goes
   there) with buttons for home, scratch, project, … next to it.
+- The directory view shows the permissions of each entry (as `ls -l`, a `+`
+  with extended ACL entries), owner and group, the extended ACL entries
+  (`getfacl`), and what you cannot do with it: **no read** (red) or **no
+  write** (yellow), as the cluster answers for you (groups and ACLs count).
+  The same for the directory itself above the list. On a cluster still in
+  one round trip.
 
 ## 0.8.1 (beta), 2026-11-17
 

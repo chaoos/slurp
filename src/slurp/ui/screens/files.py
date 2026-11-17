@@ -21,10 +21,11 @@ from textual.widgets.text_area import Selection
 
 from ...state import TAIL_BYTES
 from ...cluster.remote import (
-  cluster_work, conn, fs_getsize, fs_isdir, fs_isfile, fs_read, fs_scandir, in_background, start_worker, tab_name
+  cluster_work, conn, fs_getsize, fs_isdir, fs_isfile, fs_read, in_background, start_worker, tab_name
 )
 from ...cluster.paths import is_binary, resolve_path
 from ...cluster.storage import drive_dirs
+from ...cluster.listing import can_read, can_write, listing, mode_text, short_acl
 from .. import icons
 from ..widgets import clean, ClickTable, crumb_title, PathArea
 from .base import SplitScreen
@@ -229,7 +230,17 @@ class OpenDirScreen(ModalScreen[str | None]):
   def action_cancel(self):
     self.dismiss(None)
 
-DIR_COLUMNS = [("name", "Name"), ("size", "Size"), ("mtime", "Modified")]
+DIR_COLUMNS = [("name", "Name"), ("size", "Size"), ("mtime", "Modified"), ("mode", "Permissions"), ("owner", "Owner"),
+               ("you", "You"), ("acl", "ACL")]
+
+def access_text(entry):
+  """What the user cannot do with an entry: "no read" (red), "no write" (yellow); empty if both"""
+  marks = []
+  if not can_read(entry):
+    marks.append(("no read", "bold red"))
+  if not can_write(entry):
+    marks.append(("no write", "yellow"))
+  return Text(" ").join(Text(text, style=style) for text, style in marks)
 DIR_LIMIT = 20000 # entries listed at most
 
 class DirScreen(SplitScreen):
@@ -253,6 +264,7 @@ class DirScreen(SplitScreen):
     self.crumbs = [*crumbs, self.path.rstrip("/") + "/"]
     self.bases, self.env = list(bases), env # passed on to the files opened from here (e.g. the job's WorkDir)
     self.entries = []
+    self.this = None # the directory itself (its permissions, what the user may do)
     self.pattern = ""
     self.show_hidden = True
     self.following = False
@@ -324,22 +336,12 @@ class DirScreen(SplitScreen):
     self.action_reload()
 
   def scan(self):
-    entries = []
+    """(the directory, its entries) with permissions, owners, ACLs and what the user may do (cluster/listing.py)"""
     try:
-      with fs_scandir(self.path) as it:
-        for i, de in enumerate(it):
-          if i >= DIR_LIMIT:
-            break
-          try:
-            st = de.stat()
-            isdir = de.is_dir()
-          except OSError:
-            st, isdir = None, False
-          entries.append({"name": de.name, "dir": isdir, "size": st.st_size if st and not isdir else None,
-                          "mtime": st.st_mtime if st else 0, "link": de.is_symlink()})
+      return listing(self.path, DIR_LIMIT)
     except OSError as e:
       self.app.call_from_thread(self.notify, f"cannot list {self.path}: {e}", title=tab_name(), severity="error")
-    return entries
+      return None, []
 
   scanning = False
 
@@ -348,10 +350,10 @@ class DirScreen(SplitScreen):
     if self.scanning:
       return
     self.scanning = True
-    def listed(entries):
+    def listed(result):
       self.scanning = False
-      if entries is not None:
-        self.entries = entries
+      if result is not None:
+        self.this, self.entries = result
         self.populate()
     in_background(self, self.scan, listed, group="scan")
 
@@ -365,29 +367,40 @@ class DirScreen(SplitScreen):
         pass
     table.clear()
     if self.path != "/":
-      table.add_row(Text(icons.label("folder", "../"), style="bold"), "", "", key="..")
-    keys = {"name": lambda e: e["name"].lower(), "size": lambda e: e["size"] or 0, "mtime": lambda e: e["mtime"]}
+      table.add_row(Text(icons.label("folder", "../"), style="bold"), "", "", "", "", "", "", key="..")
+    keys = {"name": lambda e: e["name"].lower(), "size": lambda e: e["size"] or 0, "mtime": lambda e: e["mtime"],
+            "mode": mode_text, "owner": lambda e: (e["owner"], e["group"]),
+            "you": lambda e: (can_read(e), can_write(e)), "acl": lambda e: short_acl(e["acl"])}
     shown = [e for e in self.entries if (self.show_hidden or not e["name"].startswith("."))
              and self.pattern.lower() in e["name"].lower()]
     shown.sort(key=keys[self.sort_column], reverse=self.sort_reverse)
     shown.sort(key=lambda e: not e["dir"]) # directories first
     for e in shown:
       style = "bold blue" if e["dir"] else ""
-      if e["name"].startswith("."):
+      if e["name"].startswith(".") or not can_read(e):
         style += " dim"
       name = Text(icons.label(icons.file_kind(e["name"], e["dir"]), e["name"] + ("/" if e["dir"] else "") + (" @" if e["link"] else "")),
                   style=style.strip())
       size = humanize.naturalsize(e["size"]) if e["size"] is not None else ""
       mtime = datetime.fromtimestamp(e["mtime"]).strftime("%Y-%m-%d %H:%M:%S") if e["mtime"] else ""
-      table.add_row(name, size, mtime, key=e["name"])
+      table.add_row(name, size, mtime, Text(mode_text(e), style="bold" if e["acl"] else ""),
+                    f"{e['owner']}:{e['group']}", access_text(e), Text(short_acl(e["acl"]), style="cyan"), key=e["name"])
     if current is not None:
       try:
         table.move_cursor(row=table.get_row_index(current))
       except Exception:
         pass
-    status = f"{len(shown)} of {len(self.entries)} entries"
+    status = Text(f"{len(shown)} of {len(self.entries)} entries")
+    if self.this is not None:
+      status.append(f" · {mode_text(self.this)} {self.this['owner']}:{self.this['group']}")
+      if self.this["acl"]:
+        status.append(f" · ACL {short_acl(self.this['acl'])}", style="cyan")
+      if not can_read(self.this):
+        status.append(" · you cannot list this directory", style="bold red")
+      elif not can_write(self.this):
+        status.append(" · read-only for you", style="yellow")
     if self.pick is not None:
-      status = "choose a file (Enter or click) · Esc: cancel · " + status
+      status = Text("choose a file (Enter or click) · Esc: cancel · ") + status
     if len(self.entries) >= DIR_LIMIT:
       status += f" (only the first {DIR_LIMIT} are listed)"
     if self.pattern:

@@ -114,3 +114,31 @@ def test_open_a_directory_asks_which_and_opens_a_new_subtab_each_time(check, hom
       await pilot.press("q")
   asyncio.run(main())
 
+
+def test_permissions_owners_acls_and_what_the_user_cannot_do(check, home):
+  import os
+  if os.geteuid() == 0:
+    pytest.skip("root may read and write everything")
+  (home / "secret").write_text("x"); os.chmod(home / "secret", 0o000)
+  (home / "readonly").write_text("x"); os.chmod(home / "readonly", 0o444)
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 40)) as pilot:
+      await until(pilot, lambda: app.main is not None and app.cluster.loader is None)
+      app.action_login_dir()
+      await until(pilot, lambda: isinstance(app.screen, OpenDirScreen)); await pilot.press("enter")
+      ok = await until(pilot, lambda: isinstance(app.screen, DirScreen) and app.screen.entries)
+      table = app.screen.query_one("#dir")
+      row = lambda name: [str(c) for c in table.get_row(name)]
+      check("the columns", ok and [str(c.label) for c in table.columns.values()]
+            == ["Name", "Size", "Modified", "Permissions", "Owner", "You", "ACL"])
+      check("permissions and owner as ls -l", row("readonly")[3] == "-r--r--r--" and row("readonly")[4].count(":") == 1,
+            row("readonly"))
+      check("a file the user cannot read: no read (and no write)", row("secret")[5] == "no read no write", row("secret"))
+      check("a read-only file: no write", row("readonly")[5] == "no write", row("readonly"))
+      check("a file of the user: nothing", row("notes.txt")[5] == "", row("notes.txt"))
+      status = str(app.screen.query_one("#dstatus").render())
+      check("the directory itself in the status line", "drwx" in status and "read-only" not in status, status)
+      await pilot.press("q")
+  asyncio.run(main())
+  os.chmod(home / "secret", 0o600)
