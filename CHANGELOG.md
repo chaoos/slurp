@@ -6,6 +6,15 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Rules by software stack: the module rules (E01, E04) apply on clusters
+  with environment modules, the uenv rules on clusters with uenv, found with
+  the cluster's facts (or a rule pack's `stacks`). A module rule applies in
+  part to a uenv's modules view (`--view=modules`): E01 asks for versions,
+  not for `module purge`. The rule catalogue says where each rule applies
+  and greys out the ones that do not apply on the tab's cluster.
+- New uenv rules: E06 (a uenv without version or tag; proposes the one
+  pulled), E07 (a uenv without a view), E08 (`module load` on a uenv cluster
+  without the modules view).
 - E04 (modules that cannot be loaded) in a job with a uenv: the module
   loads are replayed in the uenv, as the libraries are; when the uenv cannot
   be used, P05 says the module loads are not checked either. Tested with a

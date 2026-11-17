@@ -15,6 +15,7 @@ Keys (all optional):
   login_shell = true               # S02: module needs #!/bin/bash -l
   no_purge = false                 # E01: no module purge advice (e.g. uenv instead of modules)
   muted = ["R08"]                  # rules that do not apply here
+  stacks = ["uenv"]                # the software stacks ("modules", "uenv"), if slurp should not find them itself
   options = ["uenv", "view"]       # sbatch options of site plugins (S04)
   docs = "https://docs.cscs.ch"    # the site's documentation (guides)
   status = "https://status.cscs.ch" # the site's status page (outages, maintenance): shown when the login fails

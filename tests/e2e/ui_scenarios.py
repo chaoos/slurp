@@ -640,10 +640,11 @@ async def t_checks_ui(app, pilot):
     check("an entry opened meanwhile stays open when the environment results come", ok2 and still and not still[0].collapsed)
   finally:
     environment.replay_environment = real_replay
-  ok = await until(pilot, lambda: sc.ctx is not None and sc.ctx.replay is not None and "E04" in [f.rule.id for f in sc.findings], 30)
+  ok = await until(pilot, lambda: sc.ctx is not None and sc.ctx.replay is not None and (sc.ctx.replay or {}).get("module_errors"), 30)
   ids = [f.rule.id for f in sc.findings]
-  check("then the environment: the setup replayed (the module load fails here: E04), ls checked with ldd",
-        ok and "/bin/ls" in (sc.ctx.replay or {}).get("libs", {}) and "checking the environment" not in str(sc.query_one("#sc-findings").query_one(".fv-summary").render()),
+  # (the lab is a uenv cluster without a module system, its sbatch has --uenv: E08 instead of the module rule E04)
+  check("then the environment: the setup replayed (the module load fails here; a uenv cluster: E08, not E04), ls checked with ldd",
+        ok and "E08" in ids and "E04" not in ids and sc.ctx.facts.stacks == {"uenv"} and "/bin/ls" in (sc.ctx.replay or {}).get("libs", {}) and "checking the environment" not in str(sc.query_one("#sc-findings").query_one(".fv-summary").render()),
         (ids, sc.ctx.replay if sc.ctx else None))
   open(path, "a").write("#comment\n")
   ok = await until(pilot, lambda: "#comment" in sc.text, 10)

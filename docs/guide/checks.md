@@ -18,7 +18,7 @@ The rules, by category:
 | B | Beginner mistakes | several nodes but no `srun`, arrays that never use `$SLURM_ARRAY_TASK_ID`, logs without `%j`, results left in the node's `/tmp`, `srun` in a loop, the same job twice, dependencies that can never be met, heavy work on the login node |
 | P | Paths, files, programs | the log directory does not exist (the job fails without a log), missing directories and inputs, programs missing or not executable, built for another CPU, shared libraries not found, GPU code for other GPUs, changed since submission |
 | Q | Quota and storage | writing where the quota (space or files) is full, little room left, output in `$HOME`, inputs close to the scratch purge, very many files in one directory |
-| E | Environment | modules without versions or `module purge`, `conda activate` without the hook, `pip install` in jobs, modules that cannot be loaded, site advice |
+| E | Environment | modules without versions or `module purge`, `conda activate` without the hook, `pip install` in jobs, modules that cannot be loaded, site advice; uenv not pulled, without version and tag, without a view, `module load` without the modules view |
 | N | NUMA placement | tasks not aligned with NUMA domains, threads and tasks not bound, GPUs not assigned to tasks, `srun` without `--cpus-per-task` (Slurm 22.05+) |
 | U | Usage and outcome | much more time or memory than used, low CPU usage, why a job failed (OOM, TIMEOUT, exit codes), why it waits (pending reasons), known errors in the logs, long jobs without checkpoints |
 | G | Good practice | the script sets up its own environment instead of relying on the shell it is submitted from (compared with the environment Slurm kept of the submission, `sacct --env-vars`, where the cluster stores it, and by replaying its setup after a fresh login); failures that look like successes (`echo done` after `srun`, a failed step under a COMPLETED job); array logs without both `%A` and `%a` (the tasks race on one file, or the next run overwrites them); not submitting from inside a job; task and CPU counts from Slurm, not literal; runs that overwrite each other's files; a record of what ran; no interactive commands; the script works from any directory (relative paths before it sets its directory; relative logs with a `cd` but no `--chdir`); `$0` is Slurm's copy of the script |
@@ -90,9 +90,20 @@ table for the node), GPUs, failed jobs. Their rule links open the catalogue.
 `"checks_muted"` in the config; *Mute in this script* (script view) adds
 `# slurp: ignore R08` to the script, which works for any rule.
 
+**Software stacks:** most rules apply on every cluster; some are about one
+software stack only. The module rules (E01, E04) apply on clusters with
+environment modules (Lmod or modules in a login shell), the uenv rules (E05 to
+E08) on clusters with uenv (`sbatch --uenv`, or the `uenv` command). A module
+rule also applies to a uenv's modules view (`--view=modules`), in part: E01
+asks for versions there, but not for `module purge` (the modules come from the
+uenv, not from your login). slurp finds the stacks with the other facts of the
+cluster; while it does not know them, all rules apply. The rule catalogue says
+for each rule where it applies, and greys out the ones that do not apply on
+the tab's cluster.
+
 **Site rule packs** add what Slurm does not tell: scratch purge days, parallel
 filesystems, NUMA domains per node, the GPU architecture, site plugin options
-of `sbatch`, rules that do not apply, and site advice. A pack is a TOML file
+of `sbatch`, the software stacks (`stacks`, if not found), rules that do not apply, and site advice. A pack is a TOML file
 in `src/slurp/checks/packs/` (included: CSCS Alps, and JSC's JURECA, JUWELS, JUSUF and
 JEDI) or in
 `~/.config/slurp/rules/`; it applies when one of its `match` patterns matches

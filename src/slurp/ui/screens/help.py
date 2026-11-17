@@ -133,6 +133,9 @@ A batch script with the findings of the checks below it.
   "RuleCatalogueScreen": ("Rule catalogue", """
 All rules of the checks, by category: what each finds, why it matters, how to fix it, often with an example.
 The contents on the left jump to a rule; rule ids in the text are links. Findings everywhere link here.
+
+Some rules are about one software stack: environment modules (E01, E04) or uenv (E05 to E08). Those that do not
+apply on this tab's cluster (it has no modules, or no uenv) are greyed out, here and in the contents.
 """),
   "GuidesScreen": ("Guides", """
 How to use the cluster well, with this cluster's numbers: Slurm basics, job scripts, common mistakes, arrays and

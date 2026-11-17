@@ -212,14 +212,83 @@ class DocScreen(SplitScreen):
     self.pop_back()
 
 class RuleCatalogueScreen(DocScreen):
-  """All rules with what they find, why it matters and how to fix it; opened at one rule"""
+  """All rules with what they find, why it matters and how to fix it; opened at one rule. The rules that do not apply
+  on the tab's cluster (about a software stack it does not have: modules, uenv) are greyed out."""
   icon_name = "rules" # (of its subtab)
   title_word = "Rule catalogue"
+  DEFAULT_CSS = """
+  RuleCatalogueScreen .-inactive-rule { text-opacity: 45%; }
+  """
 
   def __init__(self, rule_id=""):
-    super().__init__(checks.rules_markdown(), checks.RULES[rule_id].anchor if rule_id in checks.RULES else "")
+    from ...cluster.remote import tab_name
+    self.tab = tab_name()
+    self.facts = checks.cached_facts(self.tab)
+    super().__init__(checks.rules_markdown(self.facts, self.tab), checks.RULES[rule_id].anchor if rule_id in checks.RULES else "")
     self.rule_id = rule_id
     self.crumbs = ["Rule catalogue"] + ([rule_id] if rule_id else [])
+    self.grey_tries = 0
+
+  def on_mount(self):
+    super().on_mount()
+    if self.facts is not None:
+      self.set_timer(0.2, self.grey_inactive)
+    elif self.app.clusters: # (not known yet: asked once, then the catalogue shows what applies)
+      from ...cluster.remote import in_background
+      in_background(self, lambda: checks.gather_facts(), self.facts_known, group="facts")
+
+  def facts_known(self, facts):
+    if facts is None:
+      return
+    self.facts = facts
+    viewer = self.query_one("#doc", MarkdownViewer)
+    async def update():
+      await viewer.document.update(checks.rules_markdown(facts, self.tab))
+      self.grey_tries = 0
+      self.set_timer(0.1, self.grey_inactive)
+      if self.anchor:
+        self.jump(self.anchor)
+    self.call_later(update)
+
+  def inactive_rules(self):
+    return {r.id for r in checks.RULES.values() if not checks.rule_active(r, self.facts)} if self.facts is not None else set()
+
+  def grey_inactive(self):
+    """Each inactive rule's section (from its heading to the next one) greyed out; the document is built after
+    mounting: tried until its headings are there"""
+    from textual.widgets._markdown import MarkdownH2, MarkdownH3
+    blocks = list(self.query_one("#doc", MarkdownViewer).document.children)
+    if sum(isinstance(b, MarkdownH3) for b in blocks) < len(checks.RULES) and self.grey_tries < 30:
+      self.grey_tries += 1
+      self.set_timer(0.15, self.grey_inactive)
+      return
+    inactive, current = self.inactive_rules(), None
+    for block in blocks:
+      if isinstance(block, (MarkdownH2, MarkdownH3)):
+        words = (block.source or "").lstrip("#").split()
+        current = words[0] if isinstance(block, MarkdownH3) and words else None
+      block.set_class(current in inactive, "-inactive-rule")
+    self.grey_contents(inactive)
+
+  def grey_contents(self, inactive):
+    """The inactive rules dimmed in the table of contents too"""
+    from rich.text import Text as RichText
+    from textual.widgets import Tree
+    viewer = self.query_one("#doc", MarkdownViewer)
+    trees = viewer.query(Tree)
+    if not trees:
+      return
+    def walk(node):
+      for child in node.children:
+        label = child.label.plain if hasattr(child.label, "plain") else str(child.label)
+        words = label.split()
+        if len(words) > 1 and words[1] in checks.RULES:
+          dim = words[1] in inactive
+          if getattr(child, "slurp_dim", None) != dim:
+            child.slurp_dim = dim
+            child.set_label(RichText(label, style="dim italic" if dim else ""))
+        walk(child)
+    walk(trees.first().root)
 
   def show_rule(self, rule_id):
     self.rule_id = rule_id

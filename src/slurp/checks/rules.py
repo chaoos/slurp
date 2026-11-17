@@ -849,7 +849,7 @@ def b09(ctx):
       "versions, results change, programs fail to find their libraries. Without a purge, whatever your login loaded "
       "comes along.",
       "Start with module purge (or the site's equivalent) and load exact versions: module load gcc/12.3.0.",
-      "module purge\nmodule load gcc/12.3.0 openmpi/4.1.6")
+      "module purge\nmodule load gcc/12.3.0 openmpi/4.1.6", stack="modules")
 def e01(ctx):
   s = ctx.script
   loads = [(line, t) for line, t in s.code_lines() if re.match(r"\s*(module\s+(load|add)|ml)\s+\w", t)]
@@ -865,7 +865,11 @@ def e01(ctx):
   if unversioned:
     line, bad = unversioned[0]
     yield F("E01", f"module load {' '.join(bad)} without a version", line)
-  if not s.uses(r"\bmodule\s+(purge|reset)|\bml\s+(purge|reset)") and not (ctx.facts and ctx.facts.site.get("no_purge")):
+  # (the purge only where the modules are the system's: a uenv's modules view brings its own, and a login loads none
+  # of them)
+  from_uenv = ctx.uenv_modules() or bool(ctx.facts and ctx.facts.stacks and "modules" not in ctx.facts.stacks)
+  if not s.uses(r"\bmodule\s+(purge|reset)|\bml\s+(purge|reset)") and not (ctx.facts and ctx.facts.site.get("no_purge")) \
+     and not from_uenv:
     yield F("E01", "no module purge before the module loads", loads[0][0], snippet="module purge")
 
 @rule("E02", WARNING, "conda and pip inside the job",
@@ -900,7 +904,7 @@ def e03(ctx):
       "module load commands of the script that fail now (the module does not exist (any more) or conflicts), "
       "replayed after a fresh login, in the job's uenv if it has one (--uenv, --view: its modules).",
       "The job starts without the software: command not found, missing libraries.",
-      "Use modules that exist (module avail / module spider), with versions.", needs="replay")
+      "Use modules that exist (module avail / module spider), with versions.", needs="replay", stack="modules")
 def e04(ctx):
   if (ctx.replay or {}).get("container"): # (its modules are in the container, not on the login node)
     return
@@ -1182,12 +1186,68 @@ def u06(ctx):
       "A job can only use a uenv that was pulled before: it fails at the start without running anything.",
       "Pull it on the login node: uenv image pull <name>/<version>:<tag> (uenv image find lists what there is).",
       "#SBATCH --uenv=prgenv-gnu/24.11:v1\n#SBATCH --view=default\n\n$ uenv image pull prgenv-gnu/24.11:v1   # once, before sbatch",
-      needs="replay")
+      needs="replay", stack="uenv")
 def e05(ctx):
   missing = (ctx.replay or {}).get("uenv_not_pulled") or []
   if missing:
     yield F("E05", f"not pulled: {', '.join(missing)} (uenv image ls does not list {'it' if len(missing) == 1 else 'them'})",
             ctx.directive_line("uenv"), snippet="\n".join(f"uenv image pull {m}" for m in missing))
+
+@rule("E06", INFO, "uenv without version or tag",
+      "#SBATCH --uenv names a uenv without its version or tag (prgenv-gnu, prgenv-gnu/24.11): the uenv counterpart of "
+      "modules without versions (E01).",
+      "The job gets whichever version or tag is there when it starts: after a new release or a pull the same script "
+      "runs with other compilers and libraries, results change, programs fail to find their libraries.",
+      "Name it exactly: name/version:tag (uenv image ls shows the ones you have).",
+      "#SBATCH --uenv=prgenv-gnu            # whichever there is\n#SBATCH --uenv=prgenv-gnu/24.11:v1    # exactly this one",
+      stack="uenv")
+def e06(ctx):
+  from .environment import pulled_uenvs, uenv_specs
+  value = ctx.opt("uenv")
+  loose = [s for s in uenv_specs(value) if not s.startswith(("/", "./", "~")) and not re.fullmatch(r"[0-9a-f]{16}|[0-9a-f]{64}", s)
+           and not re.fullmatch(r"[^/:@%]+/[^:@%]+:[^@%]+(@[^%]+)?(%.+)?", s)]
+  if not loose:
+    return
+  images = pulled_uenvs((ctx.replay or {}).get("uenv_list", []))
+  exact = []
+  for spec in loose:
+    name, _, rest = spec.partition("/")
+    version = rest.partition(":")[0]
+    match = [i for i in images if i["name"] == name and (not version or i["version"] == version)]
+    exact.append(f"{match[-1]['name']}/{match[-1]['version']}:{match[-1]['tag']}" if match else None)
+  snippet = f"#SBATCH --uenv={','.join(e for e in exact if e)}" if all(exact) else ""
+  yield F("E06", f"--uenv={value}: {', '.join(loose)} without {'version and tag' if '/' not in loose[0] else 'tag'}",
+          ctx.directive_line("uenv"), snippet=snippet)
+
+@rule("E07", WARNING, "uenv without a view",
+      "#SBATCH --uenv without --view: the uenv is mounted, but none of its software is on PATH, LD_LIBRARY_PATH or "
+      "MODULEPATH.",
+      "The job's programs, compilers and libraries are not found (command not found, missing shared libraries), "
+      "unless the script uses the uenv's paths itself.",
+      "Choose a view: --view=default (or the one the uenv's documentation names; --view=modules for its modules).",
+      "#SBATCH --uenv=prgenv-gnu/24.11:v1\n#SBATCH --view=default", stack="uenv")
+def e07(ctx):
+  if ctx.opt("uenv") is not None and not ctx.opt("view") and not ctx.script.uses(r"/user-environment|/user-tools|\buenv\s+view"):
+    yield F("E07", f"--uenv={ctx.opt('uenv')} without --view: nothing of it is on PATH", ctx.directive_line("uenv"),
+            snippet="#SBATCH --view=default")
+
+@rule("E08", ERROR, "module load without a module system",
+      "The script loads modules on a cluster whose modules come from a uenv (no module system of its own), without "
+      "the uenv's modules view (--view=modules).",
+      "module is not there (command not found) or knows none of the modules: the job starts without its software.",
+      "Load them from the uenv: --uenv=<name/version:tag> and --view=modules (or <name>:modules next to another "
+      "view); or drop the module loads and use the uenv's default view.",
+      "#SBATCH --uenv=prgenv-gnu/24.11:v1\n#SBATCH --view=modules\nmodule load cray-mpich", stack="uenv")
+def e08(ctx):
+  facts = ctx.facts
+  if not facts or "uenv" not in facts.stacks or "modules" in facts.stacks or ctx.uenv_modules():
+    return
+  loads = [(line, t) for line, t in ctx.script.code_lines() if re.match(r"\s*(module\s+(load|add|try-load|swap)|ml)\s+\w", t)]
+  if loads:
+    with_uenv = ctx.opt("uenv") is not None
+    yield F("E08", "module load, but the modules here come from a uenv's modules view" +
+            (f", and --view is {ctx.opt('view') or 'not set'}" if with_uenv else ", and the script has no --uenv"), loads[0][0],
+            snippet="#SBATCH --view=modules" if with_uenv else "#SBATCH --uenv=<name/version:tag>\n#SBATCH --view=modules")
 
 # ===========================================================================
 # G: good practice

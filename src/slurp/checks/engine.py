@@ -48,6 +48,7 @@ class Rule:
   example: str = ""       # bad / good, shown in the catalogue
   needs: str = "script"   # what it needs: script, job, probe, quota, logs, live
   check: object = None
+  stack: str = "any"      # the software stack it is about: "any", "modules" or "uenv" (STACKS)
 
   @property
   def category(self):
@@ -64,9 +65,13 @@ class Rule:
 
 RULES = {}
 
-def rule(id, severity, title, what, implies, fix, example="", needs="script"):
+# The software stacks of clusters: some rules are about one of them only, and apply where it is (Facts.stacks)
+STACKS = {"modules": "clusters with environment modules (module load)",
+          "uenv": "clusters with uenv (--uenv, --view)"}
+
+def rule(id, severity, title, what, implies, fix, example="", needs="script", stack="any"):
   def register(fn):
-    RULES[id] = Rule(id, severity, title, what, implies, fix, example, needs, fn)
+    RULES[id] = Rule(id, severity, title, what, implies, fix, example, needs, fn, stack)
     return fn
   return register
 
@@ -450,6 +455,7 @@ class Facts:
   bashrc: list = field(default_factory=list)         # (line, text) of module/conda lines in ~/.bashrc
   user: str = ""
   site: dict = field(default_factory=dict)           # the rule pack
+  stacks: set = field(default_factory=set)           # the software stacks there: "modules", "uenv" (empty: unknown)
   time: float = 0
 
   def partition(self, name=None):
@@ -500,7 +506,8 @@ def gather_facts(force=False):
           ["bash", "-lc", "env"],
           ["sh", "-c", "grep -nE '^[^#]*(module +(load|add|swap)|^ *ml +[A-Za-z]|conda +activate|source +activate|uenv +start)' "
                        "\"$HOME/.bashrc\" \"$HOME/.bash_profile\" 2>/dev/null | head -10"],
-          ["sacctmgr", "-nP", "show", "user", user, "format=defaultaccount"]]
+          ["sacctmgr", "-nP", "show", "user", user, "format=defaultaccount"],
+          ["sh", "-c", "command -v uenv"]]
   res = run_many(cmds, timeout=60)
   f = Facts(time=time.time(), user=user)
   f.partitions = parse_sinfo(res[0].stdout)
@@ -525,9 +532,38 @@ def gather_facts(force=False):
   f.default_account = res[7].stdout.strip().splitlines()[0].strip() if res[7].stdout.strip() else ""
   from . import rulepacks
   f.site = rulepacks.pack_for(key, getattr(conn(), "destination", "") or "", f)
+  f.stacks = detect_stacks(f, bool(res[8].stdout.strip()))
   with _facts_lock:
     _facts[key] = f
   return f
+
+def detect_stacks(facts, uenv_command=False):
+  """The software stacks of a cluster: "modules" (Lmod or environment modules in a login shell), "uenv" (sbatch's
+  --uenv option, or the uenv command); a rule pack's "stacks" says it instead"""
+  if facts.site.get("stacks"):
+    return set(facts.site["stacks"]) & set(STACKS)
+  stacks = set()
+  if any(facts.env.get(k) for k in ("LMOD_CMD", "MODULESHOME", "LMOD_DIR", "MODULEPATH")):
+    stacks.add("modules")
+  if "uenv" in facts.sbatch_options or uenv_command:
+    stacks.add("uenv")
+  return stacks
+
+def cached_facts(tab):
+  """The facts of a tab if they were gathered already (None: not yet), without asking the cluster"""
+  with _facts_lock:
+    return _facts.get(tab)
+
+def uenv_views(value):
+  """The view names of a --view value ("default", "prgenv-gnu:modules,spack": [default] / [modules, spack])"""
+  return [part.split(":")[-1].strip() for part in (value or "").split(",") if part.strip()]
+
+def rule_active(r, facts, ctx=None):
+  """A rule applies on the cluster: it is about any stack, or one the cluster has (unknown stacks: all apply); module
+  rules also where the script's uenv brings its modules (--view=modules), in part"""
+  if r.stack == "any" or facts is None or not facts.stacks or r.stack in facts.stacks:
+    return True
+  return r.stack == "modules" and ctx is not None and ctx.uenv_modules()
 
 LOGIN_IGNORE = {"ssh", "sshd", "bash", "zsh", "sh", "tmux", "screen", "sftp-server", "sleep", "ps", "less", "vim",
                 "vi", "nano", "emacs", "top", "htop", "git", "systemd", "dbus-daemon", "(sd-pam)", "mosh-server"}
@@ -717,6 +753,10 @@ class Context:
     if self.probes is None or path is None:
       return None
     return self.probes.get(f"{kind}:{path}")
+
+  def uenv_modules(self):
+    """The script's uenv brings modules: --uenv with the modules view (--view=modules or <uenv>:modules)"""
+    return self.opt("uenv") is not None and "modules" in uenv_views(self.opt("view"))
 
   def counts(self):
     """(nodes, tasks per node, cpus per task, gpus per node) as far as known"""
@@ -1001,6 +1041,8 @@ def run_rules(ctx, only=None):
   for r in RULES.values():
     if r.id in ignored or (only and r.id[0] not in only and r.id not in only):
       continue
+    if not rule_active(r, ctx.facts, ctx): # (about a software stack the cluster does not have)
+      continue
     if r.needs in ("script",) and ctx.script is None:
       continue
     if r.needs == "job" and ctx.job is None:
@@ -1156,7 +1198,11 @@ def check_jobs(jobs):
 # ---------------------------------------------------------------------------
 # the rule catalogue
 
-def rules_markdown():
+def rules_markdown(facts=None, where=""):
+  """The catalogue; with the facts of a cluster (where: its name) the rules that do not apply there say so (and the
+  rule catalogue window greys them out)"""
+  stacks_text = (f"{where or 'This cluster'} has " + (" and ".join(sorted(facts.stacks)) if facts.stacks else
+                 "no module system and no uenv that slurp found (all rules apply)") + "." if facts is not None else "")
   out = ["# Rule catalogue",
          "",
          "slurp checks batch scripts and jobs with these rules. Every finding names its rule; this page explains "
@@ -1169,6 +1215,10 @@ def rules_markdown():
          "",
          "The guides (F1) explain the background: job scripts, arrays, software, filesystems, NUMA placement, GPUs, "
          "failed jobs.",
+         "",
+         "**Software stacks:** most rules apply everywhere; some only on " + " or on ".join(STACKS.values()) + ". "
+         "Module rules also apply in part to a uenv's modules view (--view=modules). " + stacks_text
+         + (" The rules that do not apply there are greyed out." if facts is not None else ""),
          ""]
   for cat, name in CATEGORIES.items():
     in_category = [r for r in RULES.values() if r.category == cat]
@@ -1178,8 +1228,14 @@ def rules_markdown():
     for r in in_category:
       link = lambda text: re.sub(r"\b([SRBPQENU]\d\d)\b", lambda m: f"[{m.group(1)}](rule:{m.group(1)})"
                                  if m.group(1) in RULES else m.group(1), text)
+      applies = "" if r.stack == "any" else f" · only on {STACKS[r.stack]}" + (
+        " (and in a uenv's modules view)" if r.stack == "modules" else "")
+      inactive = facts is not None and not rule_active(r, facts)
       out += [f"### {r.heading}", "",
-              f"{SEVERITY_ICON[r.severity]} {r.severity} · checks: {NEEDS_TEXT.get(r.needs, r.needs)}", "",
+              f"{SEVERITY_ICON[r.severity]} {r.severity} · checks: {NEEDS_TEXT.get(r.needs, r.needs)}{applies}", ""]
+      if inactive:
+        out += [f"*Not active on {where or 'this cluster'}: it has no {r.stack}.*", ""]
+      out += [
               f"**What:** {link(r.what)}", "",
               f"**Why it matters:** {link(r.implies)}", "",
               f"**How to fix:** {link(r.fix)}", ""]
