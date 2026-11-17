@@ -795,7 +795,8 @@ class JobScreen(SplitScreen):
         FileScreen([*crumbs, e.label], text=text, refresher=lambda: sacct_all(job), bases=bases, env=env)), key=key)
         if text is not None else None, group="sacct")
     elif e.path:
-      open_path(self.app, crumbs, e.path, bases, env, follow=self.job.running and e.kind in ("stdout", "stderr", "progress"))
+      log = e.kind in ("stdout", "stderr", "progress") # (a log: at its end, followed while the job runs; other files at their top)
+      open_path(self.app, crumbs, e.path, bases, env, follow=log and self.job.running, at_end=log)
     elif e.text is not None:
       self.app.in_new_subtab(lambda: self.app.open_window(FileScreen([*crumbs, e.label], text=e.text, bases=bases, env=env)), key=key)
 

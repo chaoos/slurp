@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Where a text file opens depends on where from: a job's output, error and
+  progress file (the job window, the job list's Err) at its end, followed
+  while the job runs (an ended job's at its end too, not followed); the
+  directory browser, a path in a text and the files of the script at the
+  top, not followed.
 - Fixed: the **Shell** button of a running job's window opened the
   categorize dialog (its handler was on the wrong method since categories
   came); `s` worked.

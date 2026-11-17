@@ -1,6 +1,6 @@
 """slurp's UI against the lab: the job list and the job window: memory, progress, restart, subtabs, sorting, accounts (the scenarios are in ui_scenarios.py)"""
 from ui_scenarios import (
-  t_memory_watch, t_memory, t_ended_progress, t_shell_button, t_since, t_restart_env, t_subtabs, t_progress, t_ij_fields, t_sort, t_accounts, t_zebra, t_restart, t_interactive,
+  t_memory_watch, t_memory, t_ended_progress, t_shell_button, t_log_positions, t_since, t_restart_env, t_subtabs, t_progress, t_ij_fields, t_sort, t_accounts, t_zebra, t_restart, t_interactive,
 )
 
 
@@ -58,3 +58,7 @@ def test_ended_progress(ui, check):
 
 def test_shell_button(ui, check):
   ui(t_shell_button, check)
+
+
+def test_log_positions(ui, check):
+  ui(t_log_positions, check)

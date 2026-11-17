@@ -71,8 +71,10 @@ One job array as a whole.
 - **Cancel** the whole array or only its pending tasks (after asking). `r` reloads.
 """),
   "FileScreen": ("Text file", """
-A text file (or command output) of the cluster, read in parts. It opens at its top (a large file: its first 1 MB;
-`G` or `f` reads its end); a log that is followed (a running job's) at its end, where `A` loads the part before.
+A text file (or command output) of the cluster, read in parts. Where it opens depends on where it is opened from:
+a job's output, error and progress file (the job window, the job list's Err) at its end, followed while the job
+runs (`A` loads the part before); everything else (the directory browser, a path in a text, files of the script)
+at its top, not followed (a large file: its first 1 MB; `G` or `f` reads its end).
 
 - **Follow** (`f`) shows what is appended, like `tail -f`; **Watch** (`w`) reruns a command output every 5 s.
 - `/` searches, `n` / `N` next and previous match; `g` / `G` top and bottom.

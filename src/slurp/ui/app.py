@@ -2411,7 +2411,8 @@ class Slurp(App):
       self.push_screen(ArrayScreen(array_id, job))
 
   def open_file(self, job, path):
-    open_path(self, ["Jobs", job.jid], path, [job.rec["WorkDir"]], job_vars(job), follow=job.running)
+    """A log of a job (its output or error file): at its end, followed while the job runs"""
+    open_path(self, ["Jobs", job.jid], path, [job.rec["WorkDir"]], job_vars(job), follow=job.running, at_end=True)
 
 
 REPORTS_OFF = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1015l\x1b[?1006l\x1b[?1004l" # mouse and focus reporting off

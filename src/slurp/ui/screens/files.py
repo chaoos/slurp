@@ -42,12 +42,13 @@ FILE_VIEWS = []
 def register_file_view(name, matches, open_view):
   FILE_VIEWS.append(FileView(name, matches, open_view))
 
-def open_path(app, crumbs, path, bases=(), env=None, follow=False, here=False):
+def open_path(app, crumbs, path, bases=(), env=None, follow=False, here=False, at_end=None):
   """Open a directory or dispatch a file to its first matching specialized view, in a subtab of its own (one per
   path: open already, its subtab is shown). here: a directory opens where it is opened (a folder entered in a
   directory view: ← goes back); a file still gets a subtab. What the path is (and what the view needs) is found
   out in a worker: on a remote cluster that takes round trips, which must not block the UI. A view's open() runs in
-  the worker and returns what to do on the UI thread."""
+  the worker and returns what to do on the UI thread. A text file opens at its top, not followed; at_end: at its end
+  (a job's log, its progress file), follow: followed (the log of a running job; at its end too)."""
   def work():
     if fs_isdir(path):
       show = lambda: app.open_window(DirScreen(crumbs, path, bases=bases, env=env))
@@ -64,7 +65,7 @@ def open_path(app, crumbs, path, bases=(), env=None, follow=False, here=False):
     if is_binary(path):
       return lambda: app.notify(f"{path} is a binary file", severity="warning")
     more_bases = list(dict.fromkeys([*bases, os.path.dirname(path)]))
-    return lambda: app.open_window(FileScreen([*crumbs, os.path.basename(path)], path=path, follow=follow,
+    return lambda: app.open_window(FileScreen([*crumbs, os.path.basename(path)], path=path, follow=follow, at_end=at_end,
                                               bases=more_bases, env=env))
   in_background(app, work, lambda show: show() if show else None, group="open", name=f"opening {path}")
 
@@ -615,12 +616,13 @@ class FileScreen(SplitScreen):
     Binding("l", "less", "less"),
   ]
 
-  def __init__(self, crumbs, path=None, text=None, refresher=None, follow=False, bases=(), env=None):
+  def __init__(self, crumbs, path=None, text=None, refresher=None, follow=False, bases=(), env=None, at_end=None):
     super().__init__()
     self.crumbs, self.path, self.text, self.refresher = crumbs, path, text, refresher
     self.bases, self.env = list(bases), env # to resolve relative paths in the text
     self.following = follow and path is not None
-    self.from_top = not self.following # (a file opens at its top; one that is followed at its end)
+    # (a file opens at its top; at its end a log (at_end), and one that is followed)
+    self.from_top = not (self.following or at_end)
     self.head_only = False # only the beginning of a large file is shown (its first TAIL_BYTES)
     self.watching = False
     self.start_pos = 0 # where in the file the text shown starts (only the end of a large file is read)

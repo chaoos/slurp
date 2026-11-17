@@ -1995,6 +1995,42 @@ async def open_job(app, pilot, jid):
   await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.details["files"], 10)
   return app.screen
 
+async def t_log_positions(app, pilot):
+  """Where a text file opens depends on where from: a job's logs at their end (followed while it runs), anything from
+  the directory browser at its top and not followed"""
+  def opened(name):
+    return isinstance(app.screen, FileScreen) and (app.screen.path or "").endswith(name) and app.screen.file_size is not None
+  def at_end(fs):
+    return fs.area.cursor_location[0] >= fs.area.document.line_count - 2
+  for jid, running in (("9001", True), ("9008", False)):
+    js = await open_job(app, pilot, jid)
+    out = next(e for e in js.details["files"] if e.kind == "stdout"); js.open_entry(out)
+    ok = await until(pilot, lambda: opened(f"slurm-{jid}.out"), 10); await pilot.pause(0.3)
+    fs = app.screen
+    check(f"job window, output of a {'running' if running else 'ended'} job: at its end, {'followed' if running else 'not followed'}",
+          ok and at_end(fs) and fs.following == running, (fs.area.cursor_location, fs.following))
+    for v in list(app.cluster.views): app.close_view(v)
+    await pilot.pause(0.3)
+  wd = app.jobs["9001"].rec["WorkDir"]
+  open_path(app, ["Local"], wd)
+  await until(pilot, lambda: isinstance(app.screen, DirScreen) and app.screen.entries, 10)
+  ds = app.screen; dt = ds.query_one("#dir"); dt.focus(); dt.move_cursor(row=dt.get_row_index("slurm-9001.out")); await pilot.press("enter")
+  ok = await until(pilot, lambda: opened("slurm-9001.out"), 10); await pilot.pause(0.3)
+  fs = app.screen
+  check("the same log of the running job from the directory browser: at its top, not followed",
+        ok and fs.area.cursor_location == (0, 0) and not fs.following, (fs.area.cursor_location, fs.following))
+  for v in list(app.cluster.views): app.close_view(v)
+  await pilot.pause(0.3)
+  app.show_view(None); await pilot.pause(0.3)
+  job = next(j for j in app.jobs.values() if not j.running and j.stderr_path() and j.err[0] == "file" and j.err[1] > 0)
+  app.open_file(job, job.stderr_path())
+  ok = await until(pilot, lambda: opened(os.path.basename(job.stderr_path())), 10); await pilot.pause(0.3)
+  fs = app.screen
+  check("the error file from the job list (Err): at its end; the job ended: not followed", ok and at_end(fs) and not fs.following,
+        (fs.area.cursor_location, fs.following))
+  for v in list(app.cluster.views): app.close_view(v)
+  await pilot.pause(0.3)
+
 async def t_shell_button(app, pilot):
   """The Shell button of a running job's window asks where the shell opens (it opened the categorize dialog: its
   handler had slipped onto action_categorize); also when the window is scrolled to its end"""

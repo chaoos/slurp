@@ -58,5 +58,13 @@ def test_a_text_file_opens_at_its_top(check, home):
       await pilot.pause(0.2)
       area = app.screen.area
       check("followed: at its end", ok and area.cursor_location[0] >= area.document.line_count - 2, area.cursor_location)
+      app.show_view(None); await pilot.pause(0.2)
+      (home / "ended.out").write_text("".join(f"step {i}\n" for i in range(500)))
+      open_path(app, ["Jobs", "2"], str(home / "ended.out"), at_end=True) # (an ended job's log: at its end, not followed)
+      ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and app.screen.path.endswith("ended.out") and app.screen.file_size is not None)
+      await pilot.pause(0.2)
+      area = app.screen.area
+      check("at its end, not followed", ok and area.cursor_location[0] >= area.document.line_count - 2 and not app.screen.following,
+            (area.cursor_location, app.screen.following))
       await pilot.press("q")
   asyncio.run(main())
