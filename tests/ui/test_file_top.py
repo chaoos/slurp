@@ -48,7 +48,7 @@ def test_a_text_file_opens_at_its_top(check, home):
       f = app.screen; area = f.area
       status = str(f.query_one("#fstatus").render())
       check("a large file: its beginning, at the top, the status says so", area.text.startswith("FIRST LINE") and "LAST LINE" not in area.text
-            and area.cursor_location == (0, 0) and "showing the first" in status and area.text.endswith("\n"), status)
+            and area.cursor_location == (0, 0) and "showing lines 1–" in status and area.text.endswith("\n"), status)
       await pilot.press("G")
       ok = await until(pilot, lambda: "LAST LINE" in f.area.text)
       check("G: its end, at the bottom", ok and f.area.cursor_location[0] == f.area.document.line_count - 1 and not f.head_only)

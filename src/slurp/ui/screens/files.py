@@ -21,7 +21,7 @@ from textual.widgets.text_area import Selection
 
 from ...state import TAIL_BYTES
 from ...cluster.remote import (
-  cluster_work, conn, fs_getsize, fs_isdir, fs_isfile, fs_read, in_background, start_worker, tab_name
+  cluster_work, conn, fs_getsize, fs_isdir, fs_isfile, fs_read, in_background, run_cmd, start_worker, tab_name
 )
 from ...cluster.paths import is_binary, resolve_path
 from ...cluster.storage import drive_dirs
@@ -594,8 +594,57 @@ class DirScreen(SplitScreen):
     self.show_hidden = not self.show_hidden
     self.populate()
 
+CHUNK = TAIL_BYTES       # a large file is read in parts of this size …
+WINDOW = 4 * TAIL_BYTES  # … and this much of it is shown at most (scrolling past its ends reads on, like less)
+
+def read_part(path, start, end, size, align=True):
+  """The bytes [start, end) of a file as whole lines (worker): from the first line start at or after start (align;
+  0: the file's start), to the last line end before end (the file's end: up to it); (start, end, data). A line longer
+  than the part is kept as it is."""
+  if start > 0 and align: # (one byte before: is start a line start already?)
+    data = fs_read(path, start - 1, end - start + 1)
+    i = data.find(b"\n")
+    if 0 <= i < len(data) - 1:
+      data, start = data[i + 1:], start + i
+    else:
+      data = data[1:]
+  else:
+    data = fs_read(path, start, end - start)
+  end = start + len(data)
+  if end < size:
+    i = data.rfind(b"\n")
+    if i >= 0:
+      data = data[:i + 1]
+      end = start + len(data)
+  return start, end, data
+
+def lines_before(path, offset):
+  """How many lines the file has before a byte offset (worker; on the cluster, without reading it here)"""
+  if offset <= 0:
+    return 0
+  res = run_cmd(["sh", "-c", 'head -c "$2" -- "$1" | wc -l', "sh", path, str(offset)], timeout=300)
+  return int(res.stdout.strip()) if res.returncode == 0 and res.stdout.strip().isdigit() else None
+
+def offset_of_line(path, line):
+  """The byte offset where a line (1: the first) starts (worker)"""
+  res = run_cmd(["sh", "-c", 'head -n "$2" -- "$1" | wc -c', "sh", path, str(max(0, line - 1))], timeout=300)
+  return int(res.stdout.strip()) if res.returncode == 0 and res.stdout.strip().isdigit() else None
+
+def grep_offset(path, term, offset, forward):
+  """The byte offset of the line start of the next match of term (case-insensitive) after offset (forward), or of the
+  last one before it; None: none (worker)"""
+  script = ('tail -c +"$(($2 + 1))" -- "$1" | grep -b -m1 -i -F -e "$3"' if forward else
+            'head -c "$2" -- "$1" | grep -b -i -F -e "$3" | tail -n 1')
+  res = run_cmd(["sh", "-c", script, "sh", path, str(offset), term], timeout=600)
+  first = res.stdout.split(":", 1)[0].strip() if res.returncode == 0 else ""
+  if not first.isdigit():
+    return None
+  return offset + int(first) if forward else int(first)
+
 class FileScreen(SplitScreen):
-  """Read-only viewer for a file (with tail -f style following) or for text (optionally re-run by a refresher)"""
+  """Read-only viewer for a file (with tail -f style following) or for text (optionally re-run by a refresher). A
+  large file is never read as a whole: a window of it (WINDOW at most) is shown, read on in parts while scrolling past
+  its ends; g, G, a line or a percentage (:) and searches jump in it, like less."""
   SHOW_BACK = True
 
   @property
@@ -610,6 +659,11 @@ class FileScreen(SplitScreen):
     Binding("N", "find(False)", "Prev", show=False),
     Binding("g", "top", "Top"),
     Binding("G", "bottom", "Bottom"),
+    Binding("colon", "goto", "Go to line / %"),
+    Binding("space", "page(1)", "Page down", show=False),
+    Binding("b", "page(-1)", "Page up", show=False),
+    Binding("j", "line(1)", "Line down", show=False),
+    Binding("k", "line(-1)", "Line up", show=False),
     Binding("r", "reload", "Reload"),
     Binding("w", "watch", "Watch"),
     Binding("A", "load_more", "Earlier part", show=False),
@@ -623,30 +677,52 @@ class FileScreen(SplitScreen):
     self.following = follow and path is not None
     # (a file opens at its top; at its end a log (at_end), and one that is followed)
     self.from_top = not (self.following or at_end)
-    self.head_only = False # only the beginning of a large file is shown (its first TAIL_BYTES)
     self.watching = False
-    self.start_pos = 0 # where in the file the text shown starts (only the end of a large file is read)
-    self.file_pos = 0
-    self.truncated = False
+    self.chunks = []       # the parts of the file shown: [start, end, lines], in order, each but the last up to a line end
+    self.first_line = 1    # the number of the first line shown (None: not known yet, being counted)
+    self.reading = False   # a part is being read
     self.term = ""
-    self.decoder = None
+    self.decoder = None    # (for what follows the end shown: a character may be split between two reads)
     self.timer = None
+
+  # (where the text shown is in the file)
+  @property
+  def start_pos(self):
+    return self.chunks[0][0] if self.chunks else 0
+
+  @property
+  def file_pos(self):
+    return self.chunks[-1][1] if self.chunks else 0
+
+  @property
+  def truncated(self): # (not from the file's start)
+    return self.start_pos > 0
+
+  @property
+  def head_only(self): # (not up to the file's end)
+    return bool(self.chunks) and self.file_size is not None and self.file_pos < self.file_size
+
+  @property
+  def whole(self):
+    return not self.truncated and not self.head_only
 
   def compose_left(self):
     yield Static(id="fstatus")
     area = PathArea(id="text", read_only=True, show_line_numbers=True, soft_wrap=False, highlight_cursor_line=False)
     yield area
     yield Input(id="search", placeholder="search (Enter: find, Esc: cancel)")
+    yield Input(id="goto", placeholder="go to: a line number (12000), or a place in the file (50%) · Enter: go, Esc: cancel")
 
   def on_mount(self):
     self.sub_title = crumb_title(self.crumbs)
     self.load()
     self.timer = self.set_interval(1.0, self.poll, pause=not self.following)
     self.rerun_timer = self.set_interval(5.0, self.rerun, pause=True)
+    self.watch(self.area, "scroll_y", lambda _: self.read_on(), init=False)
     self.query_one("#text").focus()
 
   def check_action(self, action, parameters):
-    if action == "follow" or action == "load_more":
+    if action in ("follow", "load_more", "goto"):
       return self.path is not None
     if action == "watch":
       return self.refresher is not None
@@ -665,65 +741,206 @@ class FileScreen(SplitScreen):
         parts.append(f"{self.path}  (not readable)" if self.decoder else f"{self.path} · loading …")
       else:
         parts.append(f"{self.path}  {humanize.naturalsize(self.file_size)}")
-      if self.head_only:
-        parts.append(f"showing the first {humanize.naturalsize(self.file_pos)} (G or f: its end)")
-      if self.truncated:
-        parts.append(f"showing the last {humanize.naturalsize((self.file_size or 0) - self.start_pos)} "
-                     f"(A: the {humanize.naturalsize(TAIL_BYTES)} before)")
+      if self.file_size and not self.whole:
+        share = lambda pos: f"{100 * pos / self.file_size:.0f}%"
+        where = (f"lines {self.first_line:,}–{self.first_line + max(0, self.area.document.line_count - 2):,}, "
+                 if self.first_line is not None else "")
+        parts.append(f"showing {where}{share(self.start_pos)}–{share(self.file_pos)} of it (scrolling reads on; "
+                     "g / G: start / end, :: a line or %)")
+      if self.reading:
+        parts.append("reading …")
       parts.append("following" if self.following else "not following (f)")
     if self.refresher:
       parts.append("watching every 5 s" if self.watching else "w: watch, r: run again")
     self.query_one("#fstatus", Static).update(" · ".join(parts))
 
+  def show_line_numbers(self):
+    area = self.area
+    area.show_line_numbers = self.first_line is not None
+    if self.first_line is not None:
+      area.line_number_start = self.first_line
+
+  def count_lines(self):
+    """The number of the first line shown, counted on the cluster (in the background) when it is not known"""
+    start, path = self.start_pos, self.path
+    def counted(n):
+      if n is None or start != self.start_pos:
+        return
+      self.first_line = n + 1
+      self.show_line_numbers()
+      self.update_status()
+    in_background(self, lambda: lines_before(path, start), counted, group="count-lines")
+
   def load(self):
-    """Show the text, or read the file (its end if it is large) in the background"""
+    """Show the text, or read the file (its start or its end, as it opens) in the background"""
     if self.path is None:
       self.area.load_text(clean(self.text or ""))
       self.update_status()
       return
-    from_top = self.from_top
+    self.jump("top" if self.from_top else "end")
+
+  def jump(self, where, value=None, select=""):
+    """Show the part of the file at: "top", "end", "offset" (a byte), "line" (a number), "percent"; the line there
+    centred (select: a term to select in it)"""
+    path = self.path
     def read():
       try:
-        size = fs_getsize(self.path)
-        truncated = size > TAIL_BYTES
-        if from_top: # (its beginning)
-          data = fs_read(self.path, 0, min(size, TAIL_BYTES))
-          return size, truncated, len(data), data, True
-        offset = size - TAIL_BYTES if truncated else 0
-        data = fs_read(self.path, offset, size - offset)
-        return size, truncated, offset + len(data), data, False
+        size = fs_getsize(path)
+        at = None
+        if where == "line":
+          at = offset_of_line(path, value)
+          if at is None:
+            raise OSError(f"cannot find line {value}")
+          at = min(at, size)
+        elif where == "percent":
+          at = int(size * min(max(value, 0), 100) / 100)
+        elif where == "offset":
+          at = min(value, size)
+        if where == "top":
+          start, end = 0, min(size, CHUNK)
+        elif where == "end" or (at is not None and at >= size - CHUNK // 2):
+          start, end = max(0, size - CHUNK), size
+        else:
+          start = max(0, at - CHUNK // 2)
+          end = min(size, start + CHUNK)
+        start, end, data = read_part(path, start, end, size)
+        return size, start, end, data, at
       except OSError as e:
-        return None, False, 0, f"cannot read {self.path}: {e}\n".encode(), from_top
-    in_background(self, read, self.file_read, group="load")
+        return None, 0, 0, f"cannot read {path}: {e}\n".encode(), None
+    def got(result):
+      self.reading = False
+      if result is not None:
+        self.show_part(where, *result, select=select)
+    self.reading = True
+    in_background(self, read, got, group="load")
     self.update_status()
 
-  def file_read(self, result):
-    if result is None:
-      return
+  def show_part(self, where, size, start, end, data, at, select=""):
     area = self.area
-    self.file_size, self.truncated, self.file_pos, data, from_top = result
-    self.start_pos = self.file_pos - len(data)
+    self.file_size = size
     self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-    self.head_only = False
-    if from_top and self.truncated: # the beginning of a large file: up to its last whole line
-      self.truncated, self.head_only = False, True
-      if b"\n" in data:
-        data = data[:data.rindex(b"\n") + 1]
-        self.file_pos = len(data)
-    elif self.truncated:
-      first, newline, data = data.partition(b"\n") # drop the partial first line
-      self.start_pos += len(first) + len(newline)
+    if size is None: # (unreadable: what went wrong)
+      self.chunks = []
+      area.load_text(data.decode())
+      self.update_status()
+      return
+    self.chunks = [[start, end, data.count(b"\n")]]
+    self.first_line = 1 if start == 0 else None
+    self.settling = True
     area.load_text(clean(self.decoder.decode(data)))
     area.history.clear()
-    (self.action_top if from_top else self.action_bottom)()
+    self.show_line_numbers()
+    if start > 0:
+      self.count_lines()
+    if where == "top":
+      area.move_cursor((0, 0))
+      area.scroll_home(animate=False)
+    elif where == "end" and at is None:
+      area.move_cursor((area.document.line_count - 1, 0))
+      area.scroll_end(animate=False)
+    else:
+      row = min(data[:max(0, (at or 0) - start)].count(b"\n"), area.document.line_count - 1)
+      line = area.document.get_line(row)
+      col = line.lower().find(select.lower()) if select else -1
+      area.selection = Selection((row, col), (row, col + len(select))) if col >= 0 else Selection.cursor((row, 0))
+      self.call_after_refresh(lambda: area.scroll_cursor_visible(center=True, animate=False))
+    def settled():
+      self.settling = False
+    self.call_after_refresh(lambda: self.call_after_refresh(settled))
     self.update_status()
+
+  settling = False # (a part just shown: the view goes to its place first)
+
+  # ---- reading on: past the ends of the part shown
+  def read_on(self):
+    """Near the top of what is shown: the part before it; near its end: the part after it (in the background)"""
+    if self.path is None or self.reading or self.settling or not self.chunks or self.file_size is None:
+      return
+    area = self.area
+    rows = area.document.line_count
+    if self.start_pos > 0 and (area.scroll_y <= 1 or area.cursor_location[0] <= 0):
+      self.read_before()
+    elif self.head_only and (area.scroll_y >= area.max_scroll_y - 1 or area.cursor_location[0] >= rows - 2):
+      self.read_after()
+
+  @on(TextArea.SelectionChanged, "#text")
+  def cursor_moved(self, event):
+    self.read_on()
+
+  def read_before(self):
+    end, path, size = self.start_pos, self.path, self.file_size
+    def got(result):
+      self.reading = False
+      if result is None or end != self.start_pos:
+        return
+      start, _end, data = result
+      text = clean(data.decode("utf-8", errors="replace"))
+      area = self.area
+      row, col = area.cursor_location
+      y = area.scroll_y
+      area.insert(text, (0, 0))
+      area.history.clear()
+      added = data.count(b"\n")
+      self.chunks.insert(0, [start, end, added])
+      if start == 0:
+        self.first_line = 1
+      elif self.first_line is not None:
+        self.first_line -= added
+      self.trim(keep="top")
+      area.move_cursor((row + added, col))
+      area.scroll_to(y=y + added, animate=False)
+      self.show_line_numbers()
+      self.update_status()
+    self.reading = True
+    in_background(self, lambda: read_part(path, max(0, end - CHUNK), end, size), got, group="read-on")
+    self.update_status()
+
+  def read_after(self):
+    start, path, size = self.file_pos, self.path, self.file_size
+    partial = self.area.document.get_line(self.area.document.line_count - 1) != "" # (the last line is not whole)
+    def got(result):
+      self.reading = False
+      if result is None or start != self.file_pos:
+        return
+      _start, end, data = result
+      area = self.area
+      area.insert(clean(self.decoder.decode(data)), area.document.end, maintain_selection_offset=True)
+      area.history.clear()
+      self.chunks.append([start, end, data.count(b"\n")])
+      self.trim(keep="bottom")
+      self.update_status()
+    self.reading = True
+    in_background(self, lambda: read_part(path, start, min(size, start + CHUNK), size, align=not partial), got,
+                  group="read-on")
+    self.update_status()
+
+  def trim(self, keep):
+    """More than WINDOW shown: the parts farthest from where one reads go (keep: "top" or "bottom", the end read)"""
+    area = self.area
+    while len(self.chunks) > 1 and self.file_pos - self.start_pos > WINDOW:
+      if keep == "bottom": # (the first part goes; the view stays on the same text)
+        lines = self.chunks.pop(0)[2]
+        row, col = area.cursor_location
+        y = area.scroll_y
+        area.delete((0, 0), (lines, 0))
+        area.move_cursor((max(0, row - lines), col))
+        area.scroll_to(y=max(0, y - lines), animate=False)
+        if self.first_line is not None:
+          self.first_line += lines
+      else: # (the last part goes: what follows the end shown is read again when needed)
+        self.chunks.pop()
+        rows = sum(c[2] for c in self.chunks)
+        area.delete((rows, 0), area.document.end)
+        self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    area.history.clear()
+    self.show_line_numbers()
 
   polling = False
 
   def poll(self):
-    """Append what was written to the file since the last poll. Read in a worker: on a remote cluster it takes
-    round trips, which must not block the UI."""
-    if self.polling:
+    """Append what was written to the file since the last poll (when its end is shown). Read in a worker: on a remote
+    cluster it takes round trips, which must not block the UI."""
+    if self.polling or self.reading or self.decoder is None or self.head_only:
       return
     self.polling, pos = True, self.file_pos
     def read():
@@ -740,7 +957,7 @@ class FileScreen(SplitScreen):
 
   def append(self, pos, size, data):
     self.polling = False
-    if size is None or pos != self.file_pos or not self.is_mounted or self.decoder is None: # unreadable, reloaded
+    if size is None or pos != self.file_pos or not self.is_mounted or self.decoder is None or not self.chunks: # unreadable, reloaded
       return
     self.file_size = size
     if size < pos: # truncated or replaced
@@ -748,22 +965,30 @@ class FileScreen(SplitScreen):
       return
     if not data:
       return
-    self.file_pos += len(data)
     area = self.area
     at_end = area.scroll_y >= area.max_scroll_y - 1
+    whole = area.document.get_line(area.document.line_count - 1) == "" # (the text shown ends with a whole line)
     area.insert(clean(self.decoder.decode(data)), area.document.end, maintain_selection_offset=True)
     area.history.clear()
+    last = self.chunks[-1]
+    if whole and last[1] - last[0] >= CHUNK: # (a new part: the parts before can go when it all gets too long)
+      self.chunks.append([pos, pos + len(data), data.count(b"\n")])
+    else:
+      last[1] += len(data)
+      last[2] += data.count(b"\n")
+    self.trim(keep="bottom")
     if at_end:
       area.scroll_end(animate=False)
     self.update_status()
 
   def action_back(self):
-    search = self.query_one("#search", Input)
-    if search.has_class("visible"):
-      search.remove_class("visible")
-      self.area.focus()
-    else:
-      self.pop_back()
+    for name in ("#search", "#goto"):
+      box = self.query_one(name, Input)
+      if box.has_class("visible"):
+        box.remove_class("visible")
+        self.area.focus()
+        return
+    self.pop_back()
 
   @on(PathArea.PathClicked)
   def path_clicked(self, event):
@@ -779,8 +1004,8 @@ class FileScreen(SplitScreen):
   def action_follow(self):
     self.following = not self.following
     if self.following and self.head_only: # (the end is read, then followed)
-      self.from_top, self.head_only = False, False
-      self.load()
+      self.from_top = False
+      self.jump("end")
       self.timer.resume()
       self.update_status()
       return
@@ -793,46 +1018,62 @@ class FileScreen(SplitScreen):
     self.update_status()
 
   def action_top(self):
+    if self.path and self.truncated: # (the file's start is not shown: read it)
+      self.jump("top")
+      return
     self.area.move_cursor((0, 0))
     self.area.scroll_home(animate=False)
 
   def action_bottom(self):
-    if self.head_only: # (only the beginning is read: its end instead)
-      self.from_top, self.head_only = False, False
-      self.load()
+    if self.path and self.head_only: # (the file's end is not shown: read it)
+      self.from_top = False
+      self.jump("end")
       return
     area = self.area
     area.move_cursor((area.document.line_count - 1, 0))
     area.scroll_end(animate=False)
 
-  def action_load_more(self):
-    """Read the TAIL_BYTES before the text shown (in the background) and put them in front: a large file is never read
-    as a whole, only the parts asked for"""
-    if not self.path or self.start_pos <= 0:
-      self.notify("the whole file is shown")
-      return
-    end = self.start_pos
-    start = max(0, end - TAIL_BYTES)
-    def read():
-      return fs_read(self.path, start, end - start)
-    def got(data):
-      if data is None or self.start_pos != end:
+  def action_page(self, direction):
+    (self.area.action_cursor_page_down if direction > 0 else self.area.action_cursor_page_up)()
+
+  def action_line(self, direction):
+    (self.area.action_cursor_down if direction > 0 else self.area.action_cursor_up)()
+
+  def action_goto(self):
+    box = self.query_one("#goto", Input)
+    box.add_class("visible")
+    box.value = ""
+    box.focus()
+
+  @on(Input.Submitted, "#goto")
+  def goto_submitted(self, event):
+    text = event.value.strip().replace(",", "").replace("_", "")
+    event.input.remove_class("visible")
+    self.area.focus()
+    try:
+      if text.endswith("%"):
+        self.jump("percent", float(text[:-1]))
         return
-      new_start = start
-      if start > 0:
-        first, newline, data = data.partition(b"\n") # a partial line: it starts in the part before
-        new_start += len(first) + len(newline)
-      text = clean(data.decode("utf-8", errors="replace"))
+      line = int(text)
+    except ValueError:
+      self.notify("a line number (12000) or a place in the file (50%)", severity="warning")
+      return
+    first = self.first_line
+    rows = self.area.document.line_count
+    if first is not None and first <= line < first + rows: # (shown already)
       area = self.area
-      row = area.cursor_location[0]
-      area.insert(text, (0, 0))
-      area.history.clear()
-      added = text.count("\n")
-      area.move_cursor((row + added, 0))
-      area.scroll_to(y=added, animate=False)
-      self.start_pos, self.truncated = new_start, new_start > 0
-      self.update_status()
-    in_background(self, read, got, group="load-more")
+      area.move_cursor((line - first, 0))
+      area.scroll_cursor_visible(center=True, animate=False)
+    else:
+      self.jump("line", max(1, line))
+
+  def action_load_more(self):
+    """The part before the text shown (A; scrolling up past the top reads it too)"""
+    if not self.path or self.start_pos <= 0:
+      self.notify("the file is shown from its start")
+      return
+    if not self.reading:
+      self.read_before()
 
   def action_reload(self):
     if self.refresher:
@@ -868,6 +1109,8 @@ class FileScreen(SplitScreen):
     self.action_find(True)
 
   def action_find(self, forward):
+    """The next (previous) match: in the text shown, then (a large file) in the rest of the file, searched on the
+    cluster; the whole file shown: around"""
     if not self.term:
       self.action_search()
       return
@@ -876,8 +1119,11 @@ class FileScreen(SplitScreen):
     n = doc.line_count
     sel = area.selection
     row, col = (max(sel.start, sel.end) if forward else min(sel.start, sel.end))
+    around = self.path is None or self.whole
     for i in range(n + 1):
       r = (row + i) % n if forward else (row - i) % n
+      if not around and i and (r < row if forward else r > row): # (past the end of what is shown)
+        break
       line = doc.get_line(r).lower()
       if forward:
         c = line.find(term, col if i == 0 else 0)
@@ -888,7 +1134,21 @@ class FileScreen(SplitScreen):
         area.selection = Selection((r, c), (r, c + len(term)))
         area.scroll_cursor_visible(center=True)
         return
-    self.notify(f"'{self.term}' not found", severity="warning")
+    if around or (forward and not self.head_only) or (not forward and not self.truncated):
+      self.notify(f"'{self.term}' not found" + ("" if around else " " + ("below" if forward else "above")), severity="warning")
+      return
+    path, offset, raw = self.path, (self.file_pos if forward else self.start_pos), self.term
+    def found(at):
+      self.reading = False
+      if at is None:
+        self.notify(f"'{raw}' not found {'below' if forward else 'above'} (in the rest of the file)", severity="warning")
+        self.update_status()
+        return
+      self.jump("offset", at, select=raw)
+    self.reading = True
+    self.notify(f"searching the rest of the file for '{raw}' …", timeout=3)
+    in_background(self, lambda: grep_offset(path, raw, offset, forward), found, group="search-file")
+    self.update_status()
 
   def action_less(self):
     path = self.path

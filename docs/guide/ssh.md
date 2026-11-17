@@ -36,8 +36,9 @@ the cluster run once, when the session starts, and what they print is
 ignored. Interactive shells (Shell, node shells, GDB) open as extra channels
 of the same connection, without a new login. Files are never copied: text
 files are read in parts (a job's output, error and progress file open at their end,
-the last 1 MB, followed while the job runs, `A` for the part before; anything else, e.g. from
-the directory browser, at its top, the first 1 MB, `G` its end; following reads only what was appended), and HDF5 files are read in place by h5py
+the last 1 MB, followed while the job runs; anything else, e.g. from
+the directory browser, at its top, the first 1 MB; scrolling on reads the next MB, `G`, `:` and searches jump
+in the file, like `less`; following reads only what was appended), and HDF5 files are read in place by h5py
 through a file object that fetches only the byte ranges it asks for (1 MiB
 blocks), so a large file costs only what is browsed.
 

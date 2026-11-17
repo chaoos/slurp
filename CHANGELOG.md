@@ -6,6 +6,12 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Large text files (logs of millions of lines) work like `less`, without
+  being read as a whole: scrolling past the part shown reads on (a window
+  of 4 MB at most), `g` / `G` jump to the start and end, `:` to a line or
+  a percentage, `/` searches the whole file (`grep` on the cluster);
+  `Space` / `b`, `j` / `k`; the line numbers are the file's. Before, only
+  1 MB (about 10000 lines) was shown, more with `A` only upwards.
 - The categories window opens a job (or an array) in a subtab of its own.
 - Submit… and Run array say which ids an array range gives, the first
   and the last, and warn when a step misses the end (`1-100:2`: the last

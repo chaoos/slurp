@@ -2087,6 +2087,42 @@ async def t_log_positions(app, pilot):
   for v in list(app.cluster.views): app.close_view(v)
   await pilot.pause(0.3)
 
+async def t_large_log(app, pilot):
+  """A large log on the cluster, like less: read in parts over SSH, never as a whole; G its end with the line
+  numbers counted there (wc -l), : a line, / a match far away (grep there)"""
+  home = app.cluster.connection.home
+  path = os.path.join(home, "big-run.log")
+  n = 50000
+  with open(path, "w") as f: # (the lab's cluster is this machine)
+    for i in range(1, n + 1):
+      f.write(f"line {i:06d} " + ("needle " if i == 31234 else "x" * 7) + "." * 81 + "\n")
+  try:
+    open_path(app, ["Local"], path)
+    ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and app.screen.file_size is not None and not app.screen.reading, 15)
+    fs = app.screen; a = fs.area
+    def numbers():
+      row = a.cursor_location[0]
+      if row and not a.document.get_line(row):
+        row -= 1
+      text = a.document.get_line(row)
+      return (a.line_number_start + row if a.show_line_numbers else None), (int(text[5:11]) if text.startswith("line ") else None)
+    check("a 5 MB log: its start, one part of it", ok and fs.start_pos == 0 and fs.file_pos < fs.file_size and numbers() == (1, 1), (fs.chunks, numbers()))
+    await pilot.press("G")
+    ok = await until(pilot, lambda: fs.file_pos == fs.file_size and fs.first_line is not None and not fs.reading, 20); await pilot.pause(0.3)
+    a.move_cursor((a.document.line_count - 2, 0))
+    check("G: its end, numbered as in the file (counted on the cluster)", ok and numbers() == (n, n), numbers())
+    await pilot.press("colon"); await pilot.pause(0.1)
+    fs.query_one("#goto").value = "12000"; await pilot.press("enter")
+    ok = await until(pilot, lambda: numbers() == (12000, 12000) and not fs.reading, 20)
+    check(": 12000: that line", ok, numbers())
+    await pilot.press("slash"); fs.query_one("#search").value = "needle"; await pilot.press("enter")
+    ok = await until(pilot, lambda: numbers() == (31234, 31234) and a.selected_text == "needle" and not fs.reading, 20)
+    check("/ a match beyond the part shown: grep on the cluster, shown, selected, numbered", ok, (numbers(), a.selected_text))
+  finally:
+    os.unlink(path)
+    for v in list(app.cluster.views): app.close_view(v)
+    await pilot.pause(0.3)
+
 async def t_auto_refresh(app, pilot):
   """The job window and the array window refresh by themselves every refresh_seconds (here 2), counted down in the
   title bar"""

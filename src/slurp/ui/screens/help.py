@@ -86,11 +86,15 @@ and the array window (kept). `r` reloads at once.
   "FileScreen": ("Text file", """
 A text file (or command output) of the cluster, read in parts. Where it opens depends on where it is opened from:
 a job's output, error and progress file (the job window, the job list's Err) at its end, followed while the job
-runs (`A` loads the part before); everything else (the directory browser, a path in a text, files of the script)
-at its top, not followed (a large file: its first 1 MB; `G` or `f` reads its end).
+runs; everything else (the directory browser, a path in a text, files of the script) at its top, not followed.
 
+- **A large file works like `less`:** it is never read as a whole. A window of it (4 MB at most) is shown;
+  scrolling past its top or bottom reads the part before or after (1 MB each, the farthest part goes). `g` / `G`
+  the file's start and end, `:` a line (`12000`) or a place in it (`50%`). The status line says which lines and
+  how far into the file; the line numbers are the file's (counted on the cluster for a part in the middle).
+- `/` searches (in the part shown, then the rest of the file, on the cluster), `n` / `N` next and previous match.
+- `Space` / `b` a page down / up, `j` / `k` a line.
 - **Follow** (`f`) shows what is appended, like `tail -f`; **Watch** (`w`) reruns a command output every 5 s.
-- `/` searches, `n` / `N` next and previous match; `g` / `G` top and bottom.
 - Paths and `file:line` references in the text open with Enter on them (or a click).
 - `l` opens the file in `less` (outside slurp; `q` comes back). `r` reloads.
 """),
