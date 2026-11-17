@@ -9,6 +9,7 @@ from slurp.config import load_config
 from slurp.ui.app import Slurp
 from slurp.ui.screens.checks import RuleCatalogueScreen
 from slurp.ui.screens.files import DirScreen, FileScreen, open_path
+from slurp.ui.screens.overview import OverviewScreen
 
 
 @pytest.fixture
@@ -56,18 +57,39 @@ def test_subtabs_open_again_at_the_next_start(check, home):
         and kept.get("jobs_open") is True and kept["views"][1]["rule"] == "B05", kept)
 
   async def second():
+    from slurp.ui import restore
+    real_ready = restore.ready
+    restore.ready = lambda app, cluster: False # (not connected yet)
     app = Slurp()
-    async with app.run_test(size=(140, 40)) as pilot:
-      ok = await until(pilot, lambda: len(app.cluster.views) == 3 and not app.cluster.restoring, 15)
-      await pilot.pause(0.3)
-      check("the next start: the subtabs again, in their order", ok and titles(app) == before[:3], (titles(app), before))
-      check("the one shown before is shown", isinstance(app.screen, FileScreen) and app.screen.path.endswith("out.log"),
-            type(app.screen).__name__)
-      check("the job list open again too, the overview first", app.cluster.jobs_open
-            and [b.id for b in app.screen.query("#view-tabs Button.view-tab") if b.display][:2] == ["view-overview", "view-jobs"])
-      check("opened once: nothing left to open", app.cluster.pending_views is None)
-      app.close_view(app.cluster.views[0]); await pilot.pause(0.3)
-      return titles(app)
+    try:
+      async with app.run_test(size=(140, 40)) as pilot:
+        await until(pilot, lambda: app.main is not None)
+        await pilot.pause(0.2)
+        check("at once at the start: the subtabs as placeholders, in their order (titled as they were)", [v.title for v in app.cluster.views] == before[:3]
+              and all(v.pending for v in app.cluster.views), [(v.title, v.pending) for v in app.cluster.views])
+        buttons = [b for b in app.screen.query("#view-tabs Button.view-tab") if b.display and b.id != "view-overview"]
+        check("…in the bar, muted", [str(b.label).split()[-1] for b in buttons][-3:] == [before[0].split()[-1][:40], "catalogue", "out.log"]
+              and all(b.has_class("-pending") for b in buttons[-3:]), [str(b.label) for b in buttons])
+        app.show_view(None); await pilot.pause(0.2)
+        app.show_view(app.cluster.views[2]); await pilot.pause(0.3)
+        notes = [str(n.message) for n in app._notifications]
+        check("a click before it is connected: connect first, the overview", isinstance(app.screen, OverviewScreen)
+              and any("connect first" in n for n in notes), (type(app.screen).__name__, notes[-2:]))
+        restore.ready = real_ready # (connected now)
+        app.restore_views()
+        ok = await until(pilot, lambda: not any(v.pending for v in app.cluster.views) and not app.cluster.restoring, 15)
+        await pilot.pause(0.3)
+        check("connected: each opened in its place, in their order", ok and titles(app) == before[:3], (titles(app), before))
+        buttons = [str(b.label).split()[-1] for b in app.screen.query("#view-tabs Button.view-tab") if b.display and b.id != "view-overview"]
+        check("…the bar in that order too, none muted", buttons[-3:] == [before[0].split()[-1][:40], "catalogue", "out.log"]
+              and not app.screen.query("#view-tabs Button.-pending"), buttons)
+        check("the one shown before is shown (the overview was)", isinstance(app.screen, FileScreen) and app.screen.path.endswith("out.log"),
+              type(app.screen).__name__)
+        check("the job list open again too", app.cluster.jobs_open)
+        app.close_view(app.cluster.views[0]); await pilot.pause(0.3)
+        return titles(app)
+    finally:
+      restore.ready = real_ready
   after = asyncio.run(second())
   kept = (load_config().get("tabs") or [{}])[0].get("views") or {}
   check("a subtab closed: kept so", [v["type"] for v in kept.get("views", [])] == ["rules", "path"] and len(after) == 2, kept)

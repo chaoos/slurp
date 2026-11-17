@@ -141,6 +141,7 @@ class Slurp(App):
   #view-tabs Button.view-close { width: 3; min-width: 3; padding: 0; margin-right: 1; color: $text-muted; }
   #view-tabs #view-overview { margin-right: 1; }
   #view-tabs Button.view-close:hover { color: $error; }
+  #view-tabs Button.view-tab.-pending { color: $text-muted; text-style: italic; }
   #shell-bar { height: 1; background: $panel; }
   #shell-status { width: 1fr; height: 1; padding: 0 1; background: $panel; }
   #shell-help { height: 1; min-height: 1; padding: 0 1; }
@@ -297,7 +298,9 @@ class Slurp(App):
       cluster.collapse_arrays = tab.get("collapse_arrays", True)
       views = tab.get("views")
       if isinstance(views, dict) and (views.get("views") or views.get("jobs_open")):
-        cluster.pending_views = views # (opened again when it is connected and its job list loaded)
+        cluster.pending_views = views
+        from .restore import placeholders
+        placeholders(self, cluster, views) # (there at once; opened when it is connected and its job list loaded)
       self.clusters.append(cluster)
     self.cluster_index = min(max(int(saved.get("active", 0) or 0), 0), max(len(self.clusters) - 1, 0))
     from ..cluster import jobcache
@@ -507,7 +510,7 @@ class Slurp(App):
     self.refresh_status()
     if not cluster.loaded and cluster.loader is None and (not cluster.destination or cluster.connection.ready):
       self.action_reload()
-    elif cluster.pending_views:
+    elif any(v.pending for v in cluster.views):
       self.call_after_refresh(lambda: self.restore_views(cluster))
 
   def connect_tab(self):
@@ -589,6 +592,8 @@ class Slurp(App):
       view = View(type(self).next_view_id, title, kind, key, session, icon)
       self.add_mode(view.mode, make_screen)
       self.cluster.views.append(view)
+    if self.cluster.restoring and not view.pending: # (a kept subtab opened again: in its place, nothing switches)
+      return
     self.show_view(view)
     if not self.cluster.restoring:
       self.call_after_refresh(self.save_tabs) # (the subtabs are kept for the next start)
@@ -611,7 +616,7 @@ class Slurp(App):
   def open_window(self, screen, title=""):
     """A window: from the job list it opens as a subtab, within a subtab it opens on top of it (← goes back); in a
     subtab of its own in in_new_subtab"""
-    new = self.new_subtab is not None
+    new = self.new_subtab is not None or (bool(self.clusters) and self.cluster.restoring)
     if (new or self.current_mode in ("_default", "overview")) and not isinstance(self.screen, ModalScreen) and self.clusters:
       crumbs = getattr(screen, "crumbs", None)
       self.open_view(title or (crumbs[-1] if crumbs else "") or type(screen).__name__, lambda: screen,
@@ -674,7 +679,11 @@ class Slurp(App):
     self.call_after_refresh(self.refresh_status)
 
   def show_view(self, view):
-    """Show a subtab of the active tab (None: the job list, opened if it is closed)"""
+    """Show a subtab of the active tab (None: the job list, opened if it is closed; a placeholder: when connected)"""
+    if view is not None and view.pending:
+      from .restore import placeholder_clicked
+      placeholder_clicked(self, view)
+      return
     mode = view.mode if view is not None else "_default"
     if view is None:
       self.cluster.jobs_open = True
@@ -756,10 +765,17 @@ class Slurp(App):
           b.remove()
       else:
         have.add(vid)
-    for v in self.cluster.views:
+    views = self.cluster.views
+    for i, v in enumerate(views):
       if str(v.id) not in have:
-        bar.mount(Button(icons.label(v.icon, v.title[:40]), id=f"view-tab-{v.id}", classes="view-tab", compact=True, tooltip=v.title),
-                  Button("✕", id=f"view-close-{v.id}", classes="view-close", compact=True, tooltip="close the subtab"))
+        tip = f"{v.title}: opens when the tab is connected" if v.pending else v.title
+        # (in the place of the subtab in the list: before the button of the next one that has one)
+        after = next((b for w in views[i + 1:] if str(w.id) in have for b in bar.query(f"#view-tab-{w.id}")), None)
+        bar.mount(Button(icons.label(v.icon, v.title[:40]), id=f"view-tab-{v.id}", classes="view-tab" + (" -pending" if v.pending else ""),
+                         compact=True, tooltip=tip),
+                  Button("✕", id=f"view-close-{v.id}", classes="view-close", compact=True, tooltip="close the subtab"),
+                  **({"before": after} if after is not None else {}))
+        have.add(str(v.id))
     for v in self.cluster.views:
       for b in bar.query(f"#view-tab-{v.id}"):
         b.variant = "primary" if self.current_mode == v.mode else "default"
@@ -845,7 +861,7 @@ class Slurp(App):
     """The subtabs of the last run of a tab, opened again when it is ready (connected, its job list loaded)"""
     from .restore import restore
     cluster = cluster or (self.cluster if self.clusters else None)
-    if cluster is not None and cluster.pending_views:
+    if cluster is not None and any(v.pending for v in cluster.views):
       restore(self, cluster)
 
   def add_cluster(self, destination):
@@ -1934,7 +1950,7 @@ class Slurp(App):
       threading.Thread(target=jobcache.save, args=(cluster, jobs), daemon=True, name="keeping the job list").start()
     self.show_warnings()
     self.refresh_status()
-    if cluster.pending_views and (jobs is not None or cluster.no_slurm):
+    if any(v.pending for v in cluster.views) and (jobs is not None or cluster.no_slurm):
       self.call_after_refresh(lambda: self.restore_views(cluster))
 
   def check_login_nodes(self):

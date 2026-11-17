@@ -8,11 +8,11 @@ version may need the helper of the same version).
 
 - A text file's status is two lines: its path and size (a long path wraps), then what is shown and
   whether it is followed, which a long path hid before.
-- The subtabs of a tab are kept for the next start: once the tab is
-  connected and its job list loaded, its job and array windows, files and
-  directories, the categories, the guides and the rule catalogue open
-  again in their order, and the one shown before is shown. Shells are not
-  kept.
+- The subtabs of a tab are kept for the next start: its job and array
+  windows, files and directories, the categories, the guides and the rule
+  catalogue are there at once (muted); a click before the tab is connected
+  says to connect first and shows the overview; once connected, each opens
+  in its place, and the one shown before is shown. Shells are not kept.
 - The overview is the first subtab of every tab, always there (it cannot
   be closed): **Overview** at the left of the subtabs shows it any time;
   with all other subtabs closed it is the only one.

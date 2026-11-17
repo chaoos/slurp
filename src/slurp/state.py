@@ -81,6 +81,7 @@ class ClusterSession:
   jobs_open: bool = False              # the job list is open as a subtab (closed: the overview, when nothing else is open)
   pending_views: dict | None = None    # the subtabs of the last run, to open again when connected (ui/restore.py)
   restoring: bool = False              # (they are being opened)
+  restore_target: dict | None = None   # (a placeholder clicked meanwhile: shown when it is open)
   overview: dict = field(default_factory=dict) # what the overview loaded of its cluster (screens/overview.py)
   load_started: float = 0.0
   updated: object | None = None        # when the list was loaded
@@ -107,6 +108,7 @@ class View:
   session: object | None = None # TerminalSession of a shell
   icon: str = ""              # the concept of its icon (ui/icons.py): shell, folder, file, script, …
   kept: dict | None = None    # what it shows, as kept for the next start (ui/restore.py)
+  pending: bool = False       # a placeholder: kept from the last run, opened when its tab is connected
 
   @property
   def mode(self):

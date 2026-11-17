@@ -2282,8 +2282,13 @@ async def t_restore_subtabs(app, pilot):
                                      {"type": "categories", "key": "categories", "path": ""}, {"type": "rules", "rule": "B05"},
                                      {"type": "path", "path": "/no/such/file", "crumbs": ["Jobs"]}],
                            "shown": 1, "jobs_open": True}
+  from slurp.ui.restore import placeholders
+  placeholders(app, cluster, cluster.pending_views) # (as at the start: there at once)
+  app.show_overview(); await pilot.pause(0.3)
+  check("at once: placeholders, in their order", [v.title for v in cluster.views] == ["job 9001", "slurm-9001.out", "categories", "Rule catalogue", "file"]
+        and all(v.pending for v in cluster.views), [v.title for v in cluster.views])
   app.restore_views(cluster)
-  ok = await until(pilot, lambda: cluster.pending_views is None, 30); await pilot.pause(0.5)
+  ok = await until(pilot, lambda: cluster.pending_views is None and not cluster.restoring, 30); await pilot.pause(0.5)
   check("the kept subtabs open again, in their order (one that is gone: left out)", ok
         and [v.title for v in cluster.views] == ["job 9001", "slurm-9001.out", "categories", "Rule catalogue"], [v.title for v in cluster.views])
   check("the one shown before is shown: the log, at its end", isinstance(app.screen, FileScreen) and app.screen.path.endswith("slurm-9001.out")
