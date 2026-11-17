@@ -14,3 +14,12 @@ terminal and `"copy_web": "terminal"` for a browser view, the kind that is
 active; Options, `F3`, changes them back). While a browser is the active view,
 this machine's clipboard tool is not used: it would fill the clipboard of the
 machine slurp runs on, not the browser's.
+
+**Text you mark** with the mouse (in a window, a file, a script, a dialog's
+text) is copied with `Ctrl+C` (`Cmd+C` on a Mac), as Textual does: in a
+terminal through OSC 52. In slurp in your browser (Remote web access) the
+browser copies it itself: slurp tells the page what is marked, and the page
+puts it on the clipboard in the key's own event. That is the only moment a
+browser allows it, so it also works over plain HTTP and in Safari and Firefox.
+A click starts a new selection. In a shell `Ctrl+C` interrupts; there you
+right-click the selection to copy it.

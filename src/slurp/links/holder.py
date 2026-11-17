@@ -88,6 +88,43 @@ ICON_FONT_HEAD = ('<link rel="preload" href="/slurp-icons.ttf" as="font" type="f
 # (window.open). A browser may refuse that without a click right before, and nothing shows when the helper is not set
 # up: a banner with the link as a real link to click stays for a while. Downloads open in a new tab (the page stays;
 # the browser closes that tab once the file comes); a browser that blocks the tab gets the banner with the download.
+SELECTION_LIMIT = 1 << 20 # characters of a selection sent to the browser at most
+
+# Ctrl+C (Cmd+C) copies the text marked in slurp. The app sends each selection it makes (["slurp_selection", text] on
+# the websocket, see Holder.control) and the page writes it to the clipboard in the key's own event: a browser lets a
+# page write the clipboard only there (and the Clipboard API only over HTTPS or on localhost); xterm's handling of the
+# app's OSC 52 comes later, outside the key event, and fails silently. A click starts a new selection: the old one
+# goes. The key still goes to the app as well.
+COPY_SCRIPT = """<script>
+(function () {
+  var selection = "", Native = window.WebSocket;
+  function Socket(url, protocols) {
+    var ws = protocols === undefined ? new Native(url) : new Native(url, protocols);
+    ws.addEventListener("message", function (e) {
+      if (typeof e.data === "string" && e.data.indexOf('["slurp_selection"') === 0) {
+        try { selection = JSON.parse(e.data)[1] || ""; } catch (err) {}
+      }
+    });
+    return ws;
+  }
+  Socket.prototype = Native.prototype;
+  ["CONNECTING", "OPEN", "CLOSING", "CLOSED"].forEach(function (k) { Socket[k] = Native[k]; });
+  window.WebSocket = Socket;
+  document.addEventListener("mousedown", function () { selection = ""; }, true);
+  document.addEventListener("keydown", function (e) {
+    if (!selection || (e.key || "").toLowerCase() !== "c" || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    var text = selection, copied = false;
+    function onCopy(ev) {
+      ev.clipboardData.setData("text/plain", text); ev.preventDefault(); ev.stopImmediatePropagation(); copied = true;
+    }
+    document.addEventListener("copy", onCopy, true);
+    try { document.execCommand("copy"); } catch (err) {}
+    document.removeEventListener("copy", onCopy, true);
+    if (!copied && navigator.clipboard) navigator.clipboard.writeText(text).catch(function () {});
+  }, true);
+})();
+</script>"""
+
 LINK_BANNER = """<style>
 #slurp-link-banner { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 1000; display: none;
   background: #1d3b53; color: #fff; border: 1px solid #5aa0e0; border-radius: 6px; padding: 8px 14px;
@@ -668,6 +705,12 @@ class Holder:
       return {"ok": True}
     if cmd == "open_url":
       return self.open_url(str(request.get("url", "")))
+    if cmd == "selection": # the text marked in the app: the browser's Ctrl+C copies it (COPY_SCRIPT)
+      view = self.active
+      if view is None or view.kind != "web" or not getattr(view, "send_text", None):
+        return {"ok": False, "error": "the active view is not a browser"}
+      view.send_text(json.dumps(["slurp_selection", str(request.get("text", ""))[:SELECTION_LIMIT]]))
+      return {"ok": True}
     if cmd == "deliver":
       import base64
       try:
@@ -739,7 +782,7 @@ class Holder:
       page = templates.get_template("app_index.html").render(
         font_size=int(request.query.get("fontsize", "16") or 16), app_websocket_url=f"{'wss' if secure else 'ws'}://{host}/ws",
         config={"static": {"url": f"{'https' if secure else 'http'}://{host}/static/"}}, application={"name": "slurp"}, ping_url="")
-      page = page.replace("<head>", "<head>" + LINK_BANNER + _page_brand() + ICON_FONT_HEAD, 1)
+      page = page.replace("<head>", "<head>" + COPY_SCRIPT + LINK_BANNER + _page_brand() + ICON_FONT_HEAD, 1)
       page = re.sub(r'(<div class="intro">\s*)<svg.*?</svg>\s*<div>[^<]*</div>', lambda m: m[1] + _intro_brand(), page, count=1, flags=re.S)
       response = web.Response(text=page, content_type="text/html")
       response.set_cookie("slurp_view", ticket, httponly=True, samesite="Strict", secure=secure)

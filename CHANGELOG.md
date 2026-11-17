@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- slurp in your browser: `Ctrl+C` (`Cmd+C`) copies the text you marked. The
+  page now writes it to the clipboard itself, in the key's event; before,
+  the copy went through OSC 52, which browsers refused outside HTTPS and
+  often outside a key press.
 - Closing the tab or subtab shown goes back to the one shown before it, not
   to its neighbour (a tab) or the job list (a subtab).
 - **Open a directory…** (the menu, `d`; was Login directory) asks which one:

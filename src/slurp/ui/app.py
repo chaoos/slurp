@@ -1292,6 +1292,28 @@ class Slurp(App):
     from .. import VERSION_TEXT
     return Content.assemble(logo.mark(), " ", App.format_title(self, title, sub_title), (f"  {VERSION_TEXT}", "dim"))
 
+  shared_selection = ""
+
+  def on_text_selected(self, event):
+    """Text marked with the mouse (Textual's selection): to the browser, if it is the active view"""
+    self.share_selection(self.screen.get_selected_text() or "", always=True)
+
+  @on(TextArea.SelectionChanged)
+  def text_area_selection(self, event):
+    self.share_selection(event.text_area.selected_text or "")
+
+  def share_selection(self, text, always=False):
+    """The text marked, to the browser that is the active view (slurp in your browser): its Ctrl+C copies it itself,
+    in the key's event (holder.COPY_SCRIPT). A browser lets a page write the clipboard only there; the OSC 52 of
+    Textual's copy arrives later and is dropped. always: also the same text again (the page forgets it on a click)"""
+    from ..links import holder
+    if not (text or self.shared_selection) or text == self.shared_selection and not always:
+      return
+    if not (holder.under_holder() and self.view_kind == "web"):
+      return
+    self.shared_selection = text
+    in_background(self, lambda: holder.control("selection", text=text), lambda _: None, group="selection", connection=None)
+
   def on_client(self):
     """The active view is a browser: slurp can open a URL (or a download) on the user's computer through it"""
     from ..links import holder
