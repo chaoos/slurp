@@ -2611,17 +2611,22 @@ async def t_array_window(app, pilot):
   states = [scr.overview["tasks"][int(k)]["state"] for k in order()]
   check("clicking State groups the tasks by state", states == sorted(states), states[:3])
   await pilot.click(tt, offset=(2, 0)); await pilot.pause(0.3)
+  async def back_to_array():
+    for v in [v for v in app.cluster.views if v.key.startswith("job ")]: app.close_view(v)
+    app.show_view(app.find_view("array 9600")); await pilot.pause(0.3)
+  views = len(app.cluster.views)
   tt.focus(); tt.move_cursor(row=tt.get_row_index("17")); await pilot.press("enter")
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10)
-  check("a task opens its job window (on top of the array window)", ok and app.screen.job.jid == "9600_17")
-  await pilot.press("escape"); await pilot.pause(0.3)
-  check("← back to the array window", app.screen is scr)
+  check("a task opens its job window, in a subtab of its own", ok and app.screen.job.jid == "9600_17" and len(app.cluster.views) == views + 1
+        and app.cluster.views[-1].key == "job 9600_17", [v.key for v in app.cluster.views])
+  await back_to_array()
+  check("back to the array window (its subtab)", app.screen is scr)
   gone = app.cluster.jobs.pop("9600_120") # a task that is not in the job list: loaded from Slurm
   tt.focus(); tt.move_cursor(row=tt.get_row_index("120")); await pilot.press("enter")
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 15)
-  check("a task that is not in the job list is loaded first", ok and app.screen.job.jid == "9600_120")
+  check("a task that is not in the job list is loaded first, in a subtab too", ok and app.screen.job.jid == "9600_120" and len(app.cluster.views) == views + 1)
   app.cluster.jobs["9600_120"] = gone
-  await pilot.press("escape"); await pilot.pause(0.3)
+  await back_to_array()
   scr.query_one("#arr-tabs").active = "arr-tab-states"; await pilot.pause(0.3)
   # an id in By state opens the job window of its task
   group = next(g for g in scr.query(".arr-group") if g.query_one(".arr-head").group == "FAILED (exit 2:0)")
@@ -2630,9 +2635,10 @@ async def t_array_window(app, pilot):
   text = str(ids.render()).split("\n")[0]
   await pilot.click(ids, offset=(text.index("134") + 1, 0))
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10)
-  check("By state: clicking an id opens the job window of that task", ok and app.screen.job.jid == "9600_134", text)
-  await pilot.press("escape"); await pilot.pause(0.3)
-  check("← back to the array window", app.screen is scr)
+  check("By state: clicking an id opens the job window of that task, in a subtab", ok and app.screen.job.jid == "9600_134"
+        and app.cluster.views[-1].key == "job 9600_134", text)
+  await back_to_array()
+  check("back to the array window", app.screen is scr)
   await pilot.click("#arr-cancel-pending"); await pilot.pause(0.3)
   msg = str(app.screen.dialog_message) if isinstance(app.screen, CancelScreen) else ""
   check("cancelling the pending tasks asks first, with what and the command", "10 tasks (141-150)" in msg and "scancel --state=PENDING 9600" in msg, msg)
@@ -2688,7 +2694,7 @@ async def t_array_window(app, pilot):
         and app.cluster.views[-1].key == "array 9500", [v.key for v in app.cluster.views])
   await js.run_action("open_array_window"); await pilot.pause(0.3)
   check("again: that subtab, not another", len(app.cluster.views) == views + 1)
-  # from the array window: the job window of a task on top of it, its Array line: a new subtab with the array
+  # from the array window: the job window of a task (its own subtab), its Array line: the array's subtab again
   arr = app.screen
   ids = arr.query(".arr-ids").first()
   await pilot.click(ids, offset=(0, 0))
@@ -2699,9 +2705,9 @@ async def t_array_window(app, pilot):
   lines = rendered(js3.query_one("#info").content).split("\n")
   y = next((i for i, line in enumerate(lines) if "(task " in line), 0)
   await pilot.click("#info", offset=(lines[y].index("9500") + 1, y))
-  ok = ok and await until(pilot, lambda: isinstance(app.screen, ArrayScreen) and app.screen is not arr and app.screen.groups, 20)
-  check("a task opened from the array window, a click on its Array line: the array in a new subtab (the job window stays)",
-        ok and len(app.cluster.views) == views + 1 and arr.app is app and js3.is_attached, ([v.key for v in app.cluster.views], type(app.screen).__name__))
+  ok = ok and await until(pilot, lambda: app.screen is arr, 20)
+  check("a task opened from the array window, a click on its Array line: the array's subtab (the job window stays in its own)",
+        ok and len(app.cluster.views) == views and js3.is_attached, ([v.key for v in app.cluster.views], type(app.screen).__name__))
   js2 = await open_job(app, pilot, "9001")
   check("no Array line for other jobs", "(task " not in rendered(js2.query_one("#info").content))
   check("no Array button for other jobs", not js2.query_one("#array-window").display)

@@ -83,8 +83,8 @@ and the array window (kept). `r` reloads at once.
 
 - **Overview:** what it is, how many tasks in which state, node hours, queue waits and run times.
 - **By state:** the task ids of every state (ended ones also by exit code, pending ones by reason), compressed for
-  copying (Copy); a click on an id opens that task's job window.
-- **Tasks:** every task with its progress bar; a click on a header sorts, a click on a task opens it.
+  copying (Copy); a click on an id opens that task's job window, in a subtab of its own.
+- **Tasks:** every task with its progress bar; a click on a header sorts, a click on a task opens it (in a subtab).
 - **Cancel** the whole array or only its pending tasks (after asking). `r` reloads.
 """),
   "FileScreen": ("Text file", """

@@ -23,7 +23,6 @@ from ...cluster.jobs import (
 from ..widgets import ClickTable, state_text
 from .base import SplitScreen
 from .dialogs import copy_text
-from .job import JobScreen
 
 def epoch(value):
   try:
@@ -323,11 +322,11 @@ class ArrayScreen(SplitScreen):
     self.action_open_task(event.row_key.value)
 
   def action_open_task(self, index):
-    """The job window of a task (loaded from Slurm first if it is not in the job list)"""
+    """The job window of a task, in a subtab of its own (loaded from Slurm first if it is not in the job list)"""
     jid = f"{self.array_id}_{index}"
     job = self.app.jobs.get(jid)
     if job is not None:
-      self.app.push_screen(JobScreen(job))
+      self.app.open_job_subtab(job)
       return
     self.notify(f"loading job {jid} …", timeout=3)
     def loaded(jobs):
@@ -335,7 +334,7 @@ class ArrayScreen(SplitScreen):
       if job is None:
         self.notify(f"job {jid} is not known to Slurm", severity="warning")
       elif self.is_attached:
-        self.app.push_screen(JobScreen(job))
+        self.app.open_job_subtab(job)
     in_background(self, lambda: annotate(load_jobs(None, jids=[jid])), loaded, group="array-task")
 
   def show_groups(self):

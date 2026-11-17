@@ -2607,7 +2607,11 @@ class Slurp(App):
     elif "_" in job.jid and "_" not in jid:
       self.open_array_subtab(jid, job)
     else:
-      self.open_view(f"job {job.jid}", lambda: JobScreen(job), kind="job", key=f"job {job.jid}")
+      self.open_job_subtab(job)
+
+  def open_job_subtab(self, job):
+    """The window of a job in a subtab of its own (the one open already: shown)"""
+    self.open_view(f"job {job.jid}", lambda: JobScreen(job), kind="job", key=f"job {job.jid}")
 
   def open_array_subtab(self, array_id, job=None):
     """The window of an array job in a subtab of its own, from wherever (the one open already: shown, if it shows the

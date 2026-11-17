@@ -27,8 +27,8 @@ every task under it and closes it again, and **group arrays** (or `g`) switches
 between grouped arrays and every task. Enter or a click elsewhere opens the window
 of the array: what it is, the node hours of all its tasks together, queue waits and run times (min, avg, median, max),
 all its tasks by state (ended ones also by exit code, pending ones by reason)
-with their number and ids (a click on an id opens the job window of that task), to copy, a list of every
-task with its progress bar (sorted by the header clicked; a click on a task opens its job window), the nodes in use, and buttons to cancel the whole array or only its pending tasks
+with their number and ids (a click on an id opens the job window of that task, in a subtab of its own), to copy, a list of every
+task with its progress bar (sorted by the header clicked; a click on a task opens its job window, in a subtab of its own), the nodes in use, and buttons to cancel the whole array or only its pending tasks
 (after a confirmation). The job window of an array task has an **Array** button
 for it.
 
