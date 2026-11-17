@@ -18,6 +18,9 @@ it runs on.
 VIEW_HELP = {
   "MainScreen": ("Job list", """
 Your queued and running jobs and those that ended recently, of the active tab's cluster.
+It refreshes by itself every 60 s (`"refresh_seconds"` in the config): **⟳ 0:42** in the title bar counts down
+to it; a click there switches automatic refreshing off (**⟳ off**) and on again, for the job list, the job window
+and the array window (kept). `r` reloads at once.
 
 - **Columns:** a click on a header sorts by it (again: the other way). **Progress** comes from `n/N` lines in the
   output (or `M%`, 0 to 100, in lines without one); **Done: current pace** estimates the end at the recent rate (the job window too; at the average rate since the start
@@ -44,6 +47,9 @@ Your queued and running jobs and those that ended recently, of the active tab's 
 """),
   "JobScreen": ("Job window", """
 Everything about one job.
+It refreshes by itself every 60 s (`"refresh_seconds"` in the config): **⟳ 0:42** in the title bar counts down
+to it; a click there switches automatic refreshing off (**⟳ off**) and on again, for the job list, the job window
+and the array window (kept). `r` reloads at once.
 
 - **Buttons:** Reload (`r`: the job, its files and progress from the cluster again), Cancel job, Restart job (the original submission, another array range, or an edited command; with the
   environment and script it was submitted with, if the cluster kept them), Run array, Array (the window of its array), Shell… (`s`, a running job: on
@@ -65,6 +71,9 @@ Everything about one job.
 """),
   "ArrayScreen": ("Array window", """
 One job array as a whole.
+It refreshes by itself every 60 s (`"refresh_seconds"` in the config): **⟳ 0:42** in the title bar counts down
+to it; a click there switches automatic refreshing off (**⟳ off**) and on again, for the job list, the job window
+and the array window (kept). `r` reloads at once.
 
 - **Overview:** what it is, how many tasks in which state, node hours, queue waits and run times.
 - **By state:** the task ids of every state (ended ones also by exit code, pending ones by reason), compressed for

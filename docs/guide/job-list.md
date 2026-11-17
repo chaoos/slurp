@@ -11,6 +11,10 @@ all of them (the accounts come from `sacctmgr`). Progress appears when the
 output contains a line such as `65/100`; two columns estimate when a running job
 gets to the end: **Done: current pace** (at the rate of the last few `n/N` lines; `-` until there are two; the
 [job window](job-window.md) also estimates it at the average rate since the job started).
+The job list, the job window and the array window refresh by themselves every 60 seconds
+(`"refresh_seconds"` in the config); **⟳ 0:42** in the title bar counts down to the next refresh, and a
+click on it switches automatic refreshing off (**⟳ off**) and on again (kept for the next start).
+
 The list shows as soon as Slurm answers; the command, error file and progress of
 each job (files on the cluster) follow, with spinners in those cells for jobs
 not seen before (the others keep their values meanwhile). The sizes of the error

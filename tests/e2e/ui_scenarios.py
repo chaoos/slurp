@@ -2043,6 +2043,34 @@ async def t_log_positions(app, pilot):
   for v in list(app.cluster.views): app.close_view(v)
   await pilot.pause(0.3)
 
+async def t_auto_refresh(app, pilot):
+  """The job window and the array window refresh by themselves every refresh_seconds (here 2), counted down in the
+  title bar"""
+  real = app.refresh_seconds
+  app.refresh_seconds = lambda: 2
+  try:
+    js = await open_job(app, pilot, "9001")
+    timer = js.query_one("#refresh-timer")
+    ok = await until(pilot, lambda: timer.display and str(timer.label).startswith("⟳ 0:0"), 5)
+    check("the job window: the countdown", ok, str(timer.label))
+    before = js.details
+    ok = await until(pilot, lambda: js.details is not before, 15)
+    check("…it reloads by itself (the job and its files again)", ok)
+    for v in list(app.cluster.views): app.close_view(v)
+    await pilot.pause(0.3)
+    app.show_view(None); await pilot.pause(0.3)
+    app.open_array("9700") # (an array of the lab)
+    ok = await until(pilot, lambda: isinstance(app.screen, ArrayScreen) and not app.screen.fetching, 15)
+    arr = app.screen
+    first = arr.last_refresh
+    timer = arr.query_one("#refresh-timer")
+    ok = ok and await until(pilot, lambda: timer.display and arr.last_refresh > first, 15)
+    check("the array window: the countdown, and it reloads by itself", ok, (str(timer.label), first, arr.last_refresh))
+  finally:
+    app.refresh_seconds = real
+  for v in list(app.cluster.views): app.close_view(v)
+  await pilot.pause(0.3)
+
 async def t_shell_button(app, pilot):
   """Shell… is in the job's button bar (it was hidden at the end of the window, and opened the categorize dialog):
   it asks on which node of the job (radio buttons) and where the shell opens"""

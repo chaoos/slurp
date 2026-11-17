@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import math
 import os
 import re
 import threading
@@ -151,6 +152,9 @@ class Slurp(App):
   #view-help { width: 3; min-width: 3; height: 1; text-style: bold; }
   #web-timer { width: auto; height: 1; padding: 0 1; display: none; color: $text-muted; background: transparent; }
   #update { width: auto; height: 1; padding: 0 1; display: none; color: $success; text-style: bold; background: transparent; }
+  #refresh-timer { width: auto; height: 1; padding: 0 1; display: none; color: $text-muted; background: transparent; }
+  #refresh-timer.-off { color: $text-disabled; text-style: italic; }
+  #refresh-timer:hover { background: $surface-lighten-2; }
   #update:hover { background: $surface-lighten-2; }
   #web-timer:hover { background: $surface-lighten-2; }
   #web-timer.-ending { color: $warning; text-style: bold; }
@@ -302,6 +306,53 @@ class Slurp(App):
     return MainScreen()
 
   new_version = None # a newer slurp on PyPI (update.py), asked at the start
+
+  # ---- automatic refreshing of the job list, the job window and the array window (AUTO_REFRESH), counted down in
+  # the title bar; a click there switches it off and on (kept in the config)
+  @property
+  def auto_refresh(self):
+    return load_config().get("auto_refresh", True) is not False
+
+  def refresh_seconds(self):
+    """Seconds between the automatic refreshes: "refresh_seconds" of the config (60; at least 10);
+    SLURP_REFRESH_SECONDS overrides it (the tests: nothing refreshes in the middle of a scenario)"""
+    try:
+      return max(10, int(os.environ.get("SLURP_REFRESH_SECONDS") or load_config().get("refresh_seconds") or 60))
+    except (TypeError, ValueError):
+      return 60
+
+  def toggle_auto_refresh(self):
+    on = not self.auto_refresh
+    update_config(auto_refresh=on)
+    self.notify(f"automatic refreshing {'on: every ' + str(self.refresh_seconds()) + ' s' if on else 'off (r reloads)'}", timeout=4)
+    self.show_refresh_timer()
+
+  def show_refresh_timer(self):
+    """Each second: the countdown of the view shown (if it refreshes by itself), and its refresh when it is due"""
+    screen = self.screen
+    timers = list(screen.query("#refresh-timer").results(Button))
+    if not getattr(screen, "AUTO_REFRESH", False):
+      for timer in timers:
+        timer.display = False
+      return
+    on, every = self.auto_refresh, self.refresh_seconds()
+    # (the job list counts from its last load, a property; the job and array windows from their last reload)
+    settable = not isinstance(getattr(type(screen), "last_refresh", None), property)
+    last = screen.last_refresh or 0.0
+    if not last and settable: # (shown, not reloaded yet: from now)
+      screen.last_refresh = last = time.time()
+    left = math.ceil(last + every - time.time()) if last else every # (3, 2, 1, then the refresh)
+    if on and last and left <= 0:
+      if settable:
+        screen.last_refresh = time.time()
+      screen.auto_reload()
+      left = every if settable else 0
+    text = f"⟳ {max(left, 0) // 60}:{max(left, 0) % 60:02d}" if on else "⟳ off"
+    for timer in timers:
+      timer.display = True
+      if str(timer.label) != text:
+        timer.label = text
+      timer.set_class(not on, "-off")
 
   def on_mount(self):
     self.set_interval(0.25, self.tick)
@@ -859,6 +910,7 @@ class Slurp(App):
     self.link_manager.tick()
     if self.spinner_frame % 4 == 0: # (each second) the countdown of a web link that ends, and its warning
       self.show_web_timer()
+      self.show_refresh_timer()
       for button in self.screen.query("#update").results(Button): # (a newer slurp: in the title bar)
         button.display = bool(self.new_version)
         if self.new_version and str(button.label) != f"⬆ slurp {self.new_version}":

@@ -22,6 +22,7 @@ def pytest_configure(config):
   """The tests run against the installed slurp (as users get it); it must be this checkout's (pip install -e .). slurp
   does not ask PyPI for a newer version in the tests (test_update.py asks a fake one)"""
   os.environ["SLURP_NO_UPDATE_CHECK"] = "1"
+  os.environ["SLURP_REFRESH_SECONDS"] = "100000" # (no automatic refresh in the middle of a test; its tests set their own)
   import slurp
   here = os.path.realpath(os.path.join(ROOT, "src", "slurp"))
   got = os.path.dirname(os.path.realpath(slurp.__file__))

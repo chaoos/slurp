@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The job list, the job window and the array window refresh by themselves
+  every 60 s (`"refresh_seconds"` in the config; counted from the last
+  load, `r` too); **⟳ 0:42** in the title bar counts down, a click there
+  switches it off (**⟳ off**) and on again (kept).
 - **Check…** of an SSH connection (the add dialog, SSH settings…, the
   connection window) opens a window with a terminal and goes as the tab's
   login: what needs no login, the command before the login, the login

@@ -41,6 +41,24 @@ SORT_KEYS = {
 }
 
 class MainScreen(SplitScreen):
+  AUTO_REFRESH = True # (the app reloads the job list every refresh_seconds while it is shown; the title bar counts down)
+
+  @property
+  def last_refresh(self):
+    """(the job list counts from its last load, by hand or not)"""
+    cluster = self.app.cluster if self.app.clusters else None
+    if cluster is not None and cluster.updated:
+      return cluster.updated.timestamp()
+    import time
+    return self.__dict__.setdefault("_shown_at", time.time()) # (never loaded yet: from when it was shown)
+
+  def auto_reload(self):
+    cluster = self.app.cluster if self.app.clusters else None
+    if cluster is None or cluster.loader is not None or not cluster.loaded or (cluster.destination and not (
+       cluster.connection and cluster.connection.ready)):
+      return
+    self.app.reload_cluster(cluster)
+
   """The job table"""
   SHOW_NOTABS = True
   BINDINGS = [

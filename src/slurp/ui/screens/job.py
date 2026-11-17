@@ -811,8 +811,16 @@ class JobScreen(SplitScreen):
     event.stop()
     self.action_reload()
 
+  AUTO_REFRESH = True # (the app reloads it every refresh_seconds while it is shown; the title bar counts down)
+  last_refresh = 0.0
+
+  def auto_reload(self):
+    if not self.query_one("#reload-job", Button).disabled: # (not while a reload runs)
+      self.action_reload()
+
   def action_reload(self):
     """The job from Slurm again, with its files and progress (the button says so meanwhile)"""
+    self.last_refresh = time.time()
     button = self.query_one("#reload-job", Button)
     button.label, button.disabled = icons.label("reload", "Reloading …"), True
     self.load(refresh_job=True)

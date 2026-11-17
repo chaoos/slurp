@@ -26,6 +26,8 @@ class SplitScreen(Screen):
         yield Button("←", id="back", compact=True, tooltip="Back")
       yield Header()
       yield Button("", id="update", compact=True, tooltip="a newer slurp is there: how to update")
+      yield Button("", id="refresh-timer", compact=True,
+                   tooltip="the next automatic refresh of this view (a click: automatic refreshing off, or on again)")
       yield Button("", id="web-timer", compact=True,
                    tooltip="a web link ends soon: when it takes no more logins, or its relay ends (click: the link)")
       yield Button("?", id="view-help", compact=True, tooltip="about this window: what it shows, what it can do, its keys (?)")
@@ -71,6 +73,10 @@ class SplitScreen(Screen):
     if event.button.id == "about":
       event.stop()
       self.app.action_about()
+      return
+    if event.button.id == "refresh-timer":
+      event.stop()
+      self.app.toggle_auto_refresh()
       return
     if event.button.id == "update":
       event.stop()

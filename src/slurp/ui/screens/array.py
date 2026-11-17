@@ -128,8 +128,15 @@ class ArrayScreen(SplitScreen):
   def action_back(self):
     self.pop_back()
 
+  AUTO_REFRESH = True # (the app reloads it every refresh_seconds while it is shown; the title bar counts down)
+  last_refresh = 0.0
+
+  def auto_reload(self):
+    self.action_reload()
+
   @on(Button.Pressed, "#arr-reload")
   def action_reload(self):
+    self.last_refresh = time.time()
     if self.fetching:
       return
     self.fetching, self.load_started, self.load_failed = True, time.monotonic(), False
