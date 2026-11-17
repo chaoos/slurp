@@ -2119,6 +2119,11 @@ async def t_memory(app, pilot):
   await pilot.click("#nc-ok")
   ok = await until(pilot, lambda: isinstance(app.screen, DiagnosticsScreen) and "Memory" in str(app.screen.query_one("#diag-text").render()), 30)
   ds = app.screen
+  job_view = next(v for v in app.cluster.views if v.key == "job 9001")
+  diag_view = next((v for v in app.cluster.views if v.key == "diagnostics 9001 *"), None)
+  check("in a subtab of its own (the job's stays), named after the job", ok and diag_view is not None
+        and app.current_mode == diag_view.mode and diag_view.title == "diagnostics 9001" and job_view in app.cluster.views,
+        [(v.key, v.title) for v in app.cluster.views])
   text = str(ds.query_one("#diag-text").render()) if ok else ""
   call = open(calls).read() if os.path.exists(calls) else ""
   check("the probe runs through srun as a step of the job, the script on stdin, measuring (full), on all nodes",
@@ -2131,7 +2136,14 @@ async def t_memory(app, pilot):
   ds.query_one("#diag-text").update(""); await pilot.press("r")
   ok = await until(pilot, lambda: "Memory" in str(ds.query_one("#diag-text").render()), 30)
   check("r: again", ok)
-  await pilot.press("escape"); await pilot.pause(0.3)
+  app.show_view(job_view); await pilot.pause(0.3)
+  ds.query_one("#diag-text").update("")
+  await pilot.click("#diagnostics"); await until(pilot, lambda: isinstance(app.screen, NodeChoiceScreen), 5)
+  await pilot.click("#nc-ok")
+  ok = await until(pilot, lambda: app.screen is ds and "Memory" in str(ds.query_one("#diag-text").render()), 30)
+  check("the same diagnostics again: its subtab, measured again (not another)", ok
+        and sum(v.key.startswith("diagnostics 9001") for v in app.cluster.views) == 1)
+  app.show_view(job_view); await pilot.pause(0.3)
   cpu = str(js.query_one("#memory-cpu").render())
   check("the memory row shows its memory (all nodes: the job's PSS here)", app.screen is js and "(the job's processes, PSS" in cpu
         and "unavailable" not in cpu, cpu)
@@ -2141,8 +2153,9 @@ async def t_memory(app, pilot):
   await pilot.click("#nc-ok")
   ok = await until(pilot, lambda: isinstance(app.screen, DiagnosticsScreen) and "Memory" in str(app.screen.query_one("#diag-text").render()), 30)
   call = open(calls).read().splitlines()[-1] if os.path.exists(calls) else ""
-  check("one node: srun -w that node", ok and f"-w {node}" in call and node in str(app.screen.query_one("#diag-status").render()), call)
-  await pilot.press("escape"); await pilot.pause(0.3)
+  check("one node: srun -w that node, in a subtab of its own too", ok and f"-w {node}" in call
+        and node in str(app.screen.query_one("#diag-status").render())
+        and any(v.key == f"diagnostics 9001 {node}" for v in app.cluster.views), call)
   for v in list(app.cluster.views): app.close_view(v)
   await pilot.pause(0.3)
 
@@ -2183,7 +2196,7 @@ async def t_memory_watch(app, pilot):
   await pilot.click("#nc-ok")
   ok = await until(pilot, lambda: len(w["samples"]) == 3, 30)
   check("diagnostics of all nodes are kept as a measurement too", ok and len(open(path).read().splitlines()) == 4)
-  await until(pilot, lambda: isinstance(app.screen, DiagnosticsScreen), 5); await pilot.press("escape"); await pilot.pause(0.3)
+  await until(pilot, lambda: isinstance(app.screen, DiagnosticsScreen), 5)
   js.query_one("#memory-every").value = 0
   for v in list(app.cluster.views): app.close_view(v)
   await pilot.pause(0.3)

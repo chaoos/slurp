@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Runtime diagnostics open in a subtab of their own (one per job and node;
+  asked again, it measures again), not on top of the job window.
 - The job window's progress has a **?** next to Progress file…: what the
   progress is and why it helps, what it needs (a file with n/N or M% lines,
   best the output, written unbuffered), how much of the file is read (its

@@ -34,7 +34,8 @@ read (64 kB), every 10 seconds while the job runs (the window shows when it was
 last read); a chosen file is also listed among the job's files as `progress`.
 
 For a running job, **Query runtime diagnostics…** asks on which node (all of
-them, the default, or one) and opens a window with what the job does there now,
+them, the default, or one) and opens a subtab with what the job does there now (one per job and node: asked
+again, it measures again),
 measured over one second, with **Again** (`r`):
 
 - **Memory**, in binary units (MiB, GiB) as `free -h` and `nvidia-smi` show it:

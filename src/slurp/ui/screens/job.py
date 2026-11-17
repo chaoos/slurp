@@ -558,7 +558,18 @@ class JobScreen(SplitScreen):
     def chosen(node):
       if node is None:
         return
-      self.app.push_screen(DiagnosticsScreen(job, node, done=lambda result: self.diagnosed(node, result)))
+      key = f"diagnostics {job.jid} {node or '*'}" # (a subtab of its own, one per job and node: again, it measures again)
+      view = self.app.find_view(key)
+      if view is not None:
+        self.app.show_view(view)
+        def again():
+          for screen in self.app.screen_stack:
+            if isinstance(screen, DiagnosticsScreen):
+              screen.action_again()
+        self.app.call_after_refresh(again)
+        return
+      self.app.in_new_subtab(lambda: self.app.open_window(
+        DiagnosticsScreen(job, node, done=lambda result: self.diagnosed(node, result))), key=key)
     self.app.push_screen(NodeChoiceScreen(f"Runtime diagnostics of job {job.jid}: on which node?", nodes, ALL), chosen)
 
   def diagnosed(self, node, result):

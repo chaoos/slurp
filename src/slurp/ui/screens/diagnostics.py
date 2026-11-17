@@ -201,7 +201,7 @@ class DiagnosticsScreen(SplitScreen):
   def __init__(self, job, node=ALL, done=None):
     super().__init__()
     self.job, self.node, self.done = job, node, done
-    self.crumbs = ["Jobs", job.jid, "diagnostics" + (f" {node}" if node else "")]
+    self.crumbs = ["Jobs", job.jid, f"diagnostics {job.jid}" + (f" {node}" if node else "")] # (the last: the subtab's title)
 
   def compose_left(self):
     with Horizontal(id="diag-bar"):

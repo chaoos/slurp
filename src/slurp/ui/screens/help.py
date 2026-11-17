@@ -56,7 +56,7 @@ Everything about one job.
   threads run; **Fixed copy…** writes a copy of the script with the safe fixes; **What changed** (failed jobs)
   compares with the last run that worked.
 - **Runtime diagnostics** (running jobs): on a node of the job or all of them, its memory, CPU and GPU use and load,
-  I/O, local disks and busiest processes, in a window of its own; the memory row shows its memory (MiB/GiB, as
+  I/O, local disks and busiest processes, in a subtab of its own (one per job and node: again, it measures again); the memory row shows its memory (MiB/GiB, as
   `free -h` and `nvidia-smi`). Repeated memory queries with plots (every 1 to 60 min).
 - **Progress:** the latest `n/N` (or `M%`) line with an estimate of the end (a job that ended: where its file got to
   and how it ended); its **?** explains what it needs and how the estimates are made; **Progress file…** picks another log file.
