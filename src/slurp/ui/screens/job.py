@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 
 import humanize
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 from textual import on
@@ -222,9 +223,11 @@ class JobScreen(SplitScreen):
       state.append(f"  exit code {rec['ExitCode']}")
     store = self.app.cluster.categories if self.app.clusters else None
     category = store.category_of(job.jid) if store else ""
+    def link(text, action, tip):
+      return Text.assemble((text, Style(underline=True) + Style.from_meta({"@click": f"screen.{action}"})), (f"  {tip}", "dim"))
     rows = [
       ("Job", f"{job.jid}  {rec['JobName']}"),
-      *([("Category", category)] if category else []),
+      *([("Category", link(category, "open_category", "→ a click: the category"))] if category else []),
       ("State", state),
       ("User / account", f"{rec['User']} / {rec['Account']}   partition {rec['Partition']}"),
       ("Nodes", f"{rec['NNodes']}  {rec['NodeList'] if rec['NodeList'] not in ('None assigned', '') else ''}"),
@@ -775,6 +778,13 @@ class JobScreen(SplitScreen):
     if action == "shell":
       return self.job.running
     return True
+
+  def action_open_category(self):
+    """The category of the job (a click on it): the categories window there, in a subtab of its own"""
+    store = self.app.cluster.categories if self.app.clusters else None
+    category = store.category_of(self.job.jid) if store else ""
+    if category:
+      self.app.open_category(category)
 
   def action_categorize(self):
     """c: this job (an array task: the task) in a category"""

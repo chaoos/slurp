@@ -287,10 +287,10 @@ class CategoriesScreen(SplitScreen):
   COLUMNS = [("job", "Job"), ("name", "Name"), ("category", "Category"), ("state", "State"), ("nodes", "Nodes"),
              ("elapsed", "Elapsed"), ("node_h", "Node h"), ("gpu_h", "GPU h"), ("submit", "Submit"), ("end", "End")]
 
-  def __init__(self):
+  def __init__(self, path=""):
     super().__init__()
     self.crumbs = ["Jobs", "categories"]
-    self.path = ""             # the category shown ("": all of them)
+    self.path = path           # the category shown ("": all of them)
     self.known = {}            # job id -> [Job] (an array: its tasks), as Slurm reported them
     self.asked = set()         # job ids asked from Slurm (also those it no longer knows)
     self.fetching = False

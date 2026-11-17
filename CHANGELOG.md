@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The job window: a click on the job's category opens the categories
+  window at that category, in a subtab of its own.
 - Categories have notes, in Markdown: **Notes…** (`o`) in the categories
   window; shown there rendered, under the numbers of the category.
 - The job list, the job window and the array window refresh by themselves

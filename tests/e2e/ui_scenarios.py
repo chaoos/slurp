@@ -1233,6 +1233,17 @@ async def t_categories(app, pilot):
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10); await pilot.pause(0.5)
   info = rendered(app.screen.query_one("#info").content) if ok and app.screen.query("#info") else ""
   check("the job window shows its category", "proj X/production" in info, info[:300])
+  # a click on it: the categories window there, in a subtab of its own
+  grid = app.screen.query_one("#info").content if ok else None
+  cell = next((c for c in getattr(grid, "columns", [None, None])[1]._cells if "proj X/production" in str(c)), None) if grid else None
+  clicks = [s.style.meta.get("@click") for s in (cell.spans if cell is not None else []) if s.style and not isinstance(s.style, str)]
+  check("the category is a link", "screen.open_category" in clicks, clicks)
+  views = len(cluster.views)
+  await app.screen.run_action("open_category"); await pilot.pause(0.6)
+  check("a click on it: the categories window at it, in a new subtab", isinstance(app.screen, CategoriesScreen)
+        and app.screen.path == "proj X/production" and len(cluster.views) == views + 1
+        and cluster.views[-1].key == "category proj X/production", (type(app.screen).__name__, getattr(app.screen, "path", None)))
+  app.close_view(cluster.views[-1])
   app.show_view(None)
   await pilot.pause(0.4)
   # the window

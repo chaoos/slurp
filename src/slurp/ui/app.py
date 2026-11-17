@@ -2557,6 +2557,13 @@ class Slurp(App):
       return
     self.open_view("categories", CategoriesScreen, key="categories", icon="categories")
 
+  def open_category(self, path):
+    """The categories window at one category, in a subtab of its own (one per category: shown again if it is open)"""
+    from .screens.categories import CategoriesScreen
+    if self.cluster.categories is None:
+      return
+    self.open_view(f"category {path}", lambda: CategoriesScreen(path), key=f"category {path}", icon="categories")
+
 
   def action_toggle_collapse(self):
     self.query_one("#collapse-arrays", Checkbox).value = not self.cluster.collapse_arrays
