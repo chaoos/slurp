@@ -612,13 +612,18 @@ def p04(ctx):
         yield F("P04", f"{os.path.basename(path)} is built for {other}, the cluster is {arch}", line)
 
 @rule("P05", ERROR, "Shared libraries not found",
-      "ldd finds that the program needs shared libraries that are not found in the job's environment (after the "
-      "script's module loads and exports).",
+      "ldd finds that the program needs shared libraries that are not found in the job's environment (after a "
+      "fresh login, the job's uenv (--uenv, --view) and the script's module loads, sources and exports).",
       "The job fails at once: error while loading shared libraries: libxyz.so: cannot open shared object file.",
       "Load the modules the program was built with (the same compiler and MPI), or set LD_LIBRARY_PATH in the script.",
       "module load gcc/12 openmpi/4.1    # what the program was built with\nsrun ./sim", needs="replay")
 def p05(ctx):
-  for prog, libs in (ctx.replay or {}).get("missing", {}).items():
+  replay = ctx.replay or {}
+  if replay.get("uenv_error"): # (not checked: without the uenv every library of it would be missing)
+    yield F("P05", f"the shared libraries are not checked: {replay['uenv_error']}", ctx.directive_line("uenv"),
+            INFO if replay.get("no_uenv") else WARNING)
+    return
+  for prog, libs in replay.get("missing", {}).items():
     if libs:
       line = next((l for k, p, l in referenced_paths(ctx) if p == prog), None)
       yield F("P05", f"{os.path.basename(prog)}: not found: {', '.join(libs[:4])}" + (" …" if len(libs) > 4 else ""), line)
@@ -894,6 +899,8 @@ def e03(ctx):
       "The job starts without the software: command not found, missing libraries.",
       "Use modules that exist (module avail / module spider), with versions.", needs="replay")
 def e04(ctx):
+  if (ctx.replay or {}).get("container"): # (its modules are in the container, not on the login node)
+    return
   for err in (ctx.replay or {}).get("module_errors", [])[:3]:
     yield F("E04", err)
 

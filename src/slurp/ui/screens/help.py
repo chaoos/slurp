@@ -117,7 +117,8 @@ A batch script with the findings of the checks below it.
   IGNORED after the first command.
 - **Check** (`r`) runs all checks: the script, its paths, programs and quota on the cluster at once, then its
   environment a few seconds later: the setup lines (module loads, sources, exports; never the job's commands) replayed
-  on the login node after a fresh login, the programs found and their shared libraries (`ldd`). Opening and saving the
+  on the login node after a fresh login (in the job's uenv, `--uenv` and `--view`, if it has one), the programs found
+  and their shared libraries (`ldd`). Opening and saving the
   script run it too; while you edit, Check checks the edited text, saved or not.
 - **Edit** (`e`) makes the script editable right here: the checks follow as you type (the script, and its
   paths and programs on the cluster), Go to line jumps into it, `Ctrl+S` saves, `Ctrl+Z` undoes, **Reload**

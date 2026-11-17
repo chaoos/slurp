@@ -36,7 +36,14 @@ writes, and the end of its logs, and then, a few seconds later, its
 environment: the script's setup lines (module loads, exports, sources, `cd`;
 never its commands) are replayed on the login node in a clean environment, as
 after a fresh login, and the programs are checked: found at all (G01), shared
-libraries (`ldd`), GPU code (`cuobjdump`). **Check** runs all of it again.
+libraries (`ldd`), GPU code (`cuobjdump`). A job with a uenv (`--uenv`,
+`--view`, on Alps) gets it for the replay too: the setup and the checks run in
+`uenv run` with the same uenv and view (in a login shell if the script's `#!`
+line asks for one). If the login node has no `uenv` command or the uenv does
+not start, the libraries are not checked (P05 says so) rather than all missing.
+In a container (`--environment`, `--container-image`) the programs are not
+looked at: the login node does not have what the container has. **Check** runs
+all of it again.
 Its other buttons:
 
 - **Placement** (running jobs) asks the nodes where the tasks and threads run,

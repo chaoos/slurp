@@ -6,6 +6,14 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The environment check (P05: shared libraries with `ldd`; P06, B02, E04)
+  runs in the job's uenv: with `--uenv` and `--view` the replay of the
+  script's setup runs in `uenv run` with them, as the job does. Before, it
+  ran without, and every library of the uenv was reported missing. Without a
+  `uenv` command on the login node, or a uenv that does not start, P05 says
+  the libraries are not checked. In a container (`--environment`,
+  `--container-image`) the programs are not looked at (and E04 does not
+  report its modules).
 - slurp in your browser: `Ctrl+C` (`Cmd+C`) copies the text you marked. The
   page now writes it to the clipboard itself, in the key's event; before,
   the copy went through OSC 52, which browsers refused outside HTTPS and
