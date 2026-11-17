@@ -22,7 +22,7 @@ def test_a_newer_version(check, monkeypatch):
   async def main():
     app = Slurp()
     async with app.run_test(size=(140, 40)) as pilot:
-      await until(pilot, lambda: app.main is not None)
+      await until(pilot, lambda: app.main is not None and app.screen.query("#update")) # (the first window there)
       button = app.screen.query_one("#update")
       check("no newer version known: nothing", not button.display)
       app.version_found("0.0.1")
