@@ -271,6 +271,11 @@ for sshfs, SSHFS-Win, WinSCP).
 Where the shell opens: **in slurp** (a subtab with a terminal), or **from your own terminal** (a link: an ssh command
 and a password for the terminal on your machine, through a relay).
 """),
+  "OpenDirScreen": ("Open a directory", """
+Which directory of the tab's cluster to open, in a new subtab (each time another one): your home (the default:
+Enter), your scratch, project, … (`$SCRATCH`, `$PROJECT`, `$STORE`, `$WORK`, those set on the cluster), or a path
+typed in the field below (`~/…` and relative paths are in your home). `Esc` cancels.
+"""),
   "AddClusterScreen": ("Add a cluster", """
 A new tab: an SSH destination (`user@host` or an alias of your `~/.ssh/config`, with its jump hosts and keys), or
 blank for this machine. The login runs in the pane on the right.
