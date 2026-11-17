@@ -45,7 +45,8 @@ Your queued and running jobs and those that ended recently, of the active tab's 
 Everything about one job.
 
 - **Buttons:** Reload (`r`: the job, its files and progress from the cluster again), Cancel job, Restart job (the original submission, another array range, or an edited command; with the
-  environment and script it was submitted with, if the cluster kept them), Run array, Array (the window of its array).
+  environment and script it was submitted with, if the cluster kept them), Run array, Array (the window of its array), Shell… (`s`, a running job: on
+  which of its nodes, in slurp or your own terminal).
 - **Info:** state (with the pending reason or exit code), account, partition, nodes, times, node hours, the command.
 - **Checks:** what is wrong or could be better with the script and the job, most severe first; open an entry for why
   it matters and how to fix it, and its rule in the catalogue. **Check** runs all checks again: first the record,
@@ -59,7 +60,7 @@ Everything about one job.
 - **Progress:** the latest `n/N` (or `M%`) line with two estimates of the end (a job that ended: where its file got to
   and how it ended); **Progress file…** picks another log file.
 - **Files:** output, error, script, working directory and files the job names; Enter opens one.
-- **Steps** of the job; for a running job **Run on the nodes** (a command on every node, or one) and **Shell** (`s`).
+- **Steps** of the job; for a running job **Run on the nodes** (a command on every node, or one).
 """),
   "ArrayScreen": ("Array window", """
 One job array as a whole.

@@ -2032,19 +2032,40 @@ async def t_log_positions(app, pilot):
   await pilot.pause(0.3)
 
 async def t_shell_button(app, pilot):
-  """The Shell button of a running job's window asks where the shell opens (it opened the categorize dialog: its
-  handler had slipped onto action_categorize); also when the window is scrolled to its end"""
+  """Shell… is in the job's button bar (it was hidden at the end of the window, and opened the categorize dialog):
+  it asks on which node of the job (radio buttons) and where the shell opens"""
   js = await open_job(app, pilot, "9001")
+  nodes = js.details["nodes"]
+  button = js.query_one("#shell")
+  check("Shell… in the button bar of a running job, with Cancel job, Restart job, …",
+        button.display and button.parent.id == "job-actions" and not js.query("#details #shell"), button.parent.id)
   js.query_one("#details").scroll_end(animate=False); await pilot.pause(0.3)
-  button = js.query_one("#shell"); button.scroll_visible(animate=False); await pilot.pause(0.3)
   await pilot.click("#shell")
   ok = await until(pilot, lambda: isinstance(app.screen, (ShellChoiceScreen, CategorizeScreen)), 5)
-  check("Shell: where the shell opens (not Categorize)", ok and isinstance(app.screen, ShellChoiceScreen), type(app.screen).__name__)
-  await pilot.press("escape"); await pilot.pause(0.3)
+  scr = app.screen
+  radios = [str(b.label) for b in scr.query("#choice-nodes RadioButton")] if ok else []
+  check("it asks on which node (the job's, as radio buttons, the first chosen), not Categorize",
+        ok and isinstance(scr, ShellChoiceScreen) and radios == nodes and scr.node == nodes[0], (type(scr).__name__, radios, nodes))
+  opened = []
+  real = app.open_shell
+  app.open_shell = lambda args, title, **kw: opened.append((args, title))
+  try:
+    buttons = list(scr.query("#choice-nodes RadioButton"))
+    buttons[-1].value = True; await pilot.pause(0.2)
+    await pilot.click("#choice-slurp"); await pilot.pause(0.3)
+  finally:
+    app.open_shell = real
+  args = opened[0][0] if opened else []
+  check("In slurp: the shell on the node chosen (srun --overlap --pty -w <node> in the job)",
+        args[:2] == ["srun", "--jobid=9001"] and "--overlap" in args and args[args.index("-w") + 1] == nodes[-1], (args, opened))
   await pilot.press("c")
   ok = await until(pilot, lambda: isinstance(app.screen, CategorizeScreen), 5)
   check("c still categorizes the job", ok, type(app.screen).__name__)
   await pilot.press("escape"); await pilot.pause(0.3)
+  for v in list(app.cluster.views): app.close_view(v)
+  await pilot.pause(0.3)
+  ended = await open_job(app, pilot, "9008")
+  check("a job that ended: no Shell…", not ended.query_one("#shell").display)
   for v in list(app.cluster.views): app.close_view(v)
   await pilot.pause(0.3)
 
@@ -2635,7 +2656,7 @@ async def t_links(app, pilot):
   calls = os.path.join(LAB, "srun_calls")
   if os.path.exists(calls): os.unlink(calls)
   await pilot.press("s"); await pilot.pause(0.4)
-  check("a node shell asks too", isinstance(app.screen, ShellChoiceScreen) and node in str(app.screen.query_one("#choice-title").render()))
+  check("a node shell asks too, with the node chosen", isinstance(app.screen, ShellChoiceScreen) and app.screen.node == node)
   await pilot.click("#choice-own"); await pilot.pause(0.5)
   scr = app.screen
   check("its setup panel: a shell (no drive options)", isinstance(scr, LinkSetupScreen) and scr.kind == "shell" and not scr.query("#setup-ro")

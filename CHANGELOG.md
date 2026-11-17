@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The job window's **Shell…** is in its button bar (with Cancel job,
+  Restart job, …), for a running job; it asks on which of the job's nodes
+  (radio buttons) and where the shell opens. It was at the end of the
+  window, under Run on the nodes.
 - Where a text file opens depends on where from: a job's output, error and
   progress file (the job window, the job list's Err) at its end, followed
   while the job runs (an ended job's at its end too, not followed); the

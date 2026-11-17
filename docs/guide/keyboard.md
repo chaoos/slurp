@@ -8,7 +8,7 @@ top-left `←` button to go back.
 |---|---|
 | Overview | `j` the job list; `Q` quota; `C` health; `r` ask the cluster again; `F10` the menu |
 | Job list | `F10` the menu; `/` search jobs (`cat:a/b`: a category); `Enter` open; `Space` open/close an array row; `g` group arrays on/off; `!` only jobs with problems; `m` mark, `M` all/none, `c` categorize, `K` categories; `n` new job script; `W` remote web access; `r` reload; `a` abort loading; `t` shell on the cluster (in slurp or your own terminal); `F` login directory as a drive; `d` login directory; `i` interactive job; `C` health; `Q` quota; `X` old scratch files; `q` quit |
-| Job details | `Reload` (or `r`); `Cancel job` / `Restart job` / `Run array` / `Array`; `s` shell on the node (in slurp or your own terminal); `c` categorize; Checks: `Check`, `Placement`, `Fixed copy…`, `What changed`, `Rule catalogue` |
+| Job details | `Reload` (or `r`); `Cancel job` / `Restart job` / `Run array` / `Array` / `Shell…` (or `s`: a shell on a node of the job, chosen in a list, in slurp or your own terminal); `c` categorize; Checks: `Check`, `Placement`, `Fixed copy…`, `What changed`, `Rule catalogue` |
 | Script view | `r` check (all checks, the environment too); `x` explain the `#SBATCH` lines; `e` edit in place (`Ctrl+S` save, `Esc` stop editing); buttons `Test`, `Fixed copy…`, `Submit…` |
 | Everywhere | `F10` (or **☰ Menu** in the header) the menu; `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue (`/` searches it); `F3` options |
 | Categories | the tree (and *not categorized*): `n` new, `e` rename/move, `Del` delete; its jobs: `Enter` open, `c` categorize, `x` take out; `l` in the job list; `r` reload |

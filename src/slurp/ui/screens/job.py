@@ -126,6 +126,8 @@ class JobScreen(SplitScreen):
       yield Button(icons.label("restart", "Restart job"), id="restart-job", variant="primary", compact=True)
       yield Button(icons.label("restart", "Run array"), id="run-array", tooltip="submit the array again with another range", compact=True)
       yield Button(icons.label("array", "Array"), id="array-window", tooltip="all tasks of the array by state, to copy or cancel", compact=True)
+      yield Button(icons.label("shell", "Shell…"), id="shell", compact=True,
+                   tooltip="an interactive shell on a node of the job (you choose the node), in slurp or your own terminal (s)")
     with VerticalScroll(id="details"):
       yield Static(id="info")
       with Horizontal(id="checks-bar"):
@@ -179,7 +181,6 @@ class JobScreen(SplitScreen):
           yield Input(id="cmd", placeholder="command, e.g. nvidia-smi", compact=True)
           yield Select([], id="node", prompt="all nodes", allow_blank=True, compact=True)
           yield Button("Run", id="run", variant="primary", compact=True)
-          yield Button("Shell", id="shell", tooltip="interactive shell on the node, opens on the right", compact=True)
         with Horizontal(id="presets"):
           for i, name in enumerate(PRESETS):
             yield Button(name, id=f"preset{i}", classes="preset", compact=True)
@@ -207,6 +208,7 @@ class JobScreen(SplitScreen):
     self.query_one("#restart-job", Button).disabled = restart_args(job) is None
     self.query_one("#run-array", Button).display = array_task_id(job) is not None and restart_args(job) is not None
     self.query_one("#array-window", Button).display = array_task_id(job) is not None
+    self.query_one("#shell", Button).display = job.running
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold")
     grid.add_column()
@@ -754,21 +756,26 @@ class JobScreen(SplitScreen):
     if not self.job.running:
       self.notify("the job is not running", severity="error")
       return
-    node = self.query_one("#node", Select).value
-    node = (self.details["nodes"] or [None])[0] if node is Select.NULL else node
-    if not node:
+    nodes = list(self.details["nodes"] or [])
+    if not nodes:
       self.notify("the nodes of the job are not known yet, try again in a moment", severity="warning")
       return
-    args = ["srun", f"--jobid={self.job.rec['JobIDRaw']}", "--overlap", "--pty", "--nodes=1", "--ntasks=1", "-w", node,
-            f"--job-name={STEP_NAME}", "bash", "-l"]
-    title = f"shell on {node} · job {self.job.jid}"
-    def chosen(where): # (a node: only a shell from the own terminal, never a drive)
+    picked = self.query_one("#node", Select).value # (the node of Run on the nodes, if one is chosen there)
+    job = self.job
+    def chosen(result): # (where, node)
+      if not result:
+        return
+      where, node = result
+      args = ["srun", f"--jobid={job.rec['JobIDRaw']}", "--overlap", "--pty", "--nodes=1", "--ntasks=1", "-w", node,
+              f"--job-name={STEP_NAME}", "bash", "-l"]
+      title = f"shell on {node} · job {job.jid}"
       if where == "slurp":
         self.app.open_shell(args, title)
-      elif where == "own":
+      elif where == "own": # (a node: only a shell from the own terminal, never a drive)
         cluster = self.app.cluster
         self.app.open_link_setup("shell", title, cluster, self.app.link_argv(cluster, args))
-    self.app.push_screen(ShellChoiceScreen(f"Shell on {node} (job {self.job.jid})"), chosen)
+    self.app.push_screen(ShellChoiceScreen(f"Shell on a node of job {job.jid}", nodes=nodes,
+                                           node=picked if picked in nodes else nodes[0]), chosen)
 
   @on(Button.Pressed, "#reload-job")
   def reload_pressed(self, event):

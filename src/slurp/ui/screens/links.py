@@ -150,25 +150,34 @@ def warning_text(relay, kind):
   return Text(OWN_NOTE.format(relay=f"sshj://{rest}" if rtype == "ssh-j" else relay), style="dim")
 
 class ShellChoiceScreen(ModalScreen):
-  """Where a shell opens: in slurp, or in the user's own terminal (a link). Asked every time."""
+  """Where a shell opens: in slurp, or in the user's own terminal (a link). Asked every time. With nodes (a job's):
+  also on which one (radio buttons; node: the one chosen first); dismissed with (where, node) then, else where."""
   DEFAULT_CSS = """
   ShellChoiceScreen { align: center middle; }
   #choice-dialog { width: 76; max-width: 95%; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
   #choice-title { text-style: bold; margin-bottom: 1; }
   #choice-text { height: auto; margin-bottom: 1; }
+  #choice-nodes { height: auto; max-height: 12; width: 1fr; margin-bottom: 1; }
   #choice-buttons { height: auto; align-horizontal: right; }
   #choice-buttons Button { margin-left: 1; }
   """
   BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
-  def __init__(self, title):
+  def __init__(self, title, nodes=None, node=None):
     super().__init__()
     self.title_text = title
+    self.nodes = list(nodes) if nodes else None
+    self.node = node if node in (self.nodes or []) else (self.nodes or [None])[0]
 
   def compose(self) -> ComposeResult:
     missing = share.available()
     with Vertical(id="choice-dialog"):
       yield Static(self.title_text, id="choice-title", markup=False)
+      if self.nodes:
+        yield Static(f"The node ({len(self.nodes)} of the job):", markup=False)
+        with RadioSet(id="choice-nodes"):
+          for name in self.nodes:
+            yield RadioButton(name, value=name == self.node, name=name)
       yield Static("In slurp: a subtab with the shell, as before.\nFrom your own terminal: slurp makes a one-time "
                    "link (an ssh command and a password) for your terminal or ssh client on your own machine "
                    "(OpenSSH, PuTTY, Windows Terminal, …), wherever it is." + (f"\n\n(Own terminal: {missing})" if missing else ""),
@@ -179,17 +188,33 @@ class ShellChoiceScreen(ModalScreen):
         yield Button("In slurp", id="choice-slurp", variant="primary", compact=True)
 
   def on_mount(self):
-    self.query_one("#choice-slurp", Button).focus()
+    if self.nodes and len(self.nodes) > 1:
+      nodes = self.query_one("#choice-nodes", RadioSet)
+      try: # (the keys start at the node chosen, not at the first: Textual has no public way to say so)
+        nodes._selected = self.nodes.index(self.node)
+      except (AttributeError, ValueError):
+        pass
+      nodes.focus()
+    else:
+      self.query_one("#choice-slurp").focus()
+
+  @on(RadioSet.Changed, "#choice-nodes")
+  def node_changed(self, event):
+    event.stop()
+    self.node = event.pressed.name
+
+  def result(self, where):
+    return (where, self.node) if self.nodes else where
 
   @on(Button.Pressed, "#choice-slurp")
   def slurp_pressed(self, event):
     event.stop()
-    self.dismiss("slurp")
+    self.dismiss(self.result("slurp"))
 
   @on(Button.Pressed, "#choice-own")
   def own_pressed(self, event):
     event.stop()
-    self.dismiss("own")
+    self.dismiss(self.result("own"))
 
   @on(Button.Pressed, "#choice-cancel")
   def action_cancel(self, event=None):
