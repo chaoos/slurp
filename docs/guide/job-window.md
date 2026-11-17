@@ -5,7 +5,10 @@ batch script, and files referenced by the job. A click on its **Category**
 opens the categories window at that category, in a subtab of its own.
 **Notes…** (`o`) annotates the job in Markdown (what the run was for, what
 came out); the window shows them rendered under its details, and they are
-kept on the cluster with the categories. For a
+kept on the cluster with the categories. Web addresses and the paths in the
+notes that exist on the cluster (absolute, `~/…`, `$SCRATCH/…`, relative to
+the job's directory, also with `:line`) are links: a click opens the page, or
+the file or directory in slurp. The same goes for the notes of categories. For a
 task of an array, a click on its **Array** line opens the array window in a
 subtab of its own. **Node hours (total)** is nodes ×
 elapsed time (for a running job so far, with the most it can take by its time limit). **Cancel job** asks why:

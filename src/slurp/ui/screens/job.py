@@ -36,6 +36,7 @@ from .files import FilePickScreen, FileScreen, open_path
 from .links import ShellChoiceScreen
 from .checks import FindingsView
 from .cancel import reason_text
+from ..notes import open_link, show_notes
 from ...checks import engine as checks
 
 def node_hours_text(job):
@@ -836,13 +837,17 @@ class JobScreen(SplitScreen):
     box.set_class(not text, "-empty")
     if getattr(self, "notes_shown", None) != text:
       self.notes_shown = text
-      self.query_one("#job-notes", Markdown).update(text)
+      show_notes(self, self.query_one("#job-notes", Markdown), text, self.note_bases(), job_vars(self.job))
+
+  def note_bases(self):
+    """Relative paths in the notes: from the job's directory, else the home directory"""
+    from .files import home_of
+    return [b for b in (self.job.rec.get("WorkDir"), home_of(self.app.cluster)) if b and b not in ("(null)", "None")]
 
   @on(Markdown.LinkClicked, "#job-notes")
   def note_link(self, event):
     event.stop()
-    if (event.href or "").startswith(("http://", "https://")):
-      self.app.open_page(event.href)
+    open_link(self, event.href, ["Jobs", self.job.jid], self.note_bases(), job_vars(self.job))
 
   @on(Button.Pressed, "#job-notes-edit")
   def action_notes(self, event=None):

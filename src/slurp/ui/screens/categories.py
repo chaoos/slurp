@@ -19,6 +19,7 @@ from ..widgets import ClickTable, state_text
 from .base import SplitScreen
 from .dialogs import ConfirmScreen
 from .cancel import short_reason
+from ..notes import open_link, show_notes
 
 def category_text(path, style=""):
   """a/b/c with the categories it is in dimmed"""
@@ -561,14 +562,18 @@ class CategoriesScreen(SplitScreen):
     self.query_one("#cat-notes-edit", Button).disabled = not self.path or self.path == NONE
     if getattr(self, "notes_shown", None) != text:
       self.notes_shown = text
-      self.query_one("#cat-notes", Markdown).update(text)
+      show_notes(self, self.query_one("#cat-notes", Markdown), text, self.note_bases())
+
+  def note_bases(self):
+    """Relative paths in the notes: from the home directory"""
+    from .files import home_of
+    home = home_of(self.cluster)
+    return [home] if home else []
 
   @on(Markdown.LinkClicked, "#cat-notes")
   def note_link(self, event):
     event.stop()
-    href = event.href or ""
-    if href.startswith(("http://", "https://")):
-      self.app.open_page(href)
+    open_link(self, event.href, ["Jobs", "categories"], self.note_bases())
 
   @on(Button.Pressed, "#cat-notes-edit")
   def action_notes(self, event=None):

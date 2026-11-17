@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- In the notes of categories and jobs, web addresses and the paths that
+  exist on the cluster are links: a click opens the page, or the file or
+  directory in slurp.
 - The progress file window's filter takes patterns (`run_123*.log`,
   `step_??.out`); directories stay listed, and the filter stays when
   going into one.

@@ -1253,6 +1253,22 @@ async def t_categories(app, pilot):
   check("Notes… (o) in the job window: kept on the cluster, rendered", ok and not js.query_one("#job-notes-box").has_class("-empty")
         and "Run 1" in shown and "**" not in shown
         and json.load(open(CATEGORIES_FILE))["clusters"]["lab"]["job_notes"]["9001"].startswith("## Run 1"), (ok, shown[:200]))
+  # paths in the notes that exist (and web addresses): links that open
+  wd = cluster.jobs["9001"].rec["WorkDir"]
+  await pilot.press("o"); await pilot.pause(0.4)
+  if type(app.screen).__name__ == "NotesScreen":
+    app.screen.query_one("#nt-text").text = f"the log: {wd}/slurm-9001.out:3, not /no/such/file, see https://slurm.schedmd.com\n"
+    await pilot.press("ctrl+s")
+  md = js.query_one("#job-notes")
+  ok = await until(pilot, lambda: f"](<{wd}/slurm-9001.out:3>)" in getattr(md, "notes_markdown", ""), 15)
+  check("an existing path in the notes: a link; one that does not exist: not; a web address: a link", ok
+        and "/no/such/file](" not in md.notes_markdown and "](<https://slurm.schedmd.com>)" in md.notes_markdown, getattr(md, "notes_markdown", ""))
+  views = len(cluster.views)
+  md.post_message(Markdown.LinkClicked(md, f"{wd}/slurm-9001.out:3"))
+  ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and (app.screen.path or "").endswith("slurm-9001.out"), 10)
+  check("a click on it: the file opens, in a subtab", ok and len(cluster.views) == views + 1, type(app.screen).__name__)
+  for v in list(cluster.views)[views:]: app.close_view(v)
+  await pilot.pause(0.3)
   # a click on it: the categories window there, in a subtab of its own
   grid = app.screen.query_one("#info").content if ok else None
   cell = next((c for c in getattr(grid, "columns", [None, None])[1]._cells if "proj X/production" in str(c)), None) if grid else None

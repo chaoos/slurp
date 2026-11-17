@@ -305,7 +305,10 @@ file under the cursor, and (the progress file) whether slurp finds progress in i
   "NotesScreen": ("Notes", """
 Notes of a category or a job, in Markdown: `# headings`, `**bold**`, `- lists`, `` `code` ``, `[links](https://…)`.
 The categories window (under the numbers of the category) and the job window (under its details) show them
-rendered. **Save** (`Ctrl+S`) keeps them with the categories (on the cluster); empty: no notes.
+rendered, with web addresses and the paths in them that exist on the cluster (`/scratch/…/out.log`, `~/input.dat`,
+`$SCRATCH/run`, `logs/run.out` from the job's directory, also with `:line` or in `code`) as links: a click opens the
+page in your browser, or the file or directory in slurp. **Save** (`Ctrl+S`) keeps them with the categories (on the
+cluster); empty: no notes.
 """),
   "NameScreen": ("Category name", """
 The name of a category: `a/b` is b in the category a (made too, if it is new). Renaming to another path moves it
