@@ -1,7 +1,7 @@
 """The subtabs of a tab, kept for the next start: what each one shows as a small description (a job, an array, a file
 or directory, the categories, the guides, the rule catalogue; shells and windows of the moment are not kept), saved
 with the tabs (app.save_tabs). At the next start they are there at once, as placeholders (a click before the tab is
-connected: connect first, the overview); once it is connected and its job list loaded, each is opened in its place"""
+connected: connect first, the overview); once it is connected, each is opened in its place"""
 
 import os
 
@@ -122,12 +122,15 @@ def placeholders(app, cluster, saved):
     cluster.views.append(View(type(app).next_view_id, title, "window", spec_key(spec), icon=icon, kept=spec, pending=True))
 
 
+def connected(cluster):
+  return not cluster.destination or (cluster.connection is not None and cluster.connection.ready)
+
+
 def ready(app, cluster):
-  """Can the subtabs of a tab be opened now: it is shown, connected, its job list loaded, no dialog open"""
+  """Can the subtabs of a tab be opened now: it is shown and connected (its job list need not be loaded: a job is
+  asked for by its id), no dialog open"""
   from textual.screen import ModalScreen
-  return (cluster is app.cluster and ((cluster.loaded and not cluster.from_cache) or cluster.no_slurm) and cluster.loader is None
-          and (not cluster.destination or (cluster.connection is not None and cluster.connection.ready))
-          and not isinstance(app.screen, ModalScreen))
+  return cluster is app.cluster and connected(cluster) and not isinstance(app.screen, ModalScreen)
 
 
 def placeholder_clicked(app, view):
@@ -148,7 +151,7 @@ def restore(app, cluster):
   if getattr(cluster, "restoring", False) or not any(v.pending for v in cluster.views):
     return
   if not ready(app, cluster):
-    if cluster is app.cluster and ((cluster.loaded and not cluster.from_cache) or cluster.no_slurm):
+    if cluster is app.cluster and connected(cluster):
       app.set_timer(1, lambda: restore(app, cluster)) # (a dialog open: when it closed)
     return
   cluster.restoring = True
@@ -234,13 +237,23 @@ def open_spec(app, cluster, spec, done):
     app.open_array_subtab(str(spec.get("id")))
     return False
   if kind == "categories":
-    if cluster.categories is None:
+    def show():
+      if cluster.categories is None or cluster is not app.cluster:
+        return
+      if spec.get("key", "").startswith("category ") and spec.get("path"):
+        app.open_category(spec["path"])
+      else:
+        app.action_categories()
+    if cluster.categories is not None:
+      show()
       return False
-    if spec.get("key", "").startswith("category ") and spec.get("path"):
-      app.open_category(spec["path"])
-    else:
-      app.action_categories()
-    return False
+    from ..cluster.remote import in_background
+    def loaded(_):
+      show()
+      done()
+    in_background(app, lambda: app.load_categories(cluster) or True, loaded, group="restore", name="the categories",
+                  connection=cluster.connection)
+    return True
   if kind == "rules":
     app.action_rule_catalogue(spec.get("rule") or "")
     return False

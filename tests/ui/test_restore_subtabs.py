@@ -127,6 +127,8 @@ def test_the_start_with_placeholders_on_the_overview(check, home, start_on_overv
         app.show_view(None); await pilot.pause(0.2)
         await pilot.press("ctrl+w"); await pilot.pause(0.3)
         check("closing the job list: the overview again, not a placeholder", isinstance(app.screen, OverviewScreen), type(app.screen).__name__)
+        # (connected, with the job list of the last run kept, not loaded again, not open: that is enough)
+        app.cluster.loaded, app.cluster.from_cache, app.cluster.jobs_open = True, True, False
         restore.ready = real_ready
         app.restore_views()
         ok = await until(pilot, lambda: not any(v.pending for v in app.cluster.views) and not app.cluster.restoring, 10)

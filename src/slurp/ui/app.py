@@ -1013,6 +1013,8 @@ class Slurp(App):
         self.notify(f"connected to {c.identity}", timeout=3)
         if not cluster.loaded and cluster.loader is None:
           self.reload_cluster(cluster)
+        if any(v.pending for v in cluster.views): # (its kept subtabs: open now)
+          self.call_after_refresh(lambda cluster=cluster: self.restore_views(cluster))
       elif c.state == "broken" and c.wanted and (cluster.login_terminal is None or cluster.login_terminal.done):
         if cluster.broken_at is None:
           cluster.broken_at = now
