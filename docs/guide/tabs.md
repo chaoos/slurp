@@ -24,7 +24,10 @@ files of a job, a path in a file, a file in a directory), and where you
 opened it stays as it was. A folder you enter in a directory view opens in
 that subtab (`←` or `Esc` goes back). Other windows you open inside a subtab
 open in it, and back from its first window shows the job list (or the
-overview). Opening a job, file or directory again shows its subtab. Switching tabs keeps the subtabs. In a shell all keys go to the
+overview). Opening a job, file or directory again shows its subtab. Switching tabs keeps the subtabs. They are also kept
+for the next start: starting slurp again, once a tab is connected and its job list loaded, its job windows, array
+windows, files and directories, the categories, the guides and the rule catalogue open again in their order, and
+the one shown before is shown (shells end with slurp and are not kept; a file that is gone is left out). In a shell all keys go to the
 shell, except `Ctrl-]`, which goes back to the job list; `Ctrl-W` closes the
 subtab shown (outside a shell). Every tab can be closed, also the last one;
 then only the `+` button remains. Closing the tab shown goes back to the tab

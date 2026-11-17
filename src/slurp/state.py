@@ -79,6 +79,8 @@ class ClusterSession:
   view_history: list = field(default_factory=list) # the modes shown, the last one most recently (closing goes back)
   opened: bool = False                 # shown once (the first time: the overview, or the job list with start_page jobs)
   jobs_open: bool = False              # the job list is open as a subtab (closed: the overview, when nothing else is open)
+  pending_views: dict | None = None    # the subtabs of the last run, to open again when connected (ui/restore.py)
+  restoring: bool = False              # (they are being opened)
   overview: dict = field(default_factory=dict) # what the overview loaded of its cluster (screens/overview.py)
   load_started: float = 0.0
   updated: object | None = None        # when the list was loaded
@@ -104,6 +106,7 @@ class View:
   key: str = ""               # identifies what it shows (e.g. the job), to show it again instead of opening it twice
   session: object | None = None # TerminalSession of a shell
   icon: str = ""              # the concept of its icon (ui/icons.py): shell, folder, file, script, …
+  kept: dict | None = None    # what it shows, as kept for the next start (ui/restore.py)
 
   @property
   def mode(self):

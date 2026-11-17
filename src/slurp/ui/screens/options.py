@@ -137,7 +137,8 @@ class OptionsScreen(ModalScreen):
         with Horizontal(classes="op-row"):
           yield Label("Tabs at the next start")
           yield Static(", ".join(names) or "none saved")
-        yield Static("The open tabs are saved by themselves (+ and ✕ change them).", classes="op-note")
+        yield Static("The open tabs are saved by themselves (+ and ✕ change them), with their subtabs: they open "
+                     "again when a tab is connected (shells are not kept).", classes="op-note")
       yield Static(f"Stored in {config_path()}", id="op-path")
       with Horizontal(id="op-buttons"):
         yield Button("Cancel", id="op-cancel", compact=True)

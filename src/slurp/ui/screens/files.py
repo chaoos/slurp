@@ -41,7 +41,7 @@ FILE_VIEWS = []
 def register_file_view(name, matches, open_view):
   FILE_VIEWS.append(FileView(name, matches, open_view))
 
-def open_path(app, crumbs, path, bases=(), env=None, follow=False, here=False, at_end=None):
+def open_path(app, crumbs, path, bases=(), env=None, follow=False, here=False, at_end=None, then=None):
   """Open a directory or dispatch a file to its first matching specialized view, in a subtab of its own (one per
   path: open already, its subtab is shown). here: a directory opens where it is opened (a folder entered in a
   directory view: ← goes back); a file still gets a subtab. What the path is (and what the view needs) is found
@@ -66,7 +66,12 @@ def open_path(app, crumbs, path, bases=(), env=None, follow=False, here=False, a
     more_bases = list(dict.fromkeys([*bases, os.path.dirname(path)]))
     return lambda: app.open_window(FileScreen([*crumbs, os.path.basename(path)], path=path, follow=follow, at_end=at_end,
                                               bases=more_bases, env=env))
-  in_background(app, work, lambda show: show() if show else None, group="open", name=f"opening {path}")
+  def opened(show):
+    if show:
+      show()
+    if then is not None: # (opened, or said why not)
+      then()
+  in_background(app, work, opened, group="open", name=f"opening {path}")
 
 def open_resolved(screen, word, crumbs, bases, env, quiet=True):
   """Open the file or directory a word of a text names (looked up in the background)"""

@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The subtabs of a tab are kept for the next start: once the tab is
+  connected and its job list loaded, its job and array windows, files and
+  directories, the categories, the guides and the rule catalogue open
+  again in their order, and the one shown before is shown. Shells are not
+  kept.
 - The overview is the first subtab of every tab, always there (it cannot
   be closed): **Overview** at the left of the subtabs shows it any time;
   with all other subtabs closed it is the only one.

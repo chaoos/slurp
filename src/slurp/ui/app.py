@@ -295,6 +295,9 @@ class Slurp(App):
       cluster.since_value = tab.get("since") or "1d"
       cluster.scope = tab.get("scope") or "me"
       cluster.collapse_arrays = tab.get("collapse_arrays", True)
+      views = tab.get("views")
+      if isinstance(views, dict) and (views.get("views") or views.get("jobs_open")):
+        cluster.pending_views = views # (opened again when it is connected and its job list loaded)
       self.clusters.append(cluster)
     self.cluster_index = min(max(int(saved.get("active", 0) or 0), 0), max(len(self.clusters) - 1, 0))
     from ..cluster import jobcache
@@ -412,7 +415,11 @@ class Slurp(App):
     self.shutdown()
 
   def shutdown(self):
-    """End the shells, logins and remote shells of all tabs"""
+    """End the shells, logins and remote shells of all tabs (their subtabs are kept for the next start first)"""
+    try:
+      self.save_tabs()
+    except Exception as e:
+      log.debug(f"keeping the tabs at the end: {e!r}")
     for cluster in self.clusters:
       for view in cluster.views:
         if view.session is not None:
@@ -500,6 +507,8 @@ class Slurp(App):
     self.refresh_status()
     if not cluster.loaded and cluster.loader is None and (not cluster.destination or cluster.connection.ready):
       self.action_reload()
+    elif cluster.pending_views:
+      self.call_after_refresh(lambda: self.restore_views(cluster))
 
   def connect_tab(self):
     """Connect (the job list of a tab without a session): log in, the login in the pane"""
@@ -581,6 +590,8 @@ class Slurp(App):
       self.add_mode(view.mode, make_screen)
       self.cluster.views.append(view)
     self.show_view(view)
+    if not self.cluster.restoring:
+      self.call_after_refresh(self.save_tabs) # (the subtabs are kept for the next start)
 
   new_subtab = None # (while in_new_subtab runs: the key of the subtab a window opens in)
 
@@ -688,6 +699,8 @@ class Slurp(App):
       cluster.current_view = self.home_mode(cluster)
     if self.current_mode == view.mode:
       self.show_home()
+    if not cluster.restoring:
+      self.call_after_refresh(self.save_tabs)
     def remove():
       try:
         self.remove_mode(view.mode)
@@ -814,12 +827,26 @@ class Slurp(App):
     self.save_tabs()
 
   def save_tabs(self):
-    """The open tabs (and which one is shown, and their choices) in the config, for the next start"""
+    """The open tabs (and which one is shown, their choices, their subtabs) in the config, for the next start"""
+    from .restore import tab_views
+    def views(c):
+      try:
+        return tab_views(self, c)
+      except Exception as e:
+        log.debug(f"keeping the subtabs of {c.name}: {e!r}")
+        return None
     update_config(tabs=[{"destination": c.destination, "since": c.since_value, "scope": c.scope,
                          "collapse_arrays": c.collapse_arrays, **({"ssh": c.ssh, "name": c.name} if c.ssh else {}),
-                         **({"pre_login": c.pre_login} if c.pre_login else {})}
+                         **({"pre_login": c.pre_login} if c.pre_login else {}), "views": views(c)}
                         for c in self.clusters],
                   active=self.cluster_index)
+
+  def restore_views(self, cluster=None):
+    """The subtabs of the last run of a tab, opened again when it is ready (connected, its job list loaded)"""
+    from .restore import restore
+    cluster = cluster or (self.cluster if self.clusters else None)
+    if cluster is not None and cluster.pending_views:
+      restore(self, cluster)
 
   def add_cluster(self, destination):
     """A new tab: a destination (a Host of ~/.ssh/config, user@host; empty: this machine), or {"ssh": full settings}
@@ -1907,6 +1934,8 @@ class Slurp(App):
       threading.Thread(target=jobcache.save, args=(cluster, jobs), daemon=True, name="keeping the job list").start()
     self.show_warnings()
     self.refresh_status()
+    if cluster.pending_views and (jobs is not None or cluster.no_slurm):
+      self.call_after_refresh(lambda: self.restore_views(cluster))
 
   def check_login_nodes(self):
     """B09: your processes on the login nodes that use a lot of CPU for long (said once per process)"""

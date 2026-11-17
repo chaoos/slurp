@@ -473,7 +473,8 @@ The settings slurp keeps in `config.json` (the path is shown at the bottom), to 
   else, and smooths the pace; but every running job's file is read that far at each reload and every 10 s in the job
   window: high values make slurp slow (it warns), over SSH most of all.
 - **Checks:** the rules not to report.
-- **What slurp remembers:** drives on this machine, progress files and patterns, the tabs of the next start; Forget
+- **What slurp remembers:** drives on this machine, progress files and patterns, the tabs of the next start (with
+  their subtabs, which open again when a tab is connected); Forget
   removes them (on Save).
 """),
 }

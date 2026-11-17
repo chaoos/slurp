@@ -2270,6 +2270,31 @@ async def t_cancel_reason(app, pilot):
     for v in list(app.cluster.views): app.close_view(v)
     await pilot.pause(0.3)
 
+async def t_restore_subtabs(app, pilot):
+  """The subtabs kept from the last run of the lab's tab, opened again once it is connected and loaded: a job, an
+  array, a file at its end, the categories, the rule catalogue (in their order), then the one shown before"""
+  cluster = app.cluster
+  for v in list(cluster.views): app.close_view(v)
+  await pilot.pause(0.3)
+  wd = cluster.jobs["9001"].rec["WorkDir"]
+  cluster.pending_views = {"views": [{"type": "job", "jid": "9001"}, {"type": "path", "path": f"{wd}/slurm-9001.out", "crumbs": ["Jobs", "9001"],
+                                      "follow": False, "at_end": True},
+                                     {"type": "categories", "key": "categories", "path": ""}, {"type": "rules", "rule": "B05"},
+                                     {"type": "path", "path": "/no/such/file", "crumbs": ["Jobs"]}],
+                           "shown": 1, "jobs_open": True}
+  app.restore_views(cluster)
+  ok = await until(pilot, lambda: cluster.pending_views is None, 30); await pilot.pause(0.5)
+  check("the kept subtabs open again, in their order (one that is gone: left out)", ok
+        and [v.title for v in cluster.views] == ["job 9001", "slurm-9001.out", "categories", "Rule catalogue"], [v.title for v in cluster.views])
+  check("the one shown before is shown: the log, at its end", isinstance(app.screen, FileScreen) and app.screen.path.endswith("slurm-9001.out")
+        and app.screen.area.cursor_location[0] >= app.screen.area.document.line_count - 2, type(app.screen).__name__)
+  from slurp.ui.restore import tab_views
+  kept = tab_views(app, cluster)
+  check("and they are kept again as they are", [s["type"] for s in kept["views"]] == ["job", "path", "categories", "rules"] and kept["shown"] == 1, kept)
+  for v in list(cluster.views): app.close_view(v)
+  await pilot.pause(0.3)
+  app.show_view(None); await pilot.pause(0.3)
+
 async def t_auto_refresh(app, pilot):
   """The job window and the array window refresh by themselves every refresh_seconds (here 2), counted down in the
   title bar"""
