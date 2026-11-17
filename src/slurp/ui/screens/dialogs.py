@@ -12,10 +12,10 @@ from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
-  Button, Checkbox, Input, Label, RadioButton,
+  Button, Checkbox, Collapsible, Input, Label, RadioButton,
   RadioSet, Select, Static, TextArea
 )
 from textual.suggester import SuggestFromList
@@ -496,26 +496,101 @@ class RestartScreen(ModalScreen[dict | None]):
   def action_cancel(self):
     self.dismiss(None)
 
-class AddClusterScreen(ModalScreen[str | None]):
+class AddClusterScreen(ModalScreen):
+  """A new tab. The main way: an SSH destination, a Host of ~/.ssh/config (its user, jump hosts and keys are there;
+  suggested as you type) or user@host; empty: this machine. The fallback: the full SSH settings (user, host, port,
+  jump hosts, identity files, more options). Check tries the connection without asking anything and says what is
+  wrong; Add adds the tab, checked or not. Dismissed with the destination (str), {"ssh": settings}, or None."""
   DEFAULT_CSS = """
   AddClusterScreen { align: center middle; }
-  #cluster-dialog { width: 72; max-width: 95%; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+  #cluster-dialog { width: 100; max-width: 98%; height: auto; max-height: 96%; border: thick $accent; background: $surface; padding: 1 2; }
+  #cluster-body { height: auto; max-height: 1fr; }
+  #cluster-title { text-style: bold; margin-bottom: 1; }
   #cluster-destination { width: 1fr; }
+  #cluster-hint { height: auto; color: $text-muted; margin-bottom: 1; }
+  #cluster-full { height: auto; margin-bottom: 1; }
+  .ssh-row { height: 1; margin-bottom: 1; }
+  .ssh-row Label { width: 16; padding: 0 1 0 0; }
+  .ssh-row Input { width: 1fr; }
+  #ssh-port { width: 12; }
+  #ssh-options { height: 5; }
+  #cluster-check-scroll { height: auto; max-height: 18; border: round $panel-lighten-2; display: none; }
+  #cluster-check-scroll.-shown { display: block; }
+  #cluster-check { height: auto; padding: 0 1; }
   #cluster-actions { height: auto; align-horizontal: right; margin-top: 1; }
   #cluster-actions Button { margin-left: 1; }
   """
   BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
   def compose(self) -> ComposeResult:
+    from ...cluster import sshsetup
+    hosts = sshsetup.config_hosts()
     with Vertical(id="cluster-dialog"):
-      yield Label("SSH destination (blank for local machine)")
-      yield Input(placeholder="user@host or ~/.ssh/config alias", id="cluster-destination")
+      with VerticalScroll(id="cluster-body"):
+        yield Static("Add a tab: a cluster (or this machine)", id="cluster-title")
+        yield Label("SSH destination")
+        yield Input(placeholder="a Host of your ~/.ssh/config (best), or user@host; empty: this machine", id="cluster-destination",
+                    suggester=SuggestFromList(hosts, case_sensitive=False) if hosts else None)
+        yield Static("The best way: an entry of ~/.ssh/config with the user, jump hosts and keys of the cluster; ssh, "
+                     "scp and your other tools use it too." + (f" Yours: {', '.join(hosts[:12])}" + (" …" if len(hosts) > 12 else "")
+                     if hosts else " You have none yet."), id="cluster-hint", markup=False)
+        with Collapsible(title="Full SSH settings (instead of a ~/.ssh/config entry)", id="cluster-full", collapsed=True):
+          for label, key, placeholder in (("Host", "host", "host name or address, e.g. daint.alps.cscs.ch"),
+                                          ("User", "user", "your user there (default: as here, or ~/.ssh/config)"),
+                                          ("Port", "port", "22"),
+                                          ("Jump hosts", "jump", "ProxyJump: user@gateway[:port], more separated by commas"),
+                                          ("Identity files", "identities", "private keys, e.g. ~/.ssh/cscs-key (more: commas)"),
+                                          ("Tab name", "name", "the tab's name (default: user@host)")):
+            with Horizontal(classes="ssh-row"):
+              yield Label(label)
+              yield Input(placeholder=placeholder, id=f"ssh-{key}", compact=True)
+          yield Label("More ssh options, one per line: Key=Value (e.g. ForwardAgent=yes, ServerAliveInterval=30, "
+                      "UserKnownHostsFile=…, PreferredAuthentications=…, ProxyCommand=…)")
+          yield TextArea(id="ssh-options", soft_wrap=False)
+        with VerticalScroll(id="cluster-check-scroll"):
+          yield Static(id="cluster-check")
       with Horizontal(id="cluster-actions"):
         yield Button("Cancel", id="cluster-cancel", compact=True)
-        yield Button("Add", id="cluster-confirm", variant="primary", compact=True)
+        yield Button("Check", id="cluster-check-button", compact=True,
+                     tooltip="try the connection without logging in interactively, and say what is wrong")
+        yield Button("Add", id="cluster-confirm", variant="primary", compact=True, tooltip="add the tab (checked or not); it logs in")
 
   def on_mount(self):
     self.query_one("#cluster-destination", Input).focus()
+
+  def settings(self):
+    """The full settings filled in ({} if no host)"""
+    from ...cluster import sshsetup
+    value = lambda key: self.query_one(f"#ssh-{key}", Input).value.strip()
+    raw = {key: value(key) for key in ("host", "user", "port", "jump", "name")}
+    raw["identities"] = [v for v in value("identities").split(",") if v.strip()]
+    raw["options"] = [line for line in self.query_one("#ssh-options", TextArea).text.splitlines() if line.strip()]
+    return sshsetup.clean(raw) or {}
+
+  def result(self):
+    settings = self.settings()
+    if settings:
+      return {"ssh": settings}
+    return self.query_one("#cluster-destination", Input).value.strip()
+
+  @on(Button.Pressed, "#cluster-check-button")
+  def check_pressed(self, event):
+    event.stop()
+    from ...cluster import sshsetup
+    destination, settings = self.query_one("#cluster-destination", Input).value.strip(), self.settings()
+    box = self.query_one("#cluster-check-scroll")
+    box.add_class("-shown")
+    if not destination and not settings:
+      self.query_one("#cluster-check", Static).update(Text("this machine: nothing to check (no SSH)", style="green"))
+      return
+    what = sshsetup.label(settings) if settings else destination
+    self.query_one("#cluster-check", Static).update(Text(f"checking {what} … (name, port, server, a login that asks nothing)", style="dim"))
+    self.query_one("#cluster-check-button", Button).disabled = True
+    def done(result):
+      self.query_one("#cluster-check-button", Button).disabled = False
+      if result is not None:
+        self.query_one("#cluster-check", Static).update(sshsetup.check_text(result))
+    in_background(self, lambda: sshsetup.check(destination, settings), done, group="ssh-check", connection=None)
 
   @on(Button.Pressed, "#cluster-cancel")
   def cancel_pressed(self):
@@ -524,7 +599,13 @@ class AddClusterScreen(ModalScreen[str | None]):
   @on(Button.Pressed, "#cluster-confirm")
   @on(Input.Submitted, "#cluster-destination")
   def add_pressed(self):
-    self.dismiss(self.query_one("#cluster-destination", Input).value.strip())
+    from ...cluster import sshsetup
+    settings = self.settings()
+    errors = sshsetup.option_errors(settings) if settings else []
+    if errors:
+      self.notify("; ".join(errors), severity="error")
+      return
+    self.dismiss(self.result())
 
   def action_cancel(self):
     self.dismiss(None)

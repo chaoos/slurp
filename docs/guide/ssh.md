@@ -71,7 +71,13 @@ Each tab keeps its own job list, shell, and session. Switching tabs shows the
 list as it was loaded; `r` (or **Reload**) loads it again. While a list
 loads, the old one stays visible, the footer shows the progress, and `a` (or
 the **Abort** button, which replaces **Reload** meanwhile) stops it.
-**Shell on the cluster** (in the menu, or `t`) opens a login shell on the cluster of the tab in a subtab. The **+** tab button adds another local or remote connection.
+**Shell on the cluster** (in the menu, or `t`) opens a login shell on the cluster of the tab in a subtab. The **+** tab button adds another local or remote connection: best an **SSH destination**, a Host of your
+`~/.ssh/config` (suggested as you type), or `user@host`; as a fallback the **Full SSH settings** (host, user,
+port, jump hosts, identity files, more `ssh` options, the tab's name), kept with the tab. **Check** tries the
+connection without logging in interactively (nothing can hang, nothing is written, not even a host key) and
+says what works and precisely what does not (the name, the port, the server, the host key, the keys and what
+the server accepts), with `ssh -v`'s log; the connection window has the same **Check**. A tab can be added
+checked or not.
 **Open a directory…** (in the menu, or `d`) asks which directory: your home (the default), scratch, project, … (`$SCRATCH`, `$PROJECT`, `$STORE` and `$WORK`, those set on the cluster) or a path, and opens it in a new subtab, each time another one. Its path at the top is an input (edit it, Enter goes there) with buttons for home, scratch, project, … next to it. The directory view shows the permissions of each entry as `ls -l` does (a `+` when it has extended ACL entries, which are listed in the **ACL** column), its owner and group, and in **You** what you cannot do with it: **no read** (red) or **no write** (yellow), as the cluster answers for your user (groups and ACLs count). `/` searches the names (a part of them, or `*.out`), here as you type, or with **Subdirectories** (`Ctrl+R`) in all directories below, in the background: the results come in as they are found while the window stays usable, and `Esc` stops the search. Each tab has a `✕`
 that closes it (after asking). Notifications name the tab they belong to.
 

@@ -23,6 +23,7 @@ from textual.widgets import (
 from textual.worker import get_current_worker
 
 from ..cluster import slurm as sl
+from ..cluster import sshsetup
 
 from ..state import ClusterSession, collector, is_local_destination, log, View
 from ..cluster.remote import (
@@ -77,6 +78,11 @@ def checks_cell(findings):
         parts.append(" ")
       parts.append((f"{SEVERITY_ICON[sev]}{c[sev]}", SEVERITY_STYLE[sev]))
   return Text.assemble(*parts) if parts else Text("")
+
+def new_session(cluster):
+  """The SSH session of a tab (not started): its destination, with its full SSH settings if it has them"""
+  return RemoteSSH(cluster.destination, sshsetup.ssh_args(cluster.ssh))
+
 
 class Slurp(App):
   TITLE = "slurp"
@@ -269,7 +275,8 @@ class Slurp(App):
     self.tab_history = [] # the tabs shown, the last one most recently (closing the tab shown goes back)
     for tab in saved.get("tabs", [{"destination": None}]):
       destination = tab.get("destination") or None
-      cluster = ClusterSession(destination or "Local", destination)
+      cluster = ClusterSession(tab.get("name") or destination or "Local", destination)
+      cluster.ssh = sshsetup.clean(tab.get("ssh")) if destination else None
       cluster.since_value = tab.get("since") or "1d"
       cluster.scope = tab.get("scope") or "me"
       cluster.collapse_arrays = tab.get("collapse_arrays", True)
@@ -373,7 +380,7 @@ class Slurp(App):
     """Start the SSH session of a tab. Its prompts appear in the terminal pane: right away if show (the user selected
     the tab), else only if the login takes more than a moment (an automatic reconnect that needs a password)."""
     if cluster.connection is None:
-      cluster.connection = RemoteSSH(cluster.destination)
+      cluster.connection = new_session(cluster)
     c = cluster.connection
     c.wanted = True
     if cluster.login_terminal and not cluster.login_terminal.done:
@@ -403,7 +410,7 @@ class Slurp(App):
       cluster.attempts = 0
       self.login(cluster)
     elif cluster.destination and cluster.connection is None:
-      cluster.connection = RemoteSSH(cluster.destination) # (not started: the tab's commands wait for Connect, never run here)
+      cluster.connection = new_session(cluster) # (not started: the tab's commands wait for Connect, never run here)
     self.cluster_index = index
     if cluster in self.tab_history:
       self.tab_history.remove(cluster)
@@ -731,14 +738,24 @@ class Slurp(App):
   def save_tabs(self):
     """The open tabs (and which one is shown, and their choices) in the config, for the next start"""
     update_config(tabs=[{"destination": c.destination, "since": c.since_value, "scope": c.scope,
-                         "collapse_arrays": c.collapse_arrays} for c in self.clusters],
+                         "collapse_arrays": c.collapse_arrays, **({"ssh": c.ssh, "name": c.name} if c.ssh else {})}
+                        for c in self.clusters],
                   active=self.cluster_index)
 
   def add_cluster(self, destination):
+    """A new tab: a destination (a Host of ~/.ssh/config, user@host; empty: this machine), or {"ssh": full settings}
+    (the add dialog's); it logs in right away"""
     if destination is None:
       return
+    settings = sshsetup.clean(destination.get("ssh")) if isinstance(destination, dict) else None
+    if isinstance(destination, dict):
+      destination = destination.get("destination") or ""
     self.main.remove_class("-no-tabs")
-    if not destination or is_local_destination(destination):
+    if settings:
+      cluster = ClusterSession(sshsetup.label(settings), settings["host"])
+      cluster.ssh = settings
+      self.clusters.append(cluster)
+    elif not destination or is_local_destination(destination):
       self.clusters.append(ClusterSession("Local" if not destination else destination))
     else:
       self.clusters.append(ClusterSession(destination, destination))

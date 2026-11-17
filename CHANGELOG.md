@@ -6,6 +6,15 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- **+** (a new tab): the SSH destination, a Host of `~/.ssh/config`, stays
+  the main way (now suggested as you type); as a fallback the **Full SSH
+  settings**: host, user, port, jump hosts, identity files, more `ssh`
+  options, the tab's name, kept with the tab and used by its login.
+  **Check** (also in the connection window) tries the connection without
+  asking anything and writing nothing: what ssh makes of it, the keys,
+  name, port, server, host key and a login; precise findings (works /
+  the login asks / what is wrong) with `ssh -v`'s log. A tab can be added
+  checked or not.
 - **Query runtime diagnostics…** replaces Query current memory in the job
   window: on which node (all, or one: radio buttons), then a window with
   what the job does there, measured over one second: memory (its cgroup and

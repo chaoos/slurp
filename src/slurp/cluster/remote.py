@@ -191,8 +191,9 @@ class RemoteSSH:
   trip in the open session; no ssh process is started for it. The process is also the OpenSSH control master, so
   interactive shells (Shell, node shells, GDB) open as channels of the same connection, without a new login.
   A heartbeat notices a session that stops answering; the app then reconnects it."""
-  def __init__(self, destination):
+  def __init__(self, destination, ssh_options=()):
     self.destination = destination
+    self.ssh_options = list(ssh_options) # (a tab's full SSH settings: -l, -p, -J, -i, -o … before the destination)
     self.socket_dir = tempfile.mkdtemp(prefix=f"slurp-{os.getuid()}-")
     os.chmod(self.socket_dir, 0o700)
     self.control_path = os.path.join(self.socket_dir, "control")
@@ -270,7 +271,7 @@ class RemoteSSH:
       self.heartbeat_thread = threading.Thread(target=self.heartbeat, daemon=True, name=f"heartbeat {self.destination}")
       self.heartbeat_thread.start()
     argv = self.argv = ["ssh", "-M", "-S", self.control_path, "-o", "ControlMaster=yes", "-o", "ControlPersist=no",
-                        "-T", "-x", "-a", self.destination, "exec /bin/sh"]
+                        "-T", "-x", "-a", *self.ssh_options, self.destination, "exec /bin/sh"]
     self.event(f"session {generation}: connecting")
     proc = subprocess.Popen([sys.executable, "-c", CTTY_STDERR, *argv], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=tty, start_new_session=True, env=os.environ | {"TERM": "xterm-256color"})

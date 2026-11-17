@@ -10,6 +10,8 @@ from datetime import datetime
 import humanize
 from rich.table import Table
 from rich.text import Text
+
+from ...cluster import sshsetup
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -71,10 +73,10 @@ def tcp_connections(pids):
     conns.append(info)
   return conns
 
-def ssh_config(destination):
-  """What OpenSSH makes of a destination (ssh -G: no connection is made)"""
+def ssh_config(destination, args=()):
+  """What OpenSSH makes of a destination, with a tab's full SSH settings (args) (ssh -G: no connection is made)"""
   try:
-    out = subprocess.run(["ssh", "-G", destination], capture_output=True, text=True, timeout=5).stdout
+    out = subprocess.run(["ssh", "-G", *args, destination], capture_output=True, text=True, timeout=5).stdout
   except (OSError, subprocess.TimeoutExpired):
     return {}
   conf = {}
@@ -134,8 +136,11 @@ class ConnectionScreen(ModalScreen):
         yield Static(id="conn-links-title")
         yield ClickTable(id="conn-links", cursor_type="row", zebra_stripes=True)
         yield Static(id="conn-info")
+        yield Static(id="conn-check")
       with Horizontal(id="conn-buttons"):
         if self.cluster.destination:
+          yield Button("Check", id="conn-check-button", compact=True,
+                       tooltip="try the connection from scratch without logging in interactively, and say what is wrong")
           yield Button(icons.label("reconnect", "Reconnect"), id="conn-reconnect", variant="primary", tooltip="end the session and log in again (R)", compact=True)
           yield Button(icons.label("disconnect", "Disconnect"), id="conn-disconnect", variant="error", compact=True)
         yield Button("Close", id="conn-close", compact=True)
@@ -306,8 +311,8 @@ class ConnectionScreen(ModalScreen):
   def on_mount(self):
     self.show_title()
     if self.cluster.destination:
-      dest = self.cluster.destination
-      in_background(self, lambda: ssh_config(dest), self.got_config, group="ssh-config", connection=None)
+      dest, args = self.cluster.destination, sshsetup.ssh_args(self.cluster.ssh)
+      in_background(self, lambda: ssh_config(dest, args), self.got_config, group="ssh-config", connection=None)
     self.set_interval(0.5, self.show)
     self.show()
 
@@ -394,6 +399,8 @@ class ConnectionScreen(ModalScreen):
       return
     self.poll_tcp()
     grid.add_row("Status", self.status())
+    if cluster.ssh:
+      grid.add_row("SSH settings", " ".join(sshsetup.ssh_args(cluster.ssh) + [cluster.destination]))
     if c is not None:
       grid.add_row("Logged in as", f"{c.user or '-'} on {c.hostname or '-'}" + (f" (home {c.home})" if c.home else ""))
       if c.groups:
@@ -459,6 +466,22 @@ class ConnectionScreen(ModalScreen):
         grid.add_row(f"{when:%H:%M:%S}", Text(text, style=style))
     self.query_one("#conn-info", Static).update(grid)
     self.shown = grid
+
+  @on(Button.Pressed, "#conn-check-button")
+  def check_pressed(self, event):
+    """The check of the add dialog for this tab's destination: name, port, server, a login that asks nothing"""
+    event.stop()
+    cluster = self.cluster
+    box = self.query_one("#conn-check", Static)
+    box.update(Text("\nChecking the connection from scratch … (name, port, server, a login that asks nothing)", style="dim"))
+    self.query_one("#conn-check-button", Button).disabled = True
+    def done(result):
+      self.query_one("#conn-check-button", Button).disabled = False
+      if result is not None:
+        out = Text("\nCheck of the connection\n", style="bold underline")
+        out.append_text(sshsetup.check_text(result))
+        box.update(out)
+    in_background(self, lambda: sshsetup.check(cluster.destination, cluster.ssh), done, group="ssh-check", connection=None)
 
   @on(Button.Pressed, "#conn-reconnect")
   def action_reconnect(self):

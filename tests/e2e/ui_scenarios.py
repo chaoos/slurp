@@ -2924,3 +2924,79 @@ async def t_dir_permissions(app, pilot):
     await pilot.press("escape"); await pilot.pause(0.3)
   finally:
     os.chmod(os.path.join(d, "closed"), 0o700); os.chmod(os.path.join(d, "secret"), 0o600)
+
+
+async def t_ssh_setup(app, pilot):
+  """+: a destination of ~/.ssh/config, or the full SSH settings; Check says precisely what works and what not (against
+  the lab's sshd); the tab is added checked or not and logs in with those settings; the connection window checks too"""
+  import re as _re
+  from slurp.cluster import sshsetup
+  from slurp.ui.screens.dialogs import AddClusterScreen
+  loop = asyncio.get_running_loop()
+  port = _re.search(r"Port (\d+)", open(os.path.join(LAB, "ssh_config")).read())[1]
+  user, relay, userkey = getpass.getuser(), os.path.join(HERE, "share", "relaykey"), os.path.join(LAB, "userkey")
+  known = [f"UserKnownHostsFile={os.path.join(LAB, 'known_hosts')}"]
+  run = lambda dest, settings: loop.run_in_executor(None, lambda: sshsetup.check(dest, settings, timeout=20))
+  r = await run("lab", None)
+  check("check of a Host of ssh_config with a key that has a passphrase: works, the login asks for it",
+        r.verdict == "warn" and "passphrase" in r.summary and "debug1:" in r.log, (r.verdict, r.summary, [f.text for f in r.findings]))
+  full = {"host": "127.0.0.1", "port": port, "user": user, "identities": [relay], "options": known}
+  r = await run("", full)
+  check("full settings, a key without passphrase: the login works", r.verdict == "ok" and "the login works" in r.summary
+        and any(f.text.startswith("port " + port + " answers: SSH-") for f in r.findings), (r.verdict, r.summary, [f.text for f in r.findings]))
+  r = await run("", {"host": "127.0.0.1", "port": port, "user": user, "identities": [userkey],
+                     "options": [f"UserKnownHostsFile={os.path.join(HERE, 'no-known-hosts')}"]})
+  texts = [f.text for f in r.findings]
+  check("an unknown host key: said (with its fingerprint), and the rest is checked (nothing written)", r.verdict == "warn"
+        and any("not known yet" in t and "SHA256:" in t for t in texts) and "passphrase" in r.summary
+        and not os.path.exists(os.path.join(HERE, "no-known-hosts")), (r.summary, texts))
+  r = await run("", {**full, "user": "nobody-here"})
+  check("a user the server does not take: the keys are not accepted", r.verdict == "error" and "does not accept your keys" in r.summary, r.summary)
+  r = await run("", {**full, "port": "1"})
+  check("a wrong port: refused", r.verdict == "error" and any("refuses connections on port 1" in t.text for t in r.findings), r.summary)
+  # the dialog: the full settings, Check, Add
+  while not isinstance(app.screen, MainScreen) and len(app.screen_stack) > 1:
+    await pilot.press("escape"); await pilot.pause(0.2)
+  await pilot.click("#cluster-add")
+  ok = await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
+  dlg = app.screen
+  check("+: the destination first (a Host of ~/.ssh/config, encouraged), the full settings folded", ok and app.focused is dlg.query_one("#cluster-destination")
+        and dlg.query_one("#cluster-full").collapsed and "~/.ssh/config" in str(dlg.query_one("#cluster-hint").render()))
+  dlg.query_one("#cluster-full").collapsed = False; await pilot.pause(0.2)
+  for key, value in (("host", "127.0.0.1"), ("port", port), ("user", user), ("identities", relay)):
+    dlg.query_one(f"#ssh-{key}").value = value
+  dlg.query_one("#ssh-options").load_text("\n".join(known + ["ServerAliveInterval=5"]))
+  dlg.query_one("#cluster-check-button").press()
+  ok = await until(pilot, lambda: "works" in str(dlg.query_one("#cluster-check").render()), 30)
+  text = str(dlg.query_one("#cluster-check").render())
+  check("Check in the dialog: the verdict, the findings, the verbose log", ok and "✔ works: the login works" in text and "ssh -v" in text, text[:300])
+  n = len(app.clusters)
+  calls = os.path.join(LAB, "ssh_calls.log")
+  before = len(open(calls).read().splitlines()) if os.path.exists(calls) else 0
+  dlg.query_one("#cluster-confirm").press()
+  ok = await until(pilot, lambda: len(app.clusters) == n + 1 and app.cluster.connection is not None and app.cluster.connection.ready, 30)
+  cluster = app.cluster
+  new = open(calls).read().splitlines()[before:] if os.path.exists(calls) else []
+  master = next((l for l in new if " -M " in l), "")
+  check("Add: a tab named user@host:port, it logs in with the settings (-l, -p, -i, IdentitiesOnly, the options)",
+        ok and cluster.name == f"{user}@127.0.0.1:{port}" and f"-p {port}" in master and f"-i {relay}" in master
+        and "IdentitiesOnly=yes" in master and "ServerAliveInterval=5" in master and master.rstrip().endswith("127.0.0.1 exec /bin/sh"),
+        (cluster.name, master))
+  tabs = load_config().get("tabs") or []
+  check("…kept for the next start (its settings and name)", any(t.get("ssh", {}).get("port") == port and t.get("name") == cluster.name for t in tabs), tabs)
+  app.action_connection(); await pilot.pause(0.8)
+  cs = app.screen
+  info = rendered(cs.query_one("#conn-info").content) if isinstance(cs, ConnectionScreen) else ""
+  check("the connection window shows the SSH settings", f"-p {port}" in info and "SSH settings" in info, info[:400])
+  cs.query_one("#conn-check-button").press()
+  ok = await until(pilot, lambda: "works" in str(cs.query_one("#conn-check").render()), 30)
+  check("…and Check there: the same diagnostics", ok and "Check of the connection" in str(cs.query_one("#conn-check").render()))
+  await pilot.press("escape"); await pilot.pause(0.3)
+  # a tab can be added unchecked, also one that does not work
+  await pilot.click("#cluster-add"); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
+  app.screen.query_one("#cluster-destination").value = "no-such-host.invalid"
+  app.screen.query_one("#cluster-confirm").press()
+  ok = await until(pilot, lambda: len(app.clusters) == n + 2, 10)
+  check("Add without Check (even one that does not work): the tab is there", ok and app.clusters[-1].destination == "no-such-host.invalid")
+  for c in list(app.clusters[n:]):
+    app.close_cluster(c); await pilot.pause(0.3)

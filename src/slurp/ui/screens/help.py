@@ -196,7 +196,9 @@ healthy, degraded or unhealthy and why. `r` (Reload) asks again.
 """),
   "ConnectionScreen": ("Connection window", """
 The SSH session of the tab: its state and the course of a (re)connect, the logged-in user and login node, the
-resolved destination, traffic and round-trip times, the ssh process and its TCP connection, and a log of events.
+resolved destination (and the tab's full SSH settings), traffic and round-trip times, the ssh process and its TCP
+connection, and a log of events. **Check** tries the connection from scratch, as in the add dialog: precisely what is
+wrong, with ssh's verbose log.
 
 - **Reconnect** (`R`) logs in again; **Disconnect** ends the session until you press **Connect** (overview, job list). When the
   login fails, the cluster may be down or in maintenance: a site's status page (from its rule pack, e.g.
@@ -328,8 +330,17 @@ Enter), your scratch, project, … (`$SCRATCH`, `$PROJECT`, `$STORE`, `$WORK`, t
 typed in the field below (`~/…` and relative paths are in your home). `Esc` cancels.
 """),
   "AddClusterScreen": ("Add a cluster", """
-A new tab: an SSH destination (`user@host` or an alias of your `~/.ssh/config`, with its jump hosts and keys), or
-blank for this machine. The login runs in the pane on the right.
+A new tab. The best way: an **SSH destination**, a Host of your `~/.ssh/config` with the cluster's user, jump hosts
+and keys (suggested as you type; ssh, scp and your other tools use it too), or `user@host`; blank: this machine.
+
+The fallback, **Full SSH settings**: host, user, port, jump hosts (ProxyJump), identity files (only these are tried),
+the tab's name, and more ssh options, one `Key=Value` per line. They are kept with the tab.
+
+**Check** tries the connection without logging in interactively (it can ask nothing, so nothing hangs, and it writes
+nothing, not even a host key): what ssh makes of the settings, the keys, the host name, the port and the server, and
+a login. It says whether it works, works with a prompt (a passphrase, a password or a code, a new host key: the
+login asks), or what is wrong, precisely, with ssh's verbose log. **Add** adds the tab, checked or not; the login runs
+in the pane on the right.
 """),
   "InteractiveJobScreen": ("Interactive job", """
 An `sbatch` command for a job that only holds nodes (`sleep infinity`), for shells on them from its job window. The

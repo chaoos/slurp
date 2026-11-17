@@ -49,6 +49,7 @@ class ClusterSession:
   """A tab: the local machine or an SSH destination, with its own connection, shell and job list"""
   name: str
   destination: str | None = None
+  ssh: dict | None = None              # full SSH settings (sshsetup: user, host, port, jump, identities, options, name)
   connection: object | None = None
   terminal: object | None = None       # shell in the pane on the right while this tab is active
   login_terminal: object | None = None # the ssh login (control master) of the connection
