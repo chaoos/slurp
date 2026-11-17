@@ -36,6 +36,7 @@ ICONS = {
   "scratch": ("✂", 0xF00E2, "broom"),
   "rules": ("☑", 0xF014E, "clipboard_check"),
   "steps": ("»", 0xF027B, "format_list_numbered"),
+  "progress": ("◔", 0xF012B, "chart_pie"), # (the glyph of quota: in the font already)
   "options": ("⚙", 0xF0493, "cog"),
   "web": ("◈", 0xF059F, "web"),
   "interactive": ("⌨", 0xF08A9, "console_network"),

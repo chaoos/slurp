@@ -1822,6 +1822,11 @@ async def t_progress(app, pilot):
   line = lambda: str(app.screen.query_one("#progress-line").render())
   check("job window: too few updates for the current pace: the estimate since the start, the file", ok and "done in" in line()
         and "slurm-9001.out" in line() and "on current pace" not in line(), line())
+  titles = [str(l.render()) for l in app.screen.query("Label.section")]
+  check("the progress has its own title, before Files, like the other sections", any(t.endswith("Progress") for t in titles)
+        and [t.split()[-1] for t in titles].index("Progress") < [t.split()[-1] for t in titles].index("Files")
+        and app.screen.query_one("#job-progress Label.section") is not None, titles)
+  app.save_screenshot(filename="job_progress.svg", path=OUT)
   wd = app.jobs["9001"].rec["WorkDir"]
   now = datetime.now().replace(microsecond=0)
   with open(os.path.join(wd, "progress.log"), "w") as f:

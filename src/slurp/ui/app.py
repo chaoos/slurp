@@ -190,7 +190,8 @@ class Slurp(App):
   #memory-controls Label { width: auto; height: 1; content-align: center middle; padding: 0; }
   #memory-cpu { width: auto; height: 1; }
   #memory-gpu { width: auto; height: auto; }
-  #job-progress { height: auto; margin-bottom: 1; padding: 0 1; }
+  #job-progress { height: auto; margin-bottom: 1; }
+  #progress-top, #progress-line, #progress-age { padding: 0 1; }
   #progress-bar { width: 40; }
   #progress-top { height: auto; }
   #progress-top Button { margin-left: 2; }

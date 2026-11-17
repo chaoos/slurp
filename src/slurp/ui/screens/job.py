@@ -183,6 +183,7 @@ class JobScreen(SplitScreen):
           yield TimePlot(color="magenta", fmt=size, id="spark-gpu")
           yield Static(id="spark-gpu-text", classes="memory-plot-text")
       with Vertical(id="job-progress"):
+        yield Label(icons.label("progress", "Progress"), classes="section")
         with Horizontal(id="progress-top"):
           yield ProgressBar(total=1, show_eta=False, id="progress-bar")
           yield Button("Progress file…", id="progress-file", compact=True,
