@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- A web link that ends: the title bar counts down to it (⏱, left of **?**;
+  a click opens the link), when it takes no more logins or its relay ends
+  the tunnel (pinggy's free hour). Five minutes before, a warning: **Extend
+  by 1 h** for its time limit; for the relay's hour what happens and how to
+  avoid it.
 - **+** (a new tab): the SSH destination, a Host of `~/.ssh/config`, stays
   the main way (now suggested as you type); as a fallback the **Full SSH
   settings**: host, user, port, jump hosts, identity files, more `ssh`

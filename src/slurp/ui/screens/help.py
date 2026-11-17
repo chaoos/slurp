@@ -298,6 +298,17 @@ for the tab; while it is mounted they stay as they are (Unmount first).
 Where the shell opens: **in slurp** (a subtab with a terminal), or **from your own terminal** (a link: an ssh command
 and a password for the terminal on your machine, through a relay).
 """),
+  "WebEndingScreen": ("A web link ends soon", """
+A web link (slurp in your browser) ends in a few minutes; the title bar counts down to it (⏱, left of ?).
+
+- **It takes no more logins then** (its time limit): a browser that is open goes on, but reloading the page or a new
+  browser needs a login. **Extend by 1 h** keeps it usable.
+- **Its relay ends the tunnel** (the free pinggy relay keeps one for an hour): slurp opens a new one, with a new
+  address, so a browser on the old one loses slurp. That cannot be extended; a relay without a time limit (Cloudflare,
+  your own) avoids it.
+
+**Its window** shows the link. You are warned once per deadline (again after an extension).
+"""),
   "NodeChoiceScreen": ("On which node", """
 The node of the job to query: all of them (the default) or one. Arrow keys and Space choose; `Esc` cancels.
 """),

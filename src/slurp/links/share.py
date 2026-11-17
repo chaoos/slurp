@@ -63,6 +63,7 @@ except ImportError: # the feature is then unavailable, slurp works without it
 PUBLIC_RELAY = "ssh-j.com"
 SERVEO = "serveo.net"
 PINGGY = "free.pinggy.io"
+RELAY_LIMITS = {"pinggy": 60 * 60} # seconds a relay keeps a tunnel (pinggy's free one: an hour, then a new address)
 DIRECT = "direct" # (a "relay" setting: no relay, the client connects to this machine itself)
 CLOUDFLARE = "cloudflare" # (web links only: a Cloudflare quick tunnel to the web view, an HTTPS address; see cloudflare.py)
 STRAIGHT = ("direct", "pinggy", "sshreach", "cloudflare") # (relay types the client connects to without a jump: a host and a port)
@@ -271,6 +272,7 @@ class Link:
   port: int = 0                  # of slurp's server for it, on 127.0.0.1
   relay_port: int = 0            # openssh relay: the port at the relay; pinggy: the public port
   public_host: str = ""          # pinggy, cloudflare: the public host it gave
+  relay_until: float = 0.0       # (epoch) the relay ends its tunnel then (pinggy's free hour; 0: no end), a new address after
   relay_note: str = ""           # what happens while it starts (cloudflare: downloading cloudflared)
   relay_state: str = "starting"  # starting, (cloudflare: downloading, installing,) connecting, ready, broken, closed
   relay_losses: list = field(default_factory=list) # (monotonic) when the relay tunnel was lost (then it reconnects)
@@ -596,6 +598,7 @@ class ShareManager:
       def became_ready():
         nonlocal delay
         link.relay_state, link.relay_error, delay = "ready", "", 2
+        link.relay_until = time.time() + RELAY_LIMITS[kind] if kind in RELAY_LIMITS else 0.0
         audit(f"link {link.id}: relay ready ({link.relay}" + (f", {link.public_host} port {link.relay_port})" if kind == "pinggy" else ")"))
         self.events("relay", link, None, "")
       async def public_address(): # (pinggy: tcp://host:port on its output)
@@ -629,7 +632,7 @@ class ShareManager:
       link.tunnel = None
       if link.finished:
         break
-      link.relay_state = "broken"
+      link.relay_state, link.relay_until = "broken", 0.0
       if not (kind == "pinggy" and time.monotonic() - started > 55 * 60): # (pinggy: a new address every hour)
         link.relay_losses = [t for t in link.relay_losses if time.monotonic() - t < UNSTABLE] + [time.monotonic()]
       link.relay_error = " | ".join(last) or f"ssh ended with {proc.returncode}"

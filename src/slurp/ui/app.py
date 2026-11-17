@@ -149,6 +149,9 @@ class Slurp(App):
   #cluster-tabs Button.cluster-close:hover { color: $error; }
   #topbar Header { dock: none; width: 1fr; height: 1; }
   #view-help { width: 3; min-width: 3; height: 1; text-style: bold; }
+  #web-timer { width: auto; height: 1; padding: 0 1; display: none; color: $text-muted; background: transparent; }
+  #web-timer:hover { background: $surface-lighten-2; }
+  #web-timer.-ending { color: $warning; text-style: bold; }
   /* code in Markdown (rule catalogue, guides, help, .md files): a framed block, the same in every theme (Textual's
      ANSI themes make it transparent and without margins, so it looked like stray indented text) */
   MarkdownFence, MarkdownFence:ansi { margin: 1 0 1 1; padding: 0; background: $boost; border-left: outer $accent; }
@@ -813,6 +816,8 @@ class Slurp(App):
     self.spinner_frame += 1
     now = time.monotonic()
     self.link_manager.tick()
+    if self.spinner_frame % 4 == 0: # (each second) the countdown of a web link that ends, and its warning
+      self.show_web_timer()
     if self.spinner_frame % 4 == 0: # (each second) the drives on this machine
       for c in self.clusters:
         if c.drive is not None:
@@ -1393,6 +1398,51 @@ class Slurp(App):
 
   def web_links(self):
     return [l for l in self.link_manager.links if l.kind == "web"]
+
+  WEB_WARN = 5 * 60 # seconds before a web link ends: the user is warned (and can extend it)
+  web_warned = None # {(link id, what, deadline)} warned about already
+
+  def web_deadline(self):
+    """(seconds left, link, what) of the web link that ends first, None if none does: "expiry" (it takes no more
+    logins; it can be extended) or "relay" (its relay ends the tunnel: a new address, e.g. pinggy's free hour). Only
+    links that are open or have sessions."""
+    now, first = time.time(), None
+    for link in self.web_links():
+      if link.finished or not (link.open() or link.live_sessions):
+        continue
+      for when, what in ((link.expires if link.open() else None, "expiry"),
+                         (link.relay_until if link.relay_state == "ready" else None, "relay")):
+        if when and when > now and (first is None or when - now < first[0]):
+          first = (when - now, link, what)
+    return first
+
+  def show_web_timer(self):
+    """The countdown in the title bar (left of ?), and the warning a few minutes before"""
+    deadline = self.web_deadline()
+    for timer in self.screen.query("#web-timer").results(Button):
+      timer.display = deadline is not None
+      if deadline is not None:
+        left, link, what = deadline
+        text = f"⏱ {int(left) // 3600}:{int(left) % 3600 // 60:02d}:{int(left) % 60:02d}" if left >= 3600 else \
+               f"⏱ {int(left) // 60}:{int(left) % 60:02d}"
+        if timer.label != text:
+          timer.label = text
+        timer.set_class(left <= self.WEB_WARN, "-ending")
+    if deadline is None:
+      return
+    left, link, what = deadline
+    key = (link.id, what, round(link.expires if what == "expiry" else link.relay_until))
+    self.web_warned = self.web_warned or set()
+    if left <= self.WEB_WARN and key not in self.web_warned:
+      self.web_warned.add(key)
+      from .screens.links import WebEndingScreen
+      self.push_screen(WebEndingScreen(link, what, left))
+
+  def show_web_deadline(self):
+    """The web link that ends first, in its window"""
+    deadline = self.web_deadline()
+    if deadline is not None:
+      self.push_screen(LinkScreen(deadline[1]))
 
   def stop_web_if_unused(self):
     """No web link takes logins or has a session any more: the web view stops (the port closes)"""

@@ -149,6 +149,64 @@ def warning_text(relay, kind):
     return Text(DIRECT_NOTE.format(host=host, port=port or "(a free one)"), style="yellow")
   return Text(OWN_NOTE.format(relay=f"sshj://{rest}" if rtype == "ssh-j" else relay), style="dim")
 
+class WebEndingScreen(ModalScreen):
+  """A web link ends in a few minutes: it takes no more logins then (Extend by 1 h), or its relay ends its tunnel
+  (pinggy's free hour: the web view gets a new address; nothing to extend)"""
+  DEFAULT_CSS = """
+  WebEndingScreen { align: center middle; }
+  #we-dialog { width: 80; max-width: 95%; height: auto; border: thick $warning; background: $surface; padding: 1 2; }
+  #we-title { text-style: bold; margin-bottom: 1; }
+  #we-text { height: auto; margin-bottom: 1; }
+  #we-buttons { height: auto; align-horizontal: right; }
+  #we-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "close", "Close")]
+
+  def __init__(self, link, what, left):
+    super().__init__()
+    self.link, self.what, self.left = link, what, left
+
+  def compose(self) -> ComposeResult:
+    minutes = max(1, round(self.left / 60))
+    with Vertical(id="we-dialog"):
+      if self.what == "expiry":
+        yield Static(f"The web link {self.link.id} ends in {minutes} min", id="we-title", markup=False)
+        yield Static(f"\"{self.link.title}\" takes no more logins then. A browser that is open goes on; reloading the page "
+                     "or a new browser needs a login, which it will not take. Extend it to keep it usable.", id="we-text", markup=False)
+      else:
+        yield Static(f"The relay of the web link {self.link.id} ends its tunnel in {minutes} min", id="we-title", markup=False)
+        yield Static(f"The free {self.link.relay_type} relay keeps a tunnel for an hour. slurp opens a new one at once, but "
+                     "with a new address: a browser on the old one loses slurp, and the link's commands change (its window "
+                     "shows the new ones). This cannot be extended; a relay without a time limit (Cloudflare, your own) "
+                     "avoids it: make a new link.", id="we-text", markup=False)
+      with Horizontal(id="we-buttons"):
+        yield Button("Not now" if self.what == "expiry" else "Close", id="we-close", compact=True)
+        yield Button("Its window", id="we-window", compact=True)
+        if self.what == "expiry":
+          yield Button("Extend by 1 h", id="we-extend", variant="primary", compact=True)
+
+  def on_mount(self):
+    self.query_one("#we-extend" if self.what == "expiry" else "#we-close", Button).focus()
+
+  @on(Button.Pressed, "#we-extend")
+  def extend(self, event):
+    event.stop()
+    self.app.link_manager.extend(self.link, 3600)
+    self.notify(f"web link {self.link.id} extended: until {datetime.fromtimestamp(self.link.expires):%H:%M}", timeout=5)
+    self.dismiss()
+
+  @on(Button.Pressed, "#we-window")
+  def window(self, event):
+    event.stop()
+    self.dismiss()
+    self.app.push_screen(LinkScreen(self.link))
+
+  @on(Button.Pressed, "#we-close")
+  def action_close(self, event=None):
+    if event is not None:
+      event.stop()
+    self.dismiss()
+
 class ShellChoiceScreen(ModalScreen):
   """Where a shell opens: in slurp, or in the user's own terminal (a link). Asked every time. With nodes (a job's):
   also on which one (radio buttons; node: the one chosen first); dismissed with (where, node) then, else where."""

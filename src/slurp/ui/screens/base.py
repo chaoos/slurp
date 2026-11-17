@@ -25,6 +25,8 @@ class SplitScreen(Screen):
       if self.SHOW_BACK:
         yield Button("←", id="back", compact=True, tooltip="Back")
       yield Header()
+      yield Button("", id="web-timer", compact=True,
+                   tooltip="a web link ends soon: when it takes no more logins, or its relay ends (click: the link)")
       yield Button("?", id="view-help", compact=True, tooltip="about this window: what it shows, what it can do, its keys (?)")
     with Horizontal(id="cluster-tabs"):
       for index, cluster in enumerate(self.app.clusters):
@@ -68,6 +70,10 @@ class SplitScreen(Screen):
     if event.button.id == "about":
       event.stop()
       self.app.action_about()
+      return
+    if event.button.id == "web-timer":
+      event.stop()
+      self.app.show_web_deadline()
       return
     if event.button.id == "view-help":
       event.stop()
