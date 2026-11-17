@@ -60,6 +60,8 @@ def s02(ctx):
   info = ctx.probe("x", interp[0]) if interp and interp[0].startswith("/") else None
   if info is not None and not info.exists:
     yield F("S02", f"the interpreter {interp[0]} does not exist", 1)
+  elif info is not None and not info.isdir and not info.executable:
+    yield F("S02", f"the interpreter {interp[0]} is not executable for you", 1)
   if interp and os.path.basename(interp[0]) == "bash" and "-l" not in interp[1:] and "--login" not in interp[1:] \
      and s.uses(r"(^|[;\s])(module|ml)\s") and (ctx.facts and ctx.facts.site.get("login_shell")):
     yield F("S02", "module is used, but bash is not a login shell (this site needs #!/bin/bash -l)", 1, INFO,
@@ -619,9 +621,12 @@ def p01(ctx):
               fix=f"create it before submitting: mkdir -p {shlex.quote(d)}", snippet=f"mkdir -p {shlex.quote(d)}")
     elif info is not None and info.exists and not info.writable:
       yield F("P01", f"--{name}: the directory {d} is not writable for you", ctx.directive_line(name))
+    elif info is not None and info.exists and info.isdir and not info.executable:
+      yield F("P01", f"--{name}: the directory {d} cannot be entered (no x permission for you)", ctx.directive_line(name))
 
-@rule("P02", ERROR, "Directories and files that do not exist",
-      "The --chdir directory, cd targets, sourced files, Python scripts and redirected inputs that do not exist.",
+@rule("P02", ERROR, "Directories and files that do not exist or cannot be read",
+      "The --chdir directory, cd targets, sourced files, Python scripts and redirected inputs that do not exist, "
+      "or that exist but you may not read (a file without r permission, a directory you cannot enter: no x).",
       "The job fails at that line, or (cd without a check) goes on in the wrong directory.",
       "Fix the path; create directories before use (mkdir -p dir before cd dir).",
       "cd /scratch/me/rnu1     # typo: run1\nsource ~/envs/sim.sh", needs="probe")
@@ -632,17 +637,33 @@ def p02(ctx):
     info = ctx.probe("d", p)
     if info is not None and not info.exists:
       yield F("P02", f"--chdir={chdir}: {p} does not exist", ctx.directive_line("chdir"))
+    elif info is not None and info.isdir and not info.executable:
+      yield F("P02", f"--chdir={chdir}: you cannot enter {p} (no x permission)", ctx.directive_line("chdir"),
+              fix=unreadable_fix(p, "x"))
   for kind, path, line in referenced_paths(ctx):
     if kind in ("d", "f"):
       info = ctx.probe(kind, path)
-      if info is not None and not info.exists:
-        what = "directory" if kind == "d" else "file"
-        guessed = path in ctx.uncertain
+      if info is None:
+        continue
+      what = "directory" if kind == "d" else "file"
+      guessed = path in ctx.uncertain
+      if not info.exists:
         yield F("P02", f"the {what} {path} does not exist" + (" (relative: checked from the script's directory)" if guessed else ""),
                 line, WARNING if kind == "f" or guessed else ERROR)
+      elif info.isdir and kind == "d" and not info.executable:
+        yield F("P02", f"you cannot enter the directory {path} (no x permission)", line, fix=unreadable_fix(path, "x"))
+      elif not info.isdir and not info.readable:
+        yield F("P02", f"the file {path} exists, but you cannot read it (no r permission)", line,
+                WARNING if guessed else ERROR, fix=unreadable_fix(path, "r"))
+
+def unreadable_fix(path, bit):
+  """How to get the permission: yours, chmod; else the owner (or the group: ls -l shows who)"""
+  return (f"yours: chmod u+{bit} {shlex.quote(path)}; someone else's: ask the owner (ls -l {shlex.quote(path)} shows who), "
+          "or use a copy you may read")
 
 @rule("P03", ERROR, "Programs that cannot run",
-      "Programs run by path (./sim, /path/bin/app, via srun) that do not exist or are not executable.",
+      "Programs run by path (./sim, /path/bin/app, via srun) that do not exist, are not executable, or are scripts "
+      "you cannot read (a script is read by its interpreter: it needs r as well as x).",
       "The job fails right away: No such file or directory, Permission denied.",
       "Build the program first, fix the path, or make it executable (chmod +x).",
       "srun ./build/sim     # not built yet", needs="probe")
@@ -661,6 +682,9 @@ def p03(ctx):
       yield F("P03", f"{path} is a directory", line)
     elif not info.executable:
       yield F("P03", f"{path} is not executable", line, snippet=f"chmod +x {shlex.quote(path)}")
+    elif not info.readable and "script" in (info.file or "").lower():
+      yield F("P03", f"{path} is a script you cannot read (its interpreter must read it: no r permission)", line,
+              fix=unreadable_fix(path, "r"))
 
 ARCH_WORDS = {"aarch64": ("aarch64", "ARM aarch64", "ARM"), "x86_64": ("x86-64", "x86_64")}
 
@@ -732,6 +756,9 @@ def p07(ctx):
     info = ctx.probe("d", env)
     if info is not None and not info.exists:
       yield F("P07", f"the environment {env} does not exist", line, ERROR)
+    elif info is not None and info.isdir and not (info.executable and info.readable):
+      yield F("P07", f"you cannot read the environment {env} (no {'r' if info.executable else 'x'} permission)", line, ERROR,
+              fix=unreadable_fix(env, "rx"))
     elif any(env.startswith(p.rstrip("/") + "/") for p in lustre):
       yield F("P07", f"the environment {env} is on a parallel filesystem (many small files)", line, INFO)
 

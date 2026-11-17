@@ -600,11 +600,12 @@ for a in "$@"; do
     t=f; [ -d "$p" ] && t=d
     x=0; [ -x "$p" ] && x=1
     w=0; [ -w "$p" ] && w=1
+    r=0; [ -r "$p" ] && r=1
     s=$(stat -L -c '%s|%Y' -- "$p" 2>/dev/null)
     info=""
     if [ "$k" = x ] && [ "$t" = f ]; then info=$(file -L -b -- "$p" 2>/dev/null | head -c 160); fi
     if [ "$k" = n ] && [ "$t" = d ]; then info=$(find "$p" -maxdepth 1 2>/dev/null | head -100001 | wc -l); fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$a" "$t" "$x" "$w" "$s" "$info"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$a" "$t" "$x" "$w" "$s" "$info" "$r"
   else
     printf '%s\t-\n' "$a"
   fi
@@ -620,6 +621,7 @@ class PathInfo:
   size: int = 0
   mtime: float = 0
   file: str = ""
+  readable: bool = True # (a directory: its names can be listed; executable: it can be entered)
 
 def run_probe(requests):
   """{"kind:path": PathInfo} (worker)"""
@@ -638,7 +640,7 @@ def run_probe(requests):
       elif len(f) >= 5:
         size, _, mtime = f[4].partition("|")
         out[f[0]] = PathInfo(True, f[1] == "d", f[2] == "1", f[3] == "1", to_int(size, 0), float(mtime or 0),
-                             f[5] if len(f) > 5 else "")
+                             f[5] if len(f) > 5 else "", f[6] != "0" if len(f) > 6 else True)
   return out
 
 # ---------------------------------------------------------------------------

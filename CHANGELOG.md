@@ -6,6 +6,12 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Checks: paths of a script must not only exist but be readable. P02 says
+  when a sourced file, an input or a Python script cannot be read (no r)
+  or a `cd`/`--chdir` directory cannot be entered (no x); P03 a script run
+  by path that is executable but not readable; P07 an environment you may
+  not read; P01 a log directory you cannot enter; S02 an interpreter that
+  is not executable. Each says how to get the permission.
 - The job window of an array task has an **Array** line: a click opens
   the array window, in a subtab of its own.
 - The job window: a click on the job's category opens the categories
