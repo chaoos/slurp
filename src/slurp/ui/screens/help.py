@@ -5,6 +5,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
+from .. import icons
 
 EVERYWHERE = """
 Tabs at the top are clusters (`+` adds one, `✕` closes one); under them the subtabs of the tab: **Jobs** and every
@@ -360,9 +361,9 @@ class ViewHelpScreen(ModalScreen):
       yield DocViewer(self.markdown, id="vh-doc", show_table_of_contents=False, open_links=False)
       with Horizontal(id="vh-buttons"):
         if self.details:
-          yield Button("Copy details", id="vh-copy", tooltip="the version and the machine, as text (for a bug report)", compact=True)
-        yield Button("Guides (F1)", id="vh-guides", compact=True)
-        yield Button("Rule catalogue (F2)", id="vh-rules", compact=True)
+          yield Button(icons.label("copy", "Copy details"), id="vh-copy", tooltip="the version and the machine, as text (for a bug report)", compact=True)
+        yield Button(icons.label("docs", "Guides (F1)"), id="vh-guides", compact=True)
+        yield Button(icons.label("rules", "Rule catalogue (F2)"), id="vh-rules", compact=True)
         yield Button("Close", id="vh-close", variant="primary", compact=True)
 
   def on_mount(self):

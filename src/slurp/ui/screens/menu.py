@@ -9,28 +9,30 @@ from textual.screen import ModalScreen
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
-# (action of the app, label, key shown); None: a line between groups
+from .. import icons
+
+# (action of the app, label, key shown, icon (ui/icons.py)); None: a line between groups
 ITEMS = [
-  ("job_list", "Job list", "j"),
-  ("cluster_info", "Health", "C"),
-  ("quota", "Quota", "Q"),
-  ("scratch", "Old files in scratch", "X"),
+  ("job_list", "Job list", "j", "jobs"),
+  ("cluster_info", "Health", "C", "health"),
+  ("quota", "Quota", "Q", "quota"),
+  ("scratch", "Old files in scratch", "X", "scratch"),
   None,
-  ("cluster_shell", "Shell on the cluster", "t"),
-  ("login_dir", "Login directory", "d"),
-  ("cluster_drive", "Login directory as a drive", "F"),
-  ("interactive_job", "Interactive job", "i"),
-  ("new_script", "New job script", "n"),
+  ("cluster_shell", "Shell on the cluster", "t", "shell"),
+  ("login_dir", "Login directory", "d", "folder"),
+  ("cluster_drive", "Login directory as a drive", "F", "drive"),
+  ("interactive_job", "Interactive job", "i", "interactive"),
+  ("new_script", "New job script", "n", "new_script"),
   None,
-  ("categories", "Categories", "K"),
-  ("web_access", "This slurp in your browser", "W"),
+  ("categories", "Categories", "K", "categories"),
+  ("web_access", "This slurp in your browser", "W", "web"),
   None,
-  ("guides", "Guides", "F1"),
-  ("rule_catalogue", "Rule catalogue", "F2"),
-  ("options", "Options", "F3"),
-  ("about", "About slurp", ""),
+  ("guides", "Guides", "F1", "docs"),
+  ("rule_catalogue", "Rule catalogue", "F2", "rules"),
+  ("options", "Options", "F3", "options"),
+  ("about", "About slurp", "", "about"),
   None,
-  ("quit", "Quit", "q"),
+  ("quit", "Quit", "q", "quit"),
 ]
 
 class MenuScreen(ModalScreen):
@@ -49,9 +51,10 @@ class MenuScreen(ModalScreen):
     self.at = at
 
   def compose(self) -> ComposeResult:
-    width = max(len(label) + len(key) for _, label, key in filter(None, ITEMS)) + 4 # (the keys at the right edge)
+    items = [item and (item[0], icons.label(item[3], item[1]), item[2]) for item in ITEMS]
+    width = max(len(label) + len(key) for _, label, key in filter(None, items)) + 4 # (the keys at the right edge)
     options = []
-    for item in ITEMS:
+    for item in items:
       if item is None:
         options.append(None)
         continue

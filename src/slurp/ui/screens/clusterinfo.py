@@ -14,6 +14,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
+from .. import icons
 
 
 from ...state import log
@@ -215,7 +216,7 @@ class ClusterInfoScreen(ModalScreen):
       with VerticalScroll(id="ci-body"):
         yield Static(id="ci-info")
       with Horizontal(id="ci-buttons"):
-        yield Button("Reload", id="ci-reload", variant="primary", compact=True)
+        yield Button(icons.label("reload", "Reload"), id="ci-reload", variant="primary", compact=True)
         yield Button("Close", id="ci-close", compact=True)
 
   def on_mount(self):
@@ -230,7 +231,7 @@ class ClusterInfoScreen(ModalScreen):
     self.dismiss()
 
   def title_text(self):
-    text = Text(f"Health of {self.cluster.name}", style="bold")
+    text = Text(icons.label("health", f"Health of {self.cluster.name}"), style="bold")
     dialog = self.query_one("#ci-dialog")
     for level in HEALTH_STYLES:
       dialog.remove_class(f"-{level}")

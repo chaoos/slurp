@@ -14,6 +14,7 @@ browser.
 python -m pip install "slurp[all] @ git+https://github.com/chaoos/slurp"
 slurp                         # on a login node, or on your own machine
                               # (+ adds a tab for a cluster over SSH)
+slurp --install-font          # once, where your terminal runs: its icons
 ```
 
 More in [Install and start](install.md).

@@ -33,6 +33,7 @@ from ..cluster.jobs import (
 )
 from ..cluster.details import current_memory_usage, MEMORY, record_memory
 from ..cluster.paths import job_vars
+from . import icons
 from .widgets import ClickTable, err_text, SPINNING, STATE_STYLES, state_text, url_text
 from .terminal import SWITCH_KEY, TerminalSession, TerminalView
 from .screens.dialogs import ConfirmScreen, InteractiveJobScreen
@@ -85,7 +86,8 @@ class Slurp(App):
   HeaderIcon { display: none; }
   #toolbar { height: auto; padding: 0 1; }
   #toolbar > * { margin-right: 1; }
-  #reload, #scratch-search { width: 8; } /* (Reload/Search and Abort: one width, the row does not move) */
+  #reload { width: auto; min-width: 10; } /* (as wide as its label, never wrapped; Reload and Abort one width: the row does not move) */
+  #scratch-search { width: 8; }
   #scope { width: 20; }
   #collapse-arrays { width: auto; }
   #scratch-bar, #scratch-actions { height: auto; padding: 0 1; }
@@ -234,6 +236,7 @@ class Slurp(App):
 
   def __init__(self):
     super().__init__()
+    icons.set_style(None) # (the set of icons stored in the config, read again)
     self.main = None # the job list (MainScreen sets it when it is mounted; the timer of tick() may run before)
     self.link_manager = ShareManager(self.link_event) # shells and drives for the user's own terminal
     # the tabs of the last run (from the config; a local tab the first time)
@@ -465,14 +468,14 @@ class Slurp(App):
   def find_view(self, key):
     return next((v for v in self.cluster.views if key and v.key == key), None)
 
-  def open_view(self, title, make_screen, kind="window", key="", session=None):
-    """A new subtab of the active tab (or the one that shows key already)"""
+  def open_view(self, title, make_screen, kind="window", key="", session=None, icon=""):
+    """A new subtab of the active tab (or the one that shows key already); icon: the concept of its icon"""
     if not self.clusters:
       return
     view = self.find_view(key)
     if view is None:
       type(self).next_view_id += 1
-      view = View(type(self).next_view_id, title, kind, key, session)
+      view = View(type(self).next_view_id, title, kind, key, session, icon)
       self.add_mode(view.mode, make_screen)
       self.cluster.views.append(view)
     self.show_view(view)
@@ -481,7 +484,8 @@ class Slurp(App):
     """A window: from the job list it opens as a subtab, within a subtab it opens on top of it (← goes back)"""
     if self.current_mode in ("_default", "overview") and not isinstance(self.screen, ModalScreen):
       crumbs = getattr(screen, "crumbs", None)
-      self.open_view(title or (crumbs[-1] if crumbs else "") or type(screen).__name__, lambda: screen)
+      self.open_view(title or (crumbs[-1] if crumbs else "") or type(screen).__name__, lambda: screen,
+                     icon=getattr(screen, "icon_name", ""))
     else:
       self.push_screen(screen)
 
@@ -594,12 +598,12 @@ class Slurp(App):
         have.add(vid)
     for v in self.cluster.views:
       if str(v.id) not in have:
-        bar.mount(Button(v.title[:40], id=f"view-tab-{v.id}", classes="view-tab", compact=True, tooltip=v.title),
+        bar.mount(Button(icons.label(v.icon, v.title[:40]), id=f"view-tab-{v.id}", classes="view-tab", compact=True, tooltip=v.title),
                   Button("✕", id=f"view-close-{v.id}", classes="view-close", compact=True, tooltip="close the subtab"))
     for v in self.cluster.views:
       for b in bar.query(f"#view-tab-{v.id}"):
         b.variant = "primary" if self.current_mode == v.mode else "default"
-        label = ("▸ " if v.kind == "shell" else "") + v.title[:40] + (" (ended)" if v.session is not None and v.session.done else "")
+        label = icons.label(v.icon, v.title[:40] + (" (ended)" if v.session is not None and v.session.done else ""))
         if str(b.label) != label:
           b.label = label
 
@@ -861,14 +865,16 @@ class Slurp(App):
                 style="yellow")
 
   def tab_label(self, cluster):
-    """Name, a dot coloured by the health of its session (● connected, ◌ connecting or not answering, ○ not
-    connected), and ⟳ while its list loads"""
+    """Its icon (this machine or a cluster over SSH), its name, for a cluster a dot coloured by the health of its
+    session (● connected, ◌ connecting or not answering, ○ not connected: by its shape too, also on the colour of the
+    active tab), and ⟳ while its list loads"""
     c = cluster.connection
-    label = Text(cluster.name)
+    mark = icons.icon("cluster" if cluster.destination else "local")
+    label = Text(f"{mark} {cluster.name}" if mark else cluster.name)
     if cluster.destination:
-      mark = "●" if c and c.ready and (c.responding() or 0) <= remote.PING_SLOW else "○" if c is None or c.state in ("new", "closed") else "◌"
       level = connection_health(c)[0] if c is not None and c.state != "new" else None
-      label.append(" " + mark, style=HEALTH_STYLES[level] if level else "dim")
+      dot = "●" if c and c.ready and (c.responding() or 0) <= remote.PING_SLOW else "○" if c is None or c.state in ("new", "closed") else "◌"
+      label.append(" " + dot, style=HEALTH_STYLES[level] if level else "dim")
     if cluster.loader is not None:
       label.append(" ⟳")
     return label
@@ -926,7 +932,8 @@ class Slurp(App):
         stale = self.stale_text(cluster)
         screen.query_one("#status", Static).update(Text.assemble(stale, cluster.summary) if stale is not None else Text(cluster.summary))
         button = screen.query_one("#reload", Button)
-        label, variant = ("Abort", "error") if cluster.loader is not None else ("Reload", "primary")
+        label, variant = ((icons.label("cancel_job", "Abort"), "error") if cluster.loader is not None
+                          else (icons.label("reload", "Reload"), "primary"))
         if str(button.label) != label:
           button.label, button.variant = label, variant
 
@@ -990,7 +997,7 @@ class Slurp(App):
     same = sum(v.kind == "shell" and v.title.split(" (")[0] == title for v in self.cluster.views)
     title = f"{title} ({same + 1})" if same else title
     session = TerminalSession(self, args, title, via=via)
-    self.open_view(title, lambda: TerminalScreen(session), kind="shell", session=session)
+    self.open_view(title, lambda: TerminalScreen(session), kind="shell", session=session, icon="shell")
 
   def action_cluster_shell(self):
     """A shell on the cluster of the tab: in slurp, or from the user's own terminal (asked every time)"""
@@ -1702,7 +1709,8 @@ class Slurp(App):
       if changes is None:
         return
       self.apply_theme() # (the theme of the kind of view that is active now)
-      self.notify("options saved", timeout=3)
+      same = (changes.get("icons") or "nerd") == icons.style()
+      self.notify("options saved" + ("" if same else " · the icons change at the next start"), timeout=3 if same else 6)
       if "checks_muted" in changes:
         for screen in self.screen_stack:
           recheck = getattr(screen, "recheck", None)
@@ -1729,7 +1737,7 @@ class Slurp(App):
       return
     view = self.find_view(key)
     if view is None:
-      self.open_view(title, make_screen, key=key)
+      self.open_view(title, make_screen, key=key, icon=getattr(cls, "icon_name", ""))
       return
     self.show_view(view)
     def moved():
@@ -1797,6 +1805,15 @@ class Slurp(App):
       parts.append((f"{counts[state]}{self.STATE_CODES.get(state, state[:3])}", style or STATE_STYLES.get(state, "red")))
     return Text.assemble(*parts)
 
+  def job_id_cell(self, job, under_its_array=False):
+    """The id of a job in the job list, after the icon of an array (a task of one) or room for it; the tasks under
+    the row of their array further in"""
+    mark = icons.icon("array")
+    room = " " * (len(mark) + 1) if mark else ""
+    if under_its_array:
+      return room + "  " + job.jid
+    return (f"{mark} " if array_task_id(job) is not None and mark else room) + job.jid
+
   def group_row(self, key, tasks, cluster):
     """Cells of the row of the tasks of an array"""
     array_id = key
@@ -1806,7 +1823,7 @@ class Slurp(App):
       ids = f"{indices[0]}…{indices[-1]}"
     opened = key in cluster.expanded
     first = tasks[0].rec
-    values = [Text(f"{array_id}_[{ids}] {'▾' if opened else '▸'} {len(tasks)} tasks", style="bold"), first["JobName"]]
+    values = [Text(icons.label("array", f"{array_id}_[{ids}] {'▾' if opened else '▸'} {len(tasks)} tasks"), style="bold"), first["JobName"]]
     if "group|" + key in cluster.marked:
       values[0] = Text.assemble(("● ", "bold magenta"), values[0])
     if "category" in self.job_column_keys:
@@ -1926,7 +1943,7 @@ class Slurp(App):
               f"{job.state} ({job.reason})" if job.queued else f"{job.state} ({rec['ExitCode']})"
       start = fmt_time(rec["Start"])
       in_open_array = rows and job.jid.partition("_")[0] in rows and array_task_id(job) is not None # under its row
-      values = [("  " + job.jid) if in_open_array else job.jid, rec["JobName"]]
+      values = [self.job_id_cell(job, in_open_array), rec["JobName"]]
       if job.jid in cluster.marked:
         values[0] = Text.assemble(("● ", "bold magenta"), (values[0], "bold"))
       if "category" in self.job_column_keys:
@@ -2001,7 +2018,7 @@ class Slurp(App):
     if cluster.destination and not (cluster.connection and cluster.connection.ready):
       self.notify("log in first", severity="warning")
       return
-    self.open_view("old files in scratch", lambda: ScratchScreen(cluster), key="scratch")
+    self.open_view("old files in scratch", lambda: ScratchScreen(cluster), key="scratch", icon="scratch")
 
   def action_cluster_info(self):
     """Health, reservations, occupancy, partitions and node topology of the tab's cluster: a window"""
@@ -2248,7 +2265,7 @@ class Slurp(App):
     if self.cluster.categories is None:
       self.notify("the categories are read with the job list: load it first (r)", severity="warning")
       return
-    self.open_view("categories", CategoriesScreen, key="categories")
+    self.open_view("categories", CategoriesScreen, key="categories", icon="categories")
 
 
   def action_toggle_collapse(self):
@@ -2275,7 +2292,8 @@ class Slurp(App):
     """The window of an array job (a subtab from the job list, else on top of the window it is opened from)"""
     job = job or next((j for j in self.jobs.values() if j.jid.partition("_")[0] == str(array_id)), None)
     if self.current_mode in ("_default", "overview"):
-      self.open_view(f"array {array_id}", lambda: ArrayScreen(array_id, job), kind="job", key=f"array {array_id}")
+      self.open_view(f"array {array_id}", lambda: ArrayScreen(array_id, job), kind="job", key=f"array {array_id}",
+                     icon="array")
     else:
       self.push_screen(ArrayScreen(array_id, job))
 

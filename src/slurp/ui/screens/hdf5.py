@@ -280,6 +280,7 @@ class H5Screen(SplitScreen):
   """HDF5 browser: tree of groups and datasets, info and attributes of the selected one, and a table of its data.
   The file is read where it is: on a cluster only the parts shown, over the SSH session (a RemoteFile), never copied.
   Every h5py call runs in a worker (one at a time); the UI shows the results."""
+  icon_name = "hdf5" # (of its subtab)
   SHOW_BACK = True
   BINDINGS = [
     Binding("escape", "back", "Back"),

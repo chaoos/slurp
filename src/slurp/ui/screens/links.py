@@ -13,6 +13,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Markdown, RadioButton, RadioSet, Select, Static, Switch, TabbedContent, TabPane, TextArea
+from .. import icons
 
 from ...links import share
 from ...links import linux as linhelper
@@ -506,7 +507,7 @@ class LinkScreen(ModalScreen):
         if link.auth == "password":
           yield Button("New password", id="lv-password", tooltip="the old one stops working", compact=True)
         yield Button("Extend 1 h", id="lv-extend", compact=True)
-        yield Button("Revoke", id="lv-revoke", variant="error", tooltip="no more logins, and its sessions end", compact=True)
+        yield Button(icons.label("revoke", "Revoke"), id="lv-revoke", variant="error", tooltip="no more logins, and its sessions end", compact=True)
         yield Button("Close", id="lv-close", variant="primary", tooltip="the link stays (see the connection window)", compact=True)
 
   def on_mount(self):
@@ -561,19 +562,19 @@ class LinkScreen(ModalScreen):
                "which starts the helper; from a terminal, copy the link and open it: Win+R on Windows, xdg-open 'link' "
                "on Linux. Set it up once on your computer: Set up the helper.", classes="lv-command-note"),
         Horizontal(Button("Open on my computer", id="lv-helper-open", variant="primary", compact=True),
-                   Button("Copy helper link", id="lv-helper-copy", compact=True),
+                   Button(icons.label("copy", "Copy helper link"), id="lv-helper-copy", compact=True),
                    Button("Set up the helper…", id="lv-helper-setup", compact=True)),
         id="lv-helper"))
     if link.auth == "password":
       widgets.append(Vertical(Static("Password", classes="lv-command-title"),
                               Horizontal(Static(link.password, classes="lv-command-text", markup=False),
-                                         Button("Copy", classes="lv-copy", name="password", compact=True)),
+                                         Button(icons.label("copy", "Copy"), classes="lv-copy", name="password", compact=True)),
                               classes="lv-command"))
     for i, (title, text, note) in enumerate(share.client_commands(link)):
       shown = text if len(text) <= 400 else f"{text[:90]} … ({len(text)} characters: use Copy)"
       widgets.append(Vertical(Static(title, classes="lv-command-title", markup=False),
                               Horizontal(Static(shown, classes="lv-command-text", markup=False),
-                                         Button("Copy", classes="lv-copy", name=str(i), compact=True)),
+                                         Button(icons.label("copy", "Copy"), classes="lv-copy", name=str(i), compact=True)),
                               Static(note, classes="lv-command-note", markup=False), classes="lv-command"))
     box.mount_all(widgets)
 
@@ -732,7 +733,7 @@ class HelperSetupScreen(ModalScreen):
             with VerticalScroll(classes="hs-body"):
               yield Markdown(text.replace("{fingerprint}", share.host_fingerprint()).replace("{alias}", share.host_alias()))
             with Horizontal(classes="hs-buttons"):
-              yield Button("Copy the setup command", id=f"{prefix}-copy", compact=True, tooltip=f"to paste into {where}")
+              yield Button(icons.label("copy", "Copy the setup command"), id=f"{prefix}-copy", compact=True, tooltip=f"to paste into {where}")
               yield Button("Download the setup", id=f"{prefix}-download", variant="primary",
                            tooltip=f"{name}, in the browser that shows slurp now", compact=True)
       with Horizontal(id="hs-buttons"):
@@ -808,7 +809,7 @@ class DriveScreen(ModalScreen):
     import socket
     drive = self.app.drive_of(self.cluster)
     with Vertical(id="drive-dialog"):
-      yield Static(f"Drive: {self.cluster.name} {self.home}", id="drive-title", markup=False)
+      yield Static(icons.label("drive", f"Drive: {self.cluster.name} {self.home}"), id="drive-title", markup=False)
       yield Static(f"On this machine ({socket.gethostname()}, where slurp runs)", classes="drive-section", markup=False)
       yield Static("sshfs through the session of this tab (no login); slurp shows its state in the connection window "
                    "and unmounts it when it quits." + (f"\nNot possible: {self.local_reason}" if self.local_reason else ""),

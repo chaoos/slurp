@@ -6,6 +6,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
+from .. import icons
 
 from ...cluster.remote import cluster_work
 from ...cluster.details import run_script_on_nodes
@@ -86,7 +87,7 @@ class PlacementScreen(ModalScreen):
         yield Static(Text("bound: the CPUs a task may run on · now: where its threads are at the moment · "
                           "# several tasks · · none. NUMA guide: F1", style="dim"), id="pl-legend")
       with Horizontal(id="pl-buttons"):
-        yield Button("Refresh", id="pl-refresh", compact=True)
+        yield Button(icons.label("reload", "Refresh"), id="pl-refresh", compact=True)
         yield Button("Close", id="pl-close", variant="primary", compact=True)
 
   def on_mount(self):

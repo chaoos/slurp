@@ -108,6 +108,7 @@ def inspect_core_file(path):
 
 class CoreScreen(SplitScreen):
   """Overview for an ELF core dump, with an editable GDB command launcher."""
+  icon_name = "core" # (of its subtab)
   SHOW_BACK = True
   BINDINGS = [Binding("escape", "back", "Back")]
 

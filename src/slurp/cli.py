@@ -54,6 +54,29 @@ def check_main(argv):
       worst = max(worst, 1)
   return worst
 
+def install_font():
+  """Copy slurp's icon font where this user's fonts are; the terminals take its icons from it (their font stays)"""
+  import shutil
+  import subprocess
+  from .ui.icons import FONT
+  if sys.platform == "win32":
+    os.startfile(FONT) # (the font viewer, with Install)
+    print(f"opened {FONT}: Install there, then restart the terminal")
+    return 0
+  folder = os.path.expanduser("~/Library/Fonts") if sys.platform == "darwin" else \
+           os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "fonts")
+  try:
+    os.makedirs(folder, exist_ok=True)
+    shutil.copyfile(FONT, os.path.join(folder, os.path.basename(FONT)))
+  except OSError as e:
+    print(f"slurp: cannot install the icon font in {folder}: {e}", file=sys.stderr)
+    return 1
+  if shutil.which("fc-cache"):
+    subprocess.run(["fc-cache", "-f", folder], check=False)
+  print(f"installed {os.path.basename(FONT)} in {folder}: open a new terminal window (or restart the terminal) to "
+        "see the icons. It is the terminal's machine that needs the font: over SSH, install it where you sit.")
+  return 0
+
 def main():
   if sys.argv[1:2] == ["check"]:
     sys.exit(check_main(sys.argv[2:]))
@@ -73,7 +96,12 @@ def main():
                       "running one")
   parser.add_argument("--no-holder", action="store_true", help="run directly in this terminal, without the session "
                       "holder (no remote web access, ends with the terminal)")
+  parser.add_argument("--install-font", action="store_true", help="install slurp's icon font for this user, so that "
+                      "the terminals of this machine show its icons (Linux, macOS; Windows: opens the font to install)")
   args = parser.parse_args()
+
+  if args.install_font:
+    sys.exit(install_font())
 
   if args.serve:
     try:

@@ -51,8 +51,8 @@ in the overview) ends it until you press **Connect**.
 
 The footer shows the state of the session of the active tab, tinted by its
 health: green (answers, with the round-trip time), yellow (slow, connecting),
-red (no answer, lost); the connection window shows the same in its title and the tab buttons mark each tab: `●`
-connected, `◌` connecting or not answering, `○` not connected. A heartbeat
+red (no answer, lost); the connection window shows the same in its title, and the tab buttons mark each tab with a
+dot in that colour after its name: `●` connected, `◌` connecting or not answering, `○` not connected. A heartbeat
 notices a session that stops answering ("no answer for …" in the footer);
 after 60 seconds without an answer, or when the session breaks, the app
 reconnects by itself right away, and if that fails again after 5, 15, 30

@@ -39,7 +39,7 @@ links = ["asyncssh"]                    # shells and drives from your own termin
 hdf5 = ["h5py", "numpy"]                # the HDF5 view; without it slurp shows `h5dump -H`
 web = ["textual-serve", "textual-web"]  # slurp --serve, and a public link to the app
 all = ["slurp[links,hdf5,web]"]
-dev = ["pytest>=8", "ruff", "pre-commit"]  # with all: pip install -e ".[all,dev]"
+dev = ["pytest>=8", "ruff", "pre-commit", "fonttools"]  # with all: pip install -e ".[all,dev]" (fonttools: tools/make_icon_font.py)
 docs = ["mkdocs-material>=9.6,<10"]  # the documentation site: mkdocs serve, mkdocs build --strict
 
 [project.scripts]

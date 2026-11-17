@@ -9,6 +9,7 @@ from textual.widgets import (
 
 
 from ...cluster.jobs import array_task_id, is_time, job_id_key, pace_eta, progress_for_job
+from .. import icons
 from ..widgets import ClickTable
 from .base import SplitScreen
 from ...checks.engine import counts as checks_counts
@@ -57,7 +58,7 @@ class MainScreen(SplitScreen):
 
   def compose_left(self):
     with Horizontal(id="toolbar"):
-      yield Button("Reload", id="reload", variant="primary", compact=True)
+      yield Button(icons.label("reload", "Reload"), id="reload", variant="primary", compact=True)
       yield Label("finished since")
       yield Select(SINCE_CHOICES, value="1d", allow_blank=False, id="since-choice",
                    tooltip="also list the jobs that finished within this time", compact=True)
@@ -72,8 +73,9 @@ class MainScreen(SplitScreen):
     with Vertical(id="connect-panel"):
       yield Static(id="connect-note")
       with Center():
-        yield Button("Connect", id="connect", variant="primary", compact=True, tooltip="log in to the cluster of this tab")
-    yield Input(id="jfilter", placeholder="filter jobs by name, command, ID, state, user, account, path, category… (cat:a/b: only that category)")
+        yield Button(icons.label("connect", "Connect"), id="connect", variant="primary", compact=True, tooltip="log in to the cluster of this tab")
+    yield Input(id="jfilter", placeholder=icons.label("filter", "filter jobs by name, command, ID, state, user, account, path, category… "
+                                                                   "(cat:a/b: only that category)"))
 
   def action_filter(self):
     search = self.query_one("#jfilter", Input)

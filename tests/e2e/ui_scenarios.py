@@ -110,9 +110,10 @@ def slurp_modules():
 class UISession:
   """slurp's app under run_test in an event loop of its own, logged in to the lab. Its task runs the scenarios given to
   run(), one at a time, in its own context (as a single run through all of them did); between them the loop waits."""
-  def __init__(self, work, home, out, size=(170, 45)):
+  def __init__(self, work, home, out, size=(170, 45), icons="none"):
     self.args = (work, home, out)
     self.size = size # (columns, rows of the terminal)
+    self.icons = icons # (none: the labels are their words, for the checks; the icons have tests of their own)
     self.broken = None
 
   def start(self):
@@ -138,7 +139,8 @@ class UISession:
     return self
 
   async def main(self):
-    update_config(start_page="jobs", # (the scenarios start on the job list; the overview has its own)
+    update_config(icons=self.icons,
+                  start_page="jobs", # (the scenarios start on the job list; the overview has its own)
                   tabs=[{"destination": None}, {"destination": "lab"}], active=1) # (a local tab, and the lab shown)
     app = self.app = Slurp()
     try:
@@ -1097,7 +1099,7 @@ async def t_about(app, pilot):
   await pilot.pause(0.5); app.save_screenshot(filename="about.svg", path=OUT)
   await pilot.press("escape"); await pilot.pause(0.3)
   from slurp.ui.screens.menu import ITEMS
-  check("the menu has About slurp", ("about", "About slurp", "") in ITEMS)
+  check("the menu has About slurp", ("about", "About slurp", "", "about") in ITEMS)
 
 async def t_links_health(app, pilot):
   """The links list: a health column for links and sessions (as for the SSH login), a drive without its path but one

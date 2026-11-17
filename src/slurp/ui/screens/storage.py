@@ -15,6 +15,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.coordinate import Coordinate
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input, Label, Select, Static
+from .. import icons
 
 from ...cluster.remote import in_background
 from ..widgets import ClickTable
@@ -63,7 +64,7 @@ class QuotaScreen(ModalScreen):
       with VerticalScroll(id="quota-body"):
         yield Static(id="quota-info")
       with Horizontal(id="quota-buttons"):
-        yield Button("Reload", id="quota-reload", variant="primary", compact=True)
+        yield Button(icons.label("reload", "Reload"), id="quota-reload", variant="primary", compact=True)
         yield Button("Close", id="quota-close", compact=True)
 
   def on_mount(self):
@@ -75,7 +76,7 @@ class QuotaScreen(ModalScreen):
 
   def set_title(self):
     state = "loading …" if self.fetching else f"as of {self.info['time']:%H:%M:%S}" if self.info else ""
-    self.query_one("#quota-title", Static).update(Text(f"Quota on {self.cluster.name or '-'} · {state}"))
+    self.query_one("#quota-title", Static).update(Text(icons.label("quota", f"Quota on {self.cluster.name or '-'} · {state}")))
 
   @on(Button.Pressed, "#quota-reload")
   def action_reload(self):

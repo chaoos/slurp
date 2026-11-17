@@ -10,6 +10,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static, Tree
+from .. import icons
 
 from ...cluster import categories as cat
 from ...cluster.remote import in_background
@@ -269,7 +270,7 @@ class CategoriesScreen(SplitScreen):
       with Vertical(id="cat-main"):
         yield Static(id="cat-info")
         with Horizontal(id="cat-main-buttons"):
-          yield Button("Reload", id="cat-reload", variant="primary", tooltip="ask Slurm again (r)", compact=True)
+          yield Button(icons.label("reload", "Reload"), id="cat-reload", variant="primary", tooltip="ask Slurm again (r)", compact=True)
           yield Button("In the job list", id="cat-list", tooltip="the job list filtered to this category (l)", compact=True)
           yield Button("Categorize…", id="cat-categorize", tooltip="the job selected in a category, another or a new one (c)", compact=True)
           yield Button("Take job out", id="cat-take-out", variant="warning", tooltip="the job selected leaves its category (x)", compact=True)

@@ -9,6 +9,7 @@ from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, DataTable, Static, TabbedContent, TabPane
+from .. import icons
 
 import shlex
 from rich.progress_bar import ProgressBar as RichProgressBar
@@ -101,11 +102,11 @@ class ArrayScreen(SplitScreen):
     with Horizontal(id="arr-bar"):
       yield Static(id="arr-info")
       with Vertical(id="arr-buttons"):
-        yield Button("Reload", id="arr-reload", variant="primary", compact=True)
-        yield Button("Copy all ids", id="arr-copy-all", compact=True)
-        yield Button("Cancel pending tasks", id="arr-cancel-pending", variant="warning",
+        yield Button(icons.label("reload", "Reload"), id="arr-reload", variant="primary", compact=True)
+        yield Button(icons.label("copy", "Copy all ids"), id="arr-copy-all", compact=True)
+        yield Button(icons.label("cancel_job", "Cancel pending tasks"), id="arr-cancel-pending", variant="warning",
                      tooltip="scancel --state=PENDING: the tasks that have not started", compact=True)
-        yield Button("Cancel the whole array", id="arr-cancel", variant="error", tooltip="scancel of the array job", compact=True)
+        yield Button(icons.label("cancel_job", "Cancel the whole array"), id="arr-cancel", variant="error", tooltip="scancel of the array job", compact=True)
     with TabbedContent(id="arr-tabs"):
       with TabPane("By state", id="arr-tab-states"):
         yield VerticalScroll(id="arr-groups")
@@ -338,7 +339,7 @@ class ArrayScreen(SplitScreen):
       ids = groups[group]
       head = Horizontal(Static(Text.assemble(state_text(group), f"  {len(ids)} task{'s' if len(ids) != 1 else ''}"),
                                classes="arr-title"),
-                        Button("Copy ids", classes="arr-copy", compact=True, tooltip="copy the ids of these tasks"),
+                        Button(icons.label("copy", "Copy ids"), classes="arr-copy", compact=True, tooltip="copy the ids of these tasks"),
                         classes="arr-head")
       # each id a link to the job window of its task
       links = ", ".join(f"[@click=screen.open_task({i})]{i}[/]" for i in ids)

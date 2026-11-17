@@ -17,6 +17,7 @@ from textual.widgets import DataTable, Static, TextArea
 
 
 from ..cluster.paths import word_at
+from . import icons
 
 # ---------------------------------------------------------------------------
 # widgets and screens
@@ -25,7 +26,8 @@ STATE_STYLES = {"RUNNING": "green", "COMPLETED": "green", "COMPLETING": "green",
                 "PENDING": "blue", "REQUEUED": "blue", "SUSPENDED": "yellow"}
 
 def state_text(state):
-  return Text(state, style=STATE_STYLES.get(state.split(" ")[0], "red"))
+  """A Slurm state in its colour, with its icon in front"""
+  return Text(icons.label(icons.state_icon(state), state), style=STATE_STYLES.get(state.split(" ")[0], "red"))
 
 class Spinning:
   """A cell whose value is still coming: a spinner that turns when the table is redrawn"""

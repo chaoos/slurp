@@ -24,6 +24,7 @@ from textual.widgets import Button, Static
 
 
 from ..state import log
+from . import icons
 
 # ---------------------------------------------------------------------------
 # terminal window: a command (srun --pty bash) in a pseudo terminal, emulated with pyte
@@ -546,7 +547,7 @@ class TerminalPane(Vertical):
       status = f"ended (exit code {s.code}) · Enter: new shell · ✕ or Ctrl-X: close"
     else:
       status = "Ctrl-] switches between the sides"
-    self.query_one(".ttitle", Static).update(f"{s.title} · {status}")
+    self.query_one(".ttitle", Static).update(icons.label("key" if s.login else "shell", f"{s.title} · {status}"))
     self.call_after_refresh(self.query_one(TerminalView).attach)
 
   def set_width(self, width):

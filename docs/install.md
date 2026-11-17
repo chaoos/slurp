@@ -47,6 +47,22 @@ starts a separate one, `--no-holder` runs it directly in the terminal. `--log FI
 events. slurp needs no configuration file: tabs, jobs and files are chosen in the app, and the
 [settings](guide/settings.md) it keeps are made there too.
 
+## The icon font
+
+slurp shows small icons in front of tabs, buttons, menu items, job states and files. A terminal draws them from
+slurp's icon font (8 KB, every icon one cell wide); install it once on the machine of the terminal you look
+through, which is your own computer, also when slurp runs on a cluster over SSH:
+
+```bash
+slurp --install-font               # Linux, macOS: into your fonts; Windows: opens the font to install
+```
+
+Then open a new terminal window. Your terminal's font stays: the terminal takes only the icons from slurp's font.
+Without slurp installed on that machine, download
+[slurp-icons.ttf](https://github.com/chaoos/slurp/raw/main/src/slurp/ui/fonts/slurp-icons.ttf) and install it like any
+font. A terminal with a [Nerd Font](https://www.nerdfonts.com/) shows the icons too, and a browser has them already.
+Without the font the icons are boxes; **Options** → **Icons** switches them off (see [Settings](guide/settings.md#icons)).
+
 ## Later: running and updating
 
 The `slurp` command lives in the virtual environment: activate it first (`source .venv/bin/activate`), or run

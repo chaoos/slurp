@@ -91,6 +91,7 @@ class View:
   kind: str                   # "job", "window" or "shell"
   key: str = ""               # identifies what it shows (e.g. the job), to show it again instead of opening it twice
   session: object | None = None # TerminalSession of a shell
+  icon: str = ""              # the concept of its icon (ui/icons.py): shell, folder, file, script, …
 
   @property
   def mode(self):

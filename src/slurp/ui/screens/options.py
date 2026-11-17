@@ -9,6 +9,10 @@ from textual.widgets.selection_list import Selection
 
 from ...checks import engine as checks
 from ...config import config_path, load_config, update_config
+from .. import icons
+
+ICON_CHOICES = [("icons (slurp's icon font or a Nerd Font)", ""), ("Unicode symbols (uneven in most fonts)", "symbols"),
+                ("none", "none")]
 
 COPY_CHOICES = [("ask how to get it, when this machine has no clipboard tool", ""),
                 ("send it to the terminal only (OSC 52), never ask", "terminal")]
@@ -43,7 +47,7 @@ class OptionsScreen(ModalScreen):
     themes = sorted(app.available_themes)
     active = getattr(app, "view_kind", "terminal")
     with Vertical(id="op-dialog"):
-      yield Static("Options", id="op-title")
+      yield Static(icons.label("options", "Options"), id="op-title")
       with VerticalScroll(id="op-body"):
         yield Static("Appearance", classes="op-section")
         with Horizontal(classes="op-row"):
@@ -56,6 +60,13 @@ class OptionsScreen(ModalScreen):
                        value=c.get("theme_web") if c.get("theme_web") in themes else "", allow_blank=False, id="op-theme-web")
         yield Static(f"The theme follows the view that is active (now: {'a browser' if active == 'web' else 'a terminal'}).",
                      classes="op-note")
+        with Horizontal(classes="op-row"):
+          yield Label("Icons")
+          yield Select(ICON_CHOICES, value=c.get("icons") if c.get("icons") in ("symbols", "none") else "",
+                       allow_blank=False, id="op-icons")
+        yield Static("In front of tabs, buttons, menu items, states and files; from the next start. A browser has "
+                     "the icons; a terminal shows boxes without slurp's icon font (slurp --install-font, on the "
+                     "machine of the terminal you look through) or a Nerd Font.", classes="op-note")
         with Horizontal(classes="op-row"):
           yield Label("At the start a tab shows")
           yield Select([("its overview", ""), ("its job list", "jobs")], value="jobs" if c.get("start_page") == "jobs" else "",
@@ -91,7 +102,7 @@ class OptionsScreen(ModalScreen):
         yield Static("What slurp remembers", classes="op-section")
         for dest, entry in sorted((c.get("drive_mounts") or {}).items()):
           with Horizontal(classes="op-row"):
-            yield Label(f"Drive of {dest}"[:23])
+            yield Label(icons.label("drive", f"Drive of {dest}")[:23])
             yield Static(f"{entry.get('path', '?')}{'  (read only)' if entry.get('read_only') else ''}")
             yield Button("Forget", classes="op-forget", name=f"drive:{dest}", compact=True)
         for key, what in (("progress_files", "progress files chosen for jobs"), ("array_progress_patterns", "progress patterns of arrays")):
@@ -135,7 +146,8 @@ class OptionsScreen(ModalScreen):
                "copy_web": self.query_one("#op-copy-web", Select).value or None,
                "link_relay": self.query_one("#op-relay", Input).value.strip() or None,
                "checks_muted": sorted(self.query_one("#op-muted", SelectionList).selected),
-               "start_page": self.query_one("#op-start-page", Select).value or None}
+               "start_page": self.query_one("#op-start-page", Select).value or None,
+               "icons": self.query_one("#op-icons", Select).value or None}
     drives = dict(self.config.get("drive_mounts") or {})
     for item in self.forget:
       if item.startswith("drive:"):

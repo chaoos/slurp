@@ -8,6 +8,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
+from .. import icons
 from textual.widgets import Markdown
 
 
@@ -159,7 +160,7 @@ class TerminalHelpScreen(ModalScreen):
       with VerticalScroll(id="thelp-text"):
         yield Markdown(self.help_text())
       with Horizontal(id="thelp-buttons"):
-        yield Button("Copy the screen", id="thelp-copy", variant="primary", compact=True)
+        yield Button(icons.label("copy", "Copy the screen"), id="thelp-copy", variant="primary", compact=True)
         yield Button("Close", id="thelp-close", compact=True)
 
   def on_mount(self):

@@ -26,6 +26,7 @@ from ...cluster.details import (
   current_memory_usage, load_details, MEMORY_EVERY, memory_watch, peak_job_memory, record_memory, run_on_nodes, sacct_all
 )
 from ...cluster.paths import job_vars
+from .. import icons
 from ..widgets import ClickTable, state_text, TimePlot
 from .dialogs import ConfirmScreen, RestartScreen, RunArrayScreen
 from .base import SplitScreen
@@ -77,15 +78,15 @@ class JobScreen(SplitScreen):
 
   def compose_left(self):
     with Horizontal(id="job-actions"):
-      yield Button("Cancel job", id="cancel-job", variant="error", compact=True)
-      yield Button("Restart job", id="restart-job", variant="primary", compact=True)
-      yield Button("Run array", id="run-array", tooltip="submit the array again with another range", compact=True)
-      yield Button("Array", id="array-window", tooltip="all tasks of the array by state, to copy or cancel", compact=True)
+      yield Button(icons.label("cancel_job", "Cancel job"), id="cancel-job", variant="error", compact=True)
+      yield Button(icons.label("restart", "Restart job"), id="restart-job", variant="primary", compact=True)
+      yield Button(icons.label("restart", "Run array"), id="run-array", tooltip="submit the array again with another range", compact=True)
+      yield Button(icons.label("array", "Array"), id="array-window", tooltip="all tasks of the array by state, to copy or cancel", compact=True)
     with VerticalScroll(id="details"):
       yield Static(id="info")
       with Horizontal(id="checks-bar"):
-        yield Label("Checks", classes="section")
-        yield Button("Check", id="checks-run", compact=True,
+        yield Label(icons.label("check", "Checks"), classes="section")
+        yield Button(icons.label("check", "Check"), id="checks-run", compact=True,
                      tooltip="all checks of the script and the job: the record, paths, quota and logs, then the script's "
                              "environment (its setup replayed after a fresh login, the programs' libraries)")
         yield Button("Placement", id="checks-placement", compact=True,
@@ -124,9 +125,9 @@ class JobScreen(SplitScreen):
           yield Button("Use stdout", id="progress-stdout", compact=True)
         yield Static(id="progress-line", markup=False)
         yield Static(id="progress-age")
-      yield Label("Files", classes="section")
+      yield Label(icons.label("folder", "Files"), classes="section")
       yield OptionList(Option("loading ...", disabled=True), id="files")
-      yield Label("Steps", classes="section")
+      yield Label(icons.label("steps", "Steps"), classes="section")
       yield ClickTable(id="steps", cursor_type="row", zebra_stripes=True)
       with Vertical(id="nodes"):
         yield Label("Run on the nodes of the job", classes="section")
@@ -335,6 +336,10 @@ class JobScreen(SplitScreen):
     files.clear_options()
     for i, e in enumerate(self.details["files"]):
       prompt = Text()
+      kind = ("folder" if e.kind in ("workdir", "output dir") else "script" if e.kind == "script" else "core" if e.kind == "core"
+              else icons.file_kind(os.path.basename(e.path)) if e.path else "file")
+      if icons.icon(kind):
+        prompt.append(icons.icon(kind) + " ")
       prompt.append(f"{e.kind:<10} ", style="bold")
       openable = (e.path and e.exists) or e.text is not None or e.kind == "sacct"
       prompt.append(e.label, style="" if openable else "dim")

@@ -213,6 +213,7 @@ class DocScreen(SplitScreen):
 
 class RuleCatalogueScreen(DocScreen):
   """All rules with what they find, why it matters and how to fix it; opened at one rule"""
+  icon_name = "rules" # (of its subtab)
   title_word = "Rule catalogue"
 
   def __init__(self, rule_id=""):
@@ -228,6 +229,7 @@ class RuleCatalogueScreen(DocScreen):
       self.jump(checks.RULES[rule_id].anchor)
 
 class GuidesScreen(DocScreen):
+  icon_name = "docs" # (of its subtab)
   title_word = "Guides"
 
 

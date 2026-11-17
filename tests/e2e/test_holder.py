@@ -113,8 +113,11 @@ def test_holder(check, lab):
         async with s.get(base + f"/?token={web['token']}") as resp:
           page = await resp.text()
           check("with the token: textual-serve's page, pointing to this holder's websocket", resp.status == 200 and "textual-terminal" in page and "/ws" in page)
+          check("…with slurp's icon font for the codepoints of the icons", "/slurp-icons.ttf" in page and "U+F0000-F1FFF" in page)
         async with s.get(base + "/static/js/textual.js") as resp:
           check("its script is served", resp.status == 200)
+        async with s.get(base + "/slurp-icons.ttf") as resp:
+          check("the icon font is served", resp.status == 200 and resp.content_type == "font/ttf" and (await resp.read())[:4] == b"\0\1\0\0")
         async with s.ws_connect(base + "/ws?width=90&height=28") as ws:
           seen = b""
           async def collect(t, pattern):

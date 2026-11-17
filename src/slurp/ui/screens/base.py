@@ -6,6 +6,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Static
+from .. import icons
 
 
 from ..widgets import ConnectionStatus
@@ -28,12 +29,12 @@ class SplitScreen(Screen):
     with Horizontal(id="cluster-tabs"):
       for index, cluster in enumerate(self.app.clusters):
         variant = "primary" if index == self.app.cluster_index else "default"
-        yield Button(cluster.name, id=f"cluster-tab-{index}", classes="cluster-tab", variant=variant, compact=True)
+        yield Button(self.app.tab_label(cluster), id=f"cluster-tab-{index}", classes="cluster-tab", variant=variant, compact=True)
         yield Button("✕", id=f"cluster-close-{index}", classes="cluster-close", compact=True, tooltip="close the tab")
       yield Button("+", id="cluster-add", tooltip="Add a local or SSH cluster", compact=True)
       yield Button("? slurp", id="about", compact=True, tooltip="about slurp: how it works, its version, the machine it runs on")
     with Horizontal(id="view-tabs"):
-      yield Button("Jobs", id="view-jobs", classes="view-tab", compact=True, tooltip="the job list")
+      yield Button(icons.label("jobs", "Jobs"), id="view-jobs", classes="view-tab", compact=True, tooltip="the job list")
       yield Button("✕", id="view-close-jobs", classes="view-close", compact=True, tooltip="close the job list (Ctrl-W)")
     if self.SHOW_NOTABS:
       yield Static("No tabs. The + button above adds a connection (blank for this machine, or an SSH destination).", id="notabs")

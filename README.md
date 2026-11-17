@@ -24,6 +24,7 @@ source .venv/bin/activate
 python -m pip install ".[all]"
 slurp                         # on a login node, or on your own machine
                               # (+ adds a tab for a cluster over SSH)
+slurp --install-font          # once, where your terminal runs: its icons
 ```
 
 More in [Install and start](https://chaoos.github.io/slurp/install/). In the

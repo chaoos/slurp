@@ -6,6 +6,13 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Icons in front of tabs, buttons, menu items, the states of jobs and the
+  files of a folder: the Material Design icons of Nerd Fonts, every one a
+  cell wide. A terminal draws them from slurp's icon font (8 KB): install it
+  once on the machine of the terminal you look through with
+  `slurp --install-font` (a Nerd Font works too); the browser view loads it
+  itself. **Options** → **Icons**: icons (the
+  default), Unicode symbols (no font, but uneven in most fonts), or none.
 - The header (slurp and its version) is the top line, above the tabs, and has
   **☰ Menu** at its left, in every window (it was in the job list's toolbar
   and the overview).

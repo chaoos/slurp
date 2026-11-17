@@ -138,6 +138,23 @@ def anonymize(path, user):
     f.write(text.replace(user, sample))
 
 
+def with_icon_font(path):
+  """slurp's icon font in the picture (a data URL: a picture shown as an image loads no other), for the codepoints
+  of the icons: the text's font stays"""
+  import base64
+  from slurp.ui.icons import FONT
+  with open(FONT, "rb") as f:
+    data = base64.b64encode(f.read()).decode()
+  face = "".join('    @font-face {\n        font-family: "Fira Code";\n'
+                 f'        src: url("data:font/ttf;base64,{data}") format("truetype");\n'
+                 f'        font-weight: {weight};\n        unicode-range: U+F0000-F1FFF;\n    }}\n'
+                 for weight in (400, 700)) # (the weights of Rich's faces, exactly: a face of another weight is passed over)
+  with open(path) as f:
+    text = f.read()
+  with open(path, "w") as f:
+    f.write(text.replace("<style>\n", "<style>\n" + face, 1))
+
+
 def main():
   from lab import Lab, missing_tools
   missing = missing_tools()
@@ -150,7 +167,8 @@ def main():
   try:
     with Lab(work) as lab:
       node_fakes(lab)
-      session = U.UISession(lab.work, os.path.join(lab.work, "home"), os.path.join(lab.work, "out"), size=SIZE).start()
+      session = U.UISession(lab.work, os.path.join(lab.work, "home"), os.path.join(lab.work, "out"), size=SIZE,
+                            icons="nerd").start()
       try:
         for shot in (shot_jobs, shot_overview, shot_job, shot_files):
           session.run(shot, no_check, timeout=300)
@@ -161,6 +179,7 @@ def main():
     shutil.rmtree(work, ignore_errors=True)
   for name in ("overview.svg", "jobs.svg", "job-details.svg", "files.svg"):
     anonymize(os.path.join(IMAGES, name), getpass.getuser())
+    with_icon_font(os.path.join(IMAGES, name))
   print("written to", IMAGES)
 
 

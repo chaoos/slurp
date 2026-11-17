@@ -16,6 +16,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Static
+from .. import icons
 
 
 from ...cluster import remote # (remote.PING_*: the settings of the heartbeat, read where they are set)
@@ -122,7 +123,7 @@ class ConnectionScreen(ModalScreen):
       yield Static(id="conn-title")
       with VerticalScroll(id="conn-body"):
         if self.cluster.destination:
-          yield Static("Drive on this machine", id="conn-drive-title")
+          yield Static(icons.label("drive", "Drive on this machine"), id="conn-drive-title")
           yield Static(id="conn-drive")
           with Horizontal(id="conn-drive-buttons"):
             yield Button("Mount…", id="conn-drive-mount", variant="primary", tooltip="choose the path and mount (Drive, F)", compact=True)
@@ -135,8 +136,8 @@ class ConnectionScreen(ModalScreen):
         yield Static(id="conn-info")
       with Horizontal(id="conn-buttons"):
         if self.cluster.destination:
-          yield Button("Reconnect", id="conn-reconnect", variant="primary", tooltip="end the session and log in again (R)", compact=True)
-          yield Button("Disconnect", id="conn-disconnect", variant="error", compact=True)
+          yield Button(icons.label("reconnect", "Reconnect"), id="conn-reconnect", variant="primary", tooltip="end the session and log in again (R)", compact=True)
+          yield Button(icons.label("disconnect", "Disconnect"), id="conn-disconnect", variant="error", compact=True)
         yield Button("Close", id="conn-close", compact=True)
 
   def show_title(self):
@@ -222,6 +223,7 @@ class ConnectionScreen(ModalScreen):
       relay, logins = link_state(link, now)
       what = (f"{link.kind}: {link.tab}" if link.kind == "drive" else # (a drive's folders: its sessions)
               "web: this slurp (all tabs)" if link.kind == "web" else f"{link.kind}: {link.title}")
+      what = icons.label(link.kind if link.kind in ("drive", "shell", "web") else "", what)
       rows.append((f"link|{link.id}", (Text.assemble(link.id, (" ◀ this view", "bold green") if link.cloudflare and self.app.this_view_link(link) else ""),
                                        health(*share.link_health(link)),
                                        what + (" (read only)" if link.read_only else ""), relay, logins,

@@ -11,6 +11,7 @@ from textual.app import SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Static, TextArea
+from .. import icons
 from textual.worker import get_current_worker
 
 from ...checks import engine as checks
@@ -36,6 +37,7 @@ def open_job_script(app, crumbs, path, bases=(), env=None):
   return lambda: app.open_window(ScriptScreen([*crumbs, os.path.basename(path)], path))
 
 class ScriptScreen(SplitScreen):
+  icon_name = "script" # (of its subtab)
   SHOW_BACK = True
   BINDINGS = [
     Binding("escape", "back", "Back", priority=True), # (also from the editor, which would keep Esc)
@@ -71,19 +73,19 @@ class ScriptScreen(SplitScreen):
 
   def compose_left(self):
     with Horizontal(id="script-bar"):
-      yield Button("Check", id="sc-check", compact=True,
+      yield Button(icons.label("check", "Check"), id="sc-check", compact=True,
                    tooltip="all checks: the script, its paths, programs and quota on the cluster, then its environment "
                            "(its module loads and sources replayed after a fresh login, the programs' libraries) (r)")
-      yield Button("Explain", id="sc-explain", compact=True, tooltip="what Slurm makes of each #SBATCH line (x)")
-      yield Button("Edit", id="sc-edit", compact=True, tooltip="edit it here, checked as you type; Ctrl+S saves (e)")
+      yield Button(icons.label("explain", "Explain"), id="sc-explain", compact=True, tooltip="what Slurm makes of each #SBATCH line (x)")
+      yield Button(icons.label("edit", "Edit"), id="sc-edit", compact=True, tooltip="edit it here, checked as you type; Ctrl+S saves (e)")
       yield Button("Save", id="sc-save", compact=True, variant="success", tooltip="write it to the file and check it fully (Ctrl+S)")
       yield Button("Revert", id="sc-revert", compact=True, tooltip="back to the file as it is saved")
       yield Button("Done", id="sc-done", compact=True, tooltip="stop editing (Esc)")
       yield Button("Edit outside", id="sc-edit-outside", compact=True,
                    tooltip="open it in your own editor ($VISUAL / $EDITOR, in the terminal); checked again when saved")
-      yield Button("Test", id="sc-test", compact=True, tooltip="sbatch --test-only: would Slurm accept it, and when would it start?")
+      yield Button(icons.label("test", "Test"), id="sc-test", compact=True, tooltip="sbatch --test-only: would Slurm accept it, and when would it start?")
       yield Button("Fixed copy…", id="sc-fix", compact=True, tooltip="the fixes that are safe to make, in a copy of the script")
-      yield Button("Submit…", id="sc-submit", compact=True, variant="primary")
+      yield Button(icons.label("submit", "Submit…"), id="sc-submit", compact=True, variant="primary")
       yield Button("Rule catalogue", id="sc-catalogue", compact=True)
     yield Static(Text("checking …", style="dim"), id="script-status")
     yield TextArea(id="script-text", read_only=True, show_line_numbers=True, soft_wrap=False, language="bash",

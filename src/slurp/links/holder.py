@@ -69,6 +69,21 @@ def _intro_brand():
   return (f'{logo.svg(size=72, boxed=True)}<div><div style="font-size:28px;font-weight:700;color:#e8eef4">slurp</div>'
           f'<div style="font-size:13px;opacity:.7;margin-top:6px">{logo.TAGLINE}</div></div>')
 
+def icon_font_path():
+  """slurp's icon font (ui/fonts/slurp-icons.ttf)"""
+  try:
+    from ..ui import icons
+    return icons.FONT
+  except ImportError:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "slurp-icons.ttf")
+
+# The terminal of the web page draws in Roboto Mono; slurp's icons (codepoints of Nerd Fonts' Material Design icons)
+# come from slurp's icon font, one cell wide, under the same name: the browser takes it for those codepoints only.
+ICON_FONT_HEAD = ('<link rel="preload" href="/slurp-icons.ttf" as="font" type="font/ttf" crossorigin>'
+                  '<style>' + "".join('@font-face { font-family: "Roboto Mono"; src: url("/slurp-icons.ttf") format("truetype"); '
+                                      f'font-weight: {weight}; unicode-range: U+F0000-F1FFF; }}' for weight in (400, 700))
+                  + '</style>') # (the weights of the text's faces, exactly: a face of another weight is passed over; bold labels too)
+
 # The web page opens slurp:// links (for the slurp helper on the user's computer) like any URL from the app
 # (window.open). A browser may refuse that without a click right before, and nothing shows when the helper is not set
 # up: a banner with the link as a real link to click stays for a while. Downloads open in a new tab (the page stays;
@@ -724,7 +739,7 @@ class Holder:
       page = templates.get_template("app_index.html").render(
         font_size=int(request.query.get("fontsize", "16") or 16), app_websocket_url=f"{'wss' if secure else 'ws'}://{host}/ws",
         config={"static": {"url": f"{'https' if secure else 'http'}://{host}/static/"}}, application={"name": "slurp"}, ping_url="")
-      page = page.replace("<head>", "<head>" + LINK_BANNER + _page_brand(), 1)
+      page = page.replace("<head>", "<head>" + LINK_BANNER + _page_brand() + ICON_FONT_HEAD, 1)
       page = re.sub(r'(<div class="intro">\s*)<svg.*?</svg>\s*<div>[^<]*</div>', lambda m: m[1] + _intro_brand(), page, count=1, flags=re.S)
       response = web.Response(text=page, content_type="text/html")
       response.set_cookie("slurp_view", ticket, httponly=True, samesite="Strict", secure=secure)
@@ -800,9 +815,12 @@ class Holder:
       return web.Response(body=data, content_type="application/octet-stream",
                           headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
 
+    async def icon_font(request):
+      return web.FileResponse(icon_font_path(), headers={"Content-Type": "font/ttf", "Cache-Control": "max-age=86400"})
+
     app = web.Application()
     app.add_routes([web.get("/", index), web.get("/ws", websocket), web.get("/download/{key}", download),
-                    web.static("/static", os.path.join(serve_dir, "static"))])
+                    web.get("/slurp-icons.ttf", icon_font), web.static("/static", os.path.join(serve_dir, "static"))])
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)

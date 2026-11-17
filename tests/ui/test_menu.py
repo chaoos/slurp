@@ -32,7 +32,7 @@ def test_menu(check, quiet):
       check("the header is the top line, above the tabs and subtabs", app.main.query_one("#topbar").region.y == 0
             and app.main.query_one("#cluster-tabs").region.y == 1 and app.main.query_one("#view-tabs").region.y == 2,
             [app.main.query_one(s).region.y for s in ("#topbar", "#cluster-tabs", "#view-tabs")])
-      check("every item of the menu is an action of the app", all(hasattr(app, f"action_{a}") for a, _, _ in filter(None, ITEMS)))
+      check("every item of the menu is an action of the app", all(hasattr(app, f"action_{a}") for a, *_ in filter(None, ITEMS)))
       await pilot.press("f10"); await pilot.pause(0.3)
       check("F10 opens the menu", isinstance(app.screen, MenuScreen))
       button = app.main.query_one("#menu")

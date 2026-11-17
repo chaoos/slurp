@@ -21,6 +21,7 @@ from ...cluster.remote import (
   cluster_work, conn, fs_getsize, fs_isdir, fs_isfile, fs_read, fs_scandir, in_background, start_worker, tab_name
 )
 from ...cluster.paths import is_binary, resolve_path
+from .. import icons
 from ..widgets import clean, ClickTable, crumb_title, PathArea
 from .base import SplitScreen
 
@@ -78,6 +79,10 @@ def open_markdown(app, crumbs, path, bases=(), env=None):
 
 class MarkdownScreen(SplitScreen):
   """Render a Markdown file with Textual's viewer and table of contents."""
+
+  @property
+  def icon_name(self): # (of its subtab)
+    return icons.file_kind(os.path.basename(self.path))
   SHOW_BACK = True
   BINDINGS = [Binding("escape", "back", "Back"), Binding("r", "reload", "Reload")]
 
@@ -117,6 +122,7 @@ DIR_LIMIT = 20000 # entries listed at most
 class DirScreen(SplitScreen):
   """Directory browser: click (or Enter) a subdirectory to enter it, a file to open it"""
   SHOW_BACK = True
+  icon_name = "folder" # (of its subtab)
   BINDINGS = [
     Binding("escape", "back", "Back"),
     Binding("backspace,u", "parent", "Parent"),
@@ -196,7 +202,7 @@ class DirScreen(SplitScreen):
         pass
     table.clear()
     if self.path != "/":
-      table.add_row(Text("../", style="bold"), "", "", key="..")
+      table.add_row(Text(icons.label("folder", "../"), style="bold"), "", "", key="..")
     keys = {"name": lambda e: e["name"].lower(), "size": lambda e: e["size"] or 0, "mtime": lambda e: e["mtime"]}
     shown = [e for e in self.entries if (self.show_hidden or not e["name"].startswith("."))
              and self.pattern.lower() in e["name"].lower()]
@@ -206,7 +212,8 @@ class DirScreen(SplitScreen):
       style = "bold blue" if e["dir"] else ""
       if e["name"].startswith("."):
         style += " dim"
-      name = Text(e["name"] + ("/" if e["dir"] else "") + (" @" if e["link"] else ""), style=style.strip())
+      name = Text(icons.label(icons.file_kind(e["name"], e["dir"]), e["name"] + ("/" if e["dir"] else "") + (" @" if e["link"] else "")),
+                  style=style.strip())
       size = humanize.naturalsize(e["size"]) if e["size"] is not None else ""
       mtime = datetime.fromtimestamp(e["mtime"]).strftime("%Y-%m-%d %H:%M:%S") if e["mtime"] else ""
       table.add_row(name, size, mtime, key=e["name"])
@@ -300,6 +307,10 @@ class DirScreen(SplitScreen):
 class FileScreen(SplitScreen):
   """Read-only viewer for a file (with tail -f style following) or for text (optionally re-run by a refresher)"""
   SHOW_BACK = True
+
+  @property
+  def icon_name(self): # (of its subtab)
+    return icons.file_kind(os.path.basename(self.path)) if self.path else "file"
   BINDINGS = [
     Binding("escape", "back", "Back"),
     Binding("enter", "open_path", "Open path"),

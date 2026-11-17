@@ -11,6 +11,7 @@ from textual.containers import Center, Horizontal, Vertical
 from textual.widgets import Button, Static
 
 from ...cluster.remote import in_background
+from .. import icons
 from ..widgets import open_clicked_url, url_text
 from .base import SplitScreen
 from .clusterinfo import cluster_health, cluster_info, HEALTH_STYLES
@@ -42,15 +43,15 @@ class OverviewScreen(SplitScreen):
         yield Static(id="ov-ssh")
         with Center():
           with Horizontal(id="ov-links"):
-            yield Button("Jobs", id="ov-jobs", variant="primary", compact=True, tooltip="the job list (j)")
+            yield Button(icons.label("jobs", "Jobs"), id="ov-jobs", variant="primary", compact=True, tooltip="the job list (j)")
             yield Static(id="ov-no-slurm")
-            yield Button("Quota", id="ov-quota", compact=True, tooltip="your quotas on the filesystems (Q)")
-            yield Button("Health", id="ov-info", compact=True,
+            yield Button(icons.label("quota", "Quota"), id="ov-quota", compact=True, tooltip="your quotas on the filesystems (Q)")
+            yield Button(icons.label("health", "Health"), id="ov-info", compact=True,
                          tooltip="health with the reasons, occupancy, partitions, node topology (C)")
         with Center(id="ov-connect-row"):
-          yield Button("Connect", id="ov-connect", variant="primary", compact=True, tooltip="log in to the cluster of this tab")
+          yield Button(icons.label("connect", "Connect"), id="ov-connect", variant="primary", compact=True, tooltip="log in to the cluster of this tab")
         with Center(id="ov-disconnect-row"):
-          yield Button("Disconnect", id="ov-disconnect", compact=True, tooltip="end the SSH session of this tab")
+          yield Button(icons.label("disconnect", "Disconnect"), id="ov-disconnect", compact=True, tooltip="end the SSH session of this tab")
         yield Static(id="ov-site")
 
   def on_mount(self):
@@ -145,7 +146,7 @@ class OverviewScreen(SplitScreen):
     info = d.get("info")
     state = self.app.connect_state(cluster) if cluster else None
     connected = cluster is not None and state is None
-    lines = {"#ov-name": Text(cluster.name, style="bold") if cluster else Text(""),
+    lines = {"#ov-name": Text(icons.label("cluster" if cluster.destination else "local", cluster.name), style="bold") if cluster else Text(""),
              "#ov-about": self.about(cluster, info) if cluster else Text(""),
              "#ov-health": self.health(cluster, d, info) if connected else Text(""),
              "#ov-ssh": self.ssh(cluster, state) if cluster else Text(""),
@@ -209,10 +210,10 @@ class OverviewScreen(SplitScreen):
 
   def jobs_label(self, cluster):
     if not cluster.loaded:
-      return "Jobs"
+      return icons.label("jobs", "Jobs")
     queued = [j for j in cluster.jobs.values() if j.queued]
     running = sum(j.running for j in queued)
-    return f"Jobs · {running} running, {len(queued) - running} pending"
+    return icons.label("jobs", f"Jobs · {running} running, {len(queued) - running} pending")
 
   def pack(self, cluster):
     import fnmatch
@@ -230,6 +231,6 @@ class OverviewScreen(SplitScreen):
       if url.startswith(("https://", "http://")):
         if text:
           text.append(" · ")
-        text.append(f"{label} ")
+        text.append(icons.label(key, label) + " ")
         text.append_text(url_text(url, url.split("://", 1)[1].rstrip("/")))
     return text
