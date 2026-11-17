@@ -622,7 +622,7 @@ def p05(ctx):
   if replay.get("uenv_not_pulled"): # (E05 says why)
     return
   if replay.get("uenv_error"): # (not checked: without the uenv every library of it would be missing)
-    yield F("P05", f"the shared libraries are not checked: {replay['uenv_error']}", ctx.directive_line("uenv"),
+    yield F("P05", f"the shared libraries and module loads are not checked: {replay['uenv_error']}", ctx.directive_line("uenv"),
             INFO if replay.get("no_uenv") else WARNING)
     return
   for prog, libs in replay.get("missing", {}).items():
@@ -897,7 +897,8 @@ def e03(ctx):
     yield F("E03", advice.get("text", ""), line, advice.get("severity", INFO))
 
 @rule("E04", WARNING, "Modules that cannot be loaded",
-      "module load commands of the script that fail now (the module does not exist (any more) or conflicts).",
+      "module load commands of the script that fail now (the module does not exist (any more) or conflicts), "
+      "replayed after a fresh login, in the job's uenv if it has one (--uenv, --view: its modules).",
       "The job starts without the software: command not found, missing libraries.",
       "Use modules that exist (module avail / module spider), with versions.", needs="replay")
 def e04(ctx):

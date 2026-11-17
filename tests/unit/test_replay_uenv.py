@@ -24,7 +24,19 @@ image=$1; shift; [ "$1" = -- ] && shift
 grep -q "^${image%%:*}" "$UENV_PULLED" 2>/dev/null || { echo "uenv: no image $image in the repository" >&2; exit 1; }
 [ "$image" = broken/1.0:v1 ] && { echo "uenv: cannot mount broken/1.0:v1: the squashfs file is damaged" >&2; exit 1; }
 [ "$view" = default ] && export LD_LIBRARY_PATH="$UENV_LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+[ "$view" = modules ] && export MODULEPATH="$UENV_MODULES${MODULEPATH:+:$MODULEPATH}"
 exec "$@"
+"""
+
+# module load NAME: as Lmod, an error for a module that is in no directory of MODULEPATH (the uenv's modules view adds
+# its own)
+MODULE = """#!/bin/bash
+[ "$1" = load ] || exit 0; shift
+for m in "$@"; do
+  found=; IFS=: read -ra dirs <<< "${MODULEPATH:-}"
+  for d in "${dirs[@]}"; do [ -n "$d" ] && [ -e "$d/$m" ] && found=1; done
+  [ -n "$found" ] || { echo "Lmod has detected the following error: The following module(s) are unknown: \"$m\"" >&2; exit 1; }
+done
 """
 
 
@@ -40,6 +52,9 @@ def world(tmp_path):
   subprocess.run(["gcc", "-o", str(tmp_path / "sim"), str(tmp_path / "sim.c"), f"-L{libs}", "-luenvfoo"], check=True)
   stub = bin_ / "uenv"
   stub.write_text(STUB); stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+  module = bin_ / "module"
+  module.write_text(MODULE); module.chmod(module.stat().st_mode | stat.S_IEXEC)
+  (tmp_path / "uenv-modules" / "cray-mpich").mkdir(parents=True)
   (tmp_path / "pulled").write_text("prgenv/24.11:v1         gh200  daint   b5f8d5b2a7c5e3d1  4,123     2024-12-05\n"
                                    "broken/1.0:v1           gh200  daint   0123456789abcdef  100       2024-12-05\n")
   return tmp_path
@@ -52,7 +67,7 @@ def replay(world, script, uenv_on_path=True):
   ctx = c.make_context(script, str(world / "job.sh"), facts=facts)
   path = (f"{world / 'bin'}:" if uenv_on_path else "") + "/usr/bin:/bin"
   env = {"PATH": path, "HOME": str(world), "UENV_LOG": str(world / "uenv.log"), "UENV_LIBS": str(world / "uenv-libs"),
-         "UENV_PULLED": str(world / "pulled")}
+         "UENV_PULLED": str(world / "pulled"), "UENV_MODULES": str(world / "uenv-modules")}
   res = subprocess.run(["bash", "-c", environment.replay_command(ctx)], env=env, capture_output=True, text=True, timeout=60)
   ctx.replay = environment.replay_result(ctx, res)
   findings, _ = c.check_script_text(script, str(world / "job.sh"), facts=facts, replay=ctx.replay)
@@ -75,7 +90,7 @@ def test_p05_in_the_jobs_uenv(check, world):
         and not f, ([(x.rule.id, x.evidence) for x in f], r["libs"]))
   r, f = replay(world, script("--uenv=prgenv/24.11:v1", "--view=default"), uenv_on_path=False)
   check("no uenv command on the login node: not checked (info), no missing library", not r["missing"]
-        and [(x.rule.id, x.severity) for x in f] == [("P05", "info")] and "not checked" in f[0].evidence, [(x.rule.id, x.severity, x.evidence) for x in f])
+        and [(x.rule.id, x.severity) for x in f] == [("P05", "info")] and "not checked" in f[0].evidence and "module loads" in f[0].evidence, [(x.rule.id, x.severity, x.evidence) for x in f])
   r, f = replay(world, script("--uenv=broken/1.0:v1"))
   check("a pulled uenv that does not start: not checked (warning, with uenv's error)", [(x.rule.id, x.severity) for x in f]
         == [("P05", "warning")] and "squashfs file is damaged" in f[0].evidence, [(x.rule.id, x.evidence) for x in f])
@@ -117,3 +132,22 @@ def test_e05_a_uenv_that_is_not_pulled(check, world):
     check(f"--uenv={value}: not pulled {want}", environment.not_pulled(value, images) == want, environment.not_pulled(value, images))
   check("the header of uenv image ls is no image", [i["name"] for i in images] == ["prgenv-gnu", "editors"]
         and images[0]["system"] == "daint" and images[0]["arch"] == "gh200" and images[0]["id"] == "b5f8d5b2a7c5e3d1", images)
+
+
+def test_e04_the_modules_of_the_uenv(check, world):
+  def mscript(*directives):
+    return ("#!/bin/bash -l\n#SBATCH --time=00:10:00\n" + "".join(f"#SBATCH {d}\n" for d in directives)
+            + "module load cray-mpich\nsrun ./sim\n")
+  e04 = lambda f: [x for x in f if x.rule.id == "E04"]
+  r, f = replay(world, mscript("--uenv=prgenv/24.11:v1", "--view=modules"), uenv_on_path=True)
+  check("a module of the uenv (its modules view): loaded in the uenv, no E04", not e04(f) and not r["module_errors"],
+        [(x.rule.id, x.evidence) for x in f])
+  r, f = replay(world, mscript())
+  check("without --uenv: the module is unknown on the login node, E04 (the job fails the same)", e04(f)
+        and "cray-mpich" in e04(f)[0].evidence, [(x.rule.id, x.evidence) for x in f])
+  r, f = replay(world, mscript("--uenv=prgenv/25.6:v2", "--view=modules"))
+  check("the uenv not pulled: E05, no E04 (the module loads did not run without it)", not e04(f)
+        and [x.rule.id for x in f] == ["E05"], [(x.rule.id, x.evidence) for x in f])
+  r, f = replay(world, mscript("--uenv=broken/1.0:v1", "--view=modules"))
+  check("the uenv does not start: no E04; P05 says the module loads are not checked either", not e04(f)
+        and any(x.rule.id == "P05" and "module loads" in x.evidence for x in f), [(x.rule.id, x.evidence) for x in f])

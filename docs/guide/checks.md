@@ -43,7 +43,8 @@ libraries (`ldd`), GPU code (`cuobjdump`). A job with a uenv (`--uenv`,
 line asks for one). Before that, `uenv image ls` shows whether the uenv is
 pulled: a job cannot use one that is not, and E05 says so, with the
 `uenv image pull` command. If the login node has no `uenv` command or the uenv does
-not start, the libraries are not checked (P05 says so) rather than all missing.
+not start, the libraries and module loads are not checked (P05 says so) rather
+than all missing or unknown (P05, E04).
 In a container (`--environment`, `--container-image`) the programs are not
 looked at: the login node does not have what the container has. **Check** runs
 all of it again.

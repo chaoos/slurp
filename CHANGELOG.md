@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- E04 (modules that cannot be loaded) in a job with a uenv: the module
+  loads are replayed in the uenv, as the libraries are; when the uenv cannot
+  be used, P05 says the module loads are not checked either. Tested with a
+  module only the uenv's modules view has.
 - New rule E05 (error): the script's uenv (`--uenv`) is not pulled. A job
   can only use a uenv in your repository; `uenv image ls`, run with the
   environment check, lists them. The finding has the `uenv image pull`
