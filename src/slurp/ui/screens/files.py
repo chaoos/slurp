@@ -908,12 +908,13 @@ class FileScreen(SplitScreen):
   file_size = None # as last read
 
   def update_status(self):
-    parts = []
+    """Two lines: the file (its path and size; a long path wraps), then what is shown of it and whether it is followed"""
+    parts, head = [], ""
     if self.path:
       if self.file_size is None:
-        parts.append(f"{self.path}  (not readable)" if self.decoder else f"{self.path} · loading …")
+        head = f"{self.path}  (not readable)" if self.decoder else f"{self.path} · loading …"
       else:
-        parts.append(f"{self.path}  {humanize.naturalsize(self.file_size)}")
+        head = f"{self.path}  {humanize.naturalsize(self.file_size)}"
       if self.file_size and not self.whole:
         share = lambda pos: f"{100 * pos / self.file_size:.0f}%"
         where = (f"lines {self.first_line:,}–{self.first_line + max(0, self.area.document.line_count - 2):,}, "
@@ -925,7 +926,10 @@ class FileScreen(SplitScreen):
       parts.append("following" if self.following else "not following (f)")
     if self.refresher:
       parts.append("watching every 5 s" if self.watching else "w: watch, r: run again")
-    self.query_one("#fstatus", Static).update(" · ".join(parts))
+    status = Text(head, style="bold") if head else Text()
+    if parts:
+      status.append(("\n" if head else "") + " · ".join(parts))
+    self.query_one("#fstatus", Static).update(status)
 
   def show_line_numbers(self):
     area = self.area

@@ -221,7 +221,7 @@ class Slurp(App):
   #cmd { width: 1fr; }
   #node { width: 28; }
   #presets Button { margin-right: 1; min-width: 8; }
-  #fstatus { height: 1; padding: 0 1; background: $panel; }
+  #fstatus { height: auto; max-height: 4; padding: 0 1; background: $panel; }
   #text { height: 1fr; }
   #search, #goto, #dsearch, #jfilter { dock: bottom; display: none; }
   #search.visible, #goto.visible, #dsearch.visible, #jfilter.visible { display: block; }

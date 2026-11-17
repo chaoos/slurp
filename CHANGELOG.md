@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- A text file's status is two lines: its path and size (a long path wraps), then what is shown and
+  whether it is followed, which a long path hid before.
 - The subtabs of a tab are kept for the next start: once the tab is
   connected and its job list loaded, its job and array windows, files and
   directories, the categories, the guides and the rule catalogue open

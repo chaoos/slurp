@@ -68,3 +68,25 @@ def test_a_text_file_opens_at_its_top(check, home):
             (area.cursor_location, app.screen.following))
       await pilot.press("q")
   asyncio.run(main())
+
+
+def test_a_long_path_leaves_room_for_the_state(check, home):
+  """The status of a file: its path (and size) on a line of its own, wrapped when long; the state below, always seen"""
+  deep = home / ("a_very_long_directory_name_for_a_project_" * 2) / ("and_a_run_with_many_parameters_" * 2)
+  deep.mkdir(parents=True)
+  log = deep / "slurm-123456_with_a_long_name_too.out"
+  log.write_text("step 1/10\n")
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(100, 30)) as pilot:
+      await until(pilot, lambda: app.main is not None and app.cluster.loader is None)
+      open_path(app, ["Jobs", "1"], str(log), follow=True)
+      ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and app.screen.file_size is not None)
+      await pilot.pause(0.3)
+      box = app.screen.query_one("#fstatus")
+      lines = [line.text for line in app.screen.query_one("#fstatus").render_lines(box.region.reset_offset)] if ok else []
+      text = "\n".join(lines)
+      check("the path wraps, the state is on a line of its own, with following", ok and box.region.height >= 3
+            and lines[-1].strip().startswith("following") and "slurm-123456" in text.replace("\n", ""), lines)
+      await pilot.press("q")
+  asyncio.run(main())
