@@ -40,9 +40,14 @@ def saved(cluster):
     return entry["path"], bool(entry.get("read_only"))
   return default_path(cluster), False
 
-def save(cluster, path, read_only):
+def saved_remote(cluster):
+  """The directory of the cluster chosen for the tab's drive before ("": the login directory)"""
+  entry = (load_config().get("drive_mounts") or {}).get(cluster.destination or "")
+  return str(entry.get("remote") or "") if isinstance(entry, dict) else ""
+
+def save(cluster, path, read_only, remote=""):
   mounts = dict(load_config().get("drive_mounts") or {})
-  mounts[cluster.destination or ""] = {"path": path, "read_only": read_only}
+  mounts[cluster.destination or ""] = {"path": path, "read_only": read_only, **({"remote": remote} if remote else {})}
   update_config(drive_mounts=mounts)
 
 def mount_table():
@@ -88,6 +93,7 @@ class LocalDrive:
   def __init__(self, cluster, events=lambda *a: None):
     self.cluster, self.events = cluster, events
     self.path, self.read_only = saved(cluster)
+    self.remote = saved_remote(cluster) # the directory of the cluster it shows ("": the login directory)
     self.proc = None            # the sshfs process (asyncio)
     self.state = "unmounted"
     self.error = ""
@@ -106,8 +112,9 @@ class LocalDrive:
     self.link = None            # the control socket path sshfs uses: a symlink to the tab's current socket
 
   # ---- mount, unmount
-  async def mount(self, path, read_only, sftp_server=""):
-    """Mount (the tab must be connected); returns an error text or ""."""
+  async def mount(self, path, read_only, sftp_server="", remote=None):
+    """Mount (the tab must be connected) the directory remote of the cluster (None: the one chosen before; "": the
+    login directory) at path; returns an error text or ""."""
     c = self.cluster.connection
     if self.proc is not None and self.proc.returncode is None:
       return "already mounted"
@@ -133,9 +140,11 @@ class LocalDrive:
     except OSError as e:
       return f"cannot use {path}: {e}"
     self.path, self.read_only, self.server = path, read_only, sftp_server
+    if remote is not None:
+      self.remote = "" if remote == c.home else remote
     self.wanted = True
-    save(self.cluster, path, read_only)
-    home = c.home or "."
+    save(self.cluster, path, read_only, self.remote)
+    home = self.remote or c.home or "."
     self.source = f"{self.cluster.destination}:{home}"
     self.update_link()
     ssh = f"ssh -S {self.link} -o ControlMaster=no -o BatchMode=yes"

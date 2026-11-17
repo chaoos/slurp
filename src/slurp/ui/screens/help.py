@@ -276,9 +276,14 @@ go through **Cloudflare**: a public https address that opens in any browser, not
 address is the key; Cloudflare can read what passes).
 """),
   "DriveScreen": ("Map a directory", """
-Your login directory of the cluster as a drive (Map a directory…, `F`): **on this machine** (sshfs through the tab's session, at the path
-given, optionally read only; the connection window shows its state), or **on your own machine** (a link with commands
-for sshfs, SSHFS-Win, WinSCP).
+A directory of the cluster as a drive (Map a directory…, `F`): **on this machine** (sshfs through the tab's session,
+optionally read only; the connection window shows its state), or **on your own machine** (a link with commands for
+sshfs, SSHFS-Win, WinSCP).
+
+On this machine, **Directory** is the one of the cluster: choose it in the list (your home, scratch, project, …:
+`$SCRATCH`, `$PROJECT`, `$STORE`, `$WORK`, those set on the cluster), or type a path next to it (`~/…` and relative
+paths: in your home; the list then says Other). **Mount at** is an empty or new directory here. Both are remembered
+for the tab; while it is mounted they stay as they are (Unmount first).
 """),
   "ShellChoiceScreen": ("Shell", """
 Where the shell opens: **in slurp** (a subtab with a terminal), or **from your own terminal** (a link: an ssh command

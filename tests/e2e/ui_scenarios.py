@@ -39,7 +39,7 @@ from slurp.ui.screens.dialogs import CommandScreen, ConfirmScreen, CopyScreen, R
 from slurp.ui.screens.files import DirScreen, FileScreen, open_path, OpenDirScreen
 from slurp.ui.screens.help import AboutScreen, VIEW_HELP, ViewHelpScreen
 from slurp.ui.screens.job import JobScreen
-from slurp.ui.screens.links import DriveScreen, link_state, LinkScreen, LinkSetupScreen, ShellChoiceScreen
+from slurp.ui.screens.links import OTHER_PLACE, DriveScreen, link_state, LinkScreen, LinkSetupScreen, ShellChoiceScreen
 from slurp.ui.screens.main import MainScreen
 from slurp.ui.screens.options import OptionsScreen
 from slurp.ui.screens.script import ScriptScreen
@@ -2723,6 +2723,38 @@ async def t_drive(app, pilot):
   busy = os.path.join(HERE, "share", "drivebusy"); os.makedirs(busy, exist_ok=True); open(os.path.join(busy, "x"), "w").write("x")
   app.mount_drive(cluster, busy, False); await pilot.pause(1)
   check("a directory that is not empty is refused", drive.state != "mounted" and any("not empty" in m for _, m in notes(app)))
+  # another directory of the cluster: chosen from the places, or a path typed in
+  sub = os.path.join(home, "drive-sub"); os.makedirs(sub, exist_ok=True); open(os.path.join(sub, "only-here.txt"), "w").write("x")
+  while not isinstance(app.screen, MainScreen) and len(app.screen_stack) > 1:
+    await pilot.press("escape"); await pilot.pause(0.2)
+  app.screen.query_one("#jobs").focus(); await pilot.press("F")
+  ok = await until(pilot, lambda: isinstance(app.screen, DriveScreen) and app.screen.places, 30)
+  scr = app.screen
+  options = [label for label, _ in scr.places]
+  check("Directory: the places of the cluster, home first and chosen", ok and options[0] == "Home"
+        and scr.query_one("#drive-place").value == home and scr.query_one("#drive-remote").value == home, (options, scr.query_one("#drive-place").value))
+  if len(scr.places) > 1:
+    label, path = scr.places[1]
+    scr.query_one("#drive-place").value = path; await pilot.pause(0.2)
+    check(f"choosing {label}: its path in the field", scr.query_one("#drive-remote").value == path)
+  scr.query_one("#drive-remote").value = "drive-sub"; await pilot.pause(0.2)
+  check("a path typed in: the list says Other", scr.query_one("#drive-place").value == OTHER_PLACE)
+  scr.query_one("#drive-path").value = mnt; scr.query_one("#drive-ro").value = True
+  scr.query_one("#drive-mount").press()
+  ok = await until(pilot, lambda: drive.state == "mounted", 20)
+  listing = await asyncio.get_running_loop().run_in_executor(None, lambda: sorted(os.listdir(mnt)) if ok else [])
+  check("Mount here: that directory (relative: in home) at the path, not the login directory", ok and listing == ["only-here.txt"]
+        and drive.source == f"lab:{sub}", (drive.state, listing, drive.source))
+  check("…remembered for the tab", (load_config().get("drive_mounts") or {}).get("lab", {}).get("remote") == sub)
+  await until(pilot, lambda: scr.query_one("#drive-remote").disabled, 5)
+  check("while mounted the directory is fixed (Unmount first)", scr.query_one("#drive-remote").disabled and scr.query_one("#drive-place").disabled)
+  scr.query_one("#drive-unmount").press()
+  await until(pilot, lambda: drive.state == "unmounted", 15)
+  scr.query_one("#drive-remote").value = "no-such-dir"; await pilot.pause(0.6)
+  scr.query_one("#drive-mount").press(); await pilot.pause(1.5)
+  check("a directory that does not exist on the cluster: said so, nothing mounted", drive.state != "mounted"
+        and any("no directory on lab" in m for _, m in notes(app)))
+  await pilot.press("escape"); await pilot.pause(0.3)
   update_config(drive_mounts=None)
 
 

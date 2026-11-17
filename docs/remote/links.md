@@ -10,8 +10,11 @@ SSH client on your own machine (OpenSSH in any terminal, cmd or PowerShell,
 PuTTY, …). **Map a directory…** (in the menu, `F`) asks where your login directory goes as a drive:
 
 - **On this machine** (where slurp runs): `sshfs` through the session of the tab
-  (no login), at a path you choose (default `~/mnt/<tab>`, remembered per tab
-  as `"drive_mounts"` in the settings), read only if you like. The connection
+  (no login). **Directory** is the directory of the cluster: your home, scratch,
+  project, … from the list (`$SCRATCH`, `$PROJECT`, `$STORE`, `$WORK`, those set
+  on the cluster) or a path typed in (`~/…` and relative paths are in your home).
+  It goes at a path you choose (default `~/mnt/<tab>`), both remembered per tab
+  as `"drive_mounts"` in the settings, read only if you like. The connection
   window shows its state (connecting, mounted since, not answering,
   reconnecting, failed and why, or something else mounted there) and offers
   Mount…, Unmount, Remount and Force unmount. When the session of the tab

@@ -1194,8 +1194,9 @@ class Slurp(App):
       self.refresh_status()
     asyncio.ensure_future(run())
 
-  def mount_drive(self, cluster, path, read_only):
-    self.drive_task(cluster, self.drive_of(cluster).mount(path, read_only, getattr(cluster, "sftp_server", "")))
+  def mount_drive(self, cluster, path, read_only, remote=None):
+    """remote: the directory of the cluster (None: as before; "": the login directory)"""
+    self.drive_task(cluster, self.drive_of(cluster).mount(path, read_only, getattr(cluster, "sftp_server", ""), remote))
 
   def unmount_drive(self, cluster, lazy=False):
     self.drive_task(cluster, self.drive_of(cluster).unmount(lazy))

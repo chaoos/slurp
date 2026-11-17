@@ -782,10 +782,12 @@ class HelperSetupScreen(ModalScreen):
       event.stop()
     self.dismiss()
 
+OTHER_PLACE = "Other: the path →" # (the entry of the place list for a path typed in)
+
 class DriveScreen(ModalScreen):
-  """Drive: where the login directory of the tab goes. On this machine (where slurp runs: sshfs through the tab's
-  session, at a path remembered per tab) or on the user's own machine (a link). Dismissed with "link" for the
-  latter."""
+  """Map a directory: a directory of the tab's cluster as a drive. On this machine (where slurp runs: sshfs through
+  the tab's session; the directory chosen from the tab's places, home, scratch, project, …, or typed in, and the
+  mount point, remembered per tab) or on the user's own machine (a link). Dismissed with "link" for the latter."""
   DEFAULT_CSS = """
   DriveScreen { align: center middle; }
   #drive-dialog { width: 96; max-width: 98%; height: auto; max-height: 95%; border: thick $accent; background: $surface; padding: 0 1; }
@@ -795,6 +797,7 @@ class DriveScreen(ModalScreen):
   .drive-row { height: auto; margin-bottom: 1; }
   .drive-row Label { width: 12; padding-top: 1; }
   .drive-row Input { width: 1fr; }
+  #drive-place { width: 24; margin-right: 1; }
   #drive-state { height: auto; margin-bottom: 1; }
   .drive-buttons { height: auto; align-horizontal: right; margin-bottom: 1; }
   .drive-buttons Button { margin-left: 1; }
@@ -809,14 +812,21 @@ class DriveScreen(ModalScreen):
     import socket
     drive = self.app.drive_of(self.cluster)
     with Vertical(id="drive-dialog"):
-      yield Static(icons.label("drive", f"Map a directory: {self.cluster.name} {self.home}"), id="drive-title", markup=False)
+      yield Static(icons.label("drive", f"Map a directory: {self.cluster.name}"), id="drive-title", markup=False)
       yield Static(f"On this machine ({socket.gethostname()}, where slurp runs)", classes="drive-section", markup=False)
       yield Static("sshfs through the session of this tab (no login); slurp shows its state in the connection window "
                    "and unmounts it when it quits." + (f"\nNot possible: {self.local_reason}" if self.local_reason else ""),
                    classes="drive-text", markup=False)
       with Horizontal(classes="drive-row"):
-        yield Label("Path")
-        yield Input(drive.path, id="drive-path", disabled=bool(self.local_reason), tooltip="an empty or new directory; remembered for this tab")
+        yield Label("Directory")
+        yield Select([("Home", self.home), (OTHER_PLACE, OTHER_PLACE)], id="drive-place", allow_blank=False,
+                     value=OTHER_PLACE if drive.remote and drive.remote != self.home else self.home,
+                     disabled=bool(self.local_reason), tooltip="the directory of the cluster: home, scratch, project, …")
+        yield Input(drive.remote or self.home, id="drive-remote", disabled=bool(self.local_reason),
+                    tooltip="the directory of the cluster to map (~ and relative paths: in your home); remembered for this tab")
+      with Horizontal(classes="drive-row"):
+        yield Label("Mount at")
+        yield Input(drive.path, id="drive-path", disabled=bool(self.local_reason), tooltip="an empty or new directory here; remembered for this tab")
       with Horizontal(classes="drive-row"):
         yield Label("Read only")
         yield Switch(value=drive.read_only, id="drive-ro", disabled=bool(self.local_reason))
@@ -835,6 +845,43 @@ class DriveScreen(ModalScreen):
   def on_mount(self):
     self.show_state()
     self.set_interval(0.5, self.show_state)
+    if not self.local_reason:
+      from .files import with_places
+      with_places(self, self.cluster, self.show_places)
+
+  places = ()
+  setting = False # (the list is set by the program: no event of the user)
+
+  def show_places(self, places):
+    """The places of the tab (home, $SCRATCH, $PROJECT, …) in the list; the path shown picks its entry"""
+    self.places = [(label, path) for label, path in places if path] or [("Home", self.home)]
+    self.setting = True
+    self.query_one("#drive-place", Select).set_options([*self.places, (OTHER_PLACE, OTHER_PLACE)])
+    self.call_after_refresh(self.match_place)
+
+  def match_place(self):
+    """The list shows the place of the path typed in, or Other"""
+    remote = self.query_one("#drive-remote", Input).value.strip().rstrip("/") or "/"
+    paths = [path for _, path in (self.places or [("Home", self.home)])]
+    select = self.query_one("#drive-place", Select)
+    value = remote if remote in paths else OTHER_PLACE
+    if select.value != value:
+      self.setting = True
+      select.value = value
+    self.call_after_refresh(lambda: setattr(self, "setting", False))
+
+  @on(Select.Changed, "#drive-place")
+  def place_chosen(self, event):
+    if self.setting:
+      return
+    if event.value == OTHER_PLACE:
+      self.query_one("#drive-remote", Input).focus()
+    elif event.value != Select.BLANK:
+      self.query_one("#drive-remote", Input).value = event.value
+
+  @on(Input.Changed, "#drive-remote")
+  def remote_changed(self, event):
+    self.match_place()
 
   def show_state(self):
     if not self.is_mounted:
@@ -845,6 +892,8 @@ class DriveScreen(ModalScreen):
     ours = drive.state in ("mounting", "mounted", "broken", "unmounting", "reconnecting")
     self.query_one("#drive-unmount", Button).display = ours
     self.query_one("#drive-mount", Button).display = not ours
+    for widget in self.query("#drive-place, #drive-remote, #drive-path"): # (what is mounted: changed after Unmount)
+      widget.disabled = ours or bool(self.local_reason)
 
   @on(Button.Pressed, "#drive-mount")
   def mount_pressed(self, event):
@@ -853,7 +902,17 @@ class DriveScreen(ModalScreen):
     if not path:
       self.notify("give a path", severity="error")
       return
-    self.app.mount_drive(self.cluster, path, self.query_one("#drive-ro", Switch).value)
+    from .files import expand_path
+    from ...cluster.remote import fs_isdir, in_background
+    remote = expand_path(self.query_one("#drive-remote", Input).value or "~", self.home)
+    read_only, cluster = self.query_one("#drive-ro", Switch).value, self.cluster
+    def checked(isdir):
+      if isdir:
+        self.app.mount_drive(cluster, path, read_only, remote)
+      elif isdir is not None:
+        self.notify(f"{remote} is no directory on {cluster.name}", severity="error")
+    in_background(self, lambda: fs_isdir(remote), checked, group="drive-check",
+                  connection=cluster.connection if cluster.destination else None)
 
   @on(Button.Pressed, "#drive-unmount")
   def unmount_pressed(self, event):

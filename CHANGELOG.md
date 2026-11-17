@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Map a directory… on this machine: **Directory** chooses the directory of
+  the cluster from a list (home, scratch, project, …, those set on the
+  cluster) or as a path typed in; before, it was always the login directory.
+  It is remembered per tab and mounted again after a reconnect; one that
+  does not exist is refused.
 - The menu's **Login directory as a drive** is now **Map a directory…**
   (`F`), next to **Open a directory…** (`d`).
 - The job window has a **Reload** button (as `r`): the job, its files and
