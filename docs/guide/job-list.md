@@ -76,7 +76,10 @@ the job selected in a category.
 **New** (`n`), **Rename** (`e`: another path moves it with all it has, into an
 existing category they merge), **Delete** (`Del`: its jobs go to the category
 it is in), **Categorize…** (`c`) and **Take job out** (`x`) for the job
-selected, **In the job list** (`l`) and **Reload** (`r`).
+selected, **In the job list** (`l`) and **Reload** (`r`). **Notes…** (`o`)
+annotates the category selected in Markdown (what it is for, how its runs
+differ, links); the window shows the notes rendered under its numbers, a
+rename takes them along.
 
 The categories are kept on the cluster, in `~/.config/slurp/categories.json`
 in your home there, so slurp on your own machine and slurp on the login node

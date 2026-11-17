@@ -54,8 +54,11 @@ def array_of(jid):
   """The array (or job) a job id belongs to: "123_4" -> "123" """
   return str(jid).partition(".")[0].partition("_")[0]
 
+MAX_NOTES = 20000 # characters of a category's notes at most
+
 class Store:
-  """The categories of one Slurm cluster: their paths, and the jobs in them ({jid: {category, name, added}})"""
+  """The categories of one Slurm cluster: their paths, the jobs in them ({jid: {category, name, added}}), and notes
+  of categories (Markdown, {path: text})"""
 
   def __init__(self, cluster="default", data=None):
     data = data if isinstance(data, dict) else {}
@@ -75,9 +78,18 @@ class Store:
           continue
         self.jobs[str(jid)] = entry
         self.paths.update(lineage(entry["category"]))
+    self.notes = {}
+    for p, text in (data.get("notes") or {}).items():
+      try:
+        if isinstance(text, str) and text.strip():
+          self.notes[normalize(p)] = text[:MAX_NOTES]
+          self.paths.update(lineage(normalize(p)))
+      except ValueError:
+        pass
 
   def to_data(self):
-    return {"categories": sorted(self.paths), "jobs": dict(sorted(self.jobs.items()))}
+    return {"categories": sorted(self.paths), "jobs": dict(sorted(self.jobs.items())),
+            **({"notes": dict(sorted(self.notes.items()))} if self.notes else {})}
 
   # ---- reading
   def category_of(self, jid):
@@ -98,7 +110,21 @@ class Store:
   def count(self, path, recursive=True):
     return len(self.job_ids(path, recursive))
 
+  def notes_of(self, path):
+    """The notes of a category (Markdown), "" if none"""
+    return self.notes.get(path, "")
+
   # ---- changes (on a store just read from the file: see change())
+  def note(self, path, text):
+    """Notes of a category (Markdown; empty: none)"""
+    path = self.add(path)
+    text = (text or "").strip()
+    if text:
+      self.notes[path] = text[:MAX_NOTES]
+    else:
+      self.notes.pop(path, None)
+    return path
+
   def add(self, path):
     path = normalize(path)
     self.paths.update(lineage(path))
@@ -138,6 +164,11 @@ class Store:
       return new + p[len(old):] if within(p, old) else p
     self.paths = {moved(p) for p in self.paths}
     self.paths.update(lineage(new))
+    notes = {}
+    for p, text in self.notes.items(): # (they go with it; into an existing one: one after the other)
+      key = moved(p)
+      notes[key] = notes[key] + "\n\n" + text if key in notes else text
+    self.notes = notes
     for entry in self.jobs.values():
       entry["category"] = moved(entry["category"])
     return new
@@ -147,6 +178,7 @@ class Store:
     path = normalize(path)
     up = parent(path)
     self.paths = {p for p in self.paths if not within(p, path)}
+    self.notes = {p: text for p, text in self.notes.items() if not within(p, path)}
     for jid, entry in list(self.jobs.items()):
       if within(entry["category"], path):
         if up:
@@ -212,7 +244,7 @@ def cluster_name():
 def load(cluster):
   return Store(cluster, read_all()["clusters"].get(cluster))
 
-OPS = ("add", "assign", "unassign", "rename", "delete") # (the changes, by name: kept to be done later, see jobcache)
+OPS = ("add", "assign", "unassign", "rename", "delete", "note") # (the changes, by name: kept to be done later, see jobcache)
 
 def apply_op(store, op):
   """[name, args...] on a store; its result"""

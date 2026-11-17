@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Categories have notes, in Markdown: **Notes…** (`o`) in the categories
+  window; shown there rendered, under the numbers of the category.
 - The job list, the job window and the array window refresh by themselves
   every 60 s (`"refresh_seconds"` in the config; counted from the last
   load, `r` too); **⟳ 0:42** in the title bar counts down, a click there

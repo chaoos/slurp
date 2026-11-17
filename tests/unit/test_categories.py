@@ -63,3 +63,28 @@ def test_categories(check, tmp_path, monkeypatch):
   try: c.change("daint", lambda st: st.add("x")); refused = False
   except ValueError as e: refused = "not valid JSON" in str(e)
   check("a broken file is not overwritten (and says so)", refused and open(path).read() == "{ broken")
+
+
+def test_notes(check):
+  s = c.Store("daint")
+  s.note("proj/prod", "  # Production\n\nruns of **v2**  \n")
+  check("notes: the category is made, the text kept (trimmed)", "proj/prod" in s.paths and "proj" in s.paths
+        and s.notes_of("proj/prod") == "# Production\n\nruns of **v2**" and s.notes_of("proj") == "")
+  data = s.to_data()
+  check("in the file's data, and read back", data["notes"] == {"proj/prod": "# Production\n\nruns of **v2**"}
+        and c.Store("daint", data).notes == s.notes)
+  check("no notes: not in the data", "notes" not in c.Store("x").to_data())
+  s.note("proj", "the project")
+  s.rename("proj", "archive/proj")
+  check("rename: the notes go with it (and those in it)", s.notes == {"archive/proj": "the project", "archive/proj/prod": "# Production\n\nruns of **v2**"}, s.notes)
+  s.note("other", "other notes")
+  s.rename("other", "archive/proj")
+  check("merged into one with notes: both kept", s.notes_of("archive/proj") == "the project\n\nother notes", s.notes)
+  s.note("archive/proj", "   ")
+  check("empty: no notes", "archive/proj" not in s.notes and "archive/proj" in s.paths)
+  s.delete("archive")
+  check("delete: its notes go too", not s.notes, s.notes)
+  c.apply_op(s, ["note", "a", "x" * (c.MAX_NOTES + 10)])
+  check("an op, kept to a size", len(s.notes_of("a")) == c.MAX_NOTES)
+  bad = c.Store("x", {"notes": {"/": "x", "b": 3, "c": "ok"}})
+  check("broken notes in a file: skipped", bad.notes == {"c": "ok"}, bad.notes)

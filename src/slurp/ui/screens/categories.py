@@ -7,9 +7,9 @@ from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Static, Tree
+from textual.widgets import Button, Input, Markdown, Static, TextArea, Tree
 from .. import icons
 
 from ...cluster import categories as cat
@@ -130,6 +130,48 @@ class NameScreen(ModalScreen[str | None]):
       event.stop()
     self.dismiss(None)
 
+class NotesScreen(ModalScreen[str | None]):
+  """The notes of a category, in Markdown; dismissed with the text ("": none) or None (cancelled)"""
+  DEFAULT_CSS = """
+  NotesScreen { align: center middle; }
+  #nt-dialog { width: 100; max-width: 95%; height: 32; max-height: 95%; border: thick $accent; background: $surface; padding: 1 2; }
+  #nt-title { text-style: bold; height: auto; }
+  #nt-note { color: $text-muted; height: auto; margin-bottom: 1; }
+  #nt-text { height: 1fr; }
+  #nt-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #nt-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("ctrl+s", "save", "Save", priority=True)]
+
+  def __init__(self, path, text):
+    super().__init__()
+    self.path, self.text = path, text
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="nt-dialog"):
+      yield Static(f"Notes of {self.path}", id="nt-title", markup=False)
+      yield Static("Markdown: # headings, **bold**, - lists, `code`, [links](https://…). Shown in the categories window. "
+                   "Empty: no notes. Ctrl+S saves.", id="nt-note", markup=False)
+      yield TextArea(self.text, id="nt-text", language="markdown", soft_wrap=True, show_line_numbers=False)
+      with Horizontal(id="nt-buttons"):
+        yield Button("Cancel", id="nt-cancel", compact=True)
+        yield Button("Save", id="nt-ok", variant="primary", compact=True)
+
+  def on_mount(self):
+    self.query_one("#nt-text", TextArea).focus()
+
+  @on(Button.Pressed, "#nt-ok")
+  def action_save(self, event=None):
+    if event is not None:
+      event.stop()
+    self.dismiss(self.query_one("#nt-text", TextArea).text)
+
+  @on(Button.Pressed, "#nt-cancel")
+  def action_cancel(self, event=None):
+    if event is not None:
+      event.stop()
+    self.dismiss(None)
+
 class CategorizeScreen(ModalScreen[tuple | None]):
   """Put jobs in a category: one of the tree, or a new one typed in; or take them out of theirs.
   Dismissed with ("assign", path), ("remove", None) or None."""
@@ -225,6 +267,7 @@ class CategoriesScreen(SplitScreen):
     Binding("c", "categorize", "Categorize job"),
     Binding("l", "in_list", "In the job list"),
     Binding("r", "reload", "Reload"),
+    Binding("o", "notes", "Notes"),
   ]
   DEFAULT_CSS = """
   #cat-body { height: 1fr; }
@@ -234,6 +277,9 @@ class CategoriesScreen(SplitScreen):
   #cat-side-buttons Button { width: 1fr; margin: 0 1 0 0; min-width: 8; }
   #cat-main { width: 1fr; height: 1fr; padding: 0 0 0 1; }
   #cat-info { height: auto; }
+  #cat-notes-box { height: auto; max-height: 40%; border: round $panel; border-title-color: $text-muted; padding: 0 1; }
+  #cat-notes-box.-empty { display: none; }
+  #cat-notes { margin: 0; padding: 0; }
   #cat-main-buttons { height: auto; margin: 1 0 0 0; }
   #cat-main-buttons Button { margin: 0 1 0 0; }
   #cat-jobs { height: 1fr; }
@@ -269,11 +315,14 @@ class CategoriesScreen(SplitScreen):
           yield Button("Delete", id="cat-delete", variant="error", tooltip="its jobs go to the category it is in (Del)", compact=True)
       with Vertical(id="cat-main"):
         yield Static(id="cat-info")
+        with VerticalScroll(id="cat-notes-box", classes="-empty"):
+          yield Markdown(id="cat-notes", open_links=False)
         with Horizontal(id="cat-main-buttons"):
           yield Button(icons.label("reload", "Reload"), id="cat-reload", variant="primary", tooltip="ask Slurm again (r)", compact=True)
           yield Button("In the job list", id="cat-list", tooltip="the job list filtered to this category (l)", compact=True)
           yield Button("Categorize…", id="cat-categorize", tooltip="the job selected in a category, another or a new one (c)", compact=True)
           yield Button("Take job out", id="cat-take-out", variant="warning", tooltip="the job selected leaves its category (x)", compact=True)
+          yield Button("Notes…", id="cat-notes-edit", tooltip="notes of the category, in Markdown (o)", compact=True)
         yield ClickTable(id="cat-jobs", cursor_type="row", zebra_stripes=True)
 
   def on_mount(self):
@@ -330,6 +379,7 @@ class CategoriesScreen(SplitScreen):
   # ---- the category shown
   def show_category(self):
     store = self.store
+    self.show_notes()
     if self.path == NONE:
       self.loose = self.uncategorized()
       ids = list(self.loose)
@@ -496,6 +546,35 @@ class CategoriesScreen(SplitScreen):
     return str(table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value)
 
   # ---- changes
+  def show_notes(self):
+    """The notes of the category selected, rendered (none: the box is hidden)"""
+    text = self.store.notes_of(self.path) if self.path and self.path != NONE else ""
+    box = self.query_one("#cat-notes-box", VerticalScroll)
+    box.border_title = f"notes of {cat.leaf(self.path)}" if text else ""
+    box.set_class(not text, "-empty")
+    self.query_one("#cat-notes-edit", Button).disabled = not self.path or self.path == NONE
+    if getattr(self, "notes_shown", None) != text:
+      self.notes_shown = text
+      self.query_one("#cat-notes", Markdown).update(text)
+
+  @on(Markdown.LinkClicked, "#cat-notes")
+  def note_link(self, event):
+    event.stop()
+    href = event.href or ""
+    if href.startswith(("http://", "https://")):
+      self.app.open_page(href)
+
+  @on(Button.Pressed, "#cat-notes-edit")
+  def action_notes(self, event=None):
+    path = self.path
+    if not path or path == NONE:
+      self.notify("select a category in the tree first", severity="warning")
+      return
+    def saved(text):
+      if text is not None and text.strip() != self.store.notes_of(path):
+        change_categories(self.app, self.cluster, ["note", path, text], lambda st, p: self.changed(p), "writing notes")
+    self.app.push_screen(NotesScreen(path, self.store.notes_of(path)), saved)
+
   def changed(self, select=None):
     self.refresh_tree(select)
     self.show_category()

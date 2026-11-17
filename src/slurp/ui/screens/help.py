@@ -265,12 +265,19 @@ has, the ones in the categories in it counted too), and for the one selected its
 - **New** (`n`, in the category selected), **Rename** (`e`: another path moves it, with all it has), **Delete**
   (`Del`: its jobs go to the category it is in). **In the job list** (`l`) filters the job list to the category
   (`cat:` in the filter). **Reload** (`r`) reads the categories and asks Slurm again.
+- **Notes…** (`o`): notes of the category, in Markdown (what it is for, how the runs differ, links); shown under its
+  numbers. A rename takes them along, a delete removes them.
 - They are kept on the cluster (`~/.config/slurp/categories.json` in your home there), per Slurm cluster: slurp on
   your own machine and slurp on the login node see the same.
 """),
   "CategorizeScreen": ("Categorize", """
 Put the jobs in a category: pick one in the tree, or type a new one (`a/b` makes b in a, and a if it is new).
 An array goes in as a whole, with all its tasks. **Take out of its category** leaves them in none.
+"""),
+  "NotesScreen": ("Notes of a category", """
+Notes of the category, in Markdown: `# headings`, `**bold**`, `- lists`, `` `code` ``, `[links](https://…)`. The
+categories window shows them rendered, under the numbers of the category. **Save** (`Ctrl+S`) keeps them with the
+categories (on the cluster); empty: no notes.
 """),
   "NameScreen": ("Category name", """
 The name of a category: `a/b` is b in the category a (made too, if it is new). Renaming to another path moves it

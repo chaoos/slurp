@@ -30,7 +30,7 @@ from slurp.config import config_path, load_config, update_config
 from slurp.cluster.jobs import array_overview, ERR_SIZES, JobProgress, progress_state, set_progress_file
 from slurp.cluster.remote import HEALTH_STYLES
 from slurp.ui.screens.array import ArrayScreen, epoch
-from slurp.ui.screens.categories import CategoriesScreen, CategorizeScreen, NONE
+from slurp.ui.screens.categories import CategoriesScreen, CategorizeScreen, NONE, find_node
 from slurp.ui.screens.checks import FixPreviewScreen, GuidesScreen, RuleCatalogueScreen
 from slurp.ui.screens.clusterinfo import cluster_health, ClusterInfoScreen
 from slurp.ui.screens.overview import OverviewScreen
@@ -1255,6 +1255,23 @@ async def t_categories(app, pilot):
   app.screen.query_one("#nm-path").value = "proj X/checks"; await pilot.press("enter")
   ok = await until(pilot, lambda: cluster.categories.category_of("9003") == "proj X/checks", 10); await pilot.pause(0.4)
   check("rename (e): the category and its job, the tree follows", ok and "proj X/tests" not in cluster.categories.paths and cs.path == "proj X/checks", cs.path)
+  # notes, in Markdown
+  box = cs.query_one("#cat-notes-box")
+  check("no notes: no box", not box.display or box.has_class("-empty"))
+  await pilot.press("o"); await pilot.pause(0.4)
+  ok = type(app.screen).__name__ == "NotesScreen"
+  if ok:
+    app.screen.query_one("#nt-text").text = "# Checks\n\nruns with **-O0**\n\n- one\n- two\n"
+    await pilot.press("ctrl+s")
+  ok = ok and await until(pilot, lambda: cluster.categories.notes_of("proj X/checks").startswith("# Checks"), 10); await pilot.pause(0.5)
+  md = cs.query_one("#cat-notes")
+  shown = " ".join(str(b.render()) if hasattr(b, "render") else "" for b in md.query("MarkdownBlock"))
+  check("Notes… (o): kept with the categories (the file), rendered", ok and not box.has_class("-empty") and "Checks" in shown
+        and "**" not in shown and json.load(open(CATEGORIES_FILE))["clusters"]["lab"]["notes"]["proj X/checks"].startswith("# Checks"),
+        (ok, shown[:200]))
+  tree.move_cursor(tree.root); await pilot.pause(0.4)
+  check("another category: not its notes", box.has_class("-empty"))
+  tree.move_cursor(find_node(tree, "proj X/checks")); await pilot.pause(0.4)
   jt.focus(); await pilot.press("x")
   ok = await until(pilot, lambda: cluster.categories.category_of("9003") == "", 10)
   check("take a job out (x)", ok)
