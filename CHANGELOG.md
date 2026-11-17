@@ -17,6 +17,10 @@ version may need the helper of the same version).
   write** (yellow), as the cluster answers for you (groups and ACLs count).
   The same for the directory itself above the list. On a cluster still in
   one round trip.
+- The script view has **Reload** (`Ctrl+R`): it reads the script from the
+  file again and checks it, also while you edit (the file goes into the
+  editor, which stays editable; unsaved changes are asked about first). It
+  replaces Revert, which was only there while editing and ended the editing.
 
 ## 0.8.1 (beta), 2026-11-17
 

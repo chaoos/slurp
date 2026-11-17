@@ -120,10 +120,12 @@ A batch script with the findings of the checks below it.
   on the login node after a fresh login, the programs found and their shared libraries (`ldd`). Opening and saving the
   script run it too; while you edit, Check checks the edited text, saved or not.
 - **Edit** (`e`) makes the script editable right here: the checks follow as you type (the script, and its
-  paths and programs on the cluster), Go to line jumps into it, `Ctrl+S` saves, `Ctrl+Z` undoes, **Revert** goes back
-  to the file, `Esc` or **Done** stops editing (asking about unsaved changes, as do closing the subtab and quitting).
+  paths and programs on the cluster), Go to line jumps into it, `Ctrl+S` saves, `Ctrl+Z` undoes, **Reload**
+  (`Ctrl+R`) reads the file into the editor again (asking about unsaved changes), `Esc` or **Done** stops editing (asking about unsaved changes, as do closing the subtab and quitting).
   Save asks before it overwrites a file that something else changed meanwhile. Bash is highlighted when Textual's
   syntax extra is installed (`pip install "textual[syntax]"`). **Edit outside** opens your own `$VISUAL`/`$EDITOR`.
+- **Reload** (`Ctrl+R`) reads the script from the file again and checks it, also while you edit (the editor gets the
+  file, and you go on editing).
 - **Test** asks Slurm whether it accepts it and when it would start (`sbatch --test-only`). **Fixed copy…** writes a copy with the safe fixes.
   **Submit…** submits it (after naming the errors found). `r` checks again.
 """),

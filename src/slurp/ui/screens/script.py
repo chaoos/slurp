@@ -45,6 +45,7 @@ class ScriptScreen(SplitScreen):
     Binding("x", "explain", "Explain"),
     Binding("e", "edit", "Edit"),
     Binding("ctrl+s", "save", "Save", priority=True),
+    Binding("ctrl+r", "reload", "Reload", priority=True),
   ]
   DEFAULT_CSS = """
   #script-bar { height: auto; }
@@ -53,8 +54,8 @@ class ScriptScreen(SplitScreen):
   #script-text { height: 1fr; }
   #script-findings { height: 45%; border-top: solid $panel-lighten-2; padding: 0 1; }
   ScriptScreen.-editing #script-text { border: round $accent; }
-  ScriptScreen #sc-save, ScriptScreen #sc-revert, ScriptScreen #sc-done { display: none; }
-  ScriptScreen.-editing #sc-save, ScriptScreen.-editing #sc-revert, ScriptScreen.-editing #sc-done { display: block; }
+  ScriptScreen #sc-save, ScriptScreen #sc-done { display: none; }
+  ScriptScreen.-editing #sc-save, ScriptScreen.-editing #sc-done { display: block; }
   ScriptScreen.-editing #sc-edit, ScriptScreen.-editing #sc-explain { display: none; }
   """
   LIVE_DELAY = 0.6 # seconds after the last change until the script is checked as typed
@@ -79,8 +80,10 @@ class ScriptScreen(SplitScreen):
       yield Button(icons.label("explain", "Explain"), id="sc-explain", compact=True, tooltip="what Slurm makes of each #SBATCH line (x)")
       yield Button(icons.label("edit", "Edit"), id="sc-edit", compact=True, tooltip="edit it here, checked as you type; Ctrl+S saves (e)")
       yield Button("Save", id="sc-save", compact=True, variant="success", tooltip="write it to the file and check it fully (Ctrl+S)")
-      yield Button("Revert", id="sc-revert", compact=True, tooltip="back to the file as it is saved")
       yield Button("Done", id="sc-done", compact=True, tooltip="stop editing (Esc)")
+      yield Button(icons.label("reload", "Reload"), id="sc-reload", compact=True,
+                   tooltip="read the script from the file again (while editing: into the editor, after asking if "
+                           "there are unsaved changes) (Ctrl+R)")
       yield Button("Edit outside", id="sc-edit-outside", compact=True,
                    tooltip="open it in your own editor ($VISUAL / $EDITOR, in the terminal); checked again when saved")
       yield Button(icons.label("test", "Test"), id="sc-test", compact=True, tooltip="sbatch --test-only: would Slurm accept it, and when would it start?")
@@ -202,7 +205,7 @@ class ScriptScreen(SplitScreen):
         if self.editing: # (not under the user's edits: Save asks before it overwrites)
           if not getattr(self, "told_changed", False):
             self.told_changed = True
-            self.notify("the file was changed on disk while you edit it: Save asks before it overwrites, Revert loads it",
+            self.notify("the file was changed on disk while you edit it: Save asks before it overwrites, Reload loads it",
                         severity="warning", timeout=8)
           return
         self.mtime = mtime
@@ -326,18 +329,43 @@ class ScriptScreen(SplitScreen):
       self.check() # (the full check: files on the cluster, quota)
     in_background(self, work, written, group="save")
 
-  @on(Button.Pressed, "#sc-revert")
-  def revert_pressed(self, event):
-    event.stop()
-    def answer(ok):
-      if ok:
-        self.stop_editing()
-        self.check()
-    if self.current_text() == self.saved_text:
-      answer(True)
-    else:
-      self.app.push_screen(ConfirmScreen("Revert?", "Your changes are lost; the script is loaded from the file again.",
-                                         "Revert"), answer)
+  @on(Button.Pressed, "#sc-reload")
+  def action_reload(self, event=None):
+    """The script from the file again (changed outside, or to drop the edits): while editing into the editor, which
+    stays editable, after asking if there are unsaved changes; then checked"""
+    if event is not None:
+      event.stop()
+    if not self.unsaved():
+      self.reload()
+      return
+    self.app.push_screen(ConfirmScreen("Reload from the file?", "Your unsaved changes are lost; the script is read "
+                                       "from the file again.", "Reload"), lambda ok: self.reload() if ok else None)
+
+  def reload(self):
+    def read():
+      text = fs_read(self.path).decode("utf-8", errors="replace")
+      try:
+        return text, fs_stat(self.path).st_mtime
+      except OSError:
+        return text, None
+    def loaded(result):
+      if result is None: # (it cannot be read: the error is shown)
+        return
+      text, mtime = result
+      self.mtime, self.told_changed = mtime, False
+      if self.editing:
+        self.saved_text = self.text = text
+        area = self.query_one("#script-text", TextArea)
+        pos = area.cursor_location
+        area.load_text(text.replace("\r", ""))
+        try:
+          area.cursor_location = pos
+        except Exception:
+          pass
+        area.focus()
+      self.check()
+      self.notify(f"reloaded {os.path.basename(self.path)}", timeout=3)
+    in_background(self, read, loaded, group="reload", name=f"reading {self.path}")
 
   @on(Button.Pressed, "#sc-done")
   def done_pressed(self, event):

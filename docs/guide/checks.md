@@ -56,7 +56,7 @@ opens in the **script view**: the script with its findings below, each with
 Slurm makes of it (units, per node, the paths of the logs, IGNORED after the
 first command). **Edit** (`e`) makes it editable right there, with Textual's
 editor: the findings follow as you type (also the paths, directories and
-programs on the cluster, a moment after you pause), `Ctrl+S` saves, `Ctrl+Z` undoes, **Revert** goes back to the file, `Esc`
+programs on the cluster, a moment after you pause), `Ctrl+S` saves, `Ctrl+Z` undoes, **Reload** (`Ctrl+R`, also when not editing) reads the file again (into the editor while editing, asking about unsaved changes), `Esc`
 stops editing; **Check** checks the edited text, saved or not; unsaved changes are asked about when you stop, close the subtab
 or quit, and Save asks before it overwrites a file changed meanwhile. Bash is
 highlighted with Textual's syntax extra (`pip install "textual[syntax]"`).

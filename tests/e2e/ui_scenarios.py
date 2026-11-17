@@ -1464,9 +1464,24 @@ async def t_script_edit(app, pilot):
   check("closing the subtab with unsaved changes asks", ok and "unsaved" in str(app.screen.query_one("#confirm-message").render()))
   await pilot.click("#confirm-no"); await pilot.pause(0.3)
   check("No: the subtab stays", view in app.cluster.views and isinstance(app.screen, ScriptScreen))
-  await pilot.press("ctrl+s"); await until(pilot, lambda: not sc.unsaved(), 5)
+  check("Reload is there while editing too", sc.query_one("#sc-reload").display)
+  await pilot.press("ctrl+r"); ok = await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 5)
+  check("Reload (Ctrl+R) with unsaved changes asks", ok and "Reload" in str(app.screen.query_one("#confirm-yes").label))
+  await pilot.click("#confirm-no"); await pilot.pause(0.3)
+  edited = area.text
+  check("No: the edits stay", sc.unsaved() and edited != open(path).read(), area.text[:20])
+  open(path, "a").write("# reloaded\n")
+  await pilot.press("ctrl+r"); await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 5)
+  await pilot.click("#confirm-yes")
+  ok = await until(pilot, lambda: "# reloaded" in area.text, 8)
+  check("Reload: the file in the editor, still editing, nothing unsaved", ok and sc.editing and not area.read_only
+        and not sc.unsaved() and area.text != edited and area.text == open(path).read(), area.text[:60])
   await pilot.press("escape"); await pilot.pause(0.3)
   check("Esc without changes just stops editing", not sc.editing)
+  open(path, "a").write("# again\n")
+  await pilot.click("#sc-reload")
+  ok = await until(pilot, lambda: "# again" in area.text, 8)
+  check("Reload while not editing: the file again, checked", ok and not sc.editing and area.read_only)
   app.action_close_view(); await pilot.pause(0.5)
 
 async def t_chdir(app, pilot):
