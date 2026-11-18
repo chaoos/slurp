@@ -79,6 +79,14 @@ class Endpoint:
       self._root = result.stdout.strip().splitlines()[-1]
     return self._root
 
+  def write(self, path, text, mode=0o600):
+    """A small file there (raises OSError)"""
+    import base64
+    result = self.sh('umask 077; printf "%s" "$2" | base64 -d > "$1" && chmod "$3" "$1"', path,
+                     base64.b64encode(text.encode()).decode(), oct(mode)[2:], retry=False)
+    if result.returncode:
+      raise OSError((result.stderr or "").strip()[:200] or f"cannot write {path} on {self.name}")
+
   def kill(self, pid, signal="TERM"):
     if self.local:
       try:
