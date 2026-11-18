@@ -113,7 +113,7 @@ def command(transfer, route, folder, version, target=None, key=False):
   """The rsync command of a run on a cluster (the file `command`): same-fs on the source; direct-push on the source to
   target (the destination); direct-pull on the destination from target (the source)"""
   opts = R.options(transfer.options, version)
-  paths, dest = transfer.source["paths"], transfer.dest["path"].rstrip("/") + "/"
+  paths, dest = R.sources(transfer), transfer.dest["path"].rstrip("/") + "/"
   if route == "same-fs":
     args = [*opts, "--", *R.marked(paths), dest]
   else:

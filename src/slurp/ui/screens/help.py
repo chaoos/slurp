@@ -263,7 +263,8 @@ runs can be changed, and the check is not run again (what the last one found sta
 1. **Source**: an endpoint (this machine, or a tab, with its state; **Connect** or **Log in in its tab** when it
    needs it) and one or more files or folders there (Browse…: Space marks several; or type a path), or
    patterns such as `/path/to/dir/*.h5` (typed, or in Browse… the pattern field, which shows its matches, and **Choose
-   the pattern**): each match is copied. Each is copied into the destination folder under its own name. Each shows what it holds, counted on its tab in the
+   the pattern**): each match is copied. Braces as bash's: `run_{1..1000..20}`, `{in,out}/*.h5`, `step_{001..100}`
+   (one line, all its paths; at most 10,000; no `$(…)`, no variables). Each is copied into the destination folder under its own name. Each shows what it holds, counted on its tab in the
    background (its size, files, folders, links), and in all.
 2. **Destination**: an endpoint and a folder there (created if it is not there), with its home, scratch, project, …
 3. **Options**: how rsync copies, the same at every run: checksums (they read every file on both sides at every run,

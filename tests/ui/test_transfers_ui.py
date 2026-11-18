@@ -942,3 +942,32 @@ def test_new_folder(check, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_source_with_braces(check, tmp_path):
+  """A source typed with braces: one line, counted over its paths (how many are there), the preview says how many;
+  too many: refused"""
+  for i in (1, 2):
+    (tmp_path / f"run_{i}").mkdir()
+    (tmp_path / f"run_{i}" / "out.h5").write_bytes(b"x" * 100)
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      await pilot.press("T"); await pilot.pause(0.4)
+      w = app.screen
+      field = w.query_one("#tw-src-path")
+      field.value = f"{tmp_path}/run_{{1..3}}"
+      field.focus(); await pilot.press("enter"); await pilot.pause(0.3)
+      check("one source, as typed", w.paths == [f"{tmp_path}/run_{{1..3}}"], w.paths)
+      check("counted over its paths: 2 of 3 there", await until(pilot, lambda: "2 of 3 paths there" in str(w.query_one("#tw-src-paths").render()), 10)
+            and "200 Bytes" in str(w.query_one("#tw-src-paths").render()), str(w.query_one("#tw-src-paths").render()))
+      w.dest_path = str(tmp_path / "dest"); w.refresh_preview(); await pilot.pause(0.1)
+      check("the preview: each of its paths", "each of its 3 paths" in str(w.query_one("#tw-dst-preview").render()))
+      field.value = f"{tmp_path}/{{1..20000}}"
+      field.focus(); await pilot.press("enter"); await pilot.pause(0.3)
+      check("too many: refused, said", len(w.paths) == 1 and any("10,000" in str(n.message) for n in app._notifications))
+      await pilot.press("q")
+
+  asyncio.run(main())

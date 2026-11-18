@@ -21,7 +21,10 @@ as they are (they can be changed once it is connected), the other steps can be c
    marked**; **Choose this folder** takes the folder shown; a pattern such as `*.h5` in its field shows the matches,
    **Choose the pattern** takes it) or a path typed in. A source can be a pattern, `/path/to/dir/*.h5`: each match is
    copied into the destination folder, as `cp /path/to/dir/*.h5 dest/` would; a pattern that matches nothing is
-   reported as not there. Each is copied into the destination
+   reported as not there. Braces are expanded as bash does: `/scratch/run_{1..1000..20}`, `/data/{in,out}/*.h5`,
+   `step_{001..100}` (zero padded), `{a..f}`, nested; a source with braces is one line in the list and stands for all
+   its paths (each a path or a pattern; at most 10,000), counted together (how many of them are there). slurp expands
+   them itself, the same on every route: no shell runs them, so `$(…)` and variables are not expanded. Each is copied into the destination
    folder under its own name. Both endpoints must be connected: the
    wizard shows their state, with **Connect** (or **Log in in its tab**, for a login that needs you). Each source shows what it holds, counted on its tab in
    the background (one `find` through it): its size, its files, folders and links; with several, also in all.

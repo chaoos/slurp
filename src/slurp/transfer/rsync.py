@@ -17,6 +17,94 @@ EXPAND = ('n=$#; i=0; while [ $i -lt $n ]; do a=$1; shift; i=$((i + 1)); case $a
           'g=${a#' + GLOB_MARK + '}; f=0; IFS=; for m in $g; do if [ -e "$m" ] || [ -L "$m" ]; then set -- "$@" "$m"; f=1; fi; '
           'done; unset IFS; [ $f = 1 ] || set -- "$@" "$g";; *) set -- "$@" "$a";; esac; done')
 
+# ---- brace expansion of sources, as bash's: {a,b,c}, {1..1000..20}, {001..100}, {a..e}, nested; then each a path or a
+# pattern. Done here (not by a shell: no $(…), no variables), the same on every route; a source keeps its braces
+# (one line in the list) and is expanded where the sources are used (sources())
+MAX_EXPANDED = 10_000
+SEQUENCE = re.compile(r"^(-?\d+|[A-Za-z])\.\.(-?\d+|[A-Za-z])(?:\.\.(-?\d+))?$")
+
+class TooMany(ValueError):
+  """A brace expansion of more paths than MAX_EXPANDED"""
+
+def has_braces(path):
+  return len(braces(path)) > 1 or braces(path) != [path]
+
+def _sequence(body):
+  """The items of a sequence {x..y[..step]}, or None (not one: literal braces)"""
+  m = SEQUENCE.match(body)
+  if not m:
+    return None
+  a, b, step = m.group(1), m.group(2), abs(int(m.group(3) or 1)) or 1
+  if a.lstrip("-").isdigit() and b.lstrip("-").isdigit():
+    x, y = int(a), int(b)
+    width = max(len(a), len(b)) if (a.lstrip("-").startswith("0") and len(a.lstrip("-")) > 1) or \
+                                     (b.lstrip("-").startswith("0") and len(b.lstrip("-")) > 1) else 0
+    if abs(y - x) // step + 1 > MAX_EXPANDED:
+      raise TooMany(f"{{{body}}} makes more than {MAX_EXPANDED:,} paths")
+    numbers = range(x, y + 1, step) if x <= y else range(x, y - 1, -step)
+    return [f"{n:0{width}d}" if width else str(n) for n in numbers]
+  if a.isalpha() and b.isalpha():
+    x, y = ord(a), ord(b)
+    return [chr(c) for c in (range(x, y + 1, step) if x <= y else range(x, y - 1, -step))]
+  return None
+
+def braces(text):
+  """bash's brace expansion of a text: [the texts], in order (no braces, or braces that are none: [text])"""
+  depth, start, i = 0, None, 0
+  while i < len(text):
+    c = text[i]
+    if c == "\\":
+      i += 2
+      continue
+    if c == "{" and not (i and text[i - 1] == "$"): # (${…}: not ours)
+      if depth == 0:
+        start = i
+      depth += 1
+    elif c == "}" and depth:
+      depth -= 1
+      if depth == 0:
+        body, prefix, suffix = text[start + 1:i], text[:start], text[i + 1:]
+        items = _sequence(body)
+        if items is None: # (a list: its commas at the top)
+          items, level, part = [], 0, ""
+          for ch in body:
+            if ch == "{":
+              level += 1
+            elif ch == "}":
+              level -= 1
+            if ch == "," and level == 0:
+              items.append(part)
+              part = ""
+            else:
+              part += ch
+          items.append(part)
+          if len(items) < 2: # (no comma, no sequence: literal braces; braces later on may be ones)
+            rest = braces(suffix)
+            return [prefix + "{" + b + "}" + r for b in braces(body) for r in rest]
+          items = [x for item in items for x in braces(item)]
+        out = []
+        for item in items:
+          for tail in braces(suffix):
+            out.append(prefix + item + tail)
+            if len(out) > MAX_EXPANDED:
+              raise TooMany(f"{text} makes more than {MAX_EXPANDED:,} paths")
+        return out
+    i += 1
+  return [text]
+
+def expand_sources(paths):
+  """The sources with their braces expanded (in order, each once); TooMany if there would be too many"""
+  out = []
+  for p in paths:
+    out += braces(p)
+    if len(out) > MAX_EXPANDED:
+      raise TooMany(f"the sources make more than {MAX_EXPANDED:,} paths")
+  return list(dict.fromkeys(out))
+
+def sources(transfer):
+  """The sources of a transfer, expanded (braces): each a path or a pattern"""
+  return expand_sources(transfer.source.get("paths", []))
+
 def is_pattern(path):
   """A source with *, ? or [ in it: its matches are copied"""
   return any(c in (path or "") for c in "*?[")

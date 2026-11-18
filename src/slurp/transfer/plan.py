@@ -330,7 +330,13 @@ def check(source, dest, transfer, source_cluster, dest_cluster, report=lambda pl
   def step(name, state, text=""):
     plan["steps"][name] = {"state": state, "text": text}
     report(plan)
-  paths, dest_path = transfer.source["paths"], transfer.dest["path"]
+  dest_path = transfer.dest["path"]
+  try:
+    paths = R.sources(transfer) # (braces expanded: {1..100}, {a,b})
+  except R.TooMany as e:
+    plan.update(done=True, error=str(e))
+    report(plan)
+    return plan
 
   step("facts", "running", "rsync and the tools on both sides")
   fs, fd = facts(source), facts(dest)
@@ -346,6 +352,8 @@ def check(source, dest, transfer, source_cluster, dest_cluster, report=lambda pl
   plan["dest"] = d = destination(dest, dest_path)
   problems = [f"{s['path']} is not there" for s in plan["sources"] if not s["exists"]]
   problems += [f"{s['path']} cannot be read" for s in plan["sources"] if s["exists"] and not s["readable"]]
+  if len(problems) > 5: # (a brace expansion: many paths)
+    problems = problems[:5] + [f"and {len(problems) - 5} more"]
   if d["exists"] and not d["dir"]:
     problems.append(f"{dest_path} is a file, not a folder")
   if not d["writable"]:

@@ -1084,11 +1084,24 @@ class TransferWizard(ModalScreen):
       return
     for p in wanted:
       self.sizes[(id(cluster), p)] = "counting"
+    expanded = {p: R.braces(p) for p in wanted} # (a source with braces: all its paths, counted together)
     def done(found):
       for p in wanted:
-        self.sizes[(id(cluster), p)] = (found or {}).get(p, "failed") if found is not None else "failed"
+        if found is None:
+          self.sizes[(id(cluster), p)] = "failed"
+          continue
+        parts = [found.get(x) for x in expanded[p]]
+        if len(parts) == 1:
+          self.sizes[(id(cluster), p)] = parts[0]
+          continue
+        there = [c for c in parts if c]
+        total = {k: sum(c[k] for c in there) for k in ("bytes", "files", "dirs", "links")} if there else None
+        if total is not None:
+          total["paths"], total["of"] = len(there), len(parts)
+        self.sizes[(id(cluster), p)] = total
       self.show_sources()
-    in_background(self, lambda: P.count(cluster and Host(cluster), wanted), done, group=f"tw-count-{len(self.sizes)}",
+    flat = list(dict.fromkeys(x for p in wanted for x in expanded[p]))
+    in_background(self, lambda: P.count(cluster and Host(cluster), flat), done, group=f"tw-count-{len(self.sizes)}",
                   name="counting the sources", connection=cluster.connection if cluster.destination else None)
 
   def show_sources(self):
@@ -1102,7 +1115,8 @@ class TransferWizard(ModalScreen):
     width = min(max(cell_len(p) for p in self.paths), 70)
     text, total, known = Text(), {"bytes": 0, "files": 0, "dirs": 0, "links": 0}, True
     def what(c):
-      words = (f"{c['matches']:,} match{'es' if c['matches'] != 1 else ''} · " if "matches" in c else "") + (
+      words = (f"{c['paths']:,} of {c['of']:,} paths there · " if "of" in c else "") + (
+        f"{c['matches']:,} match{'es' if c['matches'] != 1 else ''} · " if "matches" in c else "") + (
         f"{human(c['bytes'])} · {c['files']:,} file{'s' if c['files'] != 1 else ''}")
       if c["dirs"] > 1 or (c["dirs"] == 1 and c["files"] != 1):
         words += f" · {c['dirs']:,} folder{'s' if c['dirs'] != 1 else ''}"
@@ -1120,7 +1134,7 @@ class TransferWizard(ModalScreen):
         text.append(f"{self.app.spinner()} counting …", style="yellow")
         known = False
       elif c is None:
-        text.append("nothing matches" if R.is_pattern(p) else "not there", style="red")
+        text.append("none of its paths is there" if R.has_braces(p) else "nothing matches" if R.is_pattern(p) else "not there", style="red")
       elif c == "failed":
         text.append("not counted", style="dim")
         known = False
@@ -1139,6 +1153,13 @@ class TransferWizard(ModalScreen):
     event.stop()
     if event.value.strip() and self.side("src") is not None:
       path = self.expand("src", event.value)
+      try:
+        many = len(R.braces(path))
+      except R.TooMany as e:
+        self.app.notify(f"{e}: at most {R.MAX_EXPANDED:,}", severity="warning", timeout=8)
+        return
+      if many > 1:
+        self.app.notify(f"{path}: {many:,} paths (its braces expanded)", timeout=4)
       if path not in self.paths:
         self.paths.append(path)
       event.input.value = ""
@@ -1250,7 +1271,8 @@ class TransferWizard(ModalScreen):
       preview.update("")
       return
     name = self.side_name("dst")
-    lines = [(f"  {os.path.basename(p)} (each match)  →  {name}:{self.dest_path.rstrip('/')}/" if R.is_pattern(p) else
+    lines = [(f"  {os.path.basename(p)} (each of its {len(R.braces(p)):,} paths)  →  {name}:{self.dest_path.rstrip('/')}/" if R.has_braces(p) else
+              f"  {os.path.basename(p)} (each match)  →  {name}:{self.dest_path.rstrip('/')}/" if R.is_pattern(p) else
               f"  {os.path.basename(p.rstrip('/'))}  →  {name}:{os.path.join(self.dest_path, os.path.basename(p.rstrip('/')))}")
              for p in self.paths[:6]]
     preview.update(Text("\n".join(["What goes where:", *lines, *(["  …"] if len(self.paths) > 6 else [])])))
@@ -2393,7 +2415,7 @@ class TransferScreen(TransfersBase):
       paths = t.source.get("paths", [])
       if index >= len(paths):
         return
-      cluster, path = src, paths[index]
+      cluster, path = src, R.braces(paths[index])[0] # (braces: the first of its paths)
     ref = t.dest if index < 0 else t.source
     d = self.manager.endpoint_store.get(E.ref_id(ref))
     if d is not None and d.kind in E.RCLONE_KINDS: # (S3, SMB, WebDAV: its address, to copy)

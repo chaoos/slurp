@@ -232,3 +232,36 @@ def test_run_now_checks_first(check, tmp_path):
   mg.run_now(t)
   check("a route that does not pass: failed, why, no run", until(app, mg, lambda: t.state == "failed", 60)
         and "did not pass the check before the run" in t.message and len(t.runs) == runs, (t.state, t.message))
+
+
+def test_braces(check, tmp_path):
+  """A source with braces ({1..9..4}, {a,b}): its paths (and patterns in them) copied, as bash would name them; on the
+  relay and detached on a cluster (here: this machine)"""
+  from slurp.transfer import rsync as R
+  check("as bash", R.braces("run_{1..9..4}/{x,y}.h5") == ["run_1/x.h5", "run_1/y.h5", "run_5/x.h5", "run_5/y.h5", "run_9/x.h5", "run_9/y.h5"])
+  check("zero padded, down, letters, literal", R.braces("f{03..01}") == ["f03", "f02", "f01"] and R.braces("{c..a}") == ["c", "b", "a"]
+        and R.braces("{x}") == ["{x}"] and R.braces("${HOME}") == ["${HOME}"])
+  try:
+    R.expand_sources(["/d/{1..20000}"])
+    check("too many: refused", False)
+  except R.TooMany as e:
+    check("too many: refused", "10,000" in str(e), str(e))
+  for runs_on, route in (("slurp", "relay"), ("detached", "same-fs")):
+    app = App()
+    mg = MG.Manager(app, M.Store(str(tmp_path / f"s-{runs_on}.json")))
+    src, dst = tmp_path / f"src-{runs_on}", tmp_path / f"dst-{runs_on}"
+    for i in range(1, 8):
+      (src / f"run_{i}").mkdir(parents=True)
+      (src / f"run_{i}" / f"out_{i}.h5").write_text(str(i))
+      (src / f"run_{i}" / "log.txt").write_text("log")
+    dst.mkdir()
+    ref = M.tab_ref(app.here)
+    t = M.Transfer(M.new_id(), "braces", {"tab": ref, "paths": [f"{src}/run_{{1..7..3}}", f"{src}/run_{{2,6}}/*.h5"]},
+                   {"tab": ref, "path": str(dst)}, route=route, runs_on=runs_on)
+    mg.add(t)
+    mg.shown.add(t.id)
+    mg.start(t)
+    check(f"{runs_on}: done", until(app, mg, lambda: t.state == "done"), (t.state, t.message))
+    got = sorted(str(p.relative_to(dst)) for p in dst.rglob("*") if p.is_file())
+    check(f"{runs_on}: run_1, run_4, run_7 whole; the .h5 of run_2 and run_6", got == [
+      "out_2.h5", "out_6.h5", "run_1/log.txt", "run_1/out_1.h5", "run_4/log.txt", "run_4/out_4.h5", "run_7/log.txt", "run_7/out_7.h5"], got)

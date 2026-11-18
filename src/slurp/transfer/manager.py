@@ -168,7 +168,7 @@ class Manager:
       if cid is None:
         raise G.GlobusError("failed", f"{ref.get('name') or E.ref_id(ref)} has no Globus collection (a tab: link it, Endpoints → Edit…)")
     paths = []
-    for p in t.source.get("paths", []):
+    for p in R.sources(t):
       mapped = src_map(p)
       if mapped is None:
         raise G.GlobusError("failed", f"{p} is outside the folder linked to the collection")
@@ -368,7 +368,7 @@ class Manager:
     try:
       source, dest = self.hosts(t)
       facts = P.facts(source)
-      relay = RL.Relay(source, dest, t.source["paths"], t.dest["path"], t.options, facts.get("version")).start()
+      relay = RL.Relay(source, dest, R.sources(t), t.dest["path"], t.options, facts.get("version")).start()
     except Exception as e:
       self.from_thread(self.ended, t, None, f"the run did not start: {e}")
       return
@@ -434,7 +434,7 @@ class Manager:
   def rclone_sources(self, t, s3_src, src_cluster=None):
     """[(path, is a folder)] of the sources (a pattern: not a folder): on S3, here, or on a tab"""
     out = []
-    for p in t.source.get("paths", []):
+    for p in R.sources(t):
       if R.is_pattern(p):
         out.append((p, False))
       elif s3_src is not None:
@@ -451,7 +451,7 @@ class Manager:
     src_s3, dst_s3 = self.s3_of(t.source, keys and keys(t.source)), self.s3_of(t.dest, keys and keys(t.dest))
     env = {**(src_s3.env if src_s3 else {}), **(dst_s3.env if dst_s3 else {})}
     dest = dst_s3.path(t.dest.get("path", "/")) if dst_s3 else t.dest.get("path", "")
-    sources = self.rclone_sources(t, src_s3) if keys is None else [(p, None) for p in t.source.get("paths", [])]
+    sources = self.rclone_sources(t, src_s3) if keys is None else [(p, None) for p in R.sources(t)]
     steps = []
     for folder, rules, _ in RC.groups([(p, bool(d)) for p, d in sources]):
       if keys is not None: # (Copy as a command: a folder or a file is not known: both rules)
@@ -625,7 +625,7 @@ class Manager:
           plan["total_bytes"], plan["total_files"] = found["bytes"], found["files"]
           words.append(f"the sources hold {P.human(found['bytes'])} in {found['files']} files")
       elif route == "rclone-here":
-        sized = [p for p in t.source.get("paths", []) if not R.is_pattern(p)]
+        sized = [p for p in R.sources(t) if not R.is_pattern(p)]
         missing = [p for p in sized if not os.path.exists(p)]
         if missing:
           raise RC.RcloneError(f"{missing[0]} is not there")
@@ -1095,6 +1095,8 @@ class Manager:
       return self.rclone_command(t)
     src, dst = self.ends(t)
     def arg(p):
+      if R.has_braces(p): # (bash expands them, as slurp does)
+        return p.replace(" ", "\\ ")
       if R.is_pattern(p):
         folder, name = p.rsplit("/", 1) if "/" in p else ("", p)
         return (shlex.quote(folder) + "/" if folder else "") + name.replace(" ", "\\ ")
