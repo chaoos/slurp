@@ -131,6 +131,26 @@ class Manager:
       t.next_run = S.after_run(t.schedule, time.time())
     self.start(t)
 
+  def reschedule(self, t):
+    """Its schedule anew, after its settings changed: the next time it runs, without running now (never by itself:
+    when the user clicks Run now; now: as it was)"""
+    kind = (t.schedule or {}).get("kind", "now")
+    now = time.time()
+    if kind in ("at", "daily"):
+      t.next_run = S.first_time(t.schedule, now)
+    elif kind == "every":
+      t.next_run = S.after_run(t.schedule, now, now)
+    else:
+      t.next_run = None
+    if kind in ("at", "daily", "every") and t.next_run:
+      t.state, t.message = "scheduled", S.describe(t.schedule, t.next_run)
+    elif kind == "after_job":
+      t.state, t.message = "scheduled", S.describe(t.schedule)
+      self.job_watch[t.id] = 0
+    elif kind == "never":
+      t.message = "runs when you click Run now"
+    self.changed(t)
+
   def start(self, t, begin=None, scheduled=False):
     """A run now (begin: a transfer job that may start then). Not connected ends: it waits for them (a scheduled
     run logs in to them if its schedule says so)"""

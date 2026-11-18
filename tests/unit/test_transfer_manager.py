@@ -199,3 +199,20 @@ def test_comparing(check, tmp_path):
   mg.polled(t, {"progress": {"phase": "copying", "bytes": 10, "percent": 1, "rate": "1.00MB/s", "eta": "0:00:09"},
                 "result": None, "alive": True, "lock": "1 host", "job": "", "log": ""})
   check("its first progress line: copying", t.progress.get("phase") == "copying" and t.progress.get("bytes") == 10, t.progress)
+
+
+def test_reschedule(check, tmp_path):
+  """Saved after editing: its schedule armed again, nothing runs now"""
+  app = App()
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app)
+  mg.add(t)
+  for schedule, state in (({"kind": "daily", "daily": "02:00"}, "scheduled"), ({"kind": "every", "every": "6h"}, "scheduled"),
+                          ({"kind": "at", "at": time.time() + 3600}, "scheduled"), ({"kind": "after_job", "job": "9"}, "scheduled"),
+                          ({"kind": "never"}, "new")):
+    t.state, t.schedule, t.next_run = "new", schedule, None
+    mg.reschedule(t)
+    later = schedule["kind"] in ("daily", "every", "at")
+    check(f"{schedule['kind']}: {state}, " + ("its next time ahead" if later else "no time"), t.state == state and not t.run
+          and (bool(t.next_run and t.next_run > time.time() + 60) if later else t.next_run is None), (t.state, t.next_run))
+  check("nothing ran", not t.runs)

@@ -217,6 +217,8 @@ class TransfersTab:
       self.transfers.add(t)
     if result.get("go"):
       self.transfers.go(t)
+    elif result.get("saved"): # (edited: its schedule goes on, nothing starts now)
+      self.transfers.reschedule(t)
     self.open_transfer(t)
 
   def delete_transfer(self, t):

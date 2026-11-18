@@ -196,21 +196,31 @@ def test_never(check, tmp_path):
       e = app.screen
       check("edited: never is chosen", e.query_one("#tw-when-never").value)
       await pilot.pause(0.3)
+      buttons = [str(b.label) for b in e.query("#tw-buttons Button") if b.display]
+      check("editing: the buttons are Cancel and Save", buttons == ["Cancel", "Save"], buttons)
       check("editing: every step can be gone to", all(not e.query_one(f"#tw-goto-{i}").disabled for i in range(5)),
             [e.query_one(f"#tw-goto-{i}").disabled for i in range(5)])
       await pilot.click("#tw-goto-4"); await pilot.pause(0.3)
       check("a click on Summary: that step", e.step == 4 and "only on Run now" in str(e.query_one("#tw-summary").render()))
+      check("…Cancel and Save there too", [str(b.label) for b in e.query("#tw-buttons Button") if b.display] == ["Cancel", "Save"])
       await pilot.click("#tw-goto-2"); await pilot.pause(0.4)
       check("a click on Route: its choices as they were", e.step == 2 and e.chosen_route() == t.route and e.chosen_runs_on() == t.runs_on,
             (e.step, e.chosen_route(), e.chosen_runs_on()))
+      check("nothing changed: Save", not e.query_one("#tw-store").disabled)
       await pilot.click("#tw-goto-0"); await pilot.pause(0.3)
       e.query_one("#tw-src-path").value = str(src / "sub")
       await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.3)
-      check("another source: the steps after the check wait for a new check", e.step == 0 and not e.query_one("#tw-goto-2").disabled
-            and all(e.query_one(f"#tw-goto-{i}").disabled for i in (3, 4)), [e.query_one(f"#tw-goto-{i}").disabled for i in range(5)])
+      store = e.query_one("#tw-store")
+      check("another source: every step still a click away, Save waits for a new check and says so",
+            all(not e.query_one(f"#tw-goto-{i}").disabled for i in range(5)) and store.disabled and "3 Route" in str(store.tooltip),
+            (store.disabled, store.tooltip))
       await pilot.click("#tw-goto-2")
-      check("the check: the steps after it can be gone to again", await until(pilot, lambda: e.plan.get("done") and not e.query_one("#tw-goto-4").disabled, 30))
-      e.dismiss(None); await pilot.pause(0.2)
+      check("checked again: Save", await until(pilot, lambda: e.plan.get("done") and not e.query_one("#tw-store").disabled, 30))
+      await pilot.click("#tw-goto-3"); await pilot.pause(0.2)
+      e.query_one("#tw-when-daily").value = True; await pilot.pause(0.2)
+      e.query_one("#tw-store").press(); await pilot.pause(0.5)
+      check("Save: the changes kept, its schedule armed, nothing started", t.source["paths"] == [str(src), str(src / "sub")]
+            and t.schedule["kind"] == "daily" and t.state == "scheduled" and t.next_run and len(t.runs) == 1, (t.state, t.schedule, t.next_run, len(t.runs)))
       await pilot.press("q")
 
   asyncio.run(main())

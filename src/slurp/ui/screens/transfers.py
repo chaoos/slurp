@@ -529,6 +529,7 @@ class TransferWizard(ModalScreen):
         yield Button("Next →", id="tw-next", variant="primary", compact=True)
         yield Button("Save without starting", id="tw-save", compact=True)
         yield Button("Go", id="tw-go", variant="success", compact=True)
+        yield Button("Save", id="tw-store", variant="primary", compact=True) # (editing: Cancel and Save only)
 
   def tab_options(self):
     return [(f"{c.name}{'' if self.ready(c) else ' (not connected)'}", str(i)) for i, c in enumerate(self.tabs)]
@@ -580,12 +581,14 @@ class TransferWizard(ModalScreen):
   def show_step(self):
     self.query_one("#tw-switch", ContentSwitcher).current = f"tw-step-{self.step}"
     q = self.query_one
-    q("#tw-back", Button).display = self.step > 0
-    q("#tw-next", Button).display = self.step < len(self.STEPS) - 1
+    editing = self.editing is not None # (editing: every step a click away, and Cancel and Save)
+    q("#tw-back", Button).display = self.step > 0 and not editing
+    q("#tw-next", Button).display = self.step < len(self.STEPS) - 1 and not editing
     last = self.step == len(self.STEPS) - 1
     never = self.when_kind() == "never"
-    q("#tw-go", Button).display = last
-    q("#tw-save", Button).display = last and not never # (Add saves it already)
+    q("#tw-go", Button).display = last and not editing
+    q("#tw-save", Button).display = last and not never and not editing # (Add saves it already)
+    q("#tw-store", Button).display = editing
     go = "Save" if never and self.editing else "Add" if never else "Go"
     if str(q("#tw-go", Button).label) != go:
       q("#tw-go", Button).label = go
@@ -600,8 +603,16 @@ class TransferWizard(ModalScreen):
     self.update_next()
 
   def reachable(self, step):
-    """A step can be gone to when every step before it is complete (editing: all of them, at once)"""
-    return step == self.step or all(self.step_ok(i)[0] for i in range(step))
+    """A step can be gone to when every step before it is complete; editing: every step"""
+    return self.editing is not None or step == self.step or all(self.step_ok(i)[0] for i in range(step))
+
+  def incomplete(self):
+    """The first step that is not complete: "3 Route: why" ("" when all are)"""
+    for i in range(len(self.STEPS) - 1):
+      ok, why = self.step_ok(i)
+      if not ok:
+        return f"{i + 1} {self.STEPS[i]}: {why}"
+    return ""
 
   def update_steps(self):
     """The steps at the top: the one shown, those that can be gone to (a click), the others not yet"""
@@ -630,6 +641,11 @@ class TransferWizard(ModalScreen):
     nxt.disabled = not ok
     nxt.tooltip = why or None
     self.query_one("#tw-go", Button).disabled = self.step == len(self.STEPS) - 1 and not (self.how_ok()[0] and self.when_ok()[0])
+    if self.editing is not None:
+      store = self.query_one("#tw-store", Button)
+      missing = self.incomplete()
+      store.disabled = bool(missing)
+      store.tooltip = f"first: {missing}" if missing else "keep the changes (its schedule goes on; nothing starts now)"
 
   def plan_current(self):
     """Is the plan of the check for the sources and the destination chosen now?"""
@@ -1177,6 +1193,12 @@ class TransferWizard(ModalScreen):
     event.stop()
     if self.how_ok()[0] and self.when_ok()[0]:
       self.dismiss({"transfer": self.build(), "go": True})
+
+  @on(Button.Pressed, "#tw-store")
+  def store_pressed(self, event):
+    event.stop()
+    if self.editing is not None and not self.incomplete():
+      self.dismiss({"transfer": self.build(), "go": False, "saved": True})
 
   @on(Button.Pressed, "#tw-save")
   def save_pressed(self, event):
