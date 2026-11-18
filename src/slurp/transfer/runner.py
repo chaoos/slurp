@@ -172,6 +172,19 @@ def start_detached(endpoint, folder):
     raise OSError(f"the run did not start on {endpoint.name}: {(result.stderr or '').strip()[:200]}")
   return (result.stdout or "").strip().splitlines()[-1] if (result.stdout or "").strip() else ""
 
+TEST_SCRIPT = 'cd "$1" && printf "%s" "$2" > job-test.sh && sbatch --test-only job-test.sh 2>&1; r=$?; rm -f job-test.sh; exit $r'
+
+def test_job(endpoint, transfer, folder):
+  """sbatch --test-only of the transfer's job script there: (ok, what Slurm said: when and where it would start, or
+  the error)"""
+  result = endpoint.sh(TEST_SCRIPT, folder, job_script(transfer, folder), timeout=90, retry=False)
+  said = [l.strip() for l in (result.stdout or "").splitlines() if l.strip()]
+  line = next((l for l in said if "to start at" in l), "") or (said[-1] if said else "")
+  line = line.removeprefix("sbatch: ")
+  if result.returncode == 0 and "error" not in line.lower():
+    return True, line or "accepted"
+  return False, line or f"sbatch --test-only ended with {result.returncode}"
+
 def submit(endpoint, folder, begin=None):
   """Submit the transfer job (begin: epoch it may start) -> its job id"""
   args = ["sbatch", "--parsable"]

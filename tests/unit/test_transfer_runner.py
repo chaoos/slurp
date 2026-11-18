@@ -162,3 +162,20 @@ def test_preflight_refused(check, tmp_path, monkeypatch):
   check("rsync did not run", not list(dst.iterdir()))
   plain = RN.prepare(end, t, RN.command(t, "same-fs", None, (3, 2, 7)))
   check("another route afterwards: no login first (the file is gone)", not os.path.exists(os.path.join(plain, "preflight")))
+
+
+def test_job_test_only(check, tmp_path, monkeypatch):
+  """sbatch --test-only of a transfer job's script: when and where it would start, or Slurm's error"""
+  fake = tmp_path / "bin"
+  fake.mkdir()
+  (fake / "sbatch").write_text('#!/bin/sh\ngrep -q "account=bad" "$2" && { echo "sbatch: error: Batch job submission failed: Invalid account or account/partition combination specified" >&2; exit 1; }\n'
+                               'echo "sbatch: Job 4242 to start at 2026-11-18T14:00:00 using 1 processors on nodes nid0001 in partition xfer" >&2\n')
+  (fake / "sbatch").chmod(0o755)
+  monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+  t = M.Transfer("abc", "x", {"paths": ["/s"]}, {"path": "/d"}, options={"partition": "xfer", "time": "01:00:00", "account": "g1"})
+  ok, words = RN.test_job(local(), t, str(tmp_path))
+  check("accepted: when and where", ok and words.startswith("Job 4242 to start at 2026-11-18T14:00:00") and "partition xfer" in words, (ok, words))
+  check("its test script is gone", not (tmp_path / "job-test.sh").exists())
+  t.options["account"] = "bad"
+  ok, words = RN.test_job(local(), t, str(tmp_path))
+  check("refused: Slurm's error", not ok and "Invalid account" in words, (ok, words))

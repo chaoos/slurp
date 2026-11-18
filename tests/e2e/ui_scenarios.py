@@ -3552,6 +3552,10 @@ async def t_transfer_job(app, pilot):
   t = M.Transfer(M.new_id(), "job run", {"tab": ref, "paths": [src]}, {"tab": ref, "path": dst}, route="same-fs", runs_on="job",
                  options={"partition": "normal", "time": "01:00:00", "bwlimit": "4"}, plan={"remaining_bytes": 30_400_005})
   app.transfers.add(t)
+  tested = []
+  app.transfers.test_job(t, "same-fs", tested.append)
+  check("its job script tested on the cluster (sbatch --test-only)", await until(pilot, lambda: tested, 30)
+        and tested[0][0] is True and "to start at" in tested[0][1], tested)
   app.transfers.go(t)
   app.open_transfer(t); await pilot.pause(0.3)
   check("submitted: a transfer job", await until(pilot, lambda: t.run.get("job"), 30) and t.state in ("queued", "running"), (t.state, t.message))

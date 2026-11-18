@@ -396,6 +396,7 @@ class TransferWizard(ModalScreen):
   #tw-route, #tw-runs-on, #tw-when { height: auto; width: 1fr; }
   #tw-job { height: auto; border: round $panel; padding: 0 1; margin-top: 1; }
   #tw-partition, #tw-time, #tw-account { width: 24; margin-right: 2; }
+  #tw-account-list { width: 20; margin-right: 2; }
   #tw-bwlimit, #tw-every, #tw-daily, #tw-job-id { width: 16; margin-right: 2; }
   #tw-at { width: 24; margin-right: 2; }
   #tw-key-warning { height: auto; color: $warning; border: round $warning; padding: 0 1; display: none; }
@@ -427,6 +428,7 @@ class TransferWizard(ModalScreen):
     self.tid = editing.id if editing else M.new_id()
     self.rebuilding = asyncio.Lock() # (the choices of step 4 are rebuilt one at a time)
     self.node_checks = {} # (route, partition, account) -> ("running" | True | False | None, words): the login from a node
+    self.job_tests = {}   # (route, partition, time, account) -> ("running" | True | False, words): sbatch --test-only
     self.node_timer = None
 
   # ---- the window
@@ -484,7 +486,9 @@ class TransferWizard(ModalScreen):
               yield Input("24:00:00", id="tw-time", compact=True)
               yield Label("account")
               yield Input(id="tw-account", placeholder="(default)", compact=True)
+              yield Select([], prompt="pick", id="tw-account-list", compact=True)
             yield Checkbox("submit the next job when the time limit ends", value=True, id="tw-resubmit", compact=True)
+            yield Static(id="tw-job-test")
             yield Static(id="tw-node-check")
           with Horizontal(classes="tw-row"):
             yield Checkbox("checksums: compare the contents (every file is read on both sides, at every run, also when "
@@ -585,6 +589,8 @@ class TransferWizard(ModalScreen):
       self.show_plan()
     if self.step == 2 and any(v[0] == "running" for v in self.node_checks.values()):
       self.show_node_check()
+    if self.step == 2 and any(v[0] == "running" for v in self.job_tests.values()):
+      self.show_job_test()
     if self.step in (0, 1):
       self.refresh_states()
 
@@ -1026,8 +1032,70 @@ class TransferWizard(ModalScreen):
     if job and not part.value:
       part.value = str(site_of(client).get("transfer_partition") or "")
     self.query_one("#tw-compress", Checkbox).display = route == "relay"
+    if job:
+      self.fill_accounts(client)
     self.ensure_node_check()
+    self.ensure_job_test()
     self.update_next()
+
+  def fill_accounts(self, cluster):
+    """The Slurm accounts of the cluster that runs the job, to pick (looked up once per tab)"""
+    if cluster is None:
+      return
+    def show(accounts):
+      if accounts is not None:
+        cluster.accounts = list(accounts)
+      found = cluster.accounts or []
+      pick = self.query_one("#tw-account-list", Select)
+      pick.set_options([(a, a) for a in found])
+      field = self.query_one("#tw-account", Input)
+      from textual.suggester import SuggestFromList
+      field.suggester = SuggestFromList(found, case_sensitive=False)
+      if not field.value and len(found) == 1: # (one account: that one)
+        field.value = found[0]
+    if cluster.accounts is not None:
+      show(None)
+      return
+    from ...cluster.jobs import slurm_accounts
+    in_background(self, slurm_accounts, show, group="tw-accounts", name="looking up your Slurm accounts",
+                  connection=cluster.connection if cluster.destination else None)
+
+  @on(Select.Changed, "#tw-account-list")
+  def account_picked(self, event):
+    event.stop()
+    if event.value not in (None, Select.BLANK):
+      self.query_one("#tw-account", Input).value = str(event.value)
+
+  # (a transfer job: its batch script tested with sbatch --test-only as soon as it is chosen, and when its partition,
+  # time limit or account change; refused: Next refuses, and says what Slurm said)
+  def job_test_key(self):
+    route = self.chosen_route()
+    if self.chosen_runs_on() != "job" or route is None:
+      return None
+    q = self.query_one
+    return route, q("#tw-partition", Input).value.strip(), q("#tw-time", Input).value.strip(), q("#tw-account", Input).value.strip()
+
+  def ensure_job_test(self):
+    key = self.job_test_key()
+    if key is not None and key not in self.job_tests:
+      self.job_tests[key] = ("running", "testing the job script (sbatch --test-only) …")
+      t = self.draft()
+      t.route, t.runs_on, t.options = key[0], "job", self.options()
+      def done(result):
+        self.job_tests[key] = result
+        self.show_job_test()
+        self.update_next()
+      self.app.transfers.test_job(t, key[0], done)
+    self.show_job_test()
+
+  def show_job_test(self):
+    if not self.is_mounted:
+      return
+    key = self.job_test_key()
+    state, words = self.job_tests.get(key, (None, "")) if key else (None, "")
+    mark, style = {"running": (self.app.spinner(), "yellow"), True: ("✓ sbatch --test-only:", "green"),
+                   False: ("✗ sbatch --test-only:", "red"), None: ("", "")}[state]
+    self.query_one("#tw-job-test", Static).update(Text(f"{mark} {words}", style=style) if words else "")
 
   # (a direct route as a transfer job: rsync logs in from a node of the partition, not from the login node the check
   # ran on; some sites accept a key only from some hosts: the login is checked there too, before Next)
@@ -1060,12 +1128,12 @@ class TransferWizard(ModalScreen):
     mark, style = {"running": (self.app.spinner(), "yellow"), True: ("✓", "green"), False: ("✗", "red"), None: ("ⓘ", "dim")}[state]
     self.query_one("#tw-node-check", Static).update(Text(f"{mark} {words}", style=style) if words else "")
 
-  @on(Input.Changed, "#tw-partition, #tw-account")
+  @on(Input.Changed, "#tw-partition, #tw-account, #tw-time")
   def job_place_typed(self, event):
     event.stop()
     if self.node_timer is not None:
       self.node_timer.stop()
-    self.node_timer = self.set_timer(1.0, self.ensure_node_check)
+    self.node_timer = self.set_timer(1.0, lambda: (self.ensure_node_check(), self.ensure_job_test()))
     self.update_next()
 
   @on(Checkbox.Changed, "#tw-checksum")
@@ -1117,6 +1185,17 @@ class TransferWizard(ModalScreen):
       return False, "where it runs"
     if self.chosen_runs_on() == "job" and not self.query_one("#tw-time", Input).value.strip():
       return False, "the time limit of the job"
+    test = self.job_test_key()
+    if test is not None and not test[3]:
+      client = self.dst if test[0] == "direct-pull" else self.src
+      if client is not None and client.accounts: # (the user has accounts there: the job is charged to one of them)
+        return False, f"the account of the job (one of yours on {client.name})"
+    if test is not None:
+      state, words = self.job_tests.get(test, ("running", ""))
+      if state == "running":
+        return False, "testing the job script (sbatch --test-only)"
+      if state is False:
+        return False, f"sbatch --test-only: {words}"
     key = self.node_check_key()
     if key is not None and key[1]:
       state, words = self.node_checks.get(key, ("running", ""))

@@ -575,6 +575,21 @@ class Manager:
       self.from_thread(done, result)
     threading.Thread(target=work, daemon=True, name=f"node check {t.name}").start()
 
+  def test_job(self, t, route, done):
+    """sbatch --test-only of the transfer job t would submit (its options), on the cluster that runs rsync (in a
+    thread): done((True | False, words)) on the UI thread"""
+    def work():
+      try:
+        source, dest = self.endpoints(t)
+        client = dest if client_side(route) == "dest" else source
+        folder = RN.folder_of(client, t)
+        client.sh('mkdir -p "$1" && chmod 700 "$1"', folder, retry=False)
+        result = RN.test_job(client, t, folder)
+      except Exception as e:
+        result = (False, f"not tested: {e}")
+      self.from_thread(done, result)
+    threading.Thread(target=work, daemon=True, name=f"job test {t.name}").start()
+
   def recheck(self, t):
     """Check a transfer again as it is set up (its paths, its options): its plan as the check goes (what remains, the
     routes); False if it cannot be now (a run under way, a tab not connected)"""

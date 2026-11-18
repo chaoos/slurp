@@ -430,6 +430,7 @@ def test_direct_job_checked_on_a_node(check, tmp_path, monkeypatch):
     done((False, f"a node of {partition} cannot log in to jureca by itself: Permission denied (publickey)."))
   from slurp.transfer.manager import Manager
   monkeypatch.setattr(Manager, "probe_node", probe)
+  monkeypatch.setattr(Manager, "test_job", lambda manager, t, route, done: done((True, "Job 1 to start at 2026-11-18T14:00:00")))
 
   async def main():
     app = Slurp()
@@ -507,6 +508,54 @@ def test_status_and_continue(check, tmp_path):
       t.state, t.message = "waiting", "waiting for jedi (not connected)"
       await pilot.pause(1.2)
       check("waiting: in big, why", "WAITING" in status() and "jedi" in status(), status())
+      await pilot.press("q")
+
+  asyncio.run(main())
+
+
+def test_job_tested(check, tmp_path, monkeypatch):
+  """As a transfer job: the account picked from the user's accounts, the job script tested (sbatch --test-only) at once
+  and when its settings change; refused: Next refuses with Slurm's error"""
+  src, dst = files(tmp_path)
+  tests = []
+  def test_job(manager, t, route, done):
+    tests.append(dict(t.options))
+    done((True, "Job 1 to start at 2026-11-18T14:00:00 in partition xfer") if t.options.get("account") == "g1" else
+         (False, "error: Batch job submission failed: Invalid account or account/partition combination specified"))
+  from slurp.transfer.manager import Manager
+  monkeypatch.setattr(Manager, "test_job", test_job)
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      app.clusters[0].accounts = ["g1", "g2"]
+      await pilot.press("T"); await pilot.pause(0.3)
+      w = app.screen
+      w.query_one("#tw-src-path").value = str(src)
+      await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2)
+      w.query_one("#tw-dst-path").value = str(dst); await pilot.pause(0.2)
+      w.query_one("#tw-next").press()
+      await until(pilot, lambda: w.plan.get("done"), 30); await pilot.pause(0.5)
+      w.plan["routes"]["same-fs"]["runs_on"] = ["detached", "job"]
+      await w.route_changed(); await pilot.pause(0.2)
+      w.query_one("#tw-partition").value = "xfer"
+      w.query_one(".tw-o-job").value = True; w.runs_changed(); await pilot.pause(1.5)
+      picks = [v for _, v in w.query_one("#tw-account-list")._options if isinstance(v, str)]
+      check("the accounts to pick", picks == ["g1", "g2"], picks)
+      check("no account: Next asks for one", w.query_one("#tw-next").disabled and "account" in str(w.query_one("#tw-next").tooltip),
+            w.query_one("#tw-next").tooltip)
+      w.query_one("#tw-account-list").value = "g2"; await pilot.pause(1.5)
+      check("an account picked: in the field, the job tested", w.query_one("#tw-account").value == "g2" and tests and tests[-1].get("account") == "g2", tests)
+      test = str(w.query_one("#tw-job-test").render())
+      check("refused: Slurm's error, and Next refuses with it", "✗ sbatch --test-only" in test and "Invalid account" in test
+            and w.query_one("#tw-next").disabled and "Invalid account" in str(w.query_one("#tw-next").tooltip), (test, w.query_one("#tw-next").tooltip))
+      w.query_one("#tw-account-list").value = "g1"; await pilot.pause(1.5)
+      test = str(w.query_one("#tw-job-test").render())
+      check("another account: tested again, accepted: when and where", "✓ sbatch --test-only" in test and "to start at" in test
+            and not w.query_one("#tw-next").disabled, (test, w.query_one("#tw-next").tooltip))
+      w.dismiss(None); await pilot.pause(0.2)
       await pilot.press("q")
 
   asyncio.run(main())
