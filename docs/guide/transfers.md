@@ -8,7 +8,8 @@ destination.
 
 ## Setting one up
 
-**Menu → Transfer data…** (`T`), or **New transfer** in the list of transfers, opens a wizard of five steps. **Next**
+**Menu → Transfer data…** (`T`), or **New transfer** in the list of transfers, opens a wizard of five steps (for
+Globus endpoints see [Globus](#globus)). **Next**
 waits until a step is complete (its tooltip says what is missing); **Back** goes back. The steps at the top can be
 clicked: any step whose steps before it are complete. **Edit…** of a transfer opens the same wizard with every step a
 click away and two buttons, **Cancel** and **Save**: Save keeps the changes once every step is complete (its tooltip
@@ -77,7 +78,32 @@ itself while it is open; closed, a transfer's endpoint shows *tab not open*, wit
 **Menu → Endpoints…** shows them in a subtab of the Transfers tab: each with its kind, where it is, its state (●
 connected with its latency, ○ needs login, connecting, needs you, tab not open) and how many transfers use it, with
 **Connect**, **Disconnect**, **Test**, **Edit…** and **Delete** (refused while transfers use it, which it names).
-Further kinds (S3, SMB, WebDAV, Globus) come later; their secrets will be kept only in the system keyring.
+S3, SMB and WebDAV come later; secrets are kept only in the system keyring (Secret Service, Keychain, Windows
+Credential Manager), never in a file of slurp: where there is no keyring, the kinds that need one say so.
+
+## Globus
+
+**New endpoint… → Globus collection** makes a Globus endpoint: a collection (a site's storage, a guest collection),
+found by **Search** (its name, at Globus) or its id, and a folder where Browse… starts. A **tab** can be linked to its
+site's collection too (**Edit…** of the tab in the Endpoints list; a rule pack's `globus` is suggested): which folder of
+the tab is which folder in the collection (`/capstor/scratch/cscs/me` ↔ `/`). Between two Globus endpoints, or a
+Globus endpoint and a linked tab, only Globus can move the data; between two linked tabs the wizard offers the
+**Globus transfer** next to the rsync routes.
+
+- **The login**: one for all collections (Connect, or **Log in to Globus**): Globus's login page opens in the browser,
+  you log in there and paste the code it shows. The login (a refresh token) is kept only in the keyring. slurp logs in
+  as a Globus app: the first time it asks for the app's client id (register one at app.globus.org → Settings →
+  Developers as a native app; or set `$SLURP_GLOBUS_CLIENT_ID`). A collection that needs a consent to its data (a mapped
+  collection of Globus Connect Server 5) asks for the login again, with it.
+- **The check** asks Globus for both collections, the sources (a pattern: its matches) and the destination; what
+  remains is not known before: Globus compares at the run (by time and size; with checksums by content), and copies
+  only what is missing or changed. **Options**: checksums, and whether Globus verifies each file's checksum after
+  copying (on by default).
+- **A run** is a Globus task: slurp submits it and follows it (also after slurp restarts: the task goes on without
+  slurp); the data does not pass this machine. Run now needs the Globus login and the Globus endpoints tested (a linked
+  tab need not be connected). **Pause** cancels the task (Globus has no pause), **Continue** submits a new one, which
+  skips what is there already. The paths on a Globus endpoint's card open in Globus's web app.
+- **Copy as a command** gives the `globus transfer --batch` command (the Globus CLI) of a run.
 
 ## Routes
 

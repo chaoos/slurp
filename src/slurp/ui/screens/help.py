@@ -280,16 +280,33 @@ starts now) once every step is complete; its tooltip says what is missing.
    added and runs each time you click **Run now**.
 """),
   "EndpointsScreen": ("Endpoints", """
-Where transfers take data from and put it: this machine, and every tab (a cluster tab is an endpoint by itself, as
-long as it is open). Each row: its name, its kind, where it is, its state (● connected, ○ needs login, connecting,
-needs you, tab not open) and how many transfers use it. **Connect** logs in (a tab: in its tab), **Disconnect**,
-**Test**, **Edit…**, **Delete** (refused while transfers use it; a tab goes away when it is closed). More kinds (S3,
-SMB, WebDAV, Globus) come with later versions; their secrets are kept only in the system keyring.
+Where transfers take data from and put it: this machine, every tab (a cluster tab is an endpoint by itself, as long
+as it is open), and Globus collections. Each row: its name, its kind, where it is (a tab linked to a Globus collection:
+which), its state (● connected, ○ needs login, connecting, needs you, tab not open; Globus: not set up until you log
+in, expired or needs consent: log in again) and how many transfers use it. **Connect** logs in (a tab: in its tab;
+Globus: the Globus login if there is none, then a test), **Disconnect**, **Test**, **Edit…** (a Globus endpoint: its
+collection; a tab: its link to a Globus collection), **Delete** (refused while transfers use it; a tab goes away when
+it is closed). S3, SMB and WebDAV come with later versions; secrets are kept only in the system keyring.
 """),
   "NewEndpointScreen": ("New endpoint", """
 Choose the kind of the new endpoint, then **Next** for its settings (`Esc` or **Cancel** closes it). A cluster is
-added as a tab (`+`): every open tab is an endpoint by itself. The kinds this version cannot make yet are not
-offered.
+added as a tab (`+`): every open tab is an endpoint by itself. A kind that cannot be made here says why (Globus needs
+the Python package globus-sdk and a keyring); the kinds this version cannot make yet are not offered.
+"""),
+  "GlobusLoginScreen": ("Log in to Globus", """
+One Globus login for all collections. **Open in the browser** (or **Copy the link**) shows Globus's login page: log in
+there with your institution, allow slurp, and paste the code Globus shows into the field, then **Log in**. slurp keeps
+the login (a refresh token) only in the keyring of this machine. The first time it asks for the client id of a Globus
+app (app.globus.org → Settings → Developers: a native app, "thick client"), kept in slurp's settings. Collections that
+need a consent to their data (mapped collections of Globus Connect Server 5) are asked for in the same login.
+"""),
+  "GlobusEndpointScreen": ("A Globus collection", """
+A Globus endpoint: its name, its collection (**Search** by name at Globus, or paste its id; a click on a result chooses
+it), and its folder (where Browse… starts; empty: your home there). Linking a tab: the collection of its site (the
+site's suggestion, where its rule pack names one), and which folder of the tab is which folder in the collection (the
+paths of transfers under the folder of the tab map to it); **Remove the link** unlinks it. **Test** asks Globus for the
+collection and lists the folder. **Log in to Globus** when there is no login yet (search and Test need it). Globus
+moves the data between collections itself: not through this machine, and on without slurp.
 """),
   "PickPathsScreen": ("Choose paths", """
 A folder of a tab: Enter or a click goes into a folder (`Backspace` or **Up**: the one above), the path at the top can

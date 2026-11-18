@@ -38,6 +38,7 @@ python -m pip install ".[all]"
 | `links` | [shells and drives on your own machine](remote/links.md), [remote web access](remote/web-access.md) | asyncssh |
 | `hdf5` | the [HDF5 view](guide/files.md) | h5py |
 | `web` | [`--serve` and Textual Web](remote/browser.md) | textual-serve, textual-web |
+| `transfers` | [Globus collections](guide/transfers.md#globus) as endpoints of transfers, secrets in the system keyring | keyring, globus-sdk |
 
 Without `h5py` the HDF5 view shows `h5dump -H` when `h5dump` is installed. System commands such as `ssh`, `squeue`,
 `sacct`, `scontrol`, `srun` and `sbatch` are installed separately and must be there locally or on the SSH host.

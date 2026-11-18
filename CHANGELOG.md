@@ -37,6 +37,13 @@ version may need the helper of the same version).
   need; Run now waits until every endpoint is connected. This machine and
   every open tab are endpoints; Menu → Endpoints… lists them with their
   state and how many transfers use each (deleting one in use is refused).
+  **Globus collections** are endpoints too (Endpoints → New endpoint…; a
+  tab can be linked to its site's collection): a transfer between them is a
+  Globus task that slurp submits and follows (also across a restart; the
+  data does not pass this machine); Pause cancels the task, Continue
+  submits a new one. One Globus login (its token only in the system
+  keyring), with the consents collections need. New extra `transfers`
+  (keyring, globus-sdk), also in `all`.
 - Rule packs: `transfer_partition`, `transfer_hosts`, `globus`,
   `login_node_limits` (transfers).
 - Progress: only lines like the progress count (the structure of the
