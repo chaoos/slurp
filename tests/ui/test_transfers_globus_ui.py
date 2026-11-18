@@ -74,15 +74,24 @@ def test_globus_endpoint_and_login(check, monkeypatch):
       check("not logged in: said", "not logged in" in str(app.screen.query_one("#ge-login-text").render()))
       app.screen.query_one("#ge-login").press(); await pilot.pause(0.4)
       login = app.screen
-      check("the login asks for a client id first", isinstance(login, GlobusLoginScreen) and login.query_one("#gl-client-row").display
-            and login.query_one("#gl-done").disabled)
+      opened = []
+      app.open_url = lambda url, **kw: opened.append(url)
+      check("step 1: the app's client id first (the login itself not yet shown)", isinstance(login, GlobusLoginScreen)
+            and login.query_one("#gl-step-client").display and not login.query_one("#gl-step-login").display
+            and not login.query_one("#gl-done").display)
+      check("…what to do, and where", "Register a thick client" in str(login.query_one("#gl-step-client Static").render()))
+      login.query_one("#gl-dev-open").press(); await pilot.pause(0.2)
+      check("…its page opens in the browser", opened == ["https://app.globus.org/settings/developers"], opened)
       login.query_one("#gl-client").value = "not an id"
       login.query_one("#gl-client-use").press(); await pilot.pause(0.2)
       check("a wrong client id: refused", "Client UUID" in str(login.query_one("#gl-status").render()))
       login.query_one("#gl-client").value = "0123abcd-0000-4000-8000-000000000001"
       login.query_one("#gl-client-use").press(); await pilot.pause(0.3)
       url = str(login.query_one("#gl-url").render())
-      check("Globus's login page", "auth.globus.org" in url and "0123abcd-0000-4000-8000-000000000001" in url, url)
+      check("step 2: Globus's login page", login.query_one("#gl-step-login").display and not login.query_one("#gl-step-client").display
+            and "auth.globus.org" in url and "0123abcd-0000-4000-8000-000000000001" in url, url)
+      login.query_one("#gl-open").press(); await pilot.pause(0.2)
+      check("Open the login page: in the browser", opened[-1].startswith("https://auth.globus.org/") and "0123abcd" in opened[-1], opened)
       check("the client id kept", G.client_id() == "0123abcd-0000-4000-8000-000000000001")
       login.query_one("#gl-code").value = "CODE"
       login.query_one("#gl-done").press()

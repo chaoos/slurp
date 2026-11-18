@@ -50,42 +50,64 @@ class GlobusLoginScreen(ModalScreen):
     super().__init__()
     self.collections, self.why = list(collections), why
     self.login = None
+    self.had_client = bool(G.client_id()) # (the app was there already: the login is not "step 2")
 
   def compose(self) -> ComposeResult:
     with Vertical(id="gl-dialog"):
       yield Static("Log in to Globus", id="gl-title")
       if self.why:
         yield Static(self.why, classes="gl-note")
-      yield Static("slurp opens Globus's login page in your browser (or copy the link). Log in there with your "
-                   "institution, allow slurp, and paste the code Globus shows here. slurp keeps the login in the "
-                   "keyring of this machine; Globus moves the data, not slurp.", classes="gl-note")
-      with Horizontal(id="gl-client-row", classes="gl-row"):
-        yield Input(G.client_id(), placeholder="the Client UUID of a Globus app (native app)", id="gl-client")
-        yield Button("Use it", id="gl-client-use", compact=True)
-      yield Static(G.NO_CLIENT_ID, id="gl-client-note", classes="gl-note")
-      yield Static(id="gl-url")
-      with Horizontal(classes="gl-row"):
-        yield Button("Open in the browser", id="gl-open", compact=True)
-        yield Button("Copy the link", id="gl-copy", compact=True)
-      with Horizontal(classes="gl-row"):
-        yield Input(placeholder="the code Globus shows after the login", id="gl-code", password=True)
+      # step 1 (once): the Globus app slurp logs in as, its client id
+      with Vertical(id="gl-step-client"):
+        yield Static(Text.assemble(
+          ("Step 1 of 2: the Globus app slurp logs in as\n", "bold"),
+          "Globus lets programs log in only as an app registered with it, and slurp has none of its own yet. Register "
+          "one (once, a minute; it is free):\n"
+          "  1. open app.globus.org/settings/developers (the button below) and log in there;\n"
+          "  2. \"Register a thick client or script that will be installed and run by users on their devices\";\n"
+          "  3. a project (any, e.g. a new one called slurp), the app's name: slurp; "
+          "redirect: https://auth.globus.org/v2/web/auth-code;\n"
+          "  4. copy its Client UUID and paste it here."), classes="gl-note")
+        with Horizontal(classes="gl-row"):
+          yield Button("Open the Globus developers page", id="gl-dev-open", compact=True)
+          yield Button("Copy its link", id="gl-dev-copy", compact=True)
+        with Horizontal(id="gl-client-row", classes="gl-row"):
+          yield Input(G.client_id(), placeholder="the Client UUID, e.g. 01234567-89ab-cdef-0123-456789abcdef", id="gl-client")
+          yield Button("Use it", id="gl-client-use", variant="primary", compact=True)
+      # step 2: the login
+      with Vertical(id="gl-step-login"):
+        yield Static(Text.assemble(
+          ("Log in\n", "bold"),
+          "Open Globus's login page (or copy its link into a browser), log in there with your institution, allow "
+          "slurp, and paste the code Globus then shows into the field below. slurp keeps the login in the keyring of "
+          "this machine; Globus moves the data, not slurp."), id="gl-login-note", classes="gl-note")
+        yield Static(id="gl-url")
+        with Horizontal(classes="gl-row"):
+          yield Button("Open the login page", id="gl-open", variant="primary", compact=True)
+          yield Button("Copy its link", id="gl-copy", compact=True)
+          yield Button("Another app…", id="gl-client-change", compact=True, tooltip="the client id of another Globus app")
+        with Horizontal(classes="gl-row"):
+          yield Input(placeholder="the code Globus shows after the login", id="gl-code", password=True)
       yield Static(id="gl-status")
       with Horizontal(id="gl-buttons"):
         yield Button("Cancel", id="gl-cancel", compact=True)
         yield Button("Log in", id="gl-done", variant="primary", compact=True)
 
+  DEVELOPERS = "https://app.globus.org/settings/developers"
+
   def on_mount(self):
     self.prepare()
 
-  def prepare(self):
-    """The login of the client id there is (none: it is asked for first)"""
-    have = bool(G.client_id())
+  def prepare(self, change=False):
+    """Step 1 while there is no client id (or change: another one), else step 2: the login page of that app"""
+    have = bool(G.client_id()) and not change
     q = self.query_one
-    q("#gl-client-row").display = q("#gl-client-note").display = not have
-    for wid in ("#gl-open", "#gl-copy", "#gl-code", "#gl-done"):
-      q(wid).disabled = not have
+    q("#gl-step-client").display = not have
+    q("#gl-step-login").display = q("#gl-done").display = have
+    q("#gl-title", Static).update("Log in to Globus" + ("" if have else ": first, its app"))
     if not have:
-      q("#gl-url", Static).update("")
+      self.login = None
+      self.status("")
       q("#gl-client", Input).focus()
       return
     try:
@@ -94,10 +116,15 @@ class GlobusLoginScreen(ModalScreen):
       self.status(e.words, "red")
       return
     url = self.login.url()
+    q("#gl-login-note", Static).update(Text.assemble(
+      ("Step 2 of 2: log in\n" if change or not self.had_client else "Log in\n", "bold"),
+      "Open Globus's login page (or copy its link into a browser), log in there with your institution, allow slurp, "
+      "and paste the code Globus then shows into the field below. slurp keeps the login in the keyring of this "
+      "machine; Globus moves the data, not slurp."))
     q("#gl-url", Static).update(Text.assemble(("The login page: ", "bold"), (url, "underline")))
     consents = len(self.login.collections)
     self.status(f"with the consent for {consents} collection{'s' if consents != 1 else ''} (their data)" if consents else "", "dim")
-    q("#gl-code", Input).focus()
+    q("#gl-open", Button).focus()
 
   def status(self, words, style=""):
     self.query_one("#gl-status", Static).update(Text(words, style=style))
@@ -113,11 +140,30 @@ class GlobusLoginScreen(ModalScreen):
     G.set_client_id(G.collection_id(value))
     self.prepare()
 
+  @on(Button.Pressed, "#gl-client-change")
+  def client_change(self, event):
+    event.stop()
+    self.had_client = False
+    self.prepare(change=True)
+
+  @on(Button.Pressed, "#gl-dev-open")
+  def dev_open(self, event):
+    event.stop()
+    self.app.open_url(self.DEVELOPERS)
+    self.status(f"opened in the browser (nothing opened? Copy its link: {self.DEVELOPERS})", "dim")
+
+  @on(Button.Pressed, "#gl-dev-copy")
+  def dev_copy(self, event):
+    event.stop()
+    copy_text(self.app, self.DEVELOPERS, "the link of the Globus developers page")
+
   @on(Button.Pressed, "#gl-open")
   def open_pressed(self, event):
     event.stop()
     if self.login is not None:
       self.app.open_url(self.login.url())
+      self.status("opened in the browser (nothing opened, e.g. over SSH? Copy its link into a browser)", "dim")
+      self.query_one("#gl-code", Input).focus()
 
   @on(Button.Pressed, "#gl-copy")
   def copy_pressed(self, event):

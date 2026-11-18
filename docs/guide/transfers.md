@@ -120,8 +120,10 @@ Globus endpoint and a linked tab, only Globus can move the data; between two lin
 
 - **The login**: one for all collections (Connect, or **Log in to Globus**): Globus's login page opens in the browser,
   you log in there and paste the code it shows. The login (a refresh token) is kept only in the keyring. slurp logs in
-  as a Globus app: the first time it asks for the app's client id (register one at app.globus.org → Settings →
-  Developers as a native app; or set `$SLURP_GLOBUS_CLIENT_ID`). A collection that needs a consent to its data (a mapped
+  as a Globus app: the first time the login asks for the app's client id, with a button to the page where you register
+  one (app.globus.org → Settings → Developers: "a thick client or script that will be installed and run by users on
+  their devices", redirect `https://auth.globus.org/v2/web/auth-code`); or set `$SLURP_GLOBUS_CLIENT_ID`. **Copy its
+  link** helps where no browser opens (slurp over SSH). A collection that needs a consent to its data (a mapped
   collection of Globus Connect Server 5) asks for the login again, with it.
 - **The check** asks Globus for both collections, the sources (a pattern: its matches) and the destination; what
   remains is not known before: Globus compares at the run (by time and size; with checksums by content), and copies

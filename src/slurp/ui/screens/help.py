@@ -309,10 +309,13 @@ added as a tab (`+`): every open tab is an endpoint by itself. A kind that canno
 the Python package globus-sdk and a keyring); the kinds this version cannot make yet are not offered.
 """),
   "GlobusLoginScreen": ("Log in to Globus", """
-One Globus login for all collections. **Open in the browser** (or **Copy the link**) shows Globus's login page: log in
-there with your institution, allow slurp, and paste the code Globus shows into the field, then **Log in**. slurp keeps
-the login (a refresh token) only in the keyring of this machine. The first time it asks for the client id of a Globus
-app (app.globus.org → Settings → Developers: a native app, "thick client"), kept in slurp's settings. Collections that
+One Globus login for all collections. The first time, step 1: the Globus app slurp logs in as (Globus lets programs
+log in only as a registered app): **Open the Globus developers page**, register "a thick client or script that will be
+installed and run by users on their devices" (redirect https://auth.globus.org/v2/web/auth-code), and paste its Client
+UUID (**Use it**; kept in slurp's settings; **Another app…** changes it). Then the login: **Open the login page** (or
+**Copy its link** into a browser, e.g. when slurp runs over SSH), log in there with your institution, allow slurp, and
+paste the code Globus shows into the field, then **Log in**. slurp keeps the login (a refresh token) only in the keyring
+of this machine. Collections that
 need a consent to their data (mapped collections of Globus Connect Server 5) are asked for in the same login.
 """),
   "GlobusEndpointScreen": ("A Globus collection", """
