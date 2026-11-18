@@ -182,7 +182,7 @@ class ConnectionScreen(ModalScreen):
   @on(Button.Pressed, "#conn-drive-mount")
   def drive_mount_pressed(self, event):
     event.stop()
-    self.app.action_cluster_drive()
+    self.app.action_cluster_drive(self.cluster) # (this window's tab: also when opened from the Endpoints)
 
   @on(Button.Pressed, "#conn-drive-unmount")
   def drive_unmount_pressed(self, event):

@@ -1370,9 +1370,9 @@ class Slurp(TransfersTab, App):
         self.refresh_status()
     self.push_screen(LinkSetupScreen(kind, title, cluster.name, argv, path=path, read_only_argv=read_only_argv), created)
 
-  def action_cluster_drive(self):
-    """The login directory of the tab as a drive for the user's own machine (SFTP)"""
-    cluster = self.cluster
+  def action_cluster_drive(self, cluster=None):
+    """The login directory of the tab (None: the current one) as a drive for the user's own machine (SFTP)"""
+    cluster = cluster or self.cluster
     if cluster.destination and (cluster.connection is None or not cluster.connection.ready):
       self.notify(f"{cluster.name}: log in first", severity="warning")
       return
