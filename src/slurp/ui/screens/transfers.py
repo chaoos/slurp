@@ -1438,12 +1438,17 @@ class TransferWizard(ModalScreen):
     self.update_next()
     self.key_changed()
 
+  def job_client(self, route):
+    """The cluster that runs it (its job, its accounts, its partition): rclone on the cluster: the end that is a tab
+    (the other is no cluster); a pull: the destination; else the source"""
+    if route == "rclone-cluster":
+      return self.src if self.src is not None and self.side("src").is_tab else self.dst
+    return self.dst if route == "direct-pull" else self.src
+
   async def fill_runs(self):
     route = self.chosen_route()
     info = self.plan.get("routes", {}).get(route or "", {})
-    client = self.dst if route == "direct-pull" else self.src
-    if route == "rclone-cluster":
-      client = self.src if self.src is not None and self.side("src").is_tab else self.dst
+    client = self.job_client(route)
     runs = (["slurp"] if route in ("relay", "rclone-here") else ["globus"] if route == "globus" else
             ["detached"] + (["job"] if P.partition_of(client, site_of) else []))
     runs = info.get("runs_on") or runs
@@ -1548,7 +1553,7 @@ class TransferWizard(ModalScreen):
     job = self.chosen_runs_on() == "job"
     self.query_one("#tw-job", Vertical).display = job
     route = self.chosen_route()
-    client = self.dst if route == "direct-pull" else self.src
+    client = self.job_client(route)
     part = self.query_one("#tw-partition", Input)
     if job and not part.value:
       part.value = str(site_of(client).get("transfer_partition") or "")
@@ -1560,10 +1565,11 @@ class TransferWizard(ModalScreen):
 
   def fill_accounts(self, cluster):
     """The Slurm accounts of the cluster that runs the job: a list to choose from (looked up once per tab); none found
-    (no sacctmgr, no associations): a field to type one"""
-    if cluster is None:
-      return
+    (no sacctmgr, no associations; no cluster to ask): a field to type one"""
     pick, field = self.query_one("#tw-account-list", Select), self.query_one("#tw-account", Input)
+    if cluster is None: # (never "looking up" for ever)
+      pick.display, field.display = False, True
+      return
     def show(accounts):
       if accounts is not None:
         cluster.accounts = list(accounts)
@@ -1749,7 +1755,7 @@ class TransferWizard(ModalScreen):
       return False, "the time limit of the job"
     test = self.job_test_key()
     if test is not None and not test[3]:
-      client = self.dst if test[0] == "direct-pull" else self.src
+      client = self.job_client(test[0])
       if client is not None and client.accounts: # (the user has accounts there: the job is charged to one of them)
         return False, f"the account of the job (one of yours on {client.name})"
     if test is not None and strict:
@@ -1842,7 +1848,7 @@ class TransferWizard(ModalScreen):
     t = self.build()
     info = self.plan.get("routes", {}).get(t.route, {})
     est = info.get("estimate")
-    client = self.dst if t.route == "direct-pull" else self.src
+    client = self.job_client(t.route)
     self.query_one("#tw-summary-flow", Static).update(
       flow_diagram(t.route, t.runs_on, self.src, self.dst, self.side_name("src"), self.side_name("dst"),
                    rate=self.plan.get("routes", {}).get(t.route, {}).get("rate"), estimate=self.estimate_words(t.route),

@@ -512,6 +512,20 @@ def test_route_says_the_tool(check):
     check(f"{route}: {want}", how_text(route, runs_on) == want, how_text(route, runs_on))
 
 
+def test_job_client(check):
+  """The cluster that runs a transfer job (its accounts, its partition): rclone on the cluster: the end that is a tab,
+  also when it is the destination (the source an S3, SMB or WebDAV endpoint: no cluster); a pull: the destination"""
+  import types
+  from slurp.ui.screens.transfers import TransferWizard
+  daint, alps = types.SimpleNamespace(name="daint"), types.SimpleNamespace(name="alps")
+  def wizard(src, dst, src_tab):
+    return types.SimpleNamespace(src=src, dst=dst, side=lambda side: types.SimpleNamespace(is_tab=src_tab if side == "src" else True))
+  check("rclone, WebDAV → daint: daint", TransferWizard.job_client(wizard(None, daint, False), "rclone-cluster") is daint)
+  check("rclone, daint → S3: daint", TransferWizard.job_client(wizard(daint, None, True), "rclone-cluster") is daint)
+  check("a pull: the destination", TransferWizard.job_client(wizard(alps, daint, True), "direct-pull") is daint)
+  check("a push: the source", TransferWizard.job_client(wizard(alps, daint, True), "direct-push") is alps)
+
+
 def test_short_path(check):
   from slurp.ui.screens.transfers import short_path
   long = "/very/long/directory/path/with/many/subdirs/and/more/stuff/going/on/in/its/path"

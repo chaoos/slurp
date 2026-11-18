@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: a transfer job of rclone on the cluster with the cluster as the
+  destination (from S3, SMB or WebDAV) looks up your accounts and fills in
+  the transfer partition of that cluster (the account list waited for ever).
 - Endpoints: Enter (or a click) opens an endpoint's window: a cluster tab's
   connection window, or for S3, SMB, WebDAV and Globus a window alike (address,
   settings, secrets as there or missing, connection and last test, the
