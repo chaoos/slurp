@@ -1412,6 +1412,8 @@ class TransferScreen(TransfersBase):
   #xd-actions Button { margin-right: 1; }
   #xd-rate { height: 6; margin-top: 1; }
   #xd-closes { color: $text-muted; }
+  #xd-sync { margin-top: 1; padding: 0 1; border: round $panel; }
+  #xd-check-bar { height: auto; margin-bottom: 1; }
   """
   BINDINGS = [Binding("p", "pause", "Pause"), Binding("c", "resume", "Continue"), Binding("s", "run_now", "Run now"),
               Binding("e", "edit", "Edit")]
@@ -1430,6 +1432,7 @@ class TransferScreen(TransfersBase):
       yield Static(id="xd-head")
       yield Static(id="xd-route")
       yield Static(id="xd-paths")
+      yield Static(id="xd-sync")
       with Horizontal(id="xd-actions"):
         yield Button(icons.label("suspended", "Pause"), id="xd-pause", variant="warning", compact=True, tooltip="stop the run; Continue goes on (p)")
         yield Button(icons.label("running", "Continue"), id="xd-resume", variant="primary", compact=True, tooltip="a new run: it goes on where it stopped (c)")
@@ -1451,6 +1454,9 @@ class TransferScreen(TransfersBase):
       yield Static("Runs", classes="section")
       yield Button("", id="xd-runs", compact=True, tooltip="all its runs: when, how long, how they ended (a click on one: its details)")
       yield Static("The check", classes="section")
+      with Horizontal(id="xd-check-bar"):
+        yield Button(icons.label("reload", "Check again"), id="xd-recheck", compact=True,
+                     tooltip="check it again as it is set up: what remains (in sync?), both sides, the routes and their speed")
       yield Static(id="xd-check")
       yield Static("Log", classes="section")
       yield Static(id="xd-log")
@@ -1540,7 +1546,15 @@ class TransferScreen(TransfersBase):
     q("#xd-runs", Button).label = runs_label(t)
     q("#xd-runs", Button).disabled = not t.runs
 
-    check = plan_text(t.plan) if t.plan.get("steps") else Text("no check", style="dim")
+    checking = t.id in self.manager.checking
+    q("#xd-sync", Static).update(sync_text(t, checking, self.app.spinner()))
+    recheck = q("#xd-recheck", Button)
+    recheck.disabled = checking or t.active
+    recheck.tooltip = ("a run is under way: after it" if t.active else "checking …" if checking else
+                       "check it again as it is set up: what remains (in sync?), both sides, the routes and their speed")
+    check = plan_text(t.plan, self.app.spinner() if checking else "") if t.plan.get("steps") else Text("no check", style="dim")
+    if t.plan.get("ended") and not checking:
+      check.append(f" checked {S.when_text(t.plan['ended'])}\n", style="dim")
     if t.plan.get("routes"):
       check.append_text(routes_text(t.plan))
     q("#xd-check", Static).update(check)
@@ -1599,6 +1613,9 @@ class TransferScreen(TransfersBase):
         self.app.connect_cluster(missing[0])
     elif bid == "xd-job":
       self.app.open_transfer_job(t)
+    elif bid == "xd-recheck":
+      self.manager.recheck(t)
+      self.refresh_view()
     elif bid == "xd-runs" and t.runs:
       self.app.push_screen(TransferRunsScreen(t.id))
 
@@ -1617,6 +1634,33 @@ class TransferScreen(TransfersBase):
   def action_edit(self):
     if self.transfer is not None:
       self.edit(self.transfer)
+
+def sync_state(t):
+  """In sync? From the newer of the last check and the last run that ended well: ("yes" | "no" | "unknown", words)"""
+  plan = t.plan or {}
+  checked = plan.get("done") and plan.get("remaining_bytes") is not None and not plan.get("error")
+  checked_at = plan.get("ended") or plan.get("started") or 0
+  last = next((r for r in reversed(t.runs) if r["result"] in ("done", "done-errors")), None)
+  if last is not None and (not checked or last["ended"] >= checked_at):
+    if last["result"] == "done":
+      return "yes", f"as of the last run ({S.when_text(last['ended'])}): it copied all there was"
+    return "no", (f"the last run ({S.when_text(last['ended'])}) could not copy {last.get('error_count') or 'some'} "
+                  "files (its errors)")
+  if checked:
+    files, size = plan.get("remaining_files") or 0, plan.get("remaining_bytes") or 0
+    if not files and not size:
+      return "yes", f"as of the check ({S.when_text(checked_at)}): nothing to copy"
+    return "no", f"as of the check ({S.when_text(checked_at)}): {human(size)} in {files} file{'s' if files != 1 else ''} to copy"
+  return "unknown", "not checked yet, and no run ended well: Check again (below) finds out"
+
+SYNC_LOOK = {"yes": ("● in sync", "bold green"), "no": ("● not in sync", "bold yellow"), "unknown": ("○ in sync?", "bold dim")}
+
+def sync_text(t, checking=False, spinner=""):
+  if checking:
+    return Text.assemble((f"{spinner} checking …", "bold cyan"), "  what remains, both sides, the routes", style="")
+  state, words = sync_state(t)
+  mark, style = SYNC_LOOK[state]
+  return Text.assemble((mark, style), f"  {words}" + ("; the source may have changed since" if state == "yes" else ""))
 
 def runs_label(t):
   """The Runs field: how many times it ran, how they ended, the last one"""

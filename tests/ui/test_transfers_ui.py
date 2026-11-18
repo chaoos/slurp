@@ -373,3 +373,37 @@ def test_runs(check, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_sync_and_recheck(check, tmp_path):
+  """The details say whether both sides are in sync (from the last check or the last run that ended well), and Check
+  again checks the transfer as it is set up"""
+  from slurp.transfer import model as M
+  src, dst = files(tmp_path)
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      ref = M.tab_ref(app.clusters[0])
+      t = M.Transfer(M.new_id(), "sync", {"tab": ref, "paths": [str(src)]}, {"tab": ref, "path": str(dst)}, route="relay", runs_on="slurp")
+      app.transfers.add(t)
+      app.open_transfer(t); await pilot.pause(1.2)
+      sync = lambda: str(app.screen.query_one("#xd-sync").render())
+      check("never checked nor run: not known", "in sync?" in sync() and "not checked yet" in sync(), sync())
+      await pilot.click("#xd-recheck"); await pilot.pause(0.1)
+      check("Check again: it checks", await until(pilot, lambda: t.id not in app.transfers.checking and t.plan.get("done"), 30))
+      await pilot.pause(1.2)
+      check("…not in sync: what is to copy", "● not in sync" in sync() and "in 2 files to copy" in sync(), sync())
+      check("the check's results in the details", "files to copy" in str(app.screen.query_one("#xd-check").render()))
+      app.transfers.start(t)
+      await until(pilot, lambda: t.state == "done", 30); await pilot.pause(1.2)
+      check("after a run that ended well: in sync, as of that run", "● in sync" in sync() and "the last run" in sync(), sync())
+      (src / "new.txt").write_text("more")
+      await pilot.click("#xd-recheck")
+      await until(pilot, lambda: t.id not in app.transfers.checking, 30); await pilot.pause(1.2)
+      check("a new file on the source, Check again: not in sync, 1 file", "● not in sync" in sync() and "in 1 file to copy" in sync(), sync())
+      check("in its log", any("checked:" in words for _, words in t.log))
+      await pilot.press("q")
+
+  asyncio.run(main())

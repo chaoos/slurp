@@ -107,6 +107,9 @@ connection), its route and where it runs, its state, how far it is, its rate, th
 ran last); the line below says why it waits, how it failed, its schedule. `Enter` or a click opens a transfer in a
 subtab of its own:
 
+- whether both sides are in sync: **● in sync**, **● not in sync** (how much is left, or how many files the last run
+  could not copy) or **○ in sync?** (not known yet), from the newer of the last check and the last run that ended
+  well, and as of when (the source may have changed since);
 - its state, the route (the tabs with their connections, and slurp in between for the relay), the sources and the
   destination: each a link that opens it in the tab of its cluster: a folder as a directory view, a file in its view
   (one that cannot be shown: its folder, searched for it), a pattern such as `/path/to/*.log` as its folder searched
@@ -117,7 +120,9 @@ subtab of its own:
   ran, how the runs ended and the last one. A click on it lists the runs, the last first (number, start, end, how long,
   how it ended, how much and how many files, the rate, the route, the job or host, why it ended so); a click on a run
   shows its details: what it copied of how much, where it ran (its job, its folder on the cluster), its options,
-  rsync's statistics, its errors and its events. `Esc` goes back. What the check found; its log.
+  rsync's statistics, its errors and its events. `Esc` goes back. What the check found, with **Check again**: the
+  check anew, as the transfer is set up (its paths and options): what remains, both sides, the routes and their speed
+  (not while a run goes on); its log.
 
 **Pause** (`p`) stops the run; rsync keeps the half-copied file in `.slurp-partial` on the destination and the next run
 goes on from it. A transfer job is cancelled for it, and loses its place in the queue and the time it used: slurp asks

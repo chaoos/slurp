@@ -210,7 +210,8 @@ cancelled for it: slurp asks first), `c` continues (rsync goes on where it stopp
 history; the files stay). Keys that act on a cluster do nothing here: its tab first.
 """),
   "TransferScreen": ("A transfer", """
-One transfer: its state, how the data flows (a picture: the tabs as boxes with their connections, slurp between them
+One transfer: its state, whether both sides are in sync (● in sync, ● not in sync with what is left, ○ not known:
+from the newer of the last check and the last run that ended well, and when), how the data flows (a picture: the tabs as boxes with their connections, slurp between them
 for the relay; on the arrow push, pull, relay or the same filesystem; under each box what runs there; while it runs a
 dot moves along the arrows), the sources and the destination (links: a click opens one in the tab of its cluster, a
 folder as a directory view, a file in its view, a file that cannot be shown or a pattern such as `*.log` as its folder
@@ -218,7 +219,8 @@ searched for it, a destination not there yet as the nearest folder that is), how
 copies now, its rate over time, what happens if slurp closes (in slurp: it stops as paused and Continue goes on;
 detached on the cluster or as a transfer job: it goes on without slurp), its schedule, the errors rsync reported for
 single files, **Runs** (how many times it ran, how they ended, the last one; a click: the list of its runs), what the
-check found, and its log.
+check found (**Check again** checks it anew as it is set up: what remains, both sides, the routes; not while a run
+goes on), and its log.
 
 **Pause** (`p`) stops the run; rsync keeps the half-copied file in `.slurp-partial` and the next run goes on from it.
 A transfer job is cancelled for it (it loses its place in the queue): slurp asks first, and **Continue** (`c`) submits a

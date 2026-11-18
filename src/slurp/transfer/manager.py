@@ -44,6 +44,7 @@ class Manager:
     self.listeners = []     # fn(transfer or None) on the UI thread when something changed
     self.login_started = {} # id -> when the logins for a scheduled run started
     self.job_watch = {}     # id -> next look at the job it waits for
+    self.checking = set()   # ids being checked again (their details: Check again)
     self.lock = threading.RLock()
     for t in self.store.transfers: # (runs that went on without slurp: followed again)
       if t.run and t.runs_on in ("detached", "job"):
@@ -526,6 +527,32 @@ class Manager:
       self.from_thread(run)
 
   # ---- checks
+  def recheck(self, t):
+    """Check a transfer again as it is set up (its paths, its options): its plan as the check goes (what remains, the
+    routes); False if it cannot be now (a run under way, a tab not connected)"""
+    if t.id in self.checking or t.active:
+      return False
+    missing = self.not_ready(t)
+    if missing:
+      self.say(t, "connect " + ", ".join(c.name if c else "its closed tab" for c in missing) + " first", "warning")
+      return False
+    self.checking.add(t.id)
+    t.event("checking …")
+    def report(plan):
+      t.plan = plan
+      self.changed(t, save=False)
+    def done(plan):
+      t.plan = plan
+      self.checking.discard(t.id)
+      remaining = plan.get("remaining_bytes")
+      t.event("checked: " + ("in sync" if remaining == 0 and not plan.get("remaining_files") else
+                              f"{P.human(remaining)} in {plan.get('remaining_files', '?')} file{'' if plan.get('remaining_files') == 1 else 's'} to copy"
+                              if remaining is not None
+                              else plan.get("error") or "what remains is not known"))
+      self.changed(t)
+    self.check(t, report, done)
+    return True
+
   def check(self, t, report, done):
     """The check of a transfer (in a thread): report(plan) as it goes, done(plan) at the end (on the UI thread)"""
     stop = threading.Event()
