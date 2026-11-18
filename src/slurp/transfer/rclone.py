@@ -308,7 +308,9 @@ def groups(sources):
   for src, is_dir in sources:
     folder, name = posixpath.split(src.rstrip("/"))
     rules = out.setdefault(folder or "/", ([], []))
-    if any(ch in name for ch in "*?["):
+    if not name: # (the endpoint's root itself: all of it, into the destination folder)
+      rules[0].append("+ /**")
+    elif any(ch in name for ch in "*?["):
       rules[0].append(f"+ /{name}")
     elif is_dir:
       rules[0].append(f"+ /{name}/**")

@@ -234,3 +234,25 @@ def test_make_folder_webdav_written(check, webdav):
   d = E.EndpointDef("w4", "dav", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"])
   note = RC.make_folder(RC.Endpoint(d, {"password": "pw456"}), "/new")
   check("made, written, no marker left, no note", (root / "new").is_dir() and not list((root / "new").iterdir()) and note == "", note)
+
+
+def test_webdav_root_as_source(check, webdav, tmp_path):
+  """The endpoint's root as the source (Choose this folder at its top): all of it copied, not nothing ("done" at once)"""
+  port, root = webdav
+  (root / "run1" / "sub").mkdir(parents=True)
+  (root / "run1" / "sub" / "b.txt").write_text("b")
+  (root / "top.txt").write_text("t")
+  store = E.EndpointStore(str(tmp_path / "endpoints.json"))
+  store.add(E.EndpointDef("w2", "dav", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"]))
+  S.put(S.user("w2", "password"), "pw456")
+  app = App()
+  m = MG.Manager(app, M.Store(str(tmp_path / "transfers.json")), store)
+  out = tmp_path / "out"
+  t = M.Transfer(M.new_id(), "all", {"endpoint": "w2", "paths": ["/"]}, {"endpoint": "local", "path": str(out)}, route="rclone-here", runs_on="slurp")
+  t.plan = {"routes": {"rclone-here": {"ok": True, "runs_on": ["slurp"]}}}
+  m.add(t)
+  m.run_now(t)
+  check("done, and everything there", until(app, m, lambda: t.state == "done") and (out / "top.txt").exists()
+        and (out / "run1" / "sub" / "b.txt").exists(), (t.state, t.message, sorted(str(p.relative_to(out)) for p in out.rglob("*")) if out.exists() else None))
+  text = m.command_text(t)
+  check("Copy as a command: its root, all of it", "//**" not in text, text)

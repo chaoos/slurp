@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: the root of an S3, SMB or WebDAV endpoint as the source (Choose
+  this folder at its top) copies all of it; rclone's filter matched nothing
+  and the run ended "done" at once.
 - Endpoints: an endpoint's window says what its server is, without changing
   anything: WebDAV and S3 software from their headers (Nextcloud/ownCloud
   version from status.php, WebDAV classes, the bucket's region), SMB the

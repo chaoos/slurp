@@ -502,8 +502,10 @@ class Manager:
     steps = []
     for folder, rules, _ in RC.groups([(p, bool(d)) for p, d in sources]):
       if keys is not None: # (Copy as a command: a folder or a file is not known: both rules)
-        rules = [r for p, _ in sources if p.rsplit("/", 1)[0] == folder or (folder == "/" and p.count("/") == 1)
-                 for r in ([f"+ /{p.rsplit('/', 1)[1]}"] + ([] if R.is_pattern(p) else [f"+ /{p.rsplit('/', 1)[1]}/**"]))] + ["- **"]
+        def both(p): # (a path: as a file, and as a folder; the root: all of it)
+          name = p.rstrip("/").rsplit("/", 1)[-1]
+          return ["+ /**"] if not name else [f"+ /{name}"] + ([] if R.is_pattern(p) else [f"+ /{name}/**"])
+        rules = [r for p, _ in sources if (p.rstrip("/").rsplit("/", 1)[0] or "/") == folder for r in both(p)] + ["- **"]
       src = src_s3.path(folder) if src_s3 else folder
       steps.append((RC.copy_argv(src, dest, rules, t.options), env))
     return steps

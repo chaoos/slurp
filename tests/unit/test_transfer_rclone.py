@@ -201,3 +201,9 @@ def test_errors_said_once(check):
   check("the cause once, with the hint", text.count("broken error response format") == 1 and "impacket" in text and "2026" not in text, text)
   check("exit 1: failed, not a usage error", RC.outcome(1) == ("failed", "rclone ended with 1: it failed"), RC.outcome(1))
   check("two different causes: both", RC.causes(["a.txt: denied", "b.txt: timeout"]) == "a.txt: denied; b.txt: timeout")
+
+
+def test_root_source_rules(check):
+  """The endpoint's root as a source: all of it (it matched nothing: + //**)"""
+  check("the root: + /**", RC.groups([("/", True)]) == [("/", ["+ /**", "- **"], [""])], RC.groups([("/", True)]))
+  check("a folder: + /name/**", RC.groups([("/run1", True)]) == [("/", ["+ /run1/**", "- **"], ["run1"])])
