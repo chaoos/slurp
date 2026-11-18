@@ -271,6 +271,11 @@ class Manager:
       self.from_thread(finish)
     threading.Thread(target=work, daemon=True, name=f"globus test {endpoint.name}").start()
 
+  def ensure_tested(self, endpoint):
+    """A Globus endpoint not tested yet in this session (logged in): tested now, once"""
+    if endpoint.kind == "globus" and endpoint.id not in self.endpoint_status and G.logged_in():
+      self.test_globus(endpoint)
+
   def globus_check(self, t, report):
     """The check of a Globus transfer (in a thread): the login, both collections, the sources (each match of a
     pattern) and the destination; what remains is not known before (Globus compares at the run)"""

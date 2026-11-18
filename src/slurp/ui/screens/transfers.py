@@ -33,8 +33,8 @@ STATE_STYLES = {"running": "bold green", "starting": "green", "queued": "cyan", 
 STATE_ICONS = {"running": "running", "starting": "running", "queued": "pending", "waiting": "pending", "pausing": "suspended",
                "paused": "suspended", "done": "completed", "done-errors": "completed",
                "failed": "failed", "new": "pending", "checking": "pending"}
-ROUTE_SHORT = {"same-fs": "same filesystem", "direct-push": "direct", "direct-pull": "direct (pull)", "relay": "relay"}
-RUNS_SHORT = {"slurp": "in slurp", "detached": "login node", "job": "transfer job"}
+ROUTE_SHORT = {"same-fs": "same filesystem", "direct-push": "direct", "direct-pull": "direct (pull)", "relay": "relay", "globus": "Globus"}
+RUNS_SHORT = {"slurp": "in slurp", "detached": "login node", "job": "transfer job", "globus": "at Globus"}
 
 def when_text(epoch):
   """A moment, short: 14:05 today, tomorrow 02:00, else the date"""
@@ -91,7 +91,11 @@ def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=No
   def rsync(extra=""):
     return "rsync" + (f" {extra}" if extra else "") + (f" ({where})" if where else "")
   two_clusters = src is not None and dst is not None and src.destination and dst.destination
-  if route == "relay" and two_clusters:
+  if route == "globus":
+    boxes = [("collection", src_name, "a Globus collection"), (None, "Globus", "moves the data (not through this machine)"),
+             ("collection", dst_name, "a Globus collection")]
+    arrows = ["Globus", "Globus"]
+  elif route == "relay" and two_clusters:
     boxes = [(src, src_name, "rsync (sends)"), (None, "slurp", "passes the bytes"), (dst, dst_name, "rsync server (receives)")]
     arrows = ["relay", "relay"]
   elif route == "relay":
@@ -108,11 +112,17 @@ def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=No
     arrows = ["same filesystem"]
   cells = []
   for cluster, name, caption in boxes:
-    label = Text.assemble(dot(cluster), " ", (name, "bold")) if cluster is not None or name != "slurp" else Text("⇄ slurp", style="bold cyan")
+    middle = cluster is None and name in ("slurp", "Globus")
+    if middle:
+      label = Text("⇄ slurp" if name == "slurp" else "☁ Globus", style="bold cyan")
+    elif cluster == "collection":
+      label = Text.assemble(("◆", "cyan"), " ", (name, "bold"))
+    else:
+      label = Text.assemble(dot(cluster), " ", (name, "bold"))
     inner = cell_len(label.plain) + 2
     caption = textwrap.wrap(caption, max(22, inner + 2)) # (a few short lines: the boxes stay close)
     width = max([inner + 2, *map(cell_len, caption)])
-    cells.append((label, inner, width, caption, cluster is None and name == "slurp"))
+    cells.append((label, inner, width, caption, middle))
   rows = max(len(c[3]) for c in cells)
   speed = f"{rate_text(rate)}" if rate else "measuring …" if measuring else ""
   arrow_widths = [max(cell_len(a) + 4, cell_len(speed) + 4, 10) for a in arrows]
@@ -152,6 +162,9 @@ def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=No
 def if_slurp_closes(t, client_name="", host="", pack=None):
   """What happens to a transfer when slurp ends (the details and the wizard say it)"""
   pack = pack or {}
+  if t.runs_on == "globus":
+    return ("Globus runs it: it goes on when slurp ends, and slurp shows it again at the next start. Pause cancels the "
+            "task (Globus has no pause); Continue submits a new one, which skips what is there already.")
   if t.runs_on == "slurp":
     from ...links import holder
     terminal = " A closed terminal does not matter: slurp keeps running in its session holder." if holder.under_holder() else ""
@@ -189,12 +202,14 @@ class PickPathsScreen(ModalScreen):
   """
   BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("space", "mark", "Mark"), Binding("backspace", "up", "Up", show=False)]
 
-  def __init__(self, cluster, start="", multi=True, title=""):
+  def __init__(self, cluster, start="", multi=True, title="", lister=None, name=""):
     super().__init__()
     self.cluster, self.multi = cluster, multi
-    self.path = start or home_of(cluster) or "/"
+    self.lister = lister # (instead of a tab: lister(path) -> entries, e.g. of a Globus collection)
+    self.path = start or (home_of(cluster) if cluster is not None else "/~/") or "/"
     self.entries, self.marked = [], set()
-    self.title_text = title or (f"Choose what to copy from {cluster.name}" if multi else f"Choose the destination folder on {cluster.name}")
+    name = name or (cluster.name if cluster is not None else "?")
+    self.title_text = title or (f"Choose what to copy from {name}" if multi else f"Choose the destination folder on {name}")
 
   def compose(self) -> ComposeResult:
     with Vertical(id="pp-dialog"):
@@ -220,7 +235,8 @@ class PickPathsScreen(ModalScreen):
     table = self.query_one("#pp-list", ClickTable)
     for key, label in (("mark", " "), ("name", "Name"), ("size", "Size"), ("mtime", "Modified")):
       table.add_column(label, key=key)
-    with_places(self, self.cluster, self.show_places)
+    if self.lister is None:
+      with_places(self, self.cluster, self.show_places)
     self.go(self.path)
     table.focus()
 
@@ -238,9 +254,17 @@ class PickPathsScreen(ModalScreen):
     self.query_one("#pp-status", Static).update(Text(f"listing {path} …", style="dim"))
     def work():
       try:
+        if self.lister is not None:
+          entries = self.lister(path)
+          where = path
+          if where.startswith("/~"): # (a Globus home: its entries, the path as Globus names it)
+            where = where.rstrip("/") + "/"
+          return where, entries, ""
         return path, listing(path, 20000)[1], ""
       except OSError as e:
         return None, None, str(e)
+      except Exception as e: # (Globus)
+        return None, None, getattr(e, "words", None) or str(e)
     def listed(result):
       if result is None:
         return
@@ -252,7 +276,7 @@ class PickPathsScreen(ModalScreen):
       self.query_one("#pp-path", Input).value = where
       self.populate()
     in_background(self, work, listed, group="pp-list", name="listing the folder",
-                  connection=self.cluster.connection if self.cluster.destination else None)
+                  connection=self.cluster.connection if self.cluster is not None and self.cluster.destination else None)
 
   def populate(self):
     table = self.query_one("#pp-list", ClickTable)
@@ -325,13 +349,13 @@ class PickPathsScreen(ModalScreen):
       self.toggle(table.coordinate_to_cell_key((table.cursor_row, 0)).row_key.value)
 
   def action_up(self):
-    if self.path != "/":
+    if self.path not in ("/", "/~/", "/~"):
       self.go(os.path.dirname(self.path.rstrip("/")) or "/")
 
   @on(Input.Submitted, "#pp-path")
   def typed(self, event):
     event.stop()
-    self.go(expand_path(event.value, home_of(self.cluster) or "/"))
+    self.go(event.value.strip() or "/~/" if self.lister is not None else expand_path(event.value, home_of(self.cluster) or "/"))
 
   @on(Button.Pressed)
   def pressed(self, event):
@@ -372,7 +396,7 @@ def select(radio_set, button):
   radio_set._pressed_button = button
 
 STEP_STATE = {"running": ("…", "yellow"), "ok": ("✓", "green"), "bad": ("✗", "red"), "warn": ("!", "yellow"), "info": ("ⓘ", "dim")}
-STEP_ORDER = ["facts", "paths", "same-fs", "remaining", "relay", "direct-push", "direct-pull"]
+STEP_ORDER = ["facts", "paths", "same-fs", "remaining", "relay", "direct-push", "direct-pull", "globus"]
 
 def plan_text(plan, spinner=""):
   """The steps of a check, as they came"""
@@ -423,7 +447,7 @@ class TransferWizard(ModalScreen):
   pass will do: Run now checks first), 5 summary (Add). A transfer runs only on Run now. Dismissed with
   {"transfer": Transfer, "go": bool} or None. editing: a transfer whose settings it changes (its id stays)"""
   STEPS = ["Source", "Destination", "Options", "Route", "Summary"]
-  ROUTE_ORDER = ("same-fs", "direct-push", "direct-pull", "relay")
+  ROUTE_ORDER = ("same-fs", "direct-push", "direct-pull", "relay", "globus")
   DEFAULT_CSS = """
   TransferWizard { align: center middle; }
   #tw-dialog { width: 120; max-width: 98%; height: 94%; border: thick $accent; background: $surface; padding: 0 2; }
@@ -467,8 +491,9 @@ class TransferWizard(ModalScreen):
     self.checking = None # (the stop event of a check under way)
     self.checked_for = None # (what the plan was made for: source, paths, destination)
     manager = app.transfers
-    # (the endpoints it offers: this machine and the cluster tabs; the others come with their movers)
-    self.endpoints = [e for e in E.listing(app, manager.endpoint_store, manager.endpoint_status) if e.is_tab]
+    # (the endpoints it offers: this machine, the cluster tabs, Globus collections; the others come with their movers)
+    self.endpoints = [e for e in E.listing(app, manager.endpoint_store, manager.endpoint_status) if e.is_tab or e.kind == "globus"]
+    self.tested = set() # (Globus endpoints tested in the wizard: once)
     by_id = {e.id: e for e in self.endpoints}
     draft = draft or {}
     if editing:
@@ -572,9 +597,12 @@ class TransferWizard(ModalScreen):
                            "nothing changed: much slower)", id="tw-checksum", compact=True)
           yield Static(id="tw-checksum-note", classes="tw-warn")
           with Horizontal(classes="tw-row"):
+            yield Checkbox("verify checksums after copying (Globus: each file's checksum compared at both ends)", value=True,
+                           id="tw-verify", compact=True)
+          with Horizontal(classes="tw-row", id="tw-compress-row"):
             yield Checkbox("compress (helps on the relay over slow links)", id="tw-compress", compact=True)
           yield Static(id="tw-compress-note", classes="tw-note")
-          with Horizontal(classes="tw-row"):
+          with Horizontal(classes="tw-row", id="tw-bwlimit-row"):
             yield Label("limit the speed to")
             yield Input(placeholder="MB/s (none)", id="tw-bwlimit", compact=True)
             yield Label("MB/s (empty: no limit)")
@@ -600,6 +628,60 @@ class TransferWizard(ModalScreen):
   def endpoint(self, eid):
     return next((e for e in self.endpoints if e.id == eid), None)
 
+  def side(self, side):
+    return self.endpoint(self.src_id if side == "src" else self.dst_id)
+
+  def side_name(self, side):
+    e = self.side(side)
+    return e.name if e is not None else "?"
+
+  def globus_only(self):
+    """An end is a Globus endpoint: only Globus can move the data"""
+    store = self.app.transfers.endpoint_store
+    return E.globus_only(store, {"endpoint": self.src_id}, {"endpoint": self.dst_id})
+
+  def globus_possible(self):
+    store = self.app.transfers.endpoint_store
+    return E.globus_possible(store, {"endpoint": self.src_id}, {"endpoint": self.dst_id})
+
+  def live_state(self, side):
+    """(state, words) of an end now (a tab: its login; Globus: its test of this session)"""
+    e = self.side(side)
+    if e is None:
+      return "failed", "no endpoint"
+    if e.is_tab:
+      return E.tab_state(self.src if side == "src" else self.dst, self.app)
+    m = self.app.transfers
+    r = E.resolve(self.app, m.endpoint_store, {"endpoint": e.id}, m.endpoint_status)
+    return r.state, r.words
+
+  def side_ok(self, side):
+    """(ok, why) of an end: connected (a Globus endpoint: tested), or, a tab for Globus, linked to a collection"""
+    e, cluster = self.side(side), (self.src if side == "src" else self.dst)
+    if e is None:
+      return False, "choose an endpoint"
+    if e.kind == "globus":
+      state, words = self.live_state(side)
+      return (True, "") if state == "connected" else (False, f"{e.name}: {words or state}" + (" (Connect)" if state == "not connected" else ""))
+    if self.globus_only():
+      if E.collection_of(self.app.transfers.endpoint_store, {"endpoint": e.id})[0] is None:
+        return False, (f"{e.name} is not linked to a Globus collection (Endpoints → Edit…): only Globus moves the data of "
+                       "a Globus collection")
+      return True, "" # (Globus moves it: the tab need not be connected)
+    if cluster is None:
+      return False, f"open the tab of {e.name}"
+    if not self.ready(cluster):
+      return False, f"connect {e.name} first"
+    return True, ""
+
+  def expand(self, side, value):
+    """A path typed for an end (~ and relative paths: in its home)"""
+    cluster = self.src if side == "src" else self.dst
+    value = value.strip()
+    if self.side(side) is not None and self.side(side).kind == "globus":
+      return "/~/" + value[2:] if value.startswith("~/") else "/~/" if value == "~" else value
+    return expand_path(value, (home_of(cluster) if cluster is not None else "") or "/")
+
   def snapshot(self):
     """What it says so far, to come back to (after a login in a tab)"""
     return {"src": self.src_id, "dst": self.dst_id, "paths": list(self.paths), "dest_path": self.dest_path,
@@ -609,7 +691,7 @@ class TransferWizard(ModalScreen):
     if self.editing:
       self.prefill(self.editing)
       if self.plan.get("done"): # (its check is for its sources and destination: the steps after it can be gone to)
-        self.checked_for = (id(self.src), tuple(self.paths), id(self.dst), self.dest_path)
+        self.checked_for = (self.src_id, tuple(self.paths), self.dst_id, self.dest_path)
         self.refresh_routes()
     elif self.draft_options: # (a wizard that stepped aside for a login: as it was)
       self.prefill_options(self.draft_options)
@@ -625,6 +707,7 @@ class TransferWizard(ModalScreen):
   def prefill_options(self, o):
     q = self.query_one
     q("#tw-checksum", Checkbox).value = bool(o.get("checksum"))
+    q("#tw-verify", Checkbox).value = not o.get("no_verify")
     q("#tw-compress", Checkbox).value = bool(o.get("compress"))
     q("#tw-bwlimit", Input).value = str(o.get("bwlimit") or "")
     q("#tw-key", Checkbox).value = bool(o.get("temp_key"))
@@ -713,21 +796,19 @@ class TransferWizard(ModalScreen):
 
   def plan_current(self):
     """Is the plan of the check for the sources and the destination chosen now?"""
-    return self.checked_for == (id(self.src), tuple(self.paths), id(self.dst), self.dest_path)
+    return self.checked_for == (self.src_id, tuple(self.paths), self.dst_id, self.dest_path)
 
   def step_ok(self, step=None):
     step = self.step if step is None else step
     if step == 0:
-      if self.src is None:
-        return False, "choose an endpoint" if self.endpoint(self.src_id) is None else f"open the tab of {self.endpoint(self.src_id).name}"
-      if not self.ready(self.src):
-        return False, f"connect {self.src.name} first"
+      ok, why = self.side_ok("src")
+      if not ok:
+        return ok, why
       return bool(self.paths), "" if self.paths else "add what to copy"
     if step == 1:
-      if self.dst is None:
-        return False, "choose an endpoint" if self.endpoint(self.dst_id) is None else f"open the tab of {self.endpoint(self.dst_id).name}"
-      if not self.ready(self.dst):
-        return False, f"connect {self.dst.name} first"
+      ok, why = self.side_ok("dst")
+      if not ok:
+        return ok, why
       return bool(self.dest_path.strip()), "" if self.dest_path.strip() else "the destination folder"
     if step == 2:
       return self.options_ok()
@@ -789,18 +870,35 @@ class TransferWizard(ModalScreen):
       e = self.endpoint(eid)
       if e is None:
         continue
-      state, words = E.tab_state(cluster, self.app) if e.is_tab else (e.state, e.words)
-      marks = {"connected": ("●", "green"), "connecting": ("◌", "yellow"), "needs you": ("◌", "bold yellow"),
-               "not connected": ("○", "dim"), "tab not open": ("✕", "red")}
-      mark, style = marks.get(state, ("○", "dim"))
-      self.query_one(f"#tw-{side}-state", Static).update(Text.assemble(
-        (mark, style), f" {E.KINDS.get(e.kind, e.kind)}: ", (state if state == words or not words else f"{state} ({words})", style)))
-      self.query_one(f"#tw-{side}-connect", Button).display = state in ("not connected",) and cluster is not None
+      state, words = self.live_state(side)
+      if e.kind == "globus" and state == "not connected" and e.id not in self.tested: # (logged in: tested at once)
+        self.tested.add(e.id)
+        self.app.transfers.test_globus(e)
+      mark, style = STATE_MARKS.get(state, ("○", "dim"))
+      text = Text.assemble((mark, style), f" {E.KINDS.get(e.kind, e.kind)}: ", (state if state == words or not words else f"{state} ({words})", style))
+      if e.is_tab and self.globus_only():
+        cid = E.collection_of(self.app.transfers.endpoint_store, {"endpoint": e.id})[0]
+        text.append("  · Globus moves the data: " + ("its linked collection" if cid else "it is not linked to a collection (Endpoints → Edit…)"),
+                    style="cyan" if cid else "yellow")
+      self.query_one(f"#tw-{side}-state", Static).update(text)
+      connect = self.query_one(f"#tw-{side}-connect", Button)
+      if e.kind == "globus":
+        connect.display = state not in ("connected", "connecting")
+        label = "Log in" if state in ("not set up", "expired", "needs consent") else "Connect"
+        if str(connect.label) != icons.label("connect", label):
+          connect.label = icons.label("connect", label)
+      else:
+        connect.display = state in ("not connected",) and cluster is not None
       self.query_one(f"#tw-{side}-login", Button).display = state == "needs you"
     self.update_next()
 
   def connect_side(self, side):
     """Connect: the tab's login; one that needs input shows itself in the tab (Log in in its tab)"""
+    e = self.side(side)
+    if e is not None and e.kind == "globus":
+      self.tested.add(e.id)
+      self.app.connect_endpoint(self.app.endpoint_named(e.id))
+      return
     cluster = self.src if side == "src" else self.dst
     if cluster is None or not cluster.destination:
       return
@@ -874,7 +972,10 @@ class TransferWizard(ModalScreen):
     for p in self.paths:
       c = self.sizes.get((id(self.src), p))
       text.append(f"  {short_path(p, width):{width}}  ")
-      if c == "counting":
+      if self.src is None or not self.ready(self.src): # (a Globus collection, a tab not connected: not counted)
+        text.append("not counted here (Globus looks at it when it runs)" if self.globus_only() else "not counted", style="dim")
+        known = False
+      elif c == "counting":
         text.append(f"{self.app.spinner()} counting …", style="yellow")
         known = False
       elif c is None:
@@ -895,8 +996,8 @@ class TransferWizard(ModalScreen):
   @on(Input.Submitted, "#tw-src-path")
   def src_typed(self, event):
     event.stop()
-    if event.value.strip() and self.src is not None:
-      path = expand_path(event.value, home_of(self.src) or "/")
+    if event.value.strip() and self.side("src") is not None:
+      path = self.expand("src", event.value)
       if path not in self.paths:
         self.paths.append(path)
       event.input.value = ""
@@ -905,8 +1006,12 @@ class TransferWizard(ModalScreen):
   @on(Button.Pressed, "#tw-src-browse")
   def src_browse(self, event):
     event.stop()
+    picker = self.globus_picker("src", True)
+    if picker is not None:
+      self.app.push_screen(picker, lambda paths: self.add_paths(paths))
+      return
     if not self.ready(self.src):
-      self.app.notify(f"connect {self.src.name if self.src else 'the tab'} first", severity="warning")
+      self.app.notify(f"connect {self.side_name('src')} first" + (", or type the paths" if self.globus_only() else ""), severity="warning")
       return
     def chosen(paths):
       for p in paths or []:
@@ -914,6 +1019,22 @@ class TransferWizard(ModalScreen):
           self.paths.append(p)
       self.refresh_sources()
     self.app.push_screen(PickPathsScreen(self.src, os.path.dirname(self.paths[-1]) if self.paths else "", multi=True), chosen)
+
+  def add_paths(self, paths):
+    for p in paths or []:
+      if p not in self.paths:
+        self.paths.append(p)
+    self.refresh_sources()
+
+  def globus_picker(self, side, multi):
+    """Browse… of a Globus endpoint: its collection listed through Globus (None: not one)"""
+    e = self.side(side)
+    if e is None or e.kind != "globus" or e.definition is None:
+      return None
+    from ...transfer import globus as G
+    cid = e.definition.settings.get("collection")
+    start = (self.paths[-1].rsplit("/", 1)[0] if side == "src" and self.paths else self.dest_path if side == "dst" else "") or e.definition.settings.get("path") or "/~/"
+    return PickPathsScreen(None, start, multi=multi, lister=lambda path: G.ls(G.client(), cid, path), name=e.name)
 
   @on(Button.Pressed, "#tw-src-remove")
   def src_remove(self, event):
@@ -952,15 +1073,19 @@ class TransferWizard(ModalScreen):
   @on(Input.Changed, "#tw-dst-path")
   def dst_typed(self, event):
     event.stop()
-    self.dest_path = expand_path(event.value, home_of(self.dst) or "/") if event.value.strip() and self.dst else ""
+    self.dest_path = self.expand("dst", event.value) if event.value.strip() and self.side("dst") is not None else ""
     self.refresh_preview()
     self.update_next()
 
   @on(Button.Pressed, "#tw-dst-browse")
   def dst_browse(self, event):
     event.stop()
+    picker = self.globus_picker("dst", False)
+    if picker is not None:
+      self.app.push_screen(picker, lambda paths: self.set_dest(paths[0]) if paths else None)
+      return
     if not self.ready(self.dst):
-      self.app.notify(f"connect {self.dst.name if self.dst else 'the tab'} first", severity="warning")
+      self.app.notify(f"connect {self.side_name('dst')} first" + (", or type the path" if self.globus_only() else ""), severity="warning")
       return
     self.app.push_screen(PickPathsScreen(self.dst, self.dest_path, multi=False),
                          lambda paths: self.set_dest(paths[0]) if paths else None)
@@ -972,11 +1097,12 @@ class TransferWizard(ModalScreen):
     if not self.is_mounted:
       return
     preview = self.query_one("#tw-dst-preview", Static)
-    if not self.paths or not self.dest_path or self.dst is None:
+    if not self.paths or not self.dest_path or self.side("dst") is None:
       preview.update("")
       return
-    lines = [(f"  {os.path.basename(p)} (each match)  →  {self.dst.name}:{self.dest_path.rstrip('/')}/" if R.is_pattern(p) else
-              f"  {os.path.basename(p.rstrip('/'))}  →  {self.dst.name}:{os.path.join(self.dest_path, os.path.basename(p.rstrip('/')))}")
+    name = self.side_name("dst")
+    lines = [(f"  {os.path.basename(p)} (each match)  →  {name}:{self.dest_path.rstrip('/')}/" if R.is_pattern(p) else
+              f"  {os.path.basename(p.rstrip('/'))}  →  {name}:{os.path.join(self.dest_path, os.path.basename(p.rstrip('/')))}")
              for p in self.paths[:6]]
     preview.update(Text("\n".join(["What goes where:", *lines, *(["  …"] if len(self.paths) > 6 else [])])))
 
@@ -994,7 +1120,7 @@ class TransferWizard(ModalScreen):
     return t
 
   def start_check(self, force=False):
-    key = (id(self.src), tuple(self.paths), id(self.dst), self.dest_path)
+    key = (self.src_id, tuple(self.paths), self.dst_id, self.dest_path)
     if self.checking is not None or (key == self.checked_for and self.plan.get("done") and not force):
       self.show_plan()
       return
@@ -1013,7 +1139,7 @@ class TransferWizard(ModalScreen):
     if not self.is_mounted:
       return
     spinner = self.app.spinner() if self.checking is not None else ""
-    general = dict(self.plan, steps={k: v for k, v in self.plan.get("steps", {}).items() if k in ("facts", "paths", "remaining")})
+    general = dict(self.plan, steps={k: v for k, v in self.plan.get("steps", {}).items() if k in ("facts", "paths", "remaining", "globus")})
     steps = plan_text(general, spinner) # (the routes: on their choices)
     if self.checking is not None and not self.plan.get("steps"):
       steps = Text(f" {spinner} starting the check …", style="yellow")
@@ -1033,6 +1159,9 @@ class TransferWizard(ModalScreen):
     routes, checking, spinner = plan.get("routes", {}), self.checking is not None, self.app.spinner()
     rs = self.query_one("#tw-route", RadioSet)
     buttons = {b.route: b for b in rs.query(RadioButton).results(RadioButton)}
+    only, possible = self.globus_only(), self.globus_possible()
+    for route, b in buttons.items(): # (Globus: where both ends have a collection; between Globus endpoints only it)
+      b.display = (route == "globus" and possible) or (route != "globus" and not only)
     for route, b in buttons.items():
       info = routes.get(route)
       name = M.ROUTES[route]
@@ -1049,7 +1178,7 @@ class TransferWizard(ModalScreen):
         words, usable = f"✗ {name}: {info.get('why', '')[:80]}", False
       if str(b.label) != words:
         b.label = words
-      usable = usable or self.manual() # (manual: also a route that did not pass, or is not checked yet)
+      usable = (usable or self.manual()) and b.display # (manual: also a route that did not pass, or is not checked yet)
       b.disabled = not usable
       b.usable = usable
     chosen = self.chosen_route()
@@ -1091,7 +1220,8 @@ class TransferWizard(ModalScreen):
     route = self.chosen_route()
     info = self.plan.get("routes", {}).get(route or "", {})
     client = self.dst if route == "direct-pull" else self.src
-    runs = ["slurp"] if route == "relay" else ["detached"] + (["job"] if P.partition_of(client, site_of) else [])
+    runs = (["slurp"] if route == "relay" else ["globus"] if route == "globus" else
+            ["detached"] + (["job"] if P.partition_of(client, site_of) else []))
     runs = info.get("runs_on") or runs
     current = self.chosen_runs_on() or (self.editing.runs_on if self.editing else None)
     if current not in runs:
@@ -1100,7 +1230,8 @@ class TransferWizard(ModalScreen):
     await rs.remove_children()
     labels = {"slurp": "in slurp (stops when slurp quits; Continue goes on)",
               "detached": "detached on the cluster's login node (goes on without slurp)",
-              "job": "as a transfer job (Slurm; goes on without slurp)"}
+              "job": "as a transfer job (Slurm; goes on without slurp)",
+              "globus": "at Globus (goes on without slurp; Pause cancels the task, Continue submits a new one)"}
     buttons = []
     for kind in runs:
       b = RadioButton(labels[kind], classes=f"tw-o-{kind}")
@@ -1120,6 +1251,9 @@ class TransferWizard(ModalScreen):
       note = f"rsync runs on {client.name if client else '?'} and logs in to the other cluster by itself."
     elif route == "same-fs":
       note = f"Both see the same filesystem: rsync runs on {self.src.name if self.src else '?'}, no network."
+    elif route == "globus":
+      note = (f"Globus moves the data from {self.side_name('src')} to {self.side_name('dst')} itself: not through this "
+              "machine. What is there already is skipped (by time and size; with checksums: by content).")
     self.query_one("#tw-route-note", Static).update(note)
     key = self.query_one("#tw-key", Checkbox)
     # (only for a direct route that cannot log in by itself: one that can needs none, and its key would be the only one)
@@ -1158,8 +1292,8 @@ class TransferWizard(ModalScreen):
     route = self.chosen_route()
     flow = self.query_one("#tw-flow", Static)
     info = self.plan.get("routes", {}).get(route or "", {})
-    flow.update(flow_diagram(route, self.chosen_runs_on(), self.src, self.dst, self.src.name if self.src else "?",
-                             self.dst.name if self.dst else "?", rate=info.get("rate"), estimate=self.estimate_words(route),
+    flow.update(flow_diagram(route, self.chosen_runs_on(), self.src, self.dst, self.side_name("src"),
+                             self.side_name("dst"), rate=info.get("rate"), estimate=self.estimate_words(route),
                              measuring=self.checking is not None and not info) if route else "")
 
   def runs_changed(self):
@@ -1362,6 +1496,10 @@ class TransferWizard(ModalScreen):
   def show_options(self):
     """The options as they suit the route chosen (compression only for the relay), and the estimate with them"""
     route = self.chosen_route()
+    only, possible = self.globus_only(), self.globus_possible()
+    self.query_one("#tw-verify", Checkbox).display = possible
+    self.query_one("#tw-compress-row").display = self.query_one("#tw-bwlimit-row").display = not only
+    self.query_one("#tw-compress-note", Static).display = not only
     self.query_one("#tw-compress-note", Static).update(
       "(used only on the relay through slurp; on the other routes it would slow rsync down: there it is left out)")
     self.checksum_note()
@@ -1380,7 +1518,10 @@ class TransferWizard(ModalScreen):
     route = self.chosen_route()
     o = {"checksum": q("#tw-checksum", Checkbox).value, "compress": q("#tw-compress", Checkbox).value and route == "relay",
          "bwlimit": q("#tw-bwlimit", Input).value.strip(),
-         "temp_key": q("#tw-key", Checkbox).value and route in ("direct-push", "direct-pull")}
+         "temp_key": q("#tw-key", Checkbox).value and route in ("direct-push", "direct-pull"),
+         "no_verify": route == "globus" and not q("#tw-verify", Checkbox).value}
+    if route == "globus":
+      o["bwlimit"] = ""
     if self.chosen_runs_on() == "job":
       o.update(partition=q("#tw-partition", Input).value.strip(), time=q("#tw-time", Input).value.strip(),
                account=q("#tw-account", Input).value.strip(), resubmit=q("#tw-resubmit", Checkbox).value)
@@ -1396,20 +1537,20 @@ class TransferWizard(ModalScreen):
   def fill_summary(self):
     name = self.query_one("#tw-name", Input)
     if not name.value:
-      name.value = self.editing.name if self.editing else M.default_name(self.paths, M.tab_ref(self.src), M.tab_ref(self.dst))
+      name.value = self.editing.name if self.editing else M.default_name(self.paths, {"name": self.side_name("src")}, {"name": self.side_name("dst")})
     t = self.build()
     info = self.plan.get("routes", {}).get(t.route, {})
     est = info.get("estimate")
     client = self.dst if t.route == "direct-pull" else self.src
     self.query_one("#tw-summary-flow", Static).update(
-      flow_diagram(t.route, t.runs_on, self.src, self.dst, self.src.name, self.dst.name,
+      flow_diagram(t.route, t.runs_on, self.src, self.dst, self.side_name("src"), self.side_name("dst"),
                    rate=self.plan.get("routes", {}).get(t.route, {}).get("rate"), estimate=self.estimate_words(t.route)))
     text = Text()
     def row(label, value, style=""):
       text.append(f"{label:10}", style="bold")
       text.append(f"{value}\n", style=style)
-    row("From", f"{self.src.name}  " + ", ".join(self.paths))
-    row("To", f"{self.dst.name}  {self.dest_path}")
+    row("From", f"{self.side_name('src')}  " + ", ".join(self.paths))
+    row("To", f"{self.side_name('dst')}  {self.dest_path}")
     if self.plan.get("remaining_bytes") is not None:
       row("Moves", f"{human(self.plan['remaining_bytes'])} in {self.plan.get('remaining_files', '?')} files"
                    + (f" (of {human(self.plan.get('total_bytes'))})" if self.plan.get("total_bytes") else ""))
@@ -1421,10 +1562,11 @@ class TransferWizard(ModalScreen):
     if t.options.get("checksum"):
       est = P.estimate(t.route, self.plan.get("remaining_bytes"), self.plan.get("remaining_files"), info.get("rate"),
                        self.plan.get("total_bytes"), checksum=True)
-    row("Estimate", (f"{P.duration(est[0])} – {P.duration(est[1])}" if est else "?") + (" (plus the time it waits in the queue)" if t.runs_on == "job" else "")
+    row("Estimate", (f"{P.duration(est[0])} – {P.duration(est[1])}" if est else "Globus says how far it is as it runs" if t.route == "globus" else "?") + (" (plus the time it waits in the queue)" if t.runs_on == "job" else "")
         + (" (with checksums: all of it is read on both sides)" if t.options.get("checksum") else ""))
     row("Runs", "when you click Run now (Copy as a command gives the command for scrontab or cron)")
-    opts = [w for k, w in (("checksum", "checksums"), ("compress", "compressed"), ("temp_key", "temporary key")) if t.options.get(k)]
+    opts = [w for k, w in (("checksum", "checksums"), ("compress", "compressed"), ("temp_key", "temporary key"),
+                            ("no_verify", "no checksum verification")) if t.options.get(k)]
     if t.options.get("bwlimit"):
       opts.append(f"at most {t.options['bwlimit']} MB/s")
     row("Options", ", ".join(opts) or "—")
@@ -1780,6 +1922,10 @@ class TransferScreen(TransfersBase):
     route.append(f"\n{M.ROUTES.get(t.route, t.route)}, {M.RUNS_ON.get(t.runs_on, t.runs_on)}", style="dim")
     if t.run.get("job"):
       route.append(f", job {t.run['job']}", style="dim")
+    if t.run.get("task"):
+      route.append(f", task {t.run['task']}", style="dim")
+    if t.route == "globus":
+      route.append(" · not through this machine", style="dim")
     q("#xd-route", Static).update(route)
     for side in ("src", "dst"):
       self.show_end(t, side)
@@ -1787,9 +1933,9 @@ class TransferScreen(TransfersBase):
     q("#xd-resume", Button).display = self.can_continue(t)
     run = q("#xd-run", Button)
     run.display = not t.active and t.state != "waiting"
-    waits_for = [e.name for e in (self.end(t, "src"), self.end(t, "dst")) if not e.connected]
-    run.disabled = bool(waits_for) # (Run now: when every endpoint is connected)
-    run.tooltip = ("first connect " + " and ".join(waits_for)) if waits_for else "a run now (s)"
+    waits_for = self.waits_for(t)
+    run.disabled = bool(waits_for) # (Run now: when every endpoint the mover needs is connected)
+    run.tooltip = ("first " + " and ".join(waits_for)) if waits_for else "a run now (s)"
     q("#xd-job", Button).display = bool(t.run.get("job") or (t.runs and t.runs[-1].get("job")))
     p = t.progress
     lines = Text()
@@ -1851,12 +1997,27 @@ class TransferScreen(TransfersBase):
     m = self.manager
     return E.resolve(self.app, m.endpoint_store, t.source if side == "src" else t.dest, m.endpoint_status)
 
+  def waits_for(self, t):
+    """What Run now waits for, in words ("connect jedi", "log in to Globus"); a Globus transfer needs no tab"""
+    ends = [self.end(t, "src"), self.end(t, "dst")]
+    if t.route == "globus":
+      from ...transfer import globus as G
+      out = [] if G.logged_in() else ["log in to Globus"]
+      for e in ends:
+        if e.kind == "globus" and not e.connected and G.logged_in():
+          self.manager.ensure_tested(e)
+          out.append(f"connect {e.name}" if e.state not in ("expired", "needs consent") else f"log in to Globus again ({e.name}: {e.state})")
+      return out
+    return [f"connect {e.name}" for e in ends if not e.connected]
+
   def show_end(self, t, side):
     """The card of an endpoint: what it is, its state, its paths (links: a click opens one in its tab), and the
     button that fits its state (Connect, Log in in its tab, Open its tab)"""
     e = self.end(t, side)
     text = Text.assemble(("Source" if side == "src" else "Destination", "bold"), "  ", endpoint_state_text(e), "\n",
                          (e.name, "bold"), f" ({E.KINDS.get(e.kind, e.kind)})", (f" · {e.where}" if e.where and e.kind != "local" else "", "dim"), "\n")
+    if t.route == "globus" and e.is_tab:
+      text.append("Globus moves it (the tab need not be connected)\n", style="cyan")
     rows = [(p, i) for i, p in enumerate(t.source.get("paths", []))] if side == "src" else [(t.dest.get("path", ""), -1)]
     for path, i in rows:
       text.append(path, style=Style(underline=True) + Style.from_meta({"@click": f"screen.open_end({i})"}))
@@ -1864,8 +2025,9 @@ class TransferScreen(TransfersBase):
     self.query_one(f"#xd-{side}-end", Static).update(text)
     button = self.query_one(f"#xd-{side}-connect", Button)
     label = {"not connected": "Connect", "needs you": "Log in in its tab", "tab not open": "Open its tab",
-             "not set up": "Edit…", "failed": "Connect", "expired": "Log in"}.get(e.state)
-    button.display = label is not None and e.kind != "local"
+             "not set up": "Log in" if e.kind == "globus" else "Edit…", "failed": "Connect", "expired": "Log in",
+             "needs consent": "Log in"}.get(e.state)
+    button.display = label is not None and e.kind != "local" and not (t.route == "globus" and e.is_tab)
     if label and str(button.label) != icons.label("connect", label):
       button.label = icons.label("connect", label)
 
@@ -1896,6 +2058,13 @@ class TransferScreen(TransfersBase):
       if index >= len(paths):
         return
       cluster, path = src, paths[index]
+    ref = t.dest if index < 0 else t.source
+    if E.is_globus(self.manager.endpoint_store, ref): # (a Globus collection: its folder in Globus's web app)
+      from urllib.parse import quote
+      cid = E.collection_of(self.manager.endpoint_store, ref)[0]
+      folder = path if index < 0 else os.path.dirname(path.rstrip("/")) # (a source: the folder it is in)
+      self.app.open_url(f"https://app.globus.org/file-manager?origin_id={cid}&origin_path={quote(folder or '/~/')}")
+      return
     if cluster is None:
       self.app.notify(f"the tab {t.dest_name if index < 0 else t.source_name} is not open", title=t.name, severity="warning")
       return
@@ -2225,7 +2394,7 @@ def rates(history):
 
 # ---- the endpoints: the second fixed subtab of the Transfers tab
 STATE_MARKS = {"connected": ("●", "green"), "connecting": ("◌", "yellow"), "needs you": ("◌", "bold yellow"),
-               "not connected": ("○", "dim"), "not set up": ("○", "yellow"), "failed": ("✗", "red"), "expired": ("◌", "yellow"),
+               "not connected": ("○", "dim"), "not set up": ("○", "yellow"), "failed": ("✗", "red"), "expired": ("◌", "yellow"), "needs consent": ("◌", "yellow"),
                "tab not open": ("✕", "red")}
 
 def endpoint_state_text(e):
@@ -2249,17 +2418,18 @@ class NewEndpointScreen(ModalScreen):
   KINDS = [("ssh", "SSH: a cluster (it opens as a tab)"), ("s3", "S3 or S3-compatible storage"), ("globus", "Globus collection"),
            ("smb", "SMB share"), ("webdav", "WebDAV")]
 
-  def __init__(self, available=("ssh",)):
+  def __init__(self, available=None):
     super().__init__()
-    self.available = set(available)
+    self.available = dict(available or {"ssh": ""}) # (kind: "" if it can be made, or why not; others: not yet)
 
   def compose(self) -> ComposeResult:
     with Vertical(id="ne-dialog"):
       yield Static("New endpoint", id="ne-title")
       with RadioSet(id="ne-kinds"):
         for kind, words in self.KINDS:
-          b = RadioButton(words + ("" if kind in self.available else "  (not here yet)"), value=kind == "ssh",
-                          disabled=kind not in self.available, classes=f"ne-{kind}")
+          why = self.available.get(kind, "not here yet")
+          b = RadioButton(words + (f"  ({why})" if why else ""), value=kind == "ssh",
+                          disabled=bool(why), classes=f"ne-{kind}")
           b.kind = kind
           yield b
       yield Static("This machine and the cluster tabs are endpoints already.", id="ne-note")

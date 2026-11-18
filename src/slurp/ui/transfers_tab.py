@@ -224,19 +224,104 @@ class TransfersTab:
       self.switch_mode(TRANSFERS_MODE)
     self.call_after_refresh(self.refresh_status)
 
-  # ---- endpoints (the kinds besides tabs come with their phases: S3, SMB, WebDAV, Globus)
+  # ---- endpoints (tabs, this machine, Globus; S3, SMB and WebDAV come later)
   def endpoint_kinds(self):
-    """The kinds of endpoints that can be made here"""
-    return ("ssh",)
+    """The kinds of endpoints that can be made here: {kind: "" (it can) or why not}"""
+    from ..transfer import globus as G
+    ok, why = G.available()
+    return {"ssh": "", "globus": "" if ok else why}
 
   def edit_endpoint(self, endpoint, kind):
-    self.notify(f"endpoints of the kind {kind} are not there yet", title="Endpoints", severity="warning")
+    """New (endpoint None) or Edit… of an endpoint; for a tab ("tab"): its link to a Globus collection"""
+    from .screens.globus import GlobusEndpointScreen
+    from ..transfer.manager import site_of
+    store = self.transfers.endpoint_store
+    if kind == "globus":
+      def saved(result):
+        if not result:
+          return
+        d = result["definition"]
+        try:
+          store.add(d)
+        except ValueError as e:
+          self.notify(str(e), title="Endpoints", severity="warning")
+          return
+        self.transfers.endpoint_status.pop(d.id, None)
+        self.transfers.changed(None)
+        self.after_globus_change(d.settings, d.name, lambda: self.connect_endpoint(self.endpoint_named(d.id)))
+      self.push_screen(GlobusEndpointScreen(store, endpoint=endpoint), saved)
+    elif kind == "tab" and endpoint is not None:
+      suggestion = str(site_of(endpoint.cluster).get("globus") or "") if endpoint.cluster is not None else ""
+      def linked(result):
+        if not result:
+          return
+        if result["link"] is None:
+          store.links.pop(endpoint.id, None)
+          self.notify(f"{endpoint.name} is no longer linked to a Globus collection", title="Endpoints", timeout=5)
+        else:
+          store.links[endpoint.id] = result["link"]
+          self.notify(f"{endpoint.name} is linked to {result['link'].get('collection_name') or result['link']['collection']}", title="Endpoints", timeout=5)
+        store.save()
+        self.transfers.endpoint_status.pop(f"link:{endpoint.id}", None)
+        self.transfers.changed(None)
+        if result["link"] is not None:
+          self.after_globus_change(result["link"], endpoint.name, None)
+      self.push_screen(GlobusEndpointScreen(store, tab=endpoint, suggestion=suggestion), linked)
+    else:
+      self.notify(f"endpoints of the kind {kind} are not there yet", title="Endpoints", severity="warning")
 
-  def connect_endpoint(self, endpoint):
-    self.notify(f"{endpoint.name}: endpoints of the kind {endpoint.kind} are not there yet", title="Endpoints", severity="warning")
+  def endpoint_named(self, eid):
+    from ..transfer import endpoints as E
+    m = self.transfers
+    return E.resolve(self, m.endpoint_store, {"endpoint": eid}, m.endpoint_status)
+
+  def after_globus_change(self, settings, name, then):
+    """A collection that needs a consent the login does not have: the login again, with it; then then()"""
+    from ..transfer import globus as G
+    from .screens.globus import GlobusLoginScreen
+    cid = settings.get("collection")
+    if cid and (not G.logged_in() or (settings.get("needs_consent") and cid not in G.consented())):
+      why = (f"{name}: its collection needs your consent to its data: log in to Globus again, with it" if G.logged_in()
+             else f"{name}: log in to Globus to use it")
+      self.push_screen(GlobusLoginScreen([cid], why), lambda ok: then() if ok and then else None)
+    elif then is not None:
+      then()
+
+  def connect_endpoint(self, endpoint, quiet=True):
+    """Connect (Log in) of an endpoint that is no tab: Globus: the login if there is none, then a test"""
+    from ..transfer import globus as G
+    if endpoint is None:
+      return
+    if endpoint.kind != "globus":
+      self.notify(f"{endpoint.name}: endpoints of the kind {endpoint.kind} are not there yet", title="Endpoints", severity="warning")
+      return
+    ok, why = G.available()
+    if not ok:
+      self.notify(why, title=endpoint.name, severity="warning", timeout=10)
+      return
+    settings = endpoint.definition.settings if endpoint.definition is not None else {}
+    if not G.logged_in() or endpoint.state in ("expired", "needs consent"):
+      from .screens.globus import GlobusLoginScreen
+      wanted = [settings["collection"]] if settings.get("collection") and (settings.get("needs_consent") or endpoint.state == "needs consent") else []
+      self.push_screen(GlobusLoginScreen(wanted, endpoint.words if endpoint.state in ("expired", "needs consent") else ""),
+                       lambda done: self.connect_endpoint(self.endpoint_named(endpoint.id), quiet) if done else None)
+      return
+    def tested(state, words):
+      if not quiet or state != "connected":
+        self.notify(f"{endpoint.name}: {state}" + (f" ({words})" if words else ""), title="Endpoints",
+                    severity="information" if state == "connected" else "warning", timeout=8)
+    self.transfers.test_globus(endpoint, tested)
 
   def test_endpoint(self, endpoint):
-    self.connect_endpoint(endpoint)
+    if endpoint is not None and endpoint.kind == "tab":
+      link = self.transfers.endpoint_store.links.get(endpoint.id)
+      if link:
+        def tested(state, words):
+          self.notify(f"{endpoint.name} (Globus: {link.get('collection_name') or link['collection']}): {state}" + (f" ({words})" if words else ""),
+                      title="Endpoints", severity="information" if state == "connected" else "warning", timeout=8)
+        self.transfers.test_globus(endpoint, tested)
+        return
+    self.connect_endpoint(endpoint, quiet=False)
 
   def delete_endpoint(self, endpoint):
     from ..transfer import endpoints as E
