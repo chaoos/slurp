@@ -24,7 +24,8 @@ from . import secrets as S
 
 SFTP_SSH = (1, 64) # (rclone --sftp-ssh: through a tab's own SSH session; not used yet)
 PROVIDERS = ["AWS", "Ceph", "Cloudflare", "DigitalOcean", "GCS", "IBMCOS", "Minio", "Wasabi", "Other"]
-EXIT = {0: "", 1: "syntax or usage error", 2: "error not otherwise categorised", 3: "directory not found",
+EXIT = {0: "", 1: "it failed", # (rclone's docs: a syntax or usage error; a copy that failed ends so too)
+         2: "error not otherwise categorised", 3: "directory not found",
         4: "file not found", 5: "temporary error (more retries might fix it)", 6: "less serious errors",
         7: "fatal error (more retries will not fix it: e.g. access denied, no such bucket)", 8: "transfer limit exceeded",
         9: "no files transferred"}
@@ -346,15 +347,44 @@ def stats_of(line):
           "errors": int(s.get("errors") or 0), "checks": int(s.get("checks") or 0), "current": current}
 
 def error_of(line):
-  """An error of an rclone JSON log line (None: none): "path: what" """
+  """An error of an rclone log line, JSON or not (None: none): "path: what"; its summaries (Attempt 2/3 failed with
+  …) none: they repeat the errors"""
   try:
     data = json.loads(line)
   except ValueError:
-    return line.strip() or None
-  if not isinstance(data, dict) or data.get("level") not in ("error", "critical"):
+    data = None
+  if not isinstance(data, dict):
+    text = re.sub(r"^\d{4}/\d\d/\d\d \d\d:\d\d:\d\d\s*(<\d>)?\s*((ERROR|CRITICAL|NOTICE)\s*:\s*)?", "", line.strip())
+    if not text or text.startswith("Attempt "):
+      return None
+    return re.sub(r"^Failed to \w+:\s*", "", text)
+  if data.get("level") not in ("error", "critical"):
     return None
   obj, msg = data.get("object") or "", data.get("msg") or ""
+  if msg.startswith("Attempt "):
+    return None
+  msg = re.sub(r"^Failed to \w+:\s*", "", msg)
   return f"{obj}: {msg}" if obj else msg
+
+# (what some servers do that rclone cannot take, said for people)
+HINTS = (("broken error response format", "the SMB server answers reads in a way rclone does not understand (impacket's "
+          "test server does so; Samba and Windows do not)"),)
+
+def causes(errors, n=2):
+  """The last n different errors of a run, for its message (one that another holds: once), with a hint where one is
+  known"""
+  out = []
+  for e in reversed(errors):
+    if any(e in o or o in e for o in out):
+      continue
+    out.insert(0, e)
+    if len(out) == n:
+      break
+  text = "; ".join(out)
+  for words, hint in HINTS:
+    if words in text:
+      text += f" ({hint})"
+  return text
 
 def outcome(code, stopped=False):
   """(state, words) of an rclone run that ended with code (stopped on purpose: paused)"""

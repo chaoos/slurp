@@ -173,6 +173,13 @@ def test_smb(check, smb, tmp_path):
   m.verify(up, results.append)
   check("Verify: the same", until(app, m, lambda: results) and results[0][0], results)
   check("no marker of the write test left", not list(share.glob(".slurp-test*")))
+  down = M.Transfer(M.new_id(), "down", {"endpoint": "m1", "paths": ["/b.txt"]}, {"endpoint": "local", "path": str(tmp_path / "smbdown")},
+                    route="rclone-here", runs_on="slurp", options={"retries": 1})
+  down.plan = {"routes": {"rclone-here": {"ok": True}}}
+  m.add(down)
+  m.run_now(down)
+  check("down from impacket's server: fails (its answers to reads), said once with why", until(app, m, lambda: down.state == "failed")
+        and down.message.count("broken error response format") == 1 and "impacket" in down.message and "usage" not in down.message, down.message)
   text = m.command_text(up)
   check("Copy as a command: the password a placeholder, obscured by the command", "pw123" not in text
         and 'rclone obscure -)' in text and "$PASSWORD" in text, text)

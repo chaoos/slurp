@@ -529,7 +529,7 @@ class Manager:
     self.stopping.discard(t.id)
     def end():
       t.errors = errors[-200:]
-      self.ended(t, code, "; ".join(errors[-2:]) if code and not stopped else "", stopped=stopped)
+      self.ended(t, code, RC.causes(errors) if code and not stopped else "", stopped=stopped)
     self.from_thread(end)
 
   def run_rclone_cluster(self, t):
@@ -851,6 +851,8 @@ class Manager:
     message = "" if result else "the run ended without a result" + (" (the job was cancelled, or its time was up)" if t.runs_on == "job" else "")
     if result and result.get("login") == "refused":
       message = self.login_refused(t, result, status.get("log", ""))
+    if t.route == "rclone-cluster" and code and not stopped and not message: # (why, from rclone's errors)
+      message = RC.causes([e for e in map(RC.error_of, errors) if e])
     self.ended(t, code, message, stats=stats, stopped=stopped)
 
   def login_refused(self, t, result, log_text):

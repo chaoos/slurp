@@ -184,3 +184,18 @@ def test_tab_over_ssh(check, monkeypatch):
   check("rclone 1.60 here: not ready, said why", not ok and "1.64 or newer" in why and "1.60.1" in why, why)
   monkeypatch.setattr(RC, "version", lambda: (1, 66, 0))
   check("rclone 1.66: ready", RC.relay_ready() == (True, ""))
+
+
+def test_errors_said_once(check):
+  """A run's message: each cause once (rclone's summaries, Attempt n/n failed …, and its last line repeat it), no
+  times, exit 1 not called a usage error; a known server quirk explained"""
+  lines = ['{"level":"error","msg":"Failed to copy: read smb.txt: invalid response error: broken error response format","object":"smb.txt","objectType":"*smb.Object","source":"slog/logger.go:256","time":"2026-11-18T18:12:52+01:00"}',
+           '{"level":"error","msg":"Attempt 3/3 failed with 1 errors and: read smb.txt: invalid response error: broken error response format","source":"x","time":"t"}',
+           "2026/11/18 18:12:52 Failed to copy: read smb.txt: invalid response error: broken error response format"]
+  errors = [e for e in map(RC.error_of, lines) if e]
+  check("the summary dropped, the last line without its time", errors == ["smb.txt: read smb.txt: invalid response error: broken error response format",
+                                                                          "read smb.txt: invalid response error: broken error response format"], errors)
+  text = RC.causes(errors)
+  check("the cause once, with the hint", text.count("broken error response format") == 1 and "impacket" in text and "2026" not in text, text)
+  check("exit 1: failed, not a usage error", RC.outcome(1) == ("failed", "rclone ended with 1: it failed"), RC.outcome(1))
+  check("two different causes: both", RC.causes(["a.txt: denied", "b.txt: timeout"]) == "a.txt: denied; b.txt: timeout")

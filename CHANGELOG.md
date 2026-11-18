@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: an rclone run that fails says each cause once (without rclone's
+  retry summaries and times), no longer calls exit 1 a usage error, and
+  explains an SMB server whose reads rclone cannot take (impacket's test
+  server).
 - Transfers: each row of the list has a small play/pause button in its first
   column (▶ starts it or continues a paused one, ‖ pauses it); `Space` does
   the same for the highlighted row.
