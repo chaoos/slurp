@@ -286,6 +286,11 @@ needs you, tab not open) and how many transfers use it. **Connect** logs in (a t
 **Test**, **Edit…**, **Delete** (refused while transfers use it; a tab goes away when it is closed). More kinds (S3,
 SMB, WebDAV, Globus) come with later versions; their secrets are kept only in the system keyring.
 """),
+  "NewEndpointScreen": ("New endpoint", """
+Choose the kind of the new endpoint, then **Next** for its settings (`Esc` or **Cancel** closes it). A cluster is
+added as a tab (`+`): every open tab is an endpoint by itself. The kinds this version cannot make yet are not
+offered.
+"""),
   "PickPathsScreen": ("Choose paths", """
 A folder of a tab: Enter or a click goes into a folder (`Backspace` or **Up**: the one above), the path at the top can
 be typed (Enter goes there), the buttons go to home, scratch, project, … To copy: `Space` marks files and folders,
