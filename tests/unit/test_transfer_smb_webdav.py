@@ -194,3 +194,28 @@ def test_webdav(check, webdav, tmp_path):
   check("paths under the URL", e.path("/a/b") == f"{e.name}:a/b" and RC.address(d, "/a") == f"http://127.0.0.1:{port}/a")
   check("Test as a destination", "can be written" in RC.test(e.env, e.path("/"), write=True))
   round_trip(check, tmp_path, store, "w1", root)
+
+
+def test_make_folder_webdav(check, tmp_path):
+  """New folder… on WebDAV: made and written; on a server that only reads: said, not made"""
+  root, port = tmp_path / "ro", free_port()
+  root.mkdir()
+  proc = subprocess.Popen(["rclone", "--config", "", "serve", "webdav", str(root), "--addr", f"127.0.0.1:{port}", "--read-only"],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+  try:
+    assert wait_port(port), "rclone serve webdav did not start"
+    d = E.EndpointDef("w3", "ro", "webdav", {"url": f"http://127.0.0.1:{port}"}, [])
+    try:
+      RC.make_folder(RC.Endpoint(d, {}), "/new")
+      check("read only: said", False)
+    except RC.RcloneError as err:
+      check("read only: said, not made", str(err) and not (root / "new").exists(), str(err))
+  finally:
+    proc.kill()
+
+
+def test_make_folder_webdav_written(check, webdav):
+  port, root = webdav
+  d = E.EndpointDef("w4", "dav", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"])
+  note = RC.make_folder(RC.Endpoint(d, {"password": "pw456"}), "/new")
+  check("made, written, no marker left, no note", (root / "new").is_dir() and not list((root / "new").iterdir()) and note == "", note)

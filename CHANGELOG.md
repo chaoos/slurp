@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: **New folder…** checks the new folder can be written (a test
+  file written and deleted in it), on every endpoint. On S3 a folder could
+  not be made and no error was said (S3 has no empty folders: rclone's mkdir
+  does nothing there, even without write rights); now a refusal is said, and
+  the new folder is shown in its folder until something is copied into it.
 - Transfers: the pickers of the source and the destination (Browse…) have a
   **Reload** button (`r`): the folder shown is listed again, the marks kept.
 - **Run before login**: what the command exports (e.g. `eval "$(ssh-agent -s)"`)

@@ -28,8 +28,9 @@ as they are (they can be changed once it is connected), the other steps can be c
    folder under its own name. Both endpoints must be connected: the
    wizard shows their state, with **Connect** (or **Log in in its tab**, for a login that needs you). Each source shows what it holds, counted on its tab in
    the background (one `find` through it): its size, its files, folders and links; with several, also in all.
-2. **Destination**: an endpoint and a folder there (Browse…: **New folder…** makes one in the folder shown and goes
-   into it; **Reload**, `r`, lists it again) (created if it is not there), with buttons for its home, scratch,
+2. **Destination**: an endpoint and a folder there (Browse…: **New folder…** makes one in the folder shown, checks it can be written (a test file written and
+   deleted in it; a refusal is said) and goes into it. On S3 the new folder stays empty until something is copied into it,
+   since S3 keeps no empty folders; **Reload**, `r`, lists it again) (created if it is not there), with buttons for its home, scratch,
    project, … The wizard shows what goes where.
 3. **Options**: how rsync copies, the same at every run:
 

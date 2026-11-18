@@ -984,6 +984,58 @@ def test_picker_reload(check, tmp_path):
   asyncio.run(main())
 
 
+def test_new_folder_checked(check, tmp_path):
+  """New folder…: a folder that cannot be written: said (in the picker and as a note), not gone into; a place that
+  keeps no empty folders (S3): the new folder shown in its folder all the same, with the maker's note"""
+  from slurp.ui.screens.transfers import PickPathsScreen
+  ro = tmp_path / "ro"
+  ro.mkdir()
+  (ro / "x").mkdir()
+  (ro / "x").chmod(0o500)
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      app.push_screen(PickPathsScreen(app.clusters[0], str(ro), multi=False))
+      await pilot.pause(0.6)
+      picker = app.screen
+      notes = []
+      app.notify = lambda message, **kw: notes.append((message, kw.get("severity")))
+      picker.query_one("#pp-new").press(); await pilot.pause(0.2)
+      picker.query_one("#pp-new-name").value = "x"
+      picker.query_one("#pp-new-create").press(); await pilot.pause(0.2)
+      check("there already: into it", await until(pilot, lambda: picker.path == str(ro / "x"), 10), picker.path)
+      picker.query_one("#pp-new").press(); await pilot.pause(0.2)
+      picker.query_one("#pp-new-name").value = "y"
+      picker.query_one("#pp-new-create").press()
+      check("in a folder that cannot be written: said", await until(pilot, lambda: "not created" in str(picker.query_one("#pp-status").render()), 10)
+            and any(sev == "error" for _, sev in notes), (str(picker.query_one("#pp-status").render()), notes))
+      check("…and not gone into", picker.path == str(ro / "x"))
+      await pilot.press("escape"); await pilot.pause(0.3)
+
+      listed = {"/": []} # (a place where an empty folder is not listed)
+      app.push_screen(PickPathsScreen(None, "/", multi=False, lister=lambda p: list(listed.get(p, [])), name="bucket",
+                                      maker=lambda p: "S3 keeps no empty folders"))
+      await pilot.pause(0.6)
+      picker = app.screen
+      picker.query_one("#pp-new").press(); await pilot.pause(0.2)
+      picker.query_one("#pp-new-name").value = "new"
+      picker.query_one("#pp-new-create").press()
+      check("made: into it, the note said", await until(pilot, lambda: picker.path == "/new", 10)
+            and any("no empty folders" in m and "can be written" in m for m, _ in notes), (picker.path, notes))
+      picker.action_up()
+      check("…shown in its folder, though not listed", await until(pilot, lambda: picker.path == "/" and any(e["name"] == "new" for e in picker.entries), 10),
+            picker.entries)
+      await pilot.press("escape"); await pilot.pause(0.3)
+      await pilot.press("q")
+
+  try:
+    asyncio.run(main())
+  finally:
+    (ro / "x").chmod(0o700)
+
+
 def test_source_with_braces(check, tmp_path):
   """A source typed with braces: one line, counted over its paths (how many are there), the preview says how many;
   too many: refused"""

@@ -235,6 +235,20 @@ def test(env, p, write=False):
     words += ", can be written" + ("" if not gone.returncode else f" (the marker {marker.split(':', 1)[1]} could not be deleted: {said(gone)})")
   return words
 
+def make_folder(e, p):
+  """New folder… of an Endpoint: the folder p made and shown to be writable (a marker written and deleted in it: an
+  S3 mkdir does nothing and says nothing, also without write rights) -> a note for people ("" none); RcloneError why
+  not"""
+  check(run(["mkdir", e.path(p)], e.env))
+  try:
+    words = test(e.env, e.path(p), write=True)
+  except RcloneError as err:
+    raise RcloneError(f"{p} cannot be written: {str(err).removeprefix('it lists, but cannot be written: ')}") from None
+  note = "S3 keeps no empty folders: it is there once something is copied into it" if e.kind == "s3" else ""
+  if "could not be deleted" in words:
+    note = "; ".join(filter(None, [note, words.split("(", 1)[1].rstrip(")")]))
+  return note
+
 # ---- a copy
 def groups(sources):
   """Sources by their folder: [(folder, [filter rule, …], [what, …])] (a folder: all below it; a file; a pattern:

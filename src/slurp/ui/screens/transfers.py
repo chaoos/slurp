@@ -203,6 +203,10 @@ def if_slurp_closes(t, client_name="", host="", pack=None):
               " When its time limit ends, the transfer stops (Continue submits a new job).")
   return f"It runs as a Slurm job on {client_name}: it goes on when slurp ends, and slurp shows it again at the next start." + resubmit
 
+# New folder… on a tab: made, and shown to be writable (a marker written and deleted in it)
+MAKE_FOLDER = 'mkdir -p -- "$1" || exit 1\nf="$1/.slurp-test-$$"\n{ : > "$f"; } 2>/dev/null || { echo "$1 cannot be written" >&2; exit 1; }\nrm -f -- "$f"\n'
+
+
 class PickPathsScreen(ModalScreen):
   """Pick paths on a tab: a directory listing (Enter or a click: into a folder), Space marks entries (several:
   multi), a pattern (*.h5: the listing shows its matches), Choose. Dismissed with [paths] (the marked ones, the folder
@@ -234,7 +238,8 @@ class PickPathsScreen(ModalScreen):
     super().__init__()
     self.cluster, self.multi = cluster, multi
     self.lister = lister # (instead of a tab: lister(path) -> entries, e.g. of a Globus collection)
-    self.maker = maker   # (with a lister: maker(path) makes a folder there; raises with why it cannot)
+    self.maker = maker   # (with a lister: maker(path) makes a folder there and shows it writable -> a note or ""; raises with why not)
+    self.made = set()    # (folders made here: shown in their folder also while empty, e.g. on S3, which keeps no empty folders)
     self.path = start or (home_of(cluster) if cluster is not None else "/~/") or "/"
     self.entries, self.marked = [], set()
     name = name or (cluster.name if cluster is not None else "?")
@@ -313,6 +318,11 @@ class PickPathsScreen(ModalScreen):
       table = self.query_one("#pp-list", ClickTable)
       cursor = table.cursor_row if keep else 0
       names = {e["name"] for e in entries}
+      for made in sorted(self.made): # (made here, not listed (S3: none in it yet): there all the same)
+        parent, name = os.path.split(made.rstrip("/"))
+        if (parent or "/") == (where.rstrip("/") or "/") and name not in names:
+          entries = [*entries, {"name": name, "dir": True, "size": 0, "mtime": time.time()}]
+          names.add(name)
       self.path, self.entries, self.marked = where, entries, (self.marked & names if keep else set())
       self.query_one("#pp-path", Input).value = where
       self.populate()
@@ -361,19 +371,26 @@ class PickPathsScreen(ModalScreen):
         if self.lister is not None:
           if self.maker is None:
             return "this place cannot make folders here: type the path (the run makes it)"
-          self.maker(path)
-          return ""
+          note = self.maker(path) # (Globus: its mkdir is the write test; its answer is no note)
+          return "", note if isinstance(note, str) else ""
         from ...cluster.remote import run_cmd
-        result = run_cmd(["mkdir", "--", path], timeout=60, retry=False)
-        return "" if result.returncode == 0 else (result.stderr or "").strip()[:200] or f"mkdir ended with {result.returncode}"
+        result = run_cmd(["sh", "-c", MAKE_FOLDER, "sh", path], timeout=60, retry=False)
+        if result.returncode == 0:
+          return "", ""
+        return (result.stderr or "").strip()[:200] or f"mkdir ended with {result.returncode}", ""
       except Exception as e:
-        return getattr(e, "words", None) or str(e)
-    def made(error):
+        return getattr(e, "words", None) or str(e), ""
+    def made(result):
+      if result is None:
+        return
+      error, note = result
       if error:
         status.update(Text(f"not created: {error}", style="red"))
+        self.app.notify(f"{path} not created: {error}", severity="error", timeout=8)
         return
       self.close_new()
-      self.app.notify(f"{path} created", timeout=4)
+      self.made.add(path)
+      self.app.notify(f"{path} created, and can be written" + (f" ({note})" if note else ""), timeout=8 if note else 4)
       self.go(path)
     in_background(self, work, made, group="pp-mkdir", name="creating the folder",
                   connection=self.cluster.connection if self.cluster is not None and self.cluster.destination else None)
@@ -1213,7 +1230,7 @@ class TransferWizard(ModalScreen):
       s3 = RC.Endpoint(e.definition)
       return PickPathsScreen(None, start or e.definition.settings.get("path") or "/", multi=multi,
                              lister=lambda path: RC.lsjson(s3.env, s3.path(path)), name=e.name,
-                             maker=lambda path: RC.check(RC.run(["mkdir", s3.path(path)], s3.env)))
+                             maker=lambda path: RC.make_folder(s3, path))
     from ...transfer import globus as G
     cid = e.definition.settings.get("collection")
     return PickPathsScreen(None, start or e.definition.settings.get("path") or "/~/", multi=multi,

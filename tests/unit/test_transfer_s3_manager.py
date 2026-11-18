@@ -136,3 +136,16 @@ def test_down_and_errors(check, s3, tmp_path):
   check("a key missing: not set up, said", E.default_state(store.get("s1"))[0] == "not set up")
   plan = m.rclone_check(t, lambda p: None)
   check("the check says so", not plan["routes"]["rclone-here"]["ok"] and "keyring has no secret key" in plan["routes"]["rclone-here"]["why"], plan)
+
+
+def test_make_folder(check, s3, tmp_path):
+  """New folder… on S3: an rclone mkdir there does nothing and says nothing (S3 keeps no empty folders), also without
+  write rights: the folder is shown writable by a marker written and deleted in it; a note says it is there once
+  something is copied into it (moto checks no keys or rights: a refusal is tested with WebDAV, read only)"""
+  from slurp.transfer import rclone as RC
+  url, client = s3
+  store, _ = setup(tmp_path, url)
+  d = store.get("s1")
+  note = RC.make_folder(RC.Endpoint(d), "/new")
+  check("made: the note of S3's empty folders", "no empty folders" in note, note)
+  check("no marker left", keys(client) == [], keys(client))
