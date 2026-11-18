@@ -52,6 +52,14 @@ def when_text(epoch):
 def state_text(t):
   return Text(icons.label(STATE_ICONS.get(t.state, ""), M.STATES.get(t.state, t.state)), style=STATE_STYLES.get(t.state, ""))
 
+def shown_percent(t):
+  """How far a transfer is, as shown (None: no bar): done is 100 % (also when its run did not know its total, e.g.
+  nothing was left to copy)"""
+  if t.state == "done":
+    return 100.0
+  p = t.progress.get("percent")
+  return p if p is not None and t.state in ("running", "pausing", "paused", "done-errors", "failed", "waiting") else None
+
 def bar(percent, width=12):
   """A bar of text: ███████░░░  70%"""
   if percent is None:
@@ -1850,8 +1858,8 @@ SORT_FIRST_DOWN = ("progress", "rate", "when") # (these first from the most: the
 def sort_key(column, manager):
   """The key of a transfer for sorting the list by a column"""
   def percent(t):
-    p = t.progress.get("percent")
-    return p if p is not None and t.state in ("running", "pausing", "paused", "done", "done-errors", "failed", "waiting") else -1
+    p = shown_percent(t)
+    return -1 if p is None else p
   keys = {
     "name": lambda t: t.name.lower(),
     "from": lambda t: (t.source_name.lower(), (t.source.get("paths") or [""])[0]),
@@ -1905,7 +1913,7 @@ class TransfersScreen(TransfersBase):
     for t in shown_order:
       src, dst = self.manager.ends(t)
       p = t.progress
-      shown = p.get("percent") if t.state in ("running", "pausing", "paused", "done", "done-errors", "failed", "waiting") else None
+      shown = shown_percent(t)
       last = t.runs[-1] if t.runs else None
       when = f"{when_text(last['ended'])} {M.STATES.get(last['result'], last['result'])}" if last else ""
       rows.append((t.id, [Text(t.name, style="bold"), end_text(src, t.source_name, t.source.get("paths", [])),
@@ -2141,8 +2149,8 @@ class TransferScreen(TransfersBase):
     verify.disabled = t.active or t.id in self.verifying or bool(waits_for)
     p = t.progress
     lines = Text()
-    if p.get("percent") is not None or p.get("bytes"):
-      lines.append_text(bar(p.get("percent"), 40))
+    if p.get("percent") is not None or p.get("bytes") or t.state == "done":
+      lines.append_text(bar(shown_percent(t) if t.state == "done" else p.get("percent"), 40))
       total = p.get("total")
       lines.append(f"   {human(p.get('bytes'))}" + (f" of {human(total)}" if total else ""))
       if t.state == "running":

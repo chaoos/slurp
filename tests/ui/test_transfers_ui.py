@@ -838,3 +838,31 @@ def test_list_sorted(check, tmp_path):
 
   asyncio.run(main())
   asyncio.run(again())
+
+
+def test_done_is_100(check):
+  """A transfer that is done shows 100 %: in the list and its details, also when its run did not know its total"""
+  from slurp.transfer import model as M
+  from slurp.ui.screens.transfers import shown_percent
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      ref = M.tab_ref(app.clusters[0])
+      t = M.Transfer(M.new_id(), "nothing left", {"endpoint": "local", "tab": ref, "paths": ["/x"]}, {"endpoint": "local", "tab": ref, "path": "/y"})
+      t.state, t.progress = "done", {"percent": 37.0, "bytes": 0} # (as a run that found nothing to copy, or an older one)
+      app.transfers.add(t)
+      check("done: 100 %", shown_percent(t) == 100.0)
+      app.show_transfers(); await pilot.pause(0.6)
+      table = app.screen.query_one("#xfer-list")
+      cell = str(table.get_row_at(0)[[c.value for c in table.columns].index("progress")])
+      check("in the list", "100%" in cell, cell)
+      app.open_transfer(t); await pilot.pause(0.6)
+      shown = str(app.screen.query_one("#xd-progress").render())
+      check("in its details", "100%" in shown, shown)
+      t.state = "paused"
+      check("paused: as far as it got", shown_percent(t) == 37.0)
+      await pilot.press("q")
+
+  asyncio.run(main())

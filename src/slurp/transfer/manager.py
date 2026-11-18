@@ -839,7 +839,7 @@ class Manager:
     t.event(f"run ended: {M.STATES.get(state, state)}" + (f" ({words})" if words else ""))
     self.remove_key(t)
     self.remove_keys(t)
-    if state in ("done", "done-errors") and t.progress.get("total"):
+    if state == "done" or (state == "done-errors" and t.progress.get("total")): # (done: all of it, total known or not)
       t.progress["percent"] = 100.0
     self.changed(t)
     severity = {"done": "information", "done-errors": "warning", "paused": "information"}.get(state, "error")
