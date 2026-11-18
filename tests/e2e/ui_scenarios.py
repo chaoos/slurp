@@ -356,6 +356,9 @@ async def t_connect_button(app, pilot):
   await pilot.press(*"pw123", "enter")
   ok = await until(pilot, lambda: app.ssh.ready, 20); await pilot.pause(0.5)
   check("logged in again: Disconnect in the overview", ok and ov.query_one("#ov-disconnect-row").display)
+  button = ov.query_one("#ov-disconnect")
+  check("…its whole label shown (as wide as its text, after Abort while it logged in)",
+        button.size.width >= len(str(button.label)), (str(button.label), button.size))
   app.show_view(None); await pilot.pause(0.4) # (the job list again, for the scenarios after this one)
 
 async def t_restart(app, pilot):

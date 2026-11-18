@@ -179,6 +179,9 @@ class OverviewScreen(SplitScreen):
       button.label = label
       button.tooltip = ("end the SSH session of this tab" if live else
                         "give up the login (the tab stays not connected; Connect tries again)")
+      # (its width follows the label: Abort → Disconnect; a hidden row would keep the narrow one)
+      button.refresh(layout=True)
+      q("#ov-disconnect-row").refresh(layout=True)
     q("#ov-config-row").display = bool(cluster and cluster.destination)
     if connected:
       jobs = q("#ov-jobs")
