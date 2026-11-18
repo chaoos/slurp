@@ -133,10 +133,12 @@ class PickPathsScreen(ModalScreen):
   def show_places(self, places):
     bar_ = self.query_one("#pp-places", Horizontal)
     bar_.remove_children()
-    for i, (label, path) in enumerate(places):
-      button = Button(label, id=f"pp-place-{i}", compact=True, tooltip=path)
+    buttons = []
+    for label, path in places:
+      button = Button(label, classes="pp-place", compact=True, tooltip=path)
       button.place = path
-      bar_.mount(button)
+      buttons.append(button)
+    bar_.mount(*buttons)
 
   def go(self, path):
     self.query_one("#pp-status", Static).update(Text(f"listing {path} …", style="dim"))
@@ -215,7 +217,7 @@ class PickPathsScreen(ModalScreen):
   @on(Button.Pressed)
   def pressed(self, event):
     bid = event.button.id or ""
-    if bid.startswith("pp-place-"):
+    if event.button.has_class("pp-place"):
       event.stop()
       self.go(event.button.place)
     elif bid == "pp-up":
@@ -492,7 +494,7 @@ class TransferWizard(ModalScreen):
     if self.step == 2:
       self.start_check()
     if self.step == 3:
-      self.fill_how()
+      self.call_later(self.fill_how)
     if self.step == 4:
       self.when_changed()
     if self.step == 5:
@@ -634,10 +636,12 @@ class TransferWizard(ModalScreen):
     if self.ready(self.dst):
       def places(found):
         places_bar.remove_children()
-        for i, (label, path) in enumerate(found):
-          b = Button(label, id=f"tw-place-{i}", compact=True, tooltip=path)
+        buttons = []
+        for label, path in found:
+          b = Button(label, classes="tw-place", compact=True, tooltip=path)
           b.place = path
-          places_bar.mount(b)
+          buttons.append(b)
+        places_bar.mount(*buttons)
       with_places(self, self.dst, places)
     self.refresh_preview()
 
@@ -719,11 +723,11 @@ class TransferWizard(ModalScreen):
     self.start_check(force=True)
 
   # ---- 4: how
-  def fill_how(self):
+  async def fill_how(self):
     routes = self.plan.get("routes", {})
     current = self.chosen_route() or (self.editing.route if self.editing else None) or self.plan.get("recommended")
     rs = self.query_one("#tw-route", RadioSet)
-    rs.remove_children()
+    await rs.remove_children()
     buttons = []
     for route in ("same-fs", "direct-push", "direct-pull", "relay"):
       info = routes.get(route)
@@ -736,11 +740,14 @@ class TransferWizard(ModalScreen):
         words += "  (with the temporary key)"
       if not usable:
         words += f"  ✗ {info.get('why', '')[:60]}"
-      b = RadioButton(words, value=route == current and usable, id=f"tw-r-{route}", disabled=not usable)
-      b.route = route
+      b = RadioButton(words, classes=f"tw-r-{route}", disabled=not usable)
+      b.route, b.usable = route, usable
       buttons.append(b)
-    rs.mount(*buttons)
-    self.call_after_refresh(self.route_changed)
+    await rs.mount(*buttons)
+    chosen = next((b for b in buttons if b.route == current and b.usable), next((b for b in buttons if b.usable), None))
+    if chosen is not None:
+      chosen.value = True # (after mounting: the set knows which one is pressed, choosing another one unpresses it)
+    await self.route_changed()
 
   def chosen_route(self):
     for b in self.query("#tw-route RadioButton").results(RadioButton):
@@ -749,11 +756,11 @@ class TransferWizard(ModalScreen):
     return None
 
   @on(RadioSet.Changed, "#tw-route")
-  def route_set(self, event):
+  async def route_set(self, event):
     event.stop()
-    self.route_changed()
+    await self.route_changed()
 
-  def route_changed(self):
+  async def route_changed(self):
     route = self.chosen_route()
     info = self.plan.get("routes", {}).get(route or "", {})
     runs = info.get("runs_on") or (["slurp"] if route == "relay" else ["detached"])
@@ -761,16 +768,19 @@ class TransferWizard(ModalScreen):
     if current not in runs:
       current = "job" if "job" in runs else runs[0]
     rs = self.query_one("#tw-runs-on", RadioSet)
-    rs.remove_children()
+    await rs.remove_children()
     labels = {"slurp": "in slurp (stops when slurp quits; Continue goes on)",
               "detached": "detached on the cluster's login node (goes on without slurp)",
               "job": "as a transfer job (Slurm; goes on without slurp)"}
     buttons = []
     for kind in runs:
-      b = RadioButton(labels[kind], value=kind == current, id=f"tw-o-{kind}")
+      b = RadioButton(labels[kind], classes=f"tw-o-{kind}")
       b.kind = kind
       buttons.append(b)
-    rs.mount(*buttons)
+    await rs.mount(*buttons)
+    for b in buttons:
+      if b.kind == current:
+        b.value = True
     note = ""
     if route == "relay":
       note = ("The bytes pass through this machine (slurp's): its connections to both clusters set the speed."
@@ -786,7 +796,7 @@ class TransferWizard(ModalScreen):
     key.display = route in ("direct-push", "direct-pull")
     if route in ("direct-push", "direct-pull") and not info.get("ok") and info.get("keyable"):
       key.value = True
-    self.call_after_refresh(self.runs_changed)
+    self.runs_changed()
     self.key_changed()
 
   def chosen_runs_on(self):
@@ -993,7 +1003,7 @@ class TransferWizard(ModalScreen):
 
   @on(Button.Pressed)
   def place_pressed(self, event):
-    if (event.button.id or "").startswith("tw-place-"):
+    if event.button.has_class("tw-place"):
       event.stop()
       self.set_dest(event.button.place)
 
