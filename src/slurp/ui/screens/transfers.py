@@ -1757,8 +1757,30 @@ class TransferWizard(ModalScreen):
       self.set_dest(event.button.place)
 
 class TransfersBase(SplitScreen):
-  """(the screens of the Transfers tab: its subtab bar shows its own subtabs)"""
+  """(the screens of the Transfers tab: its subtab bar shows its own subtabs). They show what slurp knows, each second;
+  a reload (r, Reload, and automatically every refresh_seconds, counted down in the title bar as in the other views)
+  asks again now: the runs on clusters and at Globus, and the S3 and Globus endpoints"""
   TRANSFERS = True
+  AUTO_REFRESH = True
+  last_refresh = 0.0
+  BINDINGS = [Binding("r", "reload", "Reload")]
+
+  def reloaded_transfers(self):
+    """The transfers a reload asks about (None: all)"""
+    return None
+
+  def action_reload(self):
+    self.last_refresh = time.time()
+    self.manager.reload(self.reloaded_transfers())
+    self.refresh_view()
+
+  def auto_reload(self):
+    self.action_reload()
+
+  @on(Button.Pressed, ".xfer-reload")
+  def reload_pressed(self, event):
+    event.stop()
+    self.action_reload()
 
   @property
   def manager(self):
@@ -1890,6 +1912,8 @@ class TransfersScreen(TransfersBase):
   def compose_left(self):
     with Horizontal(id="xfer-toolbar"):
       yield Button(icons.label("new_script", "New transfer"), id="xfer-new", variant="primary", compact=True, tooltip="set up a transfer (n)")
+      yield Button(icons.label("reload", "Reload"), id="xfer-reload", classes="xfer-reload", compact=True,
+                   tooltip="ask again now: the runs on the clusters and at Globus, the endpoints (r)")
       yield Static(id="xfer-summary")
     yield ClickTable(id="xfer-list", cursor_type="row", zebra_stripes=True)
     yield Static(id="xfer-note")
@@ -2049,6 +2073,9 @@ class TransferScreen(TransfersBase):
     self.tid = tid
     self.verifying = set() # (ids whose Verify goes on)
 
+  def reloaded_transfers(self):
+    return [self.transfer] if self.transfer is not None else []
+
   @property
   def transfer(self):
     return self.manager.get(self.tid)
@@ -2072,6 +2099,8 @@ class TransferScreen(TransfersBase):
         yield Button(icons.label("reload", "Run now"), id="xd-run", compact=True, tooltip="a run now (s): when its endpoints are connected")
         yield Button(icons.label("edit", "Edit…"), id="xd-edit", compact=True, tooltip="its settings, in the wizard (e)")
         yield Button(icons.label("jobs", "Its job"), id="xd-job", compact=True, tooltip="the job window of its transfer job")
+        yield Button(icons.label("reload", "Reload"), id="xd-reload", classes="xfer-reload", compact=True,
+                     tooltip="ask again now: its run on the cluster or at Globus, its endpoints (r)")
         yield Button(icons.label("check", "Verify"), id="xd-verify", compact=True,
                      tooltip="rclone check: is everything of the sources on the destination, the same? (it copies nothing)")
         yield Button(icons.label("copy", "Copy as a command"), id="xd-copy", compact=True,
@@ -2703,6 +2732,8 @@ class EndpointsScreen(TransfersBase):
   def compose_left(self):
     with Horizontal(id="ep-toolbar"):
       yield Button(icons.label("new_script", "New endpoint…"), id="ep-new", variant="primary", compact=True, tooltip="(n)")
+      yield Button(icons.label("reload", "Reload"), id="ep-reload", classes="xfer-reload", compact=True,
+                   tooltip="test the S3 and Globus endpoints again (r)")
       yield Button(icons.label("connect", "Connect"), id="ep-connect", compact=True, tooltip="log in to it (c)")
       yield Button(icons.label("disconnect", "Disconnect"), id="ep-disconnect", compact=True)
       yield Button(icons.label("check", "Test"), id="ep-test", compact=True, tooltip="does it answer? (t)")
@@ -2769,6 +2800,8 @@ class EndpointsScreen(TransfersBase):
 
   @on(Button.Pressed, "#ep-toolbar Button")
   def pressed(self, event):
+    if event.button.id == "ep-reload":
+      return # (the Reload of every view of the Transfers tab)
     event.stop()
     {"ep-new": self.action_new, "ep-connect": self.action_connect, "ep-disconnect": self.action_disconnect,
      "ep-test": self.action_test, "ep-edit": self.action_edit, "ep-delete": self.action_delete}[event.button.id]()

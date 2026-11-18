@@ -287,6 +287,20 @@ class Manager:
       self.from_thread(finish)
     threading.Thread(target=work, daemon=True, name=f"globus test {endpoint.name}").start()
 
+  def reload(self, transfers=None):
+    """Ask again now (Reload): the runs on clusters and at Globus of these transfers (None: all), and the S3 and Globus
+    endpoints they use (None: all of them) tested again"""
+    chosen = list(self.transfers if transfers is None else transfers)
+    for t in chosen:
+      if t.id in self.followed:
+        self.followed[t.id] = 0 # (looked at at the next tick)
+    used = None if transfers is None else {E.ref_id(r) for t in chosen for r in (t.source, t.dest)}
+    for d in self.endpoint_store.defs:
+      if d.kind in ("s3", "globus") and (used is None or d.id in used) and self.endpoint_status.get(d.id, ("",))[0] != "connecting":
+        self.endpoint_status.pop(d.id, None)
+        self.ensure_tested(E.resolve(self.app, self.endpoint_store, {"endpoint": d.id}, self.endpoint_status))
+    self.changed(None, save=False)
+
   def ensure_tested(self, endpoint):
     """A Globus or S3 endpoint not tested yet in this session (that can be): tested now, once"""
     if endpoint.id in self.endpoint_status or endpoint.state != "not connected":

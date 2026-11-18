@@ -206,6 +206,8 @@ and +n), its route and where it runs, its state, how far it is, its rate and the
 its full paths). **Endpoints** (Menu → Endpoints…) lists where data can come from and go to.
 Enter or a click opens its subtab with everything about it. A click on a column's header sorts the list by it (▲),
 another click the other way (▼); by State the running ones come first; the order is kept for the next start.
+**Reload** (`r`) asks again now (also automatically, counted down in the title bar as in the other views; a click
+there turns it off and on): the runs on the clusters and at Globus, and the S3 and Globus endpoints.
 
 **New transfer** (`n`, or Menu → Transfer data…, `T`) sets one up in a wizard. `p` pauses (a transfer job is
 cancelled for it: slurp asks first), `c` continues (rsync goes on where it stopped: what is there is not copied again),

@@ -866,3 +866,42 @@ def test_done_is_100(check):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_reload(check):
+  """The views of the Transfers tab reload as the others: the countdown in the title bar, Reload (r): asked again now
+  (the runs, the endpoints): all of them in the list, the transfer's own in its details"""
+  from slurp.transfer import model as M
+  from slurp.ui.screens.transfers import EndpointsScreen, TransferScreen, TransfersScreen
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      calls = []
+      original = app.transfers.reload
+      app.transfers.reload = lambda transfers=None: (calls.append(transfers), original(transfers))
+      ref = M.tab_ref(app.clusters[0])
+      t = M.Transfer(M.new_id(), "one", {"endpoint": "local", "tab": ref, "paths": ["/x"]}, {"endpoint": "local", "tab": ref, "path": "/y"})
+      app.transfers.add(t)
+      app.show_transfers(); await pilot.pause(0.8)
+      timer = app.screen.query_one("#refresh-timer")
+      check("the list: the countdown in the title bar", isinstance(app.screen, TransfersScreen) and timer.display and "⟳" in str(timer.label),
+            str(timer.label))
+      app.screen.query_one("#xfer-reload").press(); await pilot.pause(0.3)
+      check("Reload: all asked again", calls and calls[-1] is None, calls)
+      app.open_transfer(t); await pilot.pause(0.8)
+      check("its details: the countdown too", isinstance(app.screen, TransferScreen) and app.screen.query_one("#refresh-timer").display)
+      calls.clear()
+      await pilot.press("r"); await pilot.pause(0.3)
+      check("r: this transfer asked again", calls and calls[-1] == [t], calls)
+      app.screen.query_one("#xd-reload").press(); await pilot.pause(0.3)
+      check("…and its Reload button", len(calls) == 2, calls)
+      await app.run_action("endpoints"); await pilot.pause(0.6)
+      calls.clear()
+      app.screen.query_one("#ep-reload").press(); await pilot.pause(0.3)
+      check("the endpoints: the countdown, Reload", isinstance(app.screen, EndpointsScreen) and app.screen.query_one("#refresh-timer").display
+            and calls == [None], calls)
+      await pilot.press("q")
+
+  asyncio.run(main())
