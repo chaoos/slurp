@@ -9,7 +9,8 @@ version may need the helper of the same version).
 - **Transfers**: data from one tab to another (cluster to cluster, or this
   machine), with rsync over the tabs' own SSH sessions: Menu → Transfer
   data… (`T`) sets one up in a wizard (source, destination, the route with its
-  check, when, summary: Go). The check (it changes nothing) says what remains to
+  check, when, summary: Go); sources may be patterns (`/path/to/dir/*.h5`:
+  each match). The check (it changes nothing) says what remains to
   copy, the room on the destination (free space, quota, a purged scratch),
   and which routes work, each with its measured speed and an estimate: the
   same filesystem, direct (one cluster logs in to the other by itself;
