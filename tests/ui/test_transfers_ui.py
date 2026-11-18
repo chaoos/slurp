@@ -610,3 +610,38 @@ def test_pattern_source(check, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_list_keeps_scrolling(check, tmp_path):
+  """The list is refreshed every second: scrolled down, it stays there (values change in place), also when a transfer
+  comes (built anew, scrolled back), and the cursor stays on its transfer"""
+  from slurp.transfer import model as M
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(140, 30)) as pilot:
+      await pilot.pause(0.5)
+      ref = M.tab_ref(app.clusters[0])
+      made = []
+      for i in range(60):
+        t = M.Transfer(M.new_id(), f"t{i:02d}", {"tab": ref, "paths": [f"/data/run{i}"]}, {"tab": ref, "path": "/dest"})
+        app.transfers.store.transfers.append(t)
+        made.append(t)
+      app.transfers.changed(None)
+      app.show_transfers(); await pilot.pause(1.2)
+      table = app.screen.query_one("#xfer-list")
+      table.move_cursor(row=2); await pilot.pause(0.2)
+      table.scroll_to(y=30, animate=False); await pilot.pause(0.3) # (as the mouse wheel: the cursor stays where it is)
+      y = table.scroll_y
+      check("scrolled down", y > 10, y)
+      made[40].state, made[40].progress = "running", {"percent": 30.0, "rate": 1024 ** 2, "eta": 60}
+      await pilot.pause(1.5)
+      check("a value changed, refreshed: the scrolling and the cursor stay", table.scroll_y == y and table.cursor_row == 2
+            and "30%" in str(table.get_row_at(40)[5]), (table.scroll_y, y, table.cursor_row))
+      app.transfers.store.transfers.insert(0, M.Transfer(M.new_id(), "new", {"tab": ref, "paths": ["/x"]}, {"tab": ref, "path": "/y"}))
+      app.transfers.changed(None); await pilot.pause(1.5)
+      check("a transfer came: scrolled where it was, the cursor on the same transfer", table.scroll_y == y and table.cursor_row == 3,
+            (table.scroll_y, y, table.cursor_row))
+      await pilot.press("q")
+
+  asyncio.run(main())

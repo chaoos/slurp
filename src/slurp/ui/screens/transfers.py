@@ -1596,9 +1596,7 @@ class TransfersScreen(TransfersBase):
       return
     table = self.query_one("#xfer-list", ClickTable)
     transfers = self.manager.transfers
-    selected = self.current()
-    keep = table.cursor_row
-    table.clear()
+    rows = []
     for t in transfers:
       src, dst = self.manager.ends(t)
       p = t.progress
@@ -1606,16 +1604,13 @@ class TransfersScreen(TransfersBase):
       last = t.runs[-1] if t.runs else None
       when = (S.when_text(t.next_run) if t.next_run else
               (f"{S.when_text(last['ended'])} {M.STATES.get(last['result'], last['result'])}" if last else ""))
-      table.add_row(Text(t.name, style="bold"), end_text(src, t.source_name, t.source.get("paths", [])),
-                    end_text(dst, t.dest_name, [t.dest.get("path", "")]),
-                    route_text(t), state_text(t),
-                    Text(f"{self.app.spinner()} comparing", style="yellow") if t.state == "running" and p.get("phase") == "comparing"
-                    else bar(shown) if shown is not None else "",
-                    rate_text(p.get("rate")) if t.state == "running" else "",
-                    P.duration(p.get("eta")) if t.state == "running" and p.get("eta") else "", when, key=t.id)
-    if transfers:
-      row = next((i for i, t in enumerate(transfers) if selected is not None and t.id == selected.id), keep)
-      table.move_cursor(row=min(max(row, 0), len(transfers) - 1))
+      rows.append((t.id, [Text(t.name, style="bold"), end_text(src, t.source_name, t.source.get("paths", [])),
+                          end_text(dst, t.dest_name, [t.dest.get("path", "")]), route_text(t), state_text(t),
+                          Text(f"{self.app.spinner()} comparing", style="yellow") if t.state == "running" and p.get("phase") == "comparing"
+                          else bar(shown) if shown is not None else "",
+                          rate_text(p.get("rate")) if t.state == "running" else "",
+                          P.duration(p.get("eta")) if t.state == "running" and p.get("eta") else "", when]))
+    fill_table(table, rows)
     running = sum(t.state == "running" for t in transfers)
     self.query_one("#xfer-summary", Static).update(
       f"{len(transfers)} transfer{'s' if len(transfers) != 1 else ''}" + (f", {running} running" if running else "")
@@ -1991,6 +1986,38 @@ def status_text(t, manager, spinner=""):
     more = t.message
   return Text.assemble((f"{mark} {word}", STATE_STYLES.get(t.state, "bold")), ("  " + more if more else "", ""))
 
+def fill_table(table, rows):
+  """Show rows ([(key, [cells])]) in a table that is refreshed while it is looked at: the same rows, new values: the
+  cells that changed are updated in place (scrolling and the cursor stay); rows came or went: it is built anew and
+  scrolled back to where it was, the cursor on the same row (as the links table of the connection window)"""
+  shown = getattr(table, "slurp_shown", None)
+  plain = [(key, [str(c) for c in cells]) for key, cells in rows]
+  if shown is not None and [k for k, _ in shown] == [k for k, _ in plain] and table.row_count == len(rows):
+    columns = [c.key for c in table.ordered_columns]
+    for (key, cells), (_, now), (_, before) in zip(rows, plain, shown):
+      for column, cell, new, old in zip(columns, cells, now, before):
+        if new != old:
+          table.update_cell(key, column, cell, update_width=True)
+    table.slurp_shown = plain
+    return
+  x, y = table.scroll_x, table.scroll_y
+  cursor_key = None
+  if table.row_count and 0 <= table.cursor_row < table.row_count:
+    try:
+      cursor_key = table.coordinate_to_cell_key((table.cursor_row, 0)).row_key.value
+    except Exception:
+      cursor_key = None
+  cursor = table.cursor_row
+  table.clear()
+  for key, cells in rows:
+    table.add_row(*cells, key=key)
+  table.slurp_shown = plain
+  keys = [k for k, _ in rows]
+  if rows:
+    row = keys.index(cursor_key) if cursor_key in keys else min(max(cursor, 0), len(rows) - 1)
+    table.move_cursor(row=row, scroll=False)
+  table.call_after_refresh(table.scroll_to, x, y, animate=False)
+
 def runs_label(t):
   """The Runs field: how many times it ran, how they ended, the last one"""
   if not t.runs:
@@ -2054,15 +2081,16 @@ class TransferRunsScreen(TransfersBase):
       return
     self.shown_keys = keys
     table = self.query_one("#xr-list", ClickTable)
-    table.clear()
     first = t.run_count - len(t.runs) + 1
+    rows = []
     for i, r in reversed(list(enumerate(t.runs))):
       where = (f"job {r['job']}" if r.get("job") else "") or r.get("host", "")
-      table.add_row(str(r.get("number") or first + i), stamp(r["started"]), stamp(r["ended"]), took(r),
-                    Text(M.STATES.get(r["result"], r["result"]), style=STATE_STYLES.get(r["result"], "")),
-                    human(r.get("bytes")), str(r.get("files") or 0), rate_text(r.get("rate")),
-                    f"{ROUTE_SHORT.get(r.get('route'), r.get('route', ''))} · {RUNS_SHORT.get(r.get('runs_on'), '')}",
-                    where, (r.get("message") or "")[:80], key=str(r["started"]))
+      rows.append((str(r["started"]), [str(r.get("number") or first + i), stamp(r["started"]), stamp(r["ended"]), took(r),
+                                       Text(M.STATES.get(r["result"], r["result"]), style=STATE_STYLES.get(r["result"], "")),
+                                       human(r.get("bytes")), str(r.get("files") or 0), rate_text(r.get("rate")),
+                                       f"{ROUTE_SHORT.get(r.get('route'), r.get('route', ''))} · {RUNS_SHORT.get(r.get('runs_on'), '')}",
+                                       where, (r.get("message") or "")[:80]]))
+    fill_table(table, rows)
 
   @on(ClickTable.RowSelected, "#xr-list")
   def selected(self, event):
