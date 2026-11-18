@@ -543,12 +543,12 @@ class TransferWizard(ModalScreen):
             yield Button(icons.label("reload", "Check again"), id="tw-recheck", compact=True)
         with VerticalScroll(id="tw-step-3"):
           with RadioSet(id="tw-when"):
-            yield RadioButton("now", value=True, id="tw-when-now")
+            yield RadioButton("never by itself: only when I click Run now", value=True, id="tw-when-never") # (the default)
+            yield RadioButton("now", id="tw-when-now")
             yield RadioButton("once, at a time", id="tw-when-at")
             yield RadioButton("repeatedly, every …", id="tw-when-every")
             yield RadioButton("daily, at …", id="tw-when-daily")
             yield RadioButton("after a job ends", id="tw-when-after")
-            yield RadioButton("never by itself: only when I click Run now", id="tw-when-never")
           with Horizontal(classes="tw-row"):
             yield Label("at")
             yield Input(placeholder="14:00, 2026-11-20 14:00, +2h", id="tw-at", compact=True)

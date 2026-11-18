@@ -116,7 +116,8 @@ def test_wizard_and_tab(check, tmp_path):
       check("checksums: the estimate says so", "with checksums" in flow, flow)
       w.query_one("#tw-checksum").value = False; await pilot.pause(0.2)
       await pilot.click("#tw-next"); await pilot.pause(0.2)
-      check("step 4: now", w.when_kind() == "now")
+      check("step 4: never by itself is the first choice, and chosen", w.when_kind() == "never"
+            and [b.id for b in w.query("#tw-when RadioButton")][0] == "tw-when-never")
       w.query_one("#tw-when-every").value = True
       w.query_one("#tw-every").value = "1m"; await pilot.pause(0.2)
       check("every 1m: too short, Next waits", w.query_one("#tw-next").disabled)

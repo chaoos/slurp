@@ -274,8 +274,8 @@ check again, in Route).
    a transfer job where the site has a transfer partition, e.g. xfer), checksums (they read every file on both sides
    at every run, also when nothing changed: the estimate counts it), compression (the relay), a speed
    limit, and for a direct route that cannot log in by itself the **temporary key** (opt-in, with its warning).
-4. **When**: now, once at a time, every so long, daily at a time, after a job ends, or never by itself (only when you
-   click **Run now**); whether slurp logs in to the tabs by itself then, and what a missed run does.
+4. **When**: never by itself (the default: only when you click **Run now**), now, once at a time, every so long,
+   daily at a time, or after a job ends; whether slurp logs in to the tabs by itself then, and what a missed run does.
 5. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes; **Go** (or **Save without
    starting**); for *never by itself* the button is **Add**: the transfer is added and waits for **Run now**.
 """),

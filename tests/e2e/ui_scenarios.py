@@ -3532,6 +3532,7 @@ async def t_transfer_wizard(app, pilot):
   await pilot.click(w.query_one(".tw-r-relay")); await pilot.pause(0.4)
   check("the relay: in slurp", w.chosen_route() == "relay" and w.chosen_runs_on() == "slurp", (w.chosen_route(), w.chosen_runs_on()))
   w.query_one("#tw-next").press(); await pilot.pause(0.3)
+  w.query_one("#tw-when-now").value = True; await pilot.pause(0.2) # (not the default: never by itself)
   w.query_one("#tw-next").press(); await pilot.pause(0.3)
   w.query_one("#tw-go").press()
   await pilot.pause(0.5)

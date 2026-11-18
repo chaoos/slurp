@@ -60,8 +60,8 @@ goes on as set, without a run now.
       run, also when nothing changed, and shows no progress meanwhile: the estimate counts that time, and a run says
       it is comparing. Size and time find almost every change; checksums are for when they cannot be trusted.
     - compression (the relay only: it helps on slow links), a limit in MB/s.
-4. **When**: now, once at a time (`14:00`, `2026-11-20 14:00`, `+2h`), every so long (`6h`, `1d`, `30m`), daily at a
-   time, after a job ends, or never by itself: only when you click **Run now** (`s`). For a schedule: whether slurp logs in to the tabs by itself then (a login that needs
+4. **When**: never by itself (the default: only when you click **Run now**, `s`), now, once at a time (`14:00`,
+   `2026-11-20 14:00`, `+2h`), every so long (`6h`, `1d`, `30m`), daily at a time, or after a job ends. For a schedule: whether slurp logs in to the tabs by itself then (a login that needs
    you waits, and says so), and whether a missed run runs once as soon as it can or is skipped.
 5. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes. **Go** starts it (or schedules
    it); **Save without starting** keeps it for later. With *never by itself* the button reads **Add**: the transfer
