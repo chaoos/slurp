@@ -113,3 +113,15 @@ def test_count(check, tmp_path):
   check("a folder: its files, folders, links, bytes", found[str(tmp_path / "a")] == {"files": 2, "dirs": 2, "links": 1, "bytes": 1500}, found)
   check("a file", found[str(tmp_path / "a" / "x")] == {"files": 1, "dirs": 0, "links": 0, "bytes": 1000})
   check("not there: None", found[str(tmp_path / "nope")] is None)
+
+
+def test_patterns(check, tmp_path):
+  src = tmp_path / "src"
+  src.mkdir()
+  for name in ("a.h5", "b.h5", "c.txt"):
+    (src / name).write_text("xx")
+  found = P.sources(local(), [str(src / "*.h5"), str(src / "*.zip")])
+  check("a pattern that matches: there; one that does not: not", found[0]["exists"] and not found[1]["exists"], found)
+  counted = P.count(local(), [str(src / "*.h5"), str(src / "*.zip")])
+  check("counted: its matches and what they hold", counted[str(src / "*.h5")] == {"files": 2, "dirs": 0, "links": 0, "bytes": 4, "matches": 2}
+        and counted[str(src / "*.zip")] is None, counted)

@@ -114,16 +114,17 @@ def command(transfer, route, folder, version, target=None, key=False):
   opts = R.options(transfer.options, version)
   paths, dest = transfer.source["paths"], transfer.dest["path"].rstrip("/") + "/"
   if route == "same-fs":
-    args = [*opts, "--", *paths, dest]
+    args = [*opts, "--", *R.marked(paths), dest]
   else:
     rsh = shlex.join(["sh", f"{folder}/rsh", *ssh_options(target, folder, key)])
     remote = [f"--rsh={rsh}", f"--rsync-path=printf '\\n{DIRECT_MARK}\\n'; exec rsync"]
     host = target["host"]
     if route == "direct-push":
-      args = [*opts, *remote, "--", *paths, f"{host}:{dest}"]
-    else:
+      args = [*opts, *remote, "--", *R.marked(paths), f"{host}:{dest}"]
+    else: # (patterns on the other side: its rsync, the sender, expands them)
       args = [*opts, *remote, "--", *[f"{host}:{p}" for p in paths], dest]
-  return "#!/bin/sh\n# the rsync command of slurp transfer " + transfer.id + "\nexec rsync " + shlex.join(args) + "\n"
+  return ("#!/bin/sh\n# the rsync command of slurp transfer " + transfer.id + " (patterns among the sources: their matches)\n"
+          "set -- " + shlex.join(args) + "\n" + R.EXPAND + "\nexec rsync \"$@\"\n")
 
 def preflight(target, folder, key=False):
   """The login to the other cluster with the ssh of the run (the file `preflight`): it must work where rsync runs"""

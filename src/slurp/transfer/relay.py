@@ -31,6 +31,7 @@ SOURCE_SCRIPT = (
   "exec 3<&0 4>&1 1>&2; "
   f"printf '\\n{MARK} %s %s\\n' \"$1\" $$ >&4; shift; "
   "p=; trap 'kill -TERM $p 2>/dev/null' TERM HUP INT; "
+  + R.EXPAND + "; " +
   'rsync --rsh="sh $h" "$@" & p=$!; '
   "wait $p; r=$?; "
   "while [ $r -gt 128 ] && kill -0 $p 2>/dev/null; do wait $p; r=$?; done; "
@@ -136,7 +137,7 @@ class Relay:
     self.ready = threading.Event() # (the destination's server runs: bytes flow)
 
   def args(self):
-    return [*R.options(self.opts, self.version, self.dry_run), "--", *self.paths, f"slurp-relay:{self.dest_path.rstrip('/')}/"]
+    return [*R.options(self.opts, self.version, self.dry_run), "--", *R.marked(self.paths), f"slurp-relay:{self.dest_path.rstrip('/')}/"]
 
   def start(self):
     self.started = time.monotonic()

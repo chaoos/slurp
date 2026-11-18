@@ -179,3 +179,18 @@ def test_job_test_only(check, tmp_path, monkeypatch):
   t.options["account"] = "bad"
   ok, words = RN.test_job(local(), t, str(tmp_path))
   check("refused: Slurm's error", not ok and "Invalid account" in words, (ok, words))
+
+
+def test_detached_pattern(check, tmp_path):
+  src, dst = tmp_path / "src", tmp_path / "dst"
+  (src / "sub").mkdir(parents=True)
+  for name in ("a.h5", "b.txt", "sub/c.h5"):
+    (src / name).write_text(name)
+  dst.mkdir()
+  end = local()
+  t = M.Transfer(M.new_id(), "t", {"paths": [str(src / "*.h5"), str(src / "sub")]}, {"path": str(dst)}, route="same-fs", runs_on="detached")
+  folder = RN.prepare(end, t, RN.command(t, "same-fs", None, (3, 2, 7)))
+  RN.start_detached(end, folder)
+  done = until(lambda: (s := RN.status(end, folder))["result"] and not s["lock"] and s)
+  check("done", done and done["result"]["exit"] == 0, done)
+  check("the matches and the folder", sorted(p.name for p in dst.iterdir()) == ["a.h5", "sub"], sorted(p.name for p in dst.iterdir()))

@@ -7,6 +7,23 @@ half-copied files in .slurp-partial (the next run goes on from them), never --de
 import re
 
 PARTIAL_DIR = ".slurp-partial"
+
+# Sources may be patterns (/path/to/dir/*.h5): each match is copied, as cp would. rsync does not expand them on the side
+# that sends, so the shell there does, just before rsync: a pattern goes to it marked, the snippet replaces it by its
+# matches (in order; IFS empty: no splitting at spaces, only the pattern); a pattern that matches nothing stays as it
+# is, and rsync says it is not there. One line: it goes into the scripts of channels too.
+GLOB_MARK = "SLURP-GLOB:"
+EXPAND = ('n=$#; i=0; while [ $i -lt $n ]; do a=$1; shift; i=$((i + 1)); case $a in ' + GLOB_MARK + '*) '
+          'g=${a#' + GLOB_MARK + '}; f=0; IFS=; for m in $g; do if [ -e "$m" ] || [ -L "$m" ]; then set -- "$@" "$m"; f=1; fi; '
+          'done; unset IFS; [ $f = 1 ] || set -- "$@" "$g";; *) set -- "$@" "$a";; esac; done')
+
+def is_pattern(path):
+  """A source with *, ? or [ in it: its matches are copied"""
+  return any(c in (path or "") for c in "*?[")
+
+def marked(paths):
+  """The sources as the snippet takes them: patterns marked"""
+  return [GLOB_MARK + p if is_pattern(p) else p for p in paths]
 MIN_PROGRESS = (3, 1, 0) # --info=progress2 and --outbuf (older rsync: only the statistics at the end)
 
 def version_of(text):

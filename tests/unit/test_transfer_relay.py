@@ -109,3 +109,18 @@ def test_probe(check, tmp_path):
   (tmp_path / "f.bin").write_bytes(os.urandom(3_000_000))
   rate = RL.probe(local(Chatty), local(Chatty), str(tmp_path), seconds=2)
   check("a speed through slurp", rate is not None and rate > 1_000_000, rate)
+
+
+def test_relay_pattern(check, tmp_path):
+  """A pattern among the sources: its matches are copied (each into the destination, as cp), a name with a space too;
+  one that matches nothing: rsync says it is not there"""
+  src, dst = tmp_path / "src", tmp_path / "dst"
+  (src / "sub").mkdir(parents=True)
+  for name in ("a.h5", "my file.h5", "c.txt", "sub/d.h5"):
+    (src / name).write_text(name)
+  dst.mkdir()
+  relay = RL.run(local(Chatty), local(Chatty), [str(src / "*.h5")], str(dst), timeout=60)
+  check("done", relay.code == 0, (relay.code, relay.output.errors))
+  check("only the matches, into the destination", sorted(p.name for p in dst.iterdir()) == ["a.h5", "my file.h5"], sorted(p.name for p in dst.iterdir()))
+  none = RL.run(local(), local(), [str(src / "*.zip")], str(dst), timeout=60)
+  check("nothing matches: not there (23)", none.code == 23 and any("*.zip" in e for e in none.output.errors), (none.code, none.output.errors))

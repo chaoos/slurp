@@ -43,7 +43,9 @@ def facts(endpoint):
   out["version"] = R.version_of(out.get("rsync", ""))
   return out
 
-SOURCES_SCRIPT = ('for p in "$@"; do e=0; d=0; r=0; [ -e "$p" ] && e=1; [ -d "$p" ] && d=1; [ -r "$p" ] && r=1; '
+SOURCES_SCRIPT = ('for p in "$@"; do e=0; d=0; r=0; case $p in *[*?[]*) r=1; IFS=; for m in $p; do '
+                  'if [ -e "$m" ]; then e=1; [ -r "$m" ] || r=0; fi; done; unset IFS;; '
+                  '*) [ -e "$p" ] && e=1; [ -d "$p" ] && d=1; [ -r "$p" ] && r=1;; esac; '
                   'printf "%s\\t%s\\t%s\\t%s\\n" "$e" "$d" "$r" "$p"; done')
 
 def sources(endpoint, paths):
@@ -55,10 +57,17 @@ def sources(endpoint, paths):
       found[parts[3]] = {"path": parts[3], "exists": parts[0] == "1", "dir": parts[1] == "1", "readable": parts[2] == "1"}
   return [found.get(p, {"path": p, "exists": False, "dir": False, "readable": False}) for p in paths]
 
-COUNT_SCRIPT = ('for p in "$@"; do if [ -e "$p" ] || [ -L "$p" ]; then '
-                'find "$p" -printf "%y %s\\n" 2>/dev/null | awk -v p="$p" \'$1 == "f" { f++; b += $2 } $1 == "d" { d++ } '
-                '$1 == "l" { l++ } END { printf "%s\\t%d\\t%d\\t%d\\t%.0f\\n", p, f, d, l, b }\'; '
-                'else printf "%s\\t-\\n" "$p"; fi; done')
+COUNT_SCRIPT = r"""
+for p in "$@"; do
+  n=-1
+  case $p in *[*?[]*) n=0; IFS=; for m in $p; do [ -e "$m" ] || [ -L "$m" ] && n=$((n + 1)); done; unset IFS;; esac
+  if [ "$n" -eq 0 ] || { [ "$n" -lt 0 ] && [ ! -e "$p" ] && [ ! -L "$p" ]; }; then printf '%s\t-\n' "$p"; continue; fi
+  if [ "$n" -gt 0 ]; then IFS=; for m in $p; do [ -e "$m" ] || [ -L "$m" ] && find "$m" -printf '%y %s\n' 2>/dev/null; done; unset IFS
+  else find "$p" -printf '%y %s\n' 2>/dev/null; fi |
+    awk -v p="$p" -v n="$n" '$1 == "f" { f++; b += $2 } $1 == "d" { d++ } $1 == "l" { l++ }
+      END { printf "%s\t%d\t%d\t%d\t%.0f\t%d\n", p, f, d, l, b, n }'
+done
+"""
 
 def count(endpoint, paths, timeout=600):
   """What the sources hold (one find through each): {path: {"files", "dirs", "links", "bytes"} or None if it is not
@@ -67,9 +76,11 @@ def count(endpoint, paths, timeout=600):
   out = {p: None for p in paths}
   for line in (result.stdout or "").splitlines():
     parts = line.split("\t")
-    if len(parts) == 5 and parts[0] in out:
+    if len(parts) == 6 and parts[0] in out:
       try:
         out[parts[0]] = {"files": int(parts[1]), "dirs": int(parts[2]), "links": int(parts[3]), "bytes": int(float(parts[4]))}
+        if int(parts[5]) >= 0: # (a pattern: how many match it)
+          out[parts[0]]["matches"] = int(parts[5])
       except ValueError:
         pass
   return out
@@ -359,7 +370,8 @@ def check(source, dest, transfer, source_cluster, dest_cluster, report=lambda pl
     step("remaining", "running", "what remains to copy (an rsync dry run)")
     try:
       if shared:
-        dry = source.run(["rsync", *R.options(transfer.options, fs["version"], dry_run=True), "--", *paths, dest_path.rstrip("/") + "/"], timeout=3600)
+        dry = source.sh(R.EXPAND + '; exec rsync "$@"', *R.options(transfer.options, fs["version"], dry_run=True), "--",
+                        *R.marked(paths), dest_path.rstrip("/") + "/", timeout=3600)
         stats, code, error = R.parse_stats(dry.stdout), dry.returncode, (dry.stderr or "").strip()[-200:]
       else:
         run = relay.run(source, dest, paths, dest_path, transfer.options, fs["version"], dry_run=True, timeout=3600)
