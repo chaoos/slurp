@@ -67,10 +67,11 @@ def dot(cluster):
 
 RUNS_WHERE = {"slurp": "", "detached": "on the login node", "job": "as a transfer job"}
 
-def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=None):
+def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=None, rate=None, estimate=None, measuring=False):
   """How the data flows, as boxes and arrows: the source, slurp (the relay between two clusters), the destination; on
-  each arrow how (push, pull, relay, the same filesystem), under each box what runs there. moving: a frame number
-  while it runs (a dot moves along the arrows)"""
+  each arrow how (push, pull, relay, the same filesystem), under it the bandwidth measured (rate; measuring: not yet),
+  under each box what runs there, and below all the estimate (a line of words). moving: a frame number while it runs
+  (a dot moves along the arrows)"""
   import textwrap
   from rich.cells import cell_len
   where = f"transfer job {job}" if job and runs_on == "job" else RUNS_WHERE.get(runs_on, "")
@@ -100,7 +101,8 @@ def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=No
     width = max([inner + 2, *map(cell_len, caption)])
     cells.append((label, inner, width, caption, cluster is None and name == "slurp"))
   rows = max(len(c[3]) for c in cells)
-  arrow_widths = [max(cell_len(a) + 4, 10) for a in arrows]
+  speed = f"{rate_text(rate)}" if rate else "measuring …" if measuring else ""
+  arrow_widths = [max(cell_len(a) + 4, cell_len(speed) + 4, 10) for a in arrows]
   lines = [Text() for _ in range(3 + rows)]
   for i, (label, inner, width, caption, relay_box) in enumerate(cells):
     pad = width - inner - 2
@@ -124,10 +126,14 @@ def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=No
       if moving is not None and shaft:
         shaft[moving % len(shaft)] = "●"
       lines[1].append(" " + "".join(shaft) + "▶ ", style="bold green" if moving is not None else "")
-      for line in lines[2:]:
+      spad = w - cell_len(speed)
+      lines[2].append(" " * (spad // 2) + speed + " " * (spad - spad // 2), style="bold cyan" if rate else "dim")
+      for line in lines[3:]:
         line.append(" " * w)
   for line in lines:
     line.rstrip()
+  if estimate:
+    lines.append(Text.assemble(("⏱ ", "bold"), (estimate, "bold")))
   return Text("\n").join(lines)
 
 def if_slurp_closes(t, client_name="", host="", pack=None):
@@ -866,6 +872,8 @@ class TransferWizard(ModalScreen):
     self.query_one("#tw-check-steps", Static).update(steps)
     self.query_one("#tw-globus", Static).update(globus_text(self.plan))
     self.refresh_routes()
+    if self.step == 2:
+      self.show_flow() # (the bandwidth and the estimate, as the check measures them)
     self.update_next()
 
   def refresh_routes(self):
@@ -977,11 +985,26 @@ class TransferWizard(ModalScreen):
     event.stop()
     self.runs_changed()
 
+  def estimate_words(self, route):
+    """The estimate of a route in words (with checksums: their time too), "" while it is not known"""
+    info = self.plan.get("routes", {}).get(route or "", {})
+    checksum = self.query_one("#tw-checksum", Checkbox).value
+    est = P.estimate(route, self.plan.get("remaining_bytes"), self.plan.get("remaining_files"), info.get("rate"),
+                     self.plan.get("total_bytes"), checksum=checksum) if info.get("rate") else info.get("estimate")
+    if not est:
+      return ""
+    size, files = self.plan.get("remaining_bytes"), self.plan.get("remaining_files")
+    what = f" for {human(size)} in {files} file{'s' if files != 1 else ''}" if size is not None else ""
+    return (f"about {P.duration(est[0])} – {P.duration(est[1])}{what}" + (" (with checksums: all of it read on both sides)" if checksum else "")
+            + (", plus the time in the queue" if self.chosen_runs_on() == "job" else ""))
+
   def show_flow(self):
     route = self.chosen_route()
     flow = self.query_one("#tw-flow", Static)
+    info = self.plan.get("routes", {}).get(route or "", {})
     flow.update(flow_diagram(route, self.chosen_runs_on(), self.src, self.dst, self.src.name if self.src else "?",
-                             self.dst.name if self.dst else "?") if route else "")
+                             self.dst.name if self.dst else "?", rate=info.get("rate"), estimate=self.estimate_words(route),
+                             measuring=self.checking is not None and not info) if route else "")
 
   def runs_changed(self):
     self.show_flow()
@@ -1000,6 +1023,7 @@ class TransferWizard(ModalScreen):
   def checksum_toggled(self, event):
     event.stop()
     self.checksum_note()
+    self.show_flow()
 
   def checksum_note(self):
     note = self.query_one("#tw-checksum-note", Static)
@@ -1148,7 +1172,8 @@ class TransferWizard(ModalScreen):
     est = info.get("estimate")
     client = self.dst if t.route == "direct-pull" else self.src
     self.query_one("#tw-summary-flow", Static).update(
-      flow_diagram(t.route, t.runs_on, self.src, self.dst, self.src.name, self.dst.name))
+      flow_diagram(t.route, t.runs_on, self.src, self.dst, self.src.name, self.dst.name,
+                   rate=self.plan.get("routes", {}).get(t.route, {}).get("rate"), estimate=self.estimate_words(t.route)))
     text = Text()
     def row(label, value, style=""):
       text.append(f"{label:10}", style="bold")

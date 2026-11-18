@@ -257,7 +257,8 @@ check again, in Route).
    temporary key, ✗ failed (why; it cannot be chosen): the same filesystem (a marker file, removed at once), direct
    (one cluster logs in to the other by itself), the relay through slurp (always possible). **Next** as soon as the
    chosen route passed. For large transfers it suggests Globus or a similar service, where both sites offer it. A
-   picture shows how the data flows (push, pull, relay through slurp, the same filesystem, where rsync runs). Below:
+   picture shows how the data flows (push, pull, relay through slurp, the same filesystem, where rsync runs), the
+   bandwidth measured under its arrows and the estimate below it (with checksums: their time too). Below:
    where it runs (in slurp; detached on the cluster's login node; as
    a transfer job where the site has a transfer partition, e.g. xfer), checksums (they read every file on both sides
    at every run, also when nothing changed: the estimate counts it), compression (the relay), a speed

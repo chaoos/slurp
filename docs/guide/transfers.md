@@ -38,14 +38,15 @@ goes on as set, without a run now.
     offer it: parallel streams, retries, and it runs without slurp. A rule pack can name a site's Globus collection
     (`globus = "…"`); with both sites' it is named.
     Below the routes: where it runs, and the options. A picture shows how the data flows, here and in the summary and
-    the transfer's subtab:
+    the transfer's subtab; in the wizard with the bandwidth the check measured under its arrows and the estimate below:
 
     ```
-     ┌────────┐    relay     ┌─────────┐     relay    ┌────────┐
-     │ ● alps │   ───────▶   │ ⇄ slurp │    ───────▶  │ ● jedi │
-     └────────┘              └─────────┘              └────────┘
-    rsync (sends)          passes the bytes          rsync server
-                                                      (receives)
+     ┌────────┐       relay       ┌─────────┐        relay      ┌────────┐
+     │ ● alps │   ────────────▶   │ ⇄ slurp │    ────────────▶  │ ● jedi │
+     └────────┘    250.0 MiB/s    └─────────┘     250.0 MiB/s   └────────┘
+    rsync (sends)               passes the bytes               rsync server
+                                                                (receives)
+    ⏱ about 2 min – 4 min for 1.2 GiB in 37 files
     ```
 
     A direct route says **push** (rsync on the source logs in to the destination) or **pull** (the other way); under

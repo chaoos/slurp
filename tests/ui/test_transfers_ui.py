@@ -100,6 +100,12 @@ def test_wizard_and_tab(check, tmp_path):
       flow = str(w.query_one("#tw-flow").render())
       check("how the data flows: the two tabs as boxes, the same filesystem on the arrow, rsync on the login node",
             flow.count("┌") == 2 and "same filesystem" in flow and "▶" in flow and "(on the login node)" in flow, flow)
+      check("…the bandwidth measured under the arrow, the estimate below", "/s" in flow.splitlines()[2] and "⏱ about" in flow
+            and "in 2 files" in flow, flow)
+      w.query_one("#tw-checksum").value = True; await pilot.pause(0.3)
+      flow = str(w.query_one("#tw-flow").render())
+      check("checksums: the estimate says so", "with checksums" in flow, flow)
+      w.query_one("#tw-checksum").value = False; await pilot.pause(0.2)
       await pilot.click("#tw-next"); await pilot.pause(0.2)
       check("step 4: now", w.when_kind() == "now")
       w.query_one("#tw-when-every").value = True
