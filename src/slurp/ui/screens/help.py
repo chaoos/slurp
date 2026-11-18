@@ -204,7 +204,9 @@ its connection, and its path, a long one shortened in the middle: /very/long/…
 and +n), its route and where it runs, its state, how far it is, its rate and the time left, and when it runs next
 (or when it ran last). The lines below say more of the highlighted one (why it waits, how it failed,
 its full paths). **Endpoints** (Menu → Endpoints…) lists where data can come from and go to.
-Enter or a click opens its subtab with everything about it. A click on a column's header sorts the list by it (▲),
+The first, small column of each row is a button: ▶ starts it (Run now; a paused one continues), ‖ pauses it while it
+runs or waits; `Space` does the same for the highlighted row. Enter or a click elsewhere on the row opens its subtab
+with everything about it. A click on a column's header sorts the list by it (▲),
 another click the other way (▼); by State the running ones come first; the order is kept for the next start.
 **Reload** (`r`) asks again now (also automatically, counted down in the title bar as in the other views; a click
 there turns it off and on): the runs on the clusters and at Globus, and the S3, SMB, WebDAV and Globus endpoints.

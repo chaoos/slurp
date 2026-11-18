@@ -152,7 +152,7 @@ def test_wizard_and_tab(check, tmp_path):
       check("a cluster's key does nothing here (t: a shell)", isinstance(app.screen, TransferScreen) and app.shell is None)
       await pilot.click("#view-transfers"); await pilot.pause(0.3)
       check("the list", isinstance(app.screen, TransfersScreen) and app.screen.query_one("#xfer-list").row_count == 1)
-      row = [str(c) for c in app.screen.query_one("#xfer-list").get_row_at(0)]
+      row = [str(c) for c in app.screen.query_one("#xfer-list").get_row_at(0)][1:] # (after the button)
       check("…with the source and the destination, each with its tab and path", row[1].endswith(f"Local:{src}") and row[2].endswith(f"Local:{dst}")
             or "/…/" in row[1], row[:3])
       note = str(app.screen.query_one("#xfer-note").render())
@@ -283,7 +283,7 @@ def test_comparing_shown(check, tmp_path):
             and "for 3" in text and "about 1 min expected" in text, text)
       await pilot.click("#view-transfers"); await pilot.pause(1.2)
       table = app.screen.query_one("#xfer-list")
-      cell = str(table.get_row_at(0)[5])
+      cell = str(table.get_row_at(0)[[c.value for c in table.columns].index("progress")])
       check("the list: comparing", "comparing" in cell, cell)
       app.transfers.store.transfers.remove(t)
       await pilot.press("q")
@@ -665,7 +665,7 @@ def test_list_keeps_scrolling(check, tmp_path):
       made[40].state, made[40].progress = "running", {"percent": 30.0, "rate": 1024 ** 2, "eta": 60}
       await pilot.pause(1.5)
       check("a value changed, refreshed: the scrolling and the cursor stay", table.scroll_y == y and table.cursor_row == 2
-            and "30%" in str(table.get_row_at(40)[5]), (table.scroll_y, y, table.cursor_row))
+            and "30%" in str(table.get_row_at(40)[[c.value for c in table.columns].index("progress")]), (table.scroll_y, y, table.cursor_row))
       app.transfers.store.transfers.insert(0, M.Transfer(M.new_id(), "new", {"tab": ref, "paths": ["/x"]}, {"tab": ref, "path": "/y"}))
       app.transfers.changed(None); await pilot.pause(1.5)
       check("a transfer came: scrolled where it was, the cursor on the same transfer", table.scroll_y == y and table.cursor_row == 3,
@@ -791,6 +791,51 @@ def test_edit_offline(check, tmp_path):
   asyncio.run(main())
 
 
+def test_list_play_pause(check, tmp_path):
+  """The list: a small first column with a button on each row: ▶ starts it (Run now), then ‖ pauses it, ▶ again
+  continues it; a click on it does not open the details (elsewhere on the row: they open); Space does the same; its
+  header does not sort"""
+  from slurp.transfer import model as M
+  from slurp.ui.screens.transfers import TransferScreen, TransfersScreen
+  src, dst = files(tmp_path)
+  (src / "big.bin").write_bytes(os.urandom(4_000_000))
+
+  def cell(app):
+    table = app.screen.query_one("#xfer-list")
+    return str(table.get_row_at(0)[0])
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      ref = M.tab_ref(app.clusters[0])
+      t = M.Transfer(M.new_id(), "slow", {"tab": ref, "paths": [str(src)]}, {"tab": ref, "path": str(dst)}, route="relay", runs_on="slurp",
+                     options={"bwlimit": 1})
+      app.transfers.add(t)
+      app.show_transfers(); await pilot.pause(0.6)
+      table = app.screen.query_one("#xfer-list")
+      check("the first column: the button, ▶", [c.value for c in table.columns][0] == "act" and cell(app) in ("▶", "\U000f040c"), cell(app))
+      check("…a small one", table.columns[next(iter(table.columns))].get_render_width(table) <= 3)
+      await pilot.click("#xfer-list", offset=(1, 1)); await pilot.pause(0.3)
+      check("a click on ▶: started, the list stays", isinstance(app.screen, TransfersScreen)
+            and await until(pilot, lambda: t.state == "running", 30), (type(app.screen).__name__, t.state, t.message))
+      await until(pilot, lambda: cell(app) not in ("▶", "\U000f040c"), 5)
+      check("…now ‖", cell(app) in ("‖", "\U000f03e5"), cell(app))
+      await pilot.click("#xfer-list", offset=(1, 1))
+      check("a click on ‖: paused", await until(pilot, lambda: t.state == "paused", 30), (t.state, t.message))
+      await until(pilot, lambda: cell(app) in ("▶", "\U000f040c"), 5)
+      check("…▶ again", cell(app) in ("▶", "\U000f040c"), cell(app))
+      table.focus(); await pilot.press("space")
+      check("Space on a paused one: it continues", await until(pilot, lambda: t.state == "running", 30), t.state)
+      await pilot.press("space")
+      check("Space again: paused", await until(pilot, lambda: t.state == "paused", 30), t.state)
+      await pilot.click("#xfer-list", offset=(8, 1)); await pilot.pause(0.5)
+      check("a click elsewhere on the row: its details", isinstance(app.screen, TransferScreen))
+      await pilot.press("q")
+
+  asyncio.run(main())
+
+
 def test_list_sorted(check, tmp_path):
   """The list of transfers sorted by a click on a column's header (▲), the other way by another click (▼); by state:
   the running ones first; kept for the next start"""
@@ -799,7 +844,7 @@ def test_list_sorted(check, tmp_path):
 
   def names(app):
     table = app.screen.query_one("#xfer-list")
-    return [str(table.get_row_at(i)[0]) for i in range(table.row_count)]
+    return [str(table.get_row_at(i)[1]) for i in range(table.row_count)]
 
   async def header(app, pilot, key):
     table = app.screen.query_one("#xfer-list")

@@ -2018,11 +2018,20 @@ def end_text(cluster, name, paths, width=34):
   more = f" +{len(paths) - 1}" if len(paths) > 1 else ""
   return Text.assemble(dot(cluster), f" {name}:", (short_path(first, width - len(more)), "cyan"), (more, "dim"))
 
-COLUMNS = [("name", "Name"), ("from", "From"), ("to", "To"), ("how", "Route"), ("state", "State"), ("progress", "Progress"),
+COLUMNS = [("act", ""), ("name", "Name"), ("from", "From"), ("to", "To"), ("how", "Route"), ("state", "State"), ("progress", "Progress"),
            ("rate", "Rate"), ("left", "Left"), ("when", "Last run")]
 # (sorting the list by a column: a click on its header; again: the other way. Under way first, then waiting, …)
 STATE_ORDER = ["running", "starting", "pausing", "queued", "checking", "waiting", "paused", "failed", "done-errors", "done", "new"]
 SORT_FIRST_DOWN = ("progress", "rate", "when") # (these first from the most: the fastest, the latest)
+
+def act_cell(t):
+  """The first cell of a transfer's row, a button: ▶ start (Run now; a paused one: Continue), ‖ pause while it runs or
+  waits, … while it pauses"""
+  if t.state == "pausing":
+    return Text("…", style="dim")
+  if t.active or t.state == "waiting":
+    return Text(icons.icon("suspended") or "‖", style="bold yellow")
+  return Text(icons.icon("running") or "▶", style="bold green")
 
 def sort_key(column, manager):
   """The key of a transfer for sorting the list by a column"""
@@ -2053,7 +2062,8 @@ class TransfersScreen(TransfersBase):
   #xfer-note { height: auto; max-height: 4; padding: 0 1; background: $panel; }
   """
   BINDINGS = [Binding("n", "new", "New transfer"), Binding("p", "pause", "Pause"), Binding("c", "resume", "Continue"),
-              Binding("s", "run_now", "Run now"), Binding("e", "edit", "Edit"), Binding("delete", "delete", "Delete")]
+              Binding("s", "run_now", "Run now"), Binding("e", "edit", "Edit"), Binding("delete", "delete", "Delete"),
+              Binding("space", "toggle", "Start/Pause")]
   icon_name = "transfer"
 
   def compose_left(self):
@@ -2087,7 +2097,7 @@ class TransfersScreen(TransfersBase):
       shown = shown_percent(t)
       last = t.runs[-1] if t.runs else None
       when = f"{when_text(last['ended'])} {M.STATES.get(last['result'], last['result'])}" if last else ""
-      rows.append((t.id, [Text(t.name, style="bold"), end_text(src, t.source_name, t.source.get("paths", [])),
+      rows.append((t.id, [act_cell(t), Text(t.name, style="bold"), end_text(src, t.source_name, t.source.get("paths", [])),
                           end_text(dst, t.dest_name, [t.dest.get("path", "")]), route_text(t), state_text(t),
                           Text(f"{self.app.spinner()} comparing", style="yellow") if t.state == "running" and p.get("phase") == "comparing"
                           else bar(shown) if shown is not None else "",
@@ -2097,7 +2107,7 @@ class TransfersScreen(TransfersBase):
     running = sum(t.state == "running" for t in transfers)
     self.query_one("#xfer-summary", Static).update(
       f"{len(transfers)} transfer{'s' if len(transfers) != 1 else ''}" + (f", {running} running" if running else "")
-      + " · Enter: its details · p pause, c continue, s run now, e edit, Del delete")
+      + " · Enter: its details · ▶/‖ (first column, Space): start or pause · p pause, c continue, s run now, e edit, Del delete")
     self.show_note()
 
   def list_order(self):
@@ -2123,6 +2133,8 @@ class TransfersScreen(TransfersBase):
     event.stop()
     column, reverse = self.list_order()
     key = event.column_key.value
+    if key == "act": # (the buttons' column: not sorted by)
+      return
     self.app.transfer_sort = (key, not reverse) if key == column else (key, key in SORT_FIRST_DOWN)
     from ...config import update_config
     update_config(transfer_sort={"column": self.app.transfer_sort[0], "reverse": self.app.transfer_sort[1]})
@@ -2158,8 +2170,29 @@ class TransfersScreen(TransfersBase):
   def selected(self, event):
     event.stop()
     t = self.manager.get(event.row_key.value)
+    if t is None:
+      return
+    if self.query_one("#xfer-list", ClickTable).take_clicked_column() == "act": # (its button: start or pause)
+      self.toggle(t)
+      return
+    self.app.open_transfer(t)
+
+  def toggle(self, t):
+    """The button of a row: pause it while it runs or waits; a paused one continues; else Run now"""
+    if t.state == "pausing":
+      return
+    if t.active or t.state == "waiting":
+      self.confirm_pause(t)
+    elif self.can_continue(t):
+      self.manager.resume(t)
+    else:
+      self.run_now(t)
+    self.refresh_view()
+
+  def action_toggle(self):
+    t = self.current()
     if t is not None:
-      self.app.open_transfer(t)
+      self.toggle(t)
 
   @on(Button.Pressed, "#xfer-new")
   def new_pressed(self, event):

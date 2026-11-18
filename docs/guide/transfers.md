@@ -209,7 +209,9 @@ While transfers exist (also finished ones), the tab **Transfers** is at the left
 how many run. Its first subtab is the list: each transfer with its name, from where and to where (each tab with a dot
 for its connection and its path; a long path is shortened in the middle, `/very/long/…/in/its/path`, and the full
 paths are below the list for the transfer highlighted), its route and where it runs, its state, how far it is, its rate, the time left, and when it ran
-last; the line below says why it waits or how it failed. A click on a column's header sorts the list by it (▲;
+last; the line below says why it waits or how it failed. The first, small column of each row is a button: **▶**
+starts the transfer (Run now; a paused one continues), **‖** pauses it while it runs or waits (`Space` does the same
+for the highlighted row; a click on it opens nothing). A click on a column's header sorts the list by it (▲;
 again: the other way, ▼; by State the running ones first), and the order is kept for the next start. The list, a
 transfer's subtab and the Endpoints subtab reload as the other views do (counted down in the title bar; a click there
 turns it off and on), and **Reload** (`r`) asks again now: the runs on the clusters and at Globus, the S3, SMB, WebDAV and Globus
