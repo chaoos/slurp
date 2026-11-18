@@ -29,7 +29,8 @@ def test_a_newer_version(check, monkeypatch):
       await pilot.pause(1.2)
       check("an older or the same version: nothing", app.new_version is None and not button.display)
       app.version_found("99.0.0")
-      ok = await until(pilot, lambda: button.display and str(button.label) == "⬆ slurp 99.0.0")
+      # (and laid out: just shown, its region is still empty, at the left: a click there hit the menu, on a busy runner)
+      ok = await until(pilot, lambda: button.display and str(button.label) == "⬆ slurp 99.0.0" and button.region.width > 0)
       notes = [str(n.message) for n in app._notifications]
       check("a newer one: said, and in the title bar", ok and any("slurp 99.0.0 is available" in n for n in notes), notes)
       await pilot.click("#update")
