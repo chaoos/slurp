@@ -255,10 +255,12 @@ class Manager:
         key = bool(t.options.get("temp_key"))
       folder = RN.folder_of(client, t)
       text = RN.command(t, t.route, folder, facts["version"], target, key=key)
-      folder = RN.prepare(client, t, text, job=t.runs_on == "job", known_hosts=known)
+      login = RN.preflight(target, folder, key) if target else ""
+      folder = RN.prepare(client, t, text, job=t.runs_on == "job", known_hosts=known, login=login)
+      run_target = (target or {}).get("host", "")
       if key:
         self.install_key(t, client, source if client is dest else dest, folder)
-      run = {"folder": folder, "client": client_side(t.route)}
+      run = {"folder": folder, "client": client_side(t.route), "target": run_target}
       if t.runs_on == "job":
         run["job"] = RN.submit(client, folder, begin)
         state = "queued"
@@ -365,7 +367,25 @@ class Manager:
         self.start(t)
         return
     message = "" if result else "the run ended without a result" + (" (the job was cancelled, or its time was up)" if t.runs_on == "job" else "")
+    if result and result.get("login") == "refused":
+      message = self.login_refused(t, result, status.get("log", ""))
     self.ended(t, code, message, stats=out.stats, stopped=stopped)
+
+  def login_refused(self, t, result, log_text):
+    """Why a direct run stopped at once: the host it ran on could not log in to the other cluster (the check had
+    logged in from another one, or that key works only from some hosts)"""
+    lines = log_text.rpartition("== run ")[2].splitlines()
+    at = next((i for i, l in enumerate(lines) if "cannot log in to the other cluster" in l), None)
+    said = [l.strip() for l in (lines[at + 1:] if at is not None else []) if l.strip() and not l.startswith("==")]
+    side = "dest" if client_side(t.route) == "dest" else "source"
+    checked = ((t.plan.get("facts") or {}).get(side) or {}).get("host", "")
+    host, target = result.get("host") or "the cluster", t.run.get("target") or "the other cluster"
+    why = said[-1] if said else "the login was refused"
+    hint = (" A transfer job runs on a node of its partition: the other site may accept your key only from some hosts "
+            "(e.g. its login nodes)." if t.runs_on == "job" else
+            " It may accept your key only from some hosts (e.g. from= in authorized_keys at JSC).")
+    return (f"{host} could not log in to {target} by itself ({why})" + (f"; the check had logged in from {checked}" if checked and checked != host else "")
+            + "." + hint + " Check again, or choose another route (Edit…).")
 
   # ---- the progress of a run
   def progress(self, t, p, current="", files=0, errors=(), error_count=0, transport=None):
@@ -527,6 +547,23 @@ class Manager:
       self.from_thread(run)
 
   # ---- checks
+  def probe_node(self, t, route, partition, account, done):
+    """The login of a direct route from a node of a partition, as a transfer job would (srun, in a thread):
+    done((True | False | None, words)) on the UI thread; None: no node within a while (not checked)"""
+    def work():
+      try:
+        source, dest = self.endpoints(t)
+        src, dst = self.ends(t)
+        client, other = (source, dst) if route == "direct-push" else (dest, src)
+        target = P.target_of(other)
+        folder = RN.folder_of(client, t)
+        client.sh('mkdir -p "$1" && chmod 700 "$1"', folder, retry=False)
+        result = P.login_works_on(client, target, folder, partition, account)
+      except Exception as e:
+        result = (None, f"not checked: {e}")
+      self.from_thread(done, result)
+    threading.Thread(target=work, daemon=True, name=f"node check {t.name}").start()
+
   def recheck(self, t):
     """Check a transfer again as it is set up (its paths, its options): its plan as the check goes (what remains, the
     routes); False if it cannot be now (a run under way, a tab not connected)"""

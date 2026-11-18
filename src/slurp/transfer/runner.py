@@ -8,6 +8,8 @@ after a new start).
   job.sh         for a transfer job: the batch script
   lock/          while a run goes on (a second run of the same transfer does not start); lock/owner: pid, host, job
   alive          touched every 20 s while it runs (a run whose alive is older than 2 minutes is gone)
+  preflight      for a direct route: the login to the other cluster, tried first where rsync runs (refused: the run
+                 ends at once, result.json says "login": "refused", the log what ssh said)
   progress.json  {"phase", "bytes", "percent", "rate", "eta", "xfr", "left", "checked", "current", "updated"}
   log            what rsync said: its errors, its statistics
   result.json    {"exit", "ended", "host", "job"} when the run ended
@@ -35,6 +37,16 @@ beat=$!
 srand_now='BEGIN { srand(); t = srand(); print t }'
 printf '{"phase": "scanning", "updated": %s}\n' "$(awk "$srand_now")" > progress.json
 echo "== run $(date) on $(hostname)${SLURM_JOB_ID:+, job $SLURM_JOB_ID}" >> log
+if [ -f preflight ]; then # (a direct route: the login to the other cluster first, here where rsync runs)
+  if ! sh ./preflight </dev/null > preflight.out 2>&1; then
+    { echo "slurp: $(hostname) cannot log in to the other cluster by itself:"; grep -v '^ *$' preflight.out | tail -n 5; } >> log
+    printf '{"exit": 255, "ended": %s, "host": "%s", "job": "%s", "login": "refused"}\n' "$(awk "$srand_now")" "$(hostname)" "${SLURM_JOB_ID:-}" > result.json
+    echo "== ended with 255 (no login)" >> log
+    kill $beat 2>/dev/null
+    rm -rf lock
+    exit 255
+  fi
+fi
 mkfifo pipe || exit 1
 awk=awk # (mawk reads a pipe in big blocks: without -W interactive the progress would come only at the end)
 if awk -W version 2>&1 | grep -q mawk; then awk="awk -W interactive"; fi
@@ -113,6 +125,11 @@ def command(transfer, route, folder, version, target=None, key=False):
       args = [*opts, *remote, "--", *[f"{host}:{p}" for p in paths], dest]
   return "#!/bin/sh\n# the rsync command of slurp transfer " + transfer.id + "\nexec rsync " + shlex.join(args) + "\n"
 
+def preflight(target, folder, key=False):
+  """The login to the other cluster with the ssh of the run (the file `preflight`): it must work where rsync runs"""
+  return ("#!/bin/sh\n# the login of a direct route, tried before rsync\nexec ssh "
+          + shlex.join([*ssh_options(target, folder, key), target["host"], "true"]) + " </dev/null\n")
+
 def job_script(transfer, folder):
   """The batch script of a transfer job"""
   o = transfer.options
@@ -131,10 +148,10 @@ def job_name(transfer):
 def folder_of(endpoint, transfer):
   return f"{endpoint.state_root()}/{transfer.id}"
 
-def prepare(endpoint, transfer, command_text, job=False, known_hosts=""):
-  """The run's folder on the cluster with its files (-> the folder)"""
+def prepare(endpoint, transfer, command_text, job=False, known_hosts="", login=""):
+  """The run's folder on the cluster with its files (login: the preflight of a direct route) -> the folder"""
   folder = folder_of(endpoint, transfer)
-  result = endpoint.sh('mkdir -p "$1" && chmod 700 "$1"', folder, retry=False)
+  result = endpoint.sh('mkdir -p "$1" && chmod 700 "$1" && rm -f "$1/preflight" "$1/preflight.out"', folder, retry=False)
   if result.returncode:
     raise OSError(f"cannot create {folder} on {endpoint.name}: {(result.stderr or '').strip()[:200]}")
   endpoint.write(f"{folder}/run.sh", RUNNER, 0o700)
@@ -142,6 +159,8 @@ def prepare(endpoint, transfer, command_text, job=False, known_hosts=""):
   if "--rsh=" in command_text:
     endpoint.write(f"{folder}/rsh", RSH, 0o700)
     endpoint.write(f"{folder}/known_hosts", known_hosts, 0o600)
+  if login:
+    endpoint.write(f"{folder}/preflight", login, 0o700)
   if job:
     endpoint.write(f"{folder}/job.sh", job_script(transfer, folder), 0o700)
   return folder

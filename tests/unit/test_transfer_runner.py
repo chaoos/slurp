@@ -136,3 +136,29 @@ def test_parse_status(check):
   check("progress as a transfer's", RN.progress_of({"bytes": 10, "rate": "1.00MB/s", "eta": "0:01:05", "names": 3, "checked": 9, "left": 2})
         == {"bytes": 10, "percent": 0, "rate": 1024 ** 2, "files": 3, "current": "", "phase": "", "updated": None, "rsync_eta": 65, "checked": 9, "left": 2})
   check("json", json.loads(json.dumps(RN.progress_of({}))) == {})
+
+
+def test_preflight_refused(check, tmp_path, monkeypatch):
+  """A direct route: the run logs in first where it runs; refused there, it ends at once and says what ssh said"""
+  fake = tmp_path / "bin"
+  fake.mkdir()
+  (fake / "ssh").write_text('#!/bin/sh\necho "user@jureca: Permission denied (publickey)." >&2\nexit 255\n')
+  (fake / "ssh").chmod(0o755)
+  monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+  src, dst = tmp_path / "src", tmp_path / "dst"
+  src.mkdir()
+  (src / "a.txt").write_text("x")
+  dst.mkdir()
+  end = local()
+  t = M.Transfer(M.new_id(), "t", {"paths": [str(src)]}, {"path": str(dst)}, route="direct-push", runs_on="detached")
+  target = {"host": "jureca.example", "user": "u"}
+  folder = RN.folder_of(end, t)
+  RN.prepare(end, t, RN.command(t, "direct-push", folder, (3, 2, 7), target), known_hosts="", login=RN.preflight(target, folder))
+  RN.start_detached(end, folder)
+  status = until(lambda: (s := RN.status(end, folder))["result"] and not s["lock"] and s)
+  check("it ended at once: no login", status and status["result"]["exit"] == 255 and status["result"].get("login") == "refused", status)
+  check("the log says where and what ssh said", status and "cannot log in to the other cluster" in status["log"]
+        and "Permission denied (publickey)" in status["log"], status and status["log"][-300:])
+  check("rsync did not run", not list(dst.iterdir()))
+  plain = RN.prepare(end, t, RN.command(t, "same-fs", None, (3, 2, 7)))
+  check("another route afterwards: no login first (the file is gone)", not os.path.exists(os.path.join(plain, "preflight")))

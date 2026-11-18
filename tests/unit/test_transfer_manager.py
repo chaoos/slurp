@@ -216,3 +216,20 @@ def test_reschedule(check, tmp_path):
     check(f"{schedule['kind']}: {state}, " + ("its next time ahead" if later else "no time"), t.state == state and not t.run
           and (bool(t.next_run and t.next_run > time.time() + 60) if later else t.next_run is None), (t.state, t.next_run))
   check("nothing ran", not t.runs)
+
+
+def test_login_refused_message(check, tmp_path):
+  app = App()
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app, runs_on="job", route="direct-push")
+  t.plan["facts"] = {"source": {"host": "daint-ln001"}}
+  t.state, t.run = "running", {"kind": "job", "folder": "/x", "job": "77", "target": "jureca.fz-juelich.de", "started": time.time()}
+  mg.add(t)
+  log = ("== run Wed on nid001\nslurp: nid001 cannot log in to the other cluster by itself:\n"
+         "user@jureca.fz-juelich.de: Permission denied (publickey).\n== ended with 255 (no login)\n")
+  mg.polled(t, {"progress": {"phase": "scanning"}, "result": {"exit": 255, "host": "nid001", "job": "77", "login": "refused"},
+                "alive": False, "lock": "", "job": "", "log": log})
+  check("failed", t.state == "failed", t.state)
+  check("it says who could not log in where, what ssh said, where the check logged in, why that may be",
+        "nid001 could not log in to jureca.fz-juelich.de by itself (user@jureca.fz-juelich.de: Permission denied (publickey).)" in t.message
+        and "the check had logged in from daint-ln001" in t.message and "transfer job runs on a node" in t.message, t.message)
