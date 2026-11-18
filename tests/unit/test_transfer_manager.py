@@ -115,11 +115,11 @@ def test_detached(check, tmp_path):
 
 
 def test_waits_for_its_tab(check, tmp_path, monkeypatch):
-  class Here(MG.Endpoint): # (the remote tab's end runs on this machine once it is "connected")
+  class Here(MG.Host): # (the remote tab's end runs on this machine once it is "connected")
     def __init__(self, cluster):
       super().__init__(cluster)
       self.local, self.connection = True, None
-  monkeypatch.setattr(MG, "Endpoint", Here)
+  monkeypatch.setattr(MG, "Host", Here)
   app = App()
   remote = types.SimpleNamespace(name="far", destination="far", connection=None, ssh=None, pre_login="")
   app.clusters.append(remote)

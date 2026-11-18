@@ -7,13 +7,13 @@ import types
 import pytest
 
 from slurp.transfer import model as M, plan as P
-from slurp.transfer.endpoint import Endpoint
+from slurp.transfer.host import Host
 
 pytestmark = pytest.mark.skipif(not shutil.which("rsync"), reason="needs rsync")
 
 
 def local():
-  return Endpoint(types.SimpleNamespace(name="here", destination=None, connection=None))
+  return Host(types.SimpleNamespace(name="here", destination=None, connection=None))
 
 
 def test_check_here(check, tmp_path):

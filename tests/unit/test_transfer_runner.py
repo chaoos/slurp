@@ -11,13 +11,13 @@ import types
 import pytest
 
 from slurp.transfer import model as M, runner as RN
-from slurp.transfer.endpoint import Endpoint
+from slurp.transfer.host import Host
 
 pytestmark = pytest.mark.skipif(not shutil.which("rsync"), reason="needs rsync")
 
 
 def local():
-  return Endpoint(types.SimpleNamespace(name="here", destination=None, connection=None))
+  return Host(types.SimpleNamespace(name="here", destination=None, connection=None))
 
 
 def transfer(src, dst, **options):

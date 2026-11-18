@@ -1,5 +1,6 @@
-"""A tab as one end of a transfer: commands there (the command channel of its SSH session, or this machine) and
-channels with their own input and output (a new channel of its SSH connection, no new login; here: a process)"""
+"""A tab as a host of a transfer: where its commands run (the command channel of its SSH session, or this machine) and
+channels with their own input and output (a new channel of its SSH connection, no new login; here: a process). (Not
+an endpoint: endpoints.py is what the user picks as a source or a destination.)"""
 
 import os
 import shlex
@@ -11,9 +12,9 @@ from ..state import log
 STATE_ROOT = '"${XDG_CACHE_HOME:-$HOME/.cache}/slurp/transfers"' # (on the cluster: the folders of the runs)
 
 class NotConnected(Exception):
-  """The tab of an end is not connected (or not open)"""
+  """The tab of a host is not connected (or not open)"""
 
-class Endpoint:
+class Host:
   def __init__(self, cluster):
     self.cluster = cluster
     self.name = cluster.name
@@ -22,7 +23,7 @@ class Endpoint:
     self._root = None
 
   def __repr__(self):
-    return f"Endpoint({self.name})"
+    return f"Host({self.name})"
 
   @property
   def ready(self):

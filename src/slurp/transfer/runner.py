@@ -146,39 +146,39 @@ def job_script(transfer, folder):
 def job_name(transfer):
   return f"slurp-xfer-{transfer.id}"
 
-def folder_of(endpoint, transfer):
-  return f"{endpoint.state_root()}/{transfer.id}"
+def folder_of(host, transfer):
+  return f"{host.state_root()}/{transfer.id}"
 
-def prepare(endpoint, transfer, command_text, job=False, known_hosts="", login=""):
+def prepare(host, transfer, command_text, job=False, known_hosts="", login=""):
   """The run's folder on the cluster with its files (login: the preflight of a direct route) -> the folder"""
-  folder = folder_of(endpoint, transfer)
-  result = endpoint.sh('mkdir -p "$1" && chmod 700 "$1" && rm -f "$1/preflight" "$1/preflight.out"', folder, retry=False)
+  folder = folder_of(host, transfer)
+  result = host.sh('mkdir -p "$1" && chmod 700 "$1" && rm -f "$1/preflight" "$1/preflight.out"', folder, retry=False)
   if result.returncode:
-    raise OSError(f"cannot create {folder} on {endpoint.name}: {(result.stderr or '').strip()[:200]}")
-  endpoint.write(f"{folder}/run.sh", RUNNER, 0o700)
-  endpoint.write(f"{folder}/command", command_text, 0o700)
+    raise OSError(f"cannot create {folder} on {host.name}: {(result.stderr or '').strip()[:200]}")
+  host.write(f"{folder}/run.sh", RUNNER, 0o700)
+  host.write(f"{folder}/command", command_text, 0o700)
   if "--rsh=" in command_text:
-    endpoint.write(f"{folder}/rsh", RSH, 0o700)
-    endpoint.write(f"{folder}/known_hosts", known_hosts, 0o600)
+    host.write(f"{folder}/rsh", RSH, 0o700)
+    host.write(f"{folder}/known_hosts", known_hosts, 0o600)
   if login:
-    endpoint.write(f"{folder}/preflight", login, 0o700)
+    host.write(f"{folder}/preflight", login, 0o700)
   if job:
-    endpoint.write(f"{folder}/job.sh", job_script(transfer, folder), 0o700)
+    host.write(f"{folder}/job.sh", job_script(transfer, folder), 0o700)
   return folder
 
-def start_detached(endpoint, folder):
+def start_detached(host, folder):
   """Start the run on the login node, away from the session (it goes on when slurp ends) -> the host it runs on"""
-  result = endpoint.sh('cd "$1" || exit 1; (setsid sh ./run.sh "$1" </dev/null >/dev/null 2>&1 &) ; hostname', folder, retry=False)
+  result = host.sh('cd "$1" || exit 1; (setsid sh ./run.sh "$1" </dev/null >/dev/null 2>&1 &) ; hostname', folder, retry=False)
   if result.returncode:
-    raise OSError(f"the run did not start on {endpoint.name}: {(result.stderr or '').strip()[:200]}")
+    raise OSError(f"the run did not start on {host.name}: {(result.stderr or '').strip()[:200]}")
   return (result.stdout or "").strip().splitlines()[-1] if (result.stdout or "").strip() else ""
 
 TEST_SCRIPT = 'cd "$1" && printf "%s" "$2" > job-test.sh && sbatch --test-only job-test.sh 2>&1; r=$?; rm -f job-test.sh; exit $r'
 
-def test_job(endpoint, transfer, folder):
+def test_job(host, transfer, folder):
   """sbatch --test-only of the transfer's job script there: (ok, what Slurm said: when and where it would start, or
   the error)"""
-  result = endpoint.sh(TEST_SCRIPT, folder, job_script(transfer, folder), timeout=90, retry=False)
+  result = host.sh(TEST_SCRIPT, folder, job_script(transfer, folder), timeout=90, retry=False)
   said = [l.strip() for l in (result.stdout or "").splitlines() if l.strip()]
   line = next((l for l in said if "to start at" in l), "") or (said[-1] if said else "")
   line = line.removeprefix("sbatch: ")
@@ -186,14 +186,14 @@ def test_job(endpoint, transfer, folder):
     return True, line or "accepted"
   return False, line or f"sbatch --test-only ended with {result.returncode}"
 
-def submit(endpoint, folder, begin=None):
+def submit(host, folder, begin=None):
   """Submit the transfer job (begin: epoch it may start) -> its job id"""
   args = ["sbatch", "--parsable"]
   if begin:
     args.append("--begin=" + time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(begin)))
-  result = endpoint.run([*args, f"{folder}/job.sh"], timeout=60, retry=False) # (never twice)
+  result = host.run([*args, f"{folder}/job.sh"], timeout=60, retry=False) # (never twice)
   if result.returncode:
-    raise OSError(f"sbatch failed on {endpoint.name}: {((result.stderr or '') + (result.stdout or '')).strip()[:300]}")
+    raise OSError(f"sbatch failed on {host.name}: {((result.stderr or '') + (result.stdout or '')).strip()[:300]}")
   jid = (result.stdout or "").strip().splitlines()[-1].split(";")[0] if (result.stdout or "").strip() else ""
   if not jid.isdigit() and not jid.replace("_", "").isdigit():
     raise OSError(f"sbatch said: {(result.stdout or '').strip()[:200]}")
@@ -204,11 +204,11 @@ STATUS_SCRIPT = ('d=$1; printf "%s\\n" "--progress"; cat "$d/progress.json" 2>/d
                  'printf "%s\\n" "--lock"; cat "$d/lock/owner" 2>/dev/null; printf "%s\\n" "--job"; '
                  'if [ -n "$2" ]; then squeue -h -j "$2" -o "%T %r" 2>/dev/null; fi; printf "%s\\n" "--log"; tail -c 6000 "$d/log" 2>/dev/null')
 
-def status(endpoint, folder, jid=""):
+def status(host, folder, jid=""):
   """What a run on a cluster does (one round trip): {progress, result, alive, lock, job (squeue: state reason), log}"""
-  result = endpoint.sh(STATUS_SCRIPT, folder, jid, timeout=60)
+  result = host.sh(STATUS_SCRIPT, folder, jid, timeout=60)
   if result.returncode == 255 and not (result.stdout or "").strip():
-    raise OSError((result.stderr or "").strip()[:200] or f"{endpoint.name} did not answer")
+    raise OSError((result.stderr or "").strip()[:200] or f"{host.name} did not answer")
   return parse_status(result.stdout or "")
 
 def parse_status(text):
@@ -246,18 +246,18 @@ def progress_of(p, total=0):
     out["checked"], out["left"] = int(p["checked"]), int(p.get("left") or 0)
   return out
 
-def stop(endpoint, lock):
+def stop(host, lock):
   """Pause a detached run: TERM to the runner (it passes it on to rsync); lock: "pid host job" of its lock/owner.
   On another login node than the session's, that does not reach it: False"""
   words = lock.split()
   if not words or not words[0].isdigit():
     return False
   if len(words) > 1:
-    here = endpoint.run(["hostname"], timeout=30)
+    here = host.run(["hostname"], timeout=30)
     if (here.stdout or "").strip() and (here.stdout or "").strip() != words[1]:
-      return endpoint.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", words[1], "kill", "-TERM", words[0]],
+      return host.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", words[1], "kill", "-TERM", words[0]],
                           timeout=60, retry=False).returncode == 0
-  return endpoint.kill(words[0], "TERM")
+  return host.kill(words[0], "TERM")
 
 # ---- the temporary key (opt-in): a key on the cluster that runs rsync, allowed on the other one for a while
 KEY_COMMENT = "slurp-transfer-{id}"
@@ -269,14 +269,14 @@ FORCED_PROGRAM = ('p="printf \'\\n' + DIRECT_MARK + '\\n\'; exec rsync --server 
                   'printf \'\\n' + DIRECT_MARK + '\\n\'; eval "exec rsync --server $c"')
 FORCED = FORCED_PROGRAM.replace('"', '\\"') # (in authorized_keys' command="…" a " is \")
 
-def make_key(endpoint, folder, transfer):
+def make_key(host, folder, transfer):
   """The key pair in the run's folder (made once) -> its public key"""
   comment = KEY_COMMENT.format(id=transfer.id)
-  result = endpoint.sh('[ -f "$1/key" ] || ssh-keygen -q -t ed25519 -N "" -C "$2" -f "$1/key" </dev/null && cat "$1/key.pub"',
+  result = host.sh('[ -f "$1/key" ] || ssh-keygen -q -t ed25519 -N "" -C "$2" -f "$1/key" </dev/null && cat "$1/key.pub"',
                        folder, comment, retry=False)
   key = (result.stdout or "").strip().splitlines()
   if result.returncode or not key or not key[-1].startswith("ssh-"):
-    raise OSError(f"no key made on {endpoint.name}: {(result.stderr or '').strip()[:200]}")
+    raise OSError(f"no key made on {host.name}: {(result.stderr or '').strip()[:200]}")
   return " ".join(key[-1].split()[:2])
 
 def key_line(public, transfer, hours):
@@ -289,12 +289,12 @@ KEYS_SCRIPT = ('f="$HOME/.ssh/authorized_keys"; mkdir -p "$HOME/.ssh" && chmod 7
                't=$(mktemp "$HOME/.ssh/.slurp.XXXXXX") || exit 1; grep -v " $1\\$" "$f" > "$t"; '
                'if [ -n "$2" ]; then printf "%s\\n" "$2" >> "$t"; fi; cat "$t" > "$f"; r=$?; rm -f "$t"; exit $r')
 
-def install_key(endpoint, line, transfer):
+def install_key(host, line, transfer):
   """Put the line into authorized_keys there (one of this transfer replaces the old one)"""
-  result = endpoint.sh(KEYS_SCRIPT, KEY_COMMENT.format(id=transfer.id), line, retry=False)
+  result = host.sh(KEYS_SCRIPT, KEY_COMMENT.format(id=transfer.id), line, retry=False)
   if result.returncode:
-    raise OSError(f"cannot change ~/.ssh/authorized_keys on {endpoint.name}: {(result.stderr or '').strip()[:200]}")
+    raise OSError(f"cannot change ~/.ssh/authorized_keys on {host.name}: {(result.stderr or '').strip()[:200]}")
 
-def remove_key(endpoint, transfer):
+def remove_key(host, transfer):
   """Take this transfer's line out of authorized_keys there"""
-  return endpoint.sh(KEYS_SCRIPT, KEY_COMMENT.format(id=transfer.id), "", retry=False).returncode == 0
+  return host.sh(KEYS_SCRIPT, KEY_COMMENT.format(id=transfer.id), "", retry=False).returncode == 0

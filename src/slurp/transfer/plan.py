@@ -30,9 +30,9 @@ FACTS_SCRIPT = ('printf "rsync=%s\\n" "$(rsync --version 2>/dev/null | head -n 1
                 'printf "user=%s\\n" "$(id -un)"; printf "home=%s\\n" "$HOME"; '
                 'for c in ssh ssh-keygen sbatch setsid stdbuf lfs timeout; do command -v $c >/dev/null 2>&1 && printf "has=%s\\n" $c; done; true')
 
-def facts(endpoint):
+def facts(host):
   """What a side has: rsync (its version), its host, user and home, the tools a route needs"""
-  result = endpoint.sh(FACTS_SCRIPT, timeout=60)
+  result = host.sh(FACTS_SCRIPT, timeout=60)
   out = {"has": []}
   for line in (result.stdout or "").splitlines():
     key, _, value = line.partition("=")
@@ -48,8 +48,8 @@ SOURCES_SCRIPT = ('for p in "$@"; do e=0; d=0; r=0; case $p in *[*?[]*) r=1; IFS
                   '*) [ -e "$p" ] && e=1; [ -d "$p" ] && d=1; [ -r "$p" ] && r=1;; esac; '
                   'printf "%s\\t%s\\t%s\\t%s\\n" "$e" "$d" "$r" "$p"; done')
 
-def sources(endpoint, paths):
-  result = endpoint.sh(SOURCES_SCRIPT, *paths)
+def sources(host, paths):
+  result = host.sh(SOURCES_SCRIPT, *paths)
   found = {}
   for line in (result.stdout or "").splitlines():
     parts = line.split("\t", 3)
@@ -69,10 +69,10 @@ for p in "$@"; do
 done
 """
 
-def count(endpoint, paths, timeout=600):
+def count(host, paths, timeout=600):
   """What the sources hold (one find through each): {path: {"files", "dirs", "links", "bytes"} or None if it is not
   there}"""
-  result = endpoint.sh(COUNT_SCRIPT, *paths, timeout=timeout)
+  result = host.sh(COUNT_SCRIPT, *paths, timeout=timeout)
   out = {p: None for p in paths}
   for line in (result.stdout or "").splitlines():
     parts = line.split("\t")
@@ -92,10 +92,10 @@ DEST_SCRIPT = ('p=$1; a=$p; while [ ! -e "$a" ] && [ "$a" != / ]; do a=$(dirname
                'if command -v lfs >/dev/null 2>&1; then printf "lfs\\n"; lfs quota -u "$(id -un)" "$a" 2>/dev/null; printf "end\\n"; fi; '
                'printf "quota\\n"; quota -w -p -u "$(id -un)" 2>/dev/null; printf "end\\n"; true')
 
-def destination(endpoint, path):
+def destination(host, path):
   """The destination: whether it is there, the folder it is created in (the nearest that exists) and whether it can be
   written, the free space there and the quota of its filesystem"""
-  result = endpoint.sh(DEST_SCRIPT, path, timeout=90)
+  result = host.sh(DEST_SCRIPT, path, timeout=90)
   out = {"path": path, "exists": False, "dir": False, "writable": False, "ancestor": "", "free": None, "quota": None}
   section, lines = None, {"lfs": [], "quota": []}
   for line in (result.stdout or "").splitlines():
@@ -254,19 +254,19 @@ def login_works_on(client, target, folder, partition, account="", seconds=60):
 TIMED_SCRIPT = ('t0=$(date +%s%N); sh -c "$1" >/dev/null 2>&1; r=$?; t1=$(date +%s%N); '
                 'printf "%s %s\\n" "$r" "$(( (t1 - t0) / 1000000 ))"')
 
-def timed(endpoint, command, timeout=120):
+def timed(host, command, timeout=120):
   """(exit code, milliseconds) of a command there"""
-  result = endpoint.sh(TIMED_SCRIPT, command, timeout=timeout)
+  result = host.sh(TIMED_SCRIPT, command, timeout=timeout)
   words = (result.stdout or "").split()
   try:
     return int(words[-2]), int(words[-1])
   except (IndexError, ValueError):
     return 255, 0
 
-def sample_file(endpoint, paths):
+def sample_file(host, paths):
   """A file of the sources to measure with (a big one: the disk counts too), "" for random data"""
   script = 'for p in "$@"; do find "$p" -type f -size +1M 2>/dev/null | head -n 1; done | head -n 1'
-  return ((endpoint.sh(script, *paths, timeout=60).stdout or "").strip().splitlines() or [""])[0]
+  return ((host.sh(script, *paths, timeout=60).stdout or "").strip().splitlines() or [""])[0]
 
 def direct_rate(client, target, folder, sample, push, key=False, has_timeout=True):
   """Bytes per second of a direct route: a sample through ssh, less the time of the login"""

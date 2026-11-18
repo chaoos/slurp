@@ -19,7 +19,7 @@ from textual.widgets import Button, Checkbox, ContentSwitcher, Input, Label, Rad
 from ...cluster.listing import listing
 from ...cluster.remote import HEALTH_STYLES, connection_health, in_background
 from ...transfer import model as M, plan as P, rsync as R, schedule as S
-from ...transfer.endpoint import Endpoint
+from ...transfer.host import Host
 from ...transfer.manager import client_side, site_of
 from .. import icons
 from ..widgets import ClickTable, TimePlot
@@ -829,7 +829,7 @@ class TransferWizard(ModalScreen):
       for p in wanted:
         self.sizes[(id(cluster), p)] = (found or {}).get(p, "failed") if found is not None else "failed"
       self.show_sources()
-    in_background(self, lambda: P.count(cluster and Endpoint(cluster), wanted), done, group=f"tw-count-{len(self.sizes)}",
+    in_background(self, lambda: P.count(cluster and Host(cluster), wanted), done, group=f"tw-count-{len(self.sizes)}",
                   name="counting the sources", connection=cluster.connection if cluster.destination else None)
 
   def show_sources(self):

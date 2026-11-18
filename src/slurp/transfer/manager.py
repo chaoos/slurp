@@ -10,7 +10,7 @@ import time
 
 from ..state import log
 from . import model as M, plan as P, relay as RL, rsync as R, runner as RN, schedule as S
-from .endpoint import Endpoint, NotConnected
+from .host import Host, NotConnected
 
 POLL_SHOWN = 3      # seconds between looks at a run on a cluster while its transfer is shown
 POLL_HIDDEN = 15    # … while it is not
@@ -70,7 +70,7 @@ class Manager:
     if src is None or dst is None:
       missing = M.tab_name(t.source.get("tab")) if src is None else M.tab_name(t.dest.get("tab"))
       raise NotConnected(f"the tab {missing} is not open")
-    return Endpoint(src), Endpoint(dst)
+    return Host(src), Host(dst)
 
   def not_ready(self, t):
     """The ends that are not connected: [cluster or None (not open)]"""
@@ -542,7 +542,7 @@ class Manager:
     cluster = M.find_tab(self.app.clusters, s.get("job_tab") or t.source.get("tab"))
     if cluster is None:
       return
-    end = Endpoint(cluster)
+    end = Host(cluster)
     if not end.ready:
       return
     result = end.run(["squeue", "-h", "-j", str(s.get("job")), "-o", "%T"], timeout=60)

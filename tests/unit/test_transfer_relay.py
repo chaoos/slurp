@@ -10,18 +10,18 @@ import types
 import pytest
 
 from slurp.transfer import relay as RL
-from slurp.transfer.endpoint import Endpoint
+from slurp.transfer.host import Host
 
 pytestmark = pytest.mark.skipif(not shutil.which("rsync"), reason="needs rsync")
 
 
-class Chatty(Endpoint):
+class Chatty(Host):
   """An end whose login scripts print (on stdout and stderr) before every channel's command"""
   def channel_argv(self, script, *args):
     return ["/bin/sh", "-c", 'echo "Welcome|x|y"; echo "module load: hi" >&2; exec /bin/sh -c "$0" "$@"', script, "sh", *map(str, args)]
 
 
-def local(cls=Endpoint):
+def local(cls=Host):
   return cls(types.SimpleNamespace(name="here", destination=None, connection=None))
 
 
@@ -72,7 +72,7 @@ def test_relay_copies(check, tmp_path):
 
 
 def test_relay_destination_missing_rsync(check, tmp_path):
-  class NoRsync(Endpoint):
+  class NoRsync(Host):
     def channel_argv(self, script, *args):
       return ["/bin/sh", "-c", 'PATH=/nonexistent; export PATH; exec /bin/sh -c "$0" "$@"', script, "sh", *map(str, args)]
   src, dst = tmp_path / "src", tmp_path / "dst"
