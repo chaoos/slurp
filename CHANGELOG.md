@@ -14,9 +14,6 @@ version may need the helper of the same version).
   retry summaries and times), no longer calls exit 1 a usage error, and
   explains an SMB server whose reads rclone cannot take (impacket's test
   server).
-- Transfers: each row of the list has a small play/pause button in its first
-  column (▶ starts it or continues a paused one, ‖ pauses it); `Space` does
-  the same for the highlighted row.
 - Transfers: between a tab and S3, SMB or WebDAV, rclone can also run on
   this machine and reach the cluster over the tab's SSH session (sftp, no new
   login): for clusters without rclone. Needs rclone 1.64 or newer here; the
