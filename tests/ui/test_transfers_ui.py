@@ -402,7 +402,7 @@ def test_sync_and_recheck(check, tmp_path):
       app.open_transfer(t); await pilot.pause(1.2)
       sync = lambda: str(app.screen.query_one("#xd-sync").render())
       check("never checked nor run: not known", "in sync?" in sync() and "not checked yet" in sync(), sync())
-      await pilot.click("#xd-recheck"); await pilot.pause(0.1)
+      app.screen.query_one("#xd-recheck").press(); await pilot.pause(0.1)
       check("Check again: it checks", await until(pilot, lambda: t.id not in app.transfers.checking and t.plan.get("done"), 30))
       await pilot.pause(1.2)
       check("…not in sync: what is to copy", "● not in sync" in sync() and "in 2 files to copy" in sync(), sync())
@@ -411,7 +411,7 @@ def test_sync_and_recheck(check, tmp_path):
       await until(pilot, lambda: t.state == "done", 30); await pilot.pause(1.2)
       check("after a run that ended well: in sync, as of that run", "● in sync" in sync() and "the last run" in sync(), sync())
       (src / "new.txt").write_text("more")
-      await pilot.click("#xd-recheck")
+      app.screen.query_one("#xd-recheck").press()
       await until(pilot, lambda: t.id not in app.transfers.checking, 30); await pilot.pause(1.2)
       check("a new file on the source, Check again: not in sync, 1 file", "● not in sync" in sync() and "in 1 file to copy" in sync(), sync())
       check("in its log", any("checked:" in words for _, words in t.log))
@@ -472,3 +472,41 @@ def test_short_path(check):
   check("a short one: as it is", short_path("/scratch/run42", 30) == "/scratch/run42")
   name = "/s/" + "x" * 60 + ".h5"
   check("one long name: its end", short_path(name, 30) == "…" + name[-29:] and len(short_path(name, 30)) == 30, short_path(name, 30))
+
+
+def test_status_and_continue(check, tmp_path):
+  """The details show the state in big; Continue only for a paused transfer: mid-run Continue, between runs Resume
+  schedule; not for one that ended"""
+  from slurp.transfer import model as M
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      ref = M.tab_ref(app.clusters[0])
+      t = M.Transfer(M.new_id(), "st", {"tab": ref, "paths": ["/x"]}, {"tab": ref, "path": "/y"}, route="relay", runs_on="slurp")
+      t.state, t.runs, t.message = "done", [{"started": 1.0, "ended": 2.0, "result": "done"}], ""
+      app.transfers.add(t)
+      app.open_transfer(t); await pilot.pause(1.2)
+      status = lambda: str(app.screen.query_one("#xd-status").render())
+      resume = lambda: app.screen.query_one("#xd-resume")
+      check("done: its state in big", "DONE" in status(), status())
+      check("…no Continue (Run now instead)", not resume().display and app.screen.query_one("#xd-run").display)
+      t.state, t.message = "paused", "paused"
+      t.runs.append({"started": 3.0, "ended": 4.0, "result": "paused"})
+      await pilot.pause(1.2)
+      check("paused mid-run: said, Continue", "PAUSED" in status() and "mid-run" in status() and resume().display and "Continue" in str(resume().label),
+            (status(), str(resume().label)))
+      t.runs.append({"started": 5.0, "ended": 6.0, "result": "done"})
+      t.schedule, t.message = {"kind": "daily", "daily": "02:00"}, "paused (its schedule waits)"
+      await pilot.pause(1.2)
+      check("its schedule paused between runs: Resume schedule", "its schedule waits" in status() and "Resume schedule" in str(resume().label),
+            (status(), str(resume().label)))
+      await pilot.click("#xd-resume"); await pilot.pause(0.5)
+      check("…which arms it again, no run", t.state == "scheduled" and not t.run and "SCHEDULED" in status(), (t.state, status()))
+      t.state, t.message = "waiting", "waiting for jedi (not connected)"
+      await pilot.pause(1.2)
+      check("waiting: in big, why", "WAITING" in status() and "jedi" in status(), status())
+      await pilot.press("q")
+
+  asyncio.run(main())

@@ -116,6 +116,9 @@ paths are below the list for the transfer highlighted), its route and where it r
 ran last); the line below says why it waits, how it failed, its schedule. `Enter` or a click opens a transfer in a
 subtab of its own:
 
+- its state at the top, in big: RUNNING (how far, the rate, the time left), PAUSED (mid-run, or its schedule),
+  WAITING (for what), SCHEDULED (when), QUEUED (its job), STARTING, PAUSING, DONE, DONE WITH ERRORS, FAILED (why),
+  NOT STARTED;
 - whether both sides are in sync: **● in sync**, **● not in sync** (how much is left, or how many files the last run
   could not copy) or **○ in sync?** (not known yet), from the newer of the last check and the last run that ended
   well, and as of when (the source may have changed since);
@@ -135,7 +138,9 @@ subtab of its own:
 
 **Pause** (`p`) stops the run; rsync keeps the half-copied file in `.slurp-partial` on the destination and the next run
 goes on from it. A transfer job is cancelled for it, and loses its place in the queue and the time it used: slurp asks
-first. **Continue** (`c`) starts a new run (for a transfer job: submits a new job). **Run now** (`s`), **Edit…**
+first. **Continue** (`c`) is there only for a paused transfer: paused mid-run, it starts a new run that goes on where
+the paused one stopped (for a transfer job: submits a new job); paused between runs, it reads **Resume schedule** and
+lets the schedule go on without a run now. A transfer that ended has no Continue: **Run now** runs it anew. **Run now** (`s`), **Edit…**
 (`e`: the wizard with its settings; pause it first), **Its job** (the job window of its transfer job), **Connect …**
 (the tab it waits for), **Delete** (`Del`: its settings and history, the files stay). The subtabs of the Transfers tab
 are kept for the next start, like the others; `Ctrl-W` closes the one shown (the list stays). Keys that act on a

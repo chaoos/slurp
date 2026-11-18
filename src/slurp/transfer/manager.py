@@ -477,9 +477,20 @@ class Manager:
       self.followed[t.id] = 0
     threading.Thread(target=work, daemon=True).start()
 
+  @staticmethod
+  def paused_mid_run(t):
+    """Paused while a run went on (Pause, slurp's end, a broken connection): Continue goes on with it"""
+    return t.state == "paused" and bool(t.runs) and t.runs[-1]["result"] in ("paused", "interrupted")
+
   def resume(self, t):
-    """Continue: a new run (rsync goes on where it stopped)"""
-    if t.active:
+    """Continue a paused transfer: paused mid-run, a new run (rsync goes on where it stopped); its schedule paused
+    between runs, the schedule again (no run now). Only a paused transfer continues: one that ended runs anew (Run now)"""
+    if t.state != "paused":
+      return
+    if not self.paused_mid_run(t):
+      t.state, t.message = "new", ""
+      t.event("its schedule goes on")
+      self.reschedule(t)
       return
     if S.repeated(t.schedule) and t.next_run is None:
       t.next_run = S.after_run(t.schedule, time.time())

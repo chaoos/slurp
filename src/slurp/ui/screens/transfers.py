@@ -1336,7 +1336,9 @@ class TransfersBase(SplitScreen):
 
   @staticmethod
   def can_continue(t):
-    return t.state in ("paused", "failed", "done", "done-errors", "new")
+    """Only a paused transfer continues (mid-run: the run goes on; between runs: its schedule); one that ended runs
+    anew with Run now"""
+    return t.state == "paused"
 
   def run_now(self, t):
     if not t.active and t.state != "waiting":
@@ -1524,6 +1526,7 @@ class TransferScreen(TransfersBase):
   #xd-rate { height: 6; margin-top: 1; }
   #xd-closes { color: $text-muted; }
   #xd-sync { margin-top: 1; padding: 0 1; border: round $panel; }
+  #xd-status { padding: 0 1; border: round $panel; text-style: bold; }
   #xd-check-bar { height: auto; margin-bottom: 1; }
   """
   BINDINGS = [Binding("p", "pause", "Pause"), Binding("c", "resume", "Continue"), Binding("s", "run_now", "Run now"),
@@ -1540,6 +1543,7 @@ class TransferScreen(TransfersBase):
 
   def compose_left(self):
     with VerticalScroll(id="xd-body"):
+      yield Static(id="xd-status")
       yield Static(id="xd-head")
       yield Static(id="xd-route")
       yield Static(id="xd-paths")
@@ -1594,6 +1598,9 @@ class TransferScreen(TransfersBase):
     if t.message:
       head.append(f" · {t.message}")
     q("#xd-head", Static).update(head)
+    status = q("#xd-status", Static)
+    status.update(status_text(t, self.manager, self.app.spinner()))
+    status.styles.border = ("round", STATUS_BORDER.get(t.state, "grey"))
     self.frame = getattr(self, "frame", 0) + 1
     route = flow_diagram(t.route, t.runs_on, src, dst, t.source_name, t.dest_name, t.run.get("job", ""),
                          moving=self.frame if t.state == "running" else None)
@@ -1604,6 +1611,11 @@ class TransferScreen(TransfersBase):
     q("#xd-paths", Static).update(self.paths_text(t))
     q("#xd-pause", Button).display = t.active or t.state in ("scheduled", "waiting")
     q("#xd-resume", Button).display = self.can_continue(t)
+    resume = "Continue" if self.manager.paused_mid_run(t) else "Resume schedule"
+    if str(q("#xd-resume", Button).label) != icons.label("running", resume):
+      q("#xd-resume", Button).label = icons.label("running", resume)
+      q("#xd-resume", Button).tooltip = ("a new run: it goes on where the paused one stopped (c)" if resume == "Continue" else
+                                         "its schedule goes on, without a run now (c)")
     q("#xd-run", Button).display = not t.active and t.state != "waiting"
     q("#xd-job", Button).display = bool(t.run.get("job") or (t.runs and t.runs[-1].get("job")))
     missing = [c for c in self.manager.not_ready(t) if c is not None]
@@ -1772,6 +1784,37 @@ def sync_text(t, checking=False, spinner=""):
   state, words = sync_state(t)
   mark, style = SYNC_LOOK[state]
   return Text.assemble((mark, style), f"  {words}" + ("; the source may have changed since" if state == "yes" else ""))
+
+STATUS_BORDER = {"running": "green", "starting": "green", "queued": "cyan", "scheduled": "cyan", "checking": "cyan",
+                 "waiting": "yellow", "pausing": "yellow", "paused": "yellow", "done": "green", "done-errors": "orange",
+                 "failed": "red", "new": "grey"}
+
+def status_text(t, manager, spinner=""):
+  """The state of a transfer in big, with what it means now"""
+  p = t.progress or {}
+  mark = icons.icon(STATE_ICONS.get(t.state, "")) or "●"
+  word = M.STATES.get(t.state, t.state).upper()
+  last = t.runs[-1] if t.runs else None
+  if t.state == "running":
+    if p.get("phase") == "comparing":
+      more = f"{spinner} comparing the files of both sides"
+    else:
+      more = (f"{p['percent']:.0f} %" if p.get("percent") is not None else "") + (f" · {rate_text(p.get('rate'))}" if p.get("rate") else "") + (
+        f" · {P.duration(p['eta'])} left" if p.get("eta") else "")
+  elif t.state in ("starting", "pausing", "checking"):
+    more = f"{spinner} {t.message}" if t.message else spinner
+  elif t.state == "paused":
+    more = ("mid-run: Continue goes on where it stopped" + (f" ({t.message})" if t.message and t.message != "paused" else "")
+            if manager.paused_mid_run(t) else "its schedule waits: Resume schedule lets it go on")
+  elif t.state == "scheduled":
+    more = S.describe(t.schedule, t.next_run)
+  elif t.state in ("done", "done-errors", "failed"):
+    more = (f"{S.when_text(last['ended'])}" if last else "") + (f": {t.message}" if t.message else "")
+  elif t.state == "new":
+    more = t.message or ("runs when you click Run now" if (t.schedule or {}).get("kind") == "never" else "Run now starts it")
+  else: # (queued, waiting)
+    more = t.message
+  return Text.assemble((f"{mark} {word}", STATE_STYLES.get(t.state, "bold")), ("  " + more if more else "", ""))
 
 def runs_label(t):
   """The Runs field: how many times it ran, how they ended, the last one"""

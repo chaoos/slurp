@@ -233,3 +233,21 @@ def test_login_refused_message(check, tmp_path):
   check("it says who could not log in where, what ssh said, where the check logged in, why that may be",
         "nid001 could not log in to jureca.fz-juelich.de by itself (user@jureca.fz-juelich.de: Permission denied (publickey).)" in t.message
         and "the check had logged in from daint-ln001" in t.message and "transfer job runs on a node" in t.message, t.message)
+
+
+def test_continue_only_paused(check, tmp_path):
+  app = App()
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app)
+  mg.add(t)
+  t.state, t.runs = "done", [{"started": 1.0, "ended": 2.0, "result": "done"}]
+  mg.resume(t)
+  check("an ended transfer does not continue", t.state == "done" and not t.run)
+  t.state, t.schedule = "scheduled", {"kind": "daily", "daily": "02:00"}
+  mg.pause(t)
+  check("a scheduled one paused: its schedule waits, not mid-run", t.state == "paused" and not mg.paused_mid_run(t))
+  mg.resume(t)
+  check("…Continue: its schedule again, no run now", t.state == "scheduled" and t.next_run and not t.run, (t.state, t.next_run))
+  t.state = "paused"
+  t.runs.append({"started": 3.0, "ended": 4.0, "result": "paused"})
+  check("paused mid-run", mg.paused_mid_run(t))
