@@ -167,8 +167,9 @@ class TabEnd:
     c = cluster.connection
     if placeholder or c is None:
       ssh = ["ssh", cluster.destination]
-    else:
-      ssh = ["ssh", "-S", c.control_path, "-o", "ControlMaster=no", "-o", "BatchMode=yes", c.destination]
+    else: # (slurp's wrapper: ssh on the session's control socket, the output of login scripts dropped)
+      import sys
+      ssh = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "sftp_ssh.py"), c.control_path, c.destination]
     p = f"RCLONE_CONFIG_{self.name}_"
     self.env = {p + "TYPE": "sftp", p + "SSH": ssh_value(ssh), p + "SHELL_TYPE": "unix"}
 

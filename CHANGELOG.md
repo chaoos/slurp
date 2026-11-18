@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: rclone on this machine reaching a cluster over slurp's SSH runs
+  the cluster's sftp-server behind a marker, so login scripts that print
+  text (a chatty `.bashrc`) no longer break it ("packet too long"); copies
+  both ways and Verify tested.
 - Transfers: a transfer job of rclone on the cluster with the cluster as the
   destination (from S3, SMB or WebDAV) looks up your accounts and fills in
   the transfer partition of that cluster (the account list waited for ever).

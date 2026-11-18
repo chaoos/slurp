@@ -6,6 +6,8 @@ import os
 import shutil
 import subprocess
 
+import sys
+
 import pytest
 
 from slurp.transfer import endpoints as E, rclone as RC, secrets as S
@@ -173,8 +175,8 @@ def test_tab_over_ssh(check, monkeypatch):
   conn = types.SimpleNamespace(control_path="/tmp/slurp-1-x/control", destination="me@daint", ready=True)
   tab = RC.TabEnd(types.SimpleNamespace(destination="daint", connection=conn))
   ssh = tab.env[f"RCLONE_CONFIG_{tab.name}_SSH"]
-  check("sftp, on slurp's session", tab.env[f"RCLONE_CONFIG_{tab.name}_TYPE"] == "sftp"
-        and ssh == "ssh -S /tmp/slurp-1-x/control -o ControlMaster=no -o BatchMode=yes me@daint", ssh)
+  check("sftp, on slurp's session (its wrapper: the control socket, the destination)", tab.env[f"RCLONE_CONFIG_{tab.name}_TYPE"] == "sftp"
+        and ssh.endswith("sftp_ssh.py /tmp/slurp-1-x/control me@daint") and ssh.split()[0] == sys.executable, ssh)
   check("absolute paths", tab.path("/scratch/run1") == f"{tab.name}:/scratch/run1")
   plain = RC.TabEnd(types.SimpleNamespace(destination="daint", connection=conn), placeholder=True)
   check("Copy as a command: plain ssh", plain.env[f"RCLONE_CONFIG_{plain.name}_SSH"] == "ssh daint")

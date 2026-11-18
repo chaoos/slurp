@@ -3610,6 +3610,18 @@ async def t_transfer_s3(app, pilot):
       check("…in the bucket", found == ["relay/src/b.txt", "relay/src/sub/a.bin"], found)
       text = app.transfers.command_text(relay)
       check("Copy as a command: plain ssh, no control socket", "ssh lab" in text.replace("'", "") or lab.destination in text, text)
+      results = []
+      app.transfers.verify(relay, results.append)
+      check("over SSH: Verify, the same", await until(pilot, lambda: results, 90) and results[0][0], results)
+      back = os.path.join(os.path.dirname(dst), "back")
+      down2 = M.Transfer(M.new_id(), "down over SSH", {"endpoint": "s3lab", "name": "lab bucket", "paths": ["/relay/src"]},
+                         {"endpoint": E.tab_id(lab), "tab": ref, "path": back}, route="rclone-here", runs_on="slurp")
+      down2.plan = {"routes": {"rclone-here": {"ok": True, "runs_on": ["slurp"]}}}
+      app.transfers.add(down2)
+      app.transfers.run_now(down2)
+      check("down over SSH: done, the files on the lab", await until(pilot, lambda: down2.state == "done", 90)
+            and same_tree(src, os.path.join(back, "src")), (down2.state, down2.message))
+      app.transfers.delete(down2)
     # the Endpoints: Enter on the lab's tab: its connection window; on the bucket: its window
     from slurp.ui.screens.connection import ConnectionScreen
     from slurp.ui.screens.endpoint import EndpointScreen

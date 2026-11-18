@@ -127,7 +127,8 @@ its environment, the keys too, never on a command line. Which rclone runs:
   rclone on a node of the partition (`srun --immediate`; no node free: not checked, with a note).
 - **rclone on this machine, the cluster over slurp's SSH**: a tab and a bucket, where the cluster has no rclone. rclone
   runs here and reaches the cluster's files over the tab's own SSH session (sftp through its control socket: no new
-  login, no question); the data passes this machine, and the keys stay here. It needs rclone 1.64 or newer on this
+  login, no question; what the cluster's login scripts print is dropped, as it would break SFTP); the data passes this
+  machine, and the keys stay here. It needs rclone 1.64 or newer on this
   machine (the check says so). The wizard offers both routes for a tab; the check recommends rclone on the cluster
   where it is installed there.
 
