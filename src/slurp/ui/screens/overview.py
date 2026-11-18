@@ -41,6 +41,7 @@ class OverviewScreen(SplitScreen):
         yield Static(id="ov-about")
         yield Static(id="ov-health")
         yield Static(id="ov-ssh")
+        yield Static(id="ov-transfers")
         with Center():
           with Horizontal(id="ov-links"):
             yield Button(icons.label("jobs", "Jobs"), id="ov-jobs", variant="primary", compact=True, tooltip="the job list (j)")
@@ -143,6 +144,10 @@ class OverviewScreen(SplitScreen):
   def on_click(self, event):
     if open_clicked_url(self.app, event): # (the site's status page, its docs)
       event.stop()
+      return
+    if getattr(event.widget, "id", None) == "ov-transfers" and self.app.transfers.summary_for(self.cluster): # (its transfers)
+      event.stop()
+      self.app.show_transfers()
 
   # ---- what it shows
   def show(self):
@@ -158,6 +163,7 @@ class OverviewScreen(SplitScreen):
              "#ov-about": self.about(cluster, info) if cluster else Text(""),
              "#ov-health": self.health(cluster, d, info) if connected else Text(""),
              "#ov-ssh": self.ssh(cluster, state) if cluster else Text(""),
+             "#ov-transfers": Text(self.app.transfers.summary_for(cluster), style="cyan") if cluster else Text(""),
              "#ov-site": self.site(cluster) if cluster else Text("")}
     for sel, text in lines.items():
       q(sel).update(text)
