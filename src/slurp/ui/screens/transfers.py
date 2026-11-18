@@ -1447,8 +1447,9 @@ class TransferWizard(ModalScreen):
     runs = (["slurp"] if route in ("relay", "rclone-here") else ["globus"] if route == "globus" else
             ["detached"] + (["job"] if P.partition_of(client, site_of) else []))
     runs = info.get("runs_on") or runs
-    if self.editing is not None and route == self.editing.route and self.editing.runs_on not in runs:
-      runs = [*runs, self.editing.runs_on] # (its tab is not there to say whether its site has a transfer partition)
+    found = route == "rclone-cluster" and info.get("runs_on") # (where the check found rclone: only there, e.g. only as a job)
+    if not found and self.editing is not None and route == self.editing.route and self.editing.runs_on not in runs:
+      runs = [*runs, self.editing.runs_on] # (not checked: its tab is not there to say whether its site has a transfer partition)
     current = self.chosen_runs_on() or (self.editing.runs_on if self.editing else None)
     if current not in runs:
       current = "job" if "job" in runs else runs[0]

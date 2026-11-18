@@ -18,6 +18,8 @@ version may need the helper of the same version).
   nodes have rclone (not the login nodes): it runs as a transfer job, and the
   wizard checks for rclone on a node of the partition first. The job test
   (`sbatch --test-only`) of an rclone transfer job works again.
+  Editing such a transfer set up to run detached offers only the transfer
+  job; Run now of one still set to detached says to choose it.
 - Transfers: an rclone run that fails says each cause once (without rclone's
   retry summaries and times), no longer calls exit 1 a usage error, and
   explains an SMB server whose reads rclone cannot take (impacket's test

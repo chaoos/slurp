@@ -1072,8 +1072,11 @@ class Manager:
 
   @staticmethod
   def route_passed(t):
-    """Did its route pass its last check (a route that logs in only with the temporary key: with it chosen)?"""
+    """Did its route pass its last check (a route that logs in only with the temporary key: with it chosen), where it
+    runs (the check says where it can: rclone only on the transfer partition's nodes: only as a transfer job)?"""
     info = (t.plan.get("routes") or {}).get(t.route) or {}
+    if t.route == "rclone-cluster" and info.get("runs_on") and t.runs_on not in info["runs_on"]: # (rclone only on the nodes)
+      return False
     return bool(info.get("ok") or (info.get("keyable") and t.options.get("temp_key")))
 
   def run_now(self, t):
@@ -1090,8 +1093,14 @@ class Manager:
         return
       info = (t.plan.get("routes") or {}).get(t.route) or {}
       t.state = "failed"
-      t.message = (f"{M.ROUTES.get(t.route, t.route)} did not pass the check before the run"
-                   + (f" ({info.get('why')})" if info.get("why") else "") + ": choose another route (Edit…), or Check again later")
+      if info.get("ok"): # (the route can, but not where it is set to run)
+        t.message = (f"{M.ROUTES.get(t.route, t.route)} cannot run {M.RUNS_ON.get(t.runs_on, t.runs_on)}: the check found it can run only "
+                     + " or ".join(M.RUNS_ON.get(r, r) for r in info["runs_on"])
+                     + ((t.plan.get("steps") or {}).get("rclone", {}).get("text", "") and f" ({t.plan['steps']['rclone']['text'][:200]})")
+                     + ": Edit…, Route")
+      else:
+        t.message = (f"{M.ROUTES.get(t.route, t.route)} did not pass the check before the run"
+                     + (f" ({info.get('why')})" if info.get("why") else "") + ": choose another route (Edit…), or Check again later")
       t.event(t.message)
       self.changed(t)
       self.say(t, t.message, "error", 12)

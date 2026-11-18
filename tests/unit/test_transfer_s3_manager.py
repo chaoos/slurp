@@ -177,6 +177,11 @@ def test_rclone_only_on_the_transfer_nodes(check, s3, tmp_path, monkeypatch):
   info = plan["routes"]["rclone-cluster"]
   check("with a transfer partition: passes, as a transfer job only", info["ok"] and info["runs_on"] == ["job"] and plan["recommended"] == "rclone-cluster", plan)
   check("…said", "not on the login node of daint" in plan["steps"]["rclone"]["text"] and "xfer" in plan["steps"]["rclone"]["text"], plan["steps"])
+  t.plan = plan
+  check("set up as a transfer job: may run", m.route_passed(t))
+  t.runs_on = "detached"
+  check("set up (before) to run detached on the login node: does not pass (Run now says: only as a transfer job)", not m.route_passed(t))
+  t.runs_on = "job"
   monkeypatch.setattr(MG.P, "partition_of", lambda c, site: "")
   plan = m.rclone_check(t, lambda p: None)
   check("without one: not", not plan["routes"]["rclone-cluster"]["ok"] and "not installed on daint" in plan["routes"]["rclone-cluster"]["why"], plan["routes"])
