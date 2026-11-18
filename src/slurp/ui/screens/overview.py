@@ -158,11 +158,13 @@ class OverviewScreen(SplitScreen):
     d = self.data(cluster) if cluster else {}
     info = d.get("info")
     state = self.app.connect_state(cluster) if cluster else None
-    connected = cluster is not None and state is None
+    c = cluster.connection if cluster and cluster.destination else None
+    live = cluster is not None and (not cluster.destination or (c is not None and c.ready)) # (its session answers)
+    connected = cluster is not None and state is None and live
     lines = {"#ov-name": Text(icons.label("cluster" if cluster.destination else "local", cluster.name), style="bold") if cluster else Text(""),
              "#ov-about": self.about(cluster, info) if cluster else Text(""),
              "#ov-health": self.health(cluster, d, info) if connected else Text(""),
-             "#ov-ssh": self.ssh(cluster, state) if cluster else Text(""),
+             "#ov-ssh": self.ssh(cluster, state, live) if cluster else Text(""),
              "#ov-transfers": Text(self.app.transfers.summary_for(cluster), style="cyan") if cluster else Text(""),
              "#ov-site": self.site(cluster) if cluster else Text("")}
     for sel, text in lines.items():
@@ -170,8 +172,13 @@ class OverviewScreen(SplitScreen):
       q(sel).display = bool(text.plain.strip()) # (no empty lines)
     q("#ov-links").display = connected
     q("#ov-connect-row").display = state == "idle"
-    c = cluster.connection if cluster and cluster.destination else None
     q("#ov-disconnect-row").display = c is not None and c.state not in ("new", "closed") and state != "idle"
+    button = q("#ov-disconnect")
+    label = icons.label("disconnect", "Disconnect" if live else "Abort") # (not connected yet: the login is given up)
+    if str(button.label) != label:
+      button.label = label
+      button.tooltip = ("end the SSH session of this tab" if live else
+                        "give up the login (the tab stays not connected; Connect tries again)")
     q("#ov-config-row").display = bool(cluster and cluster.destination)
     if connected:
       jobs = q("#ov-jobs")
@@ -210,8 +217,9 @@ class OverviewScreen(SplitScreen):
     level, why = cluster_health(info)
     return Text(f"● {dict(good='healthy', warn='degraded', bad='unhealthy')[level]}: {why}", style=HEALTH_STYLES[level])
 
-  def ssh(self, cluster, state):
-    """The SSH session: its state (as the footer has it); not connected: what happened, and Connect"""
+  def ssh(self, cluster, state, live=True):
+    """The SSH session: its state (as the footer has it); not connected: what happened, and Connect; while it
+    connects: what ssh printed last (a changed host key: said plainly)"""
     if not cluster.destination:
       return Text("")
     if state == "idle":
@@ -221,7 +229,23 @@ class OverviewScreen(SplitScreen):
       return Text.assemble((f"Not connected to {cluster.destination}", "bold"), f"\n{why}")
     if state == "connecting":
       return Text.assemble((f"Connecting to {cluster.destination} …", "bold yellow"), "\nlog in on the right")
-    return self.app.connection_text(cluster)
+    text = self.app.connection_text(cluster)
+    if not live:
+      said = self.ssh_said(cluster)
+      if any("REMOTE HOST IDENTIFICATION HAS CHANGED" in line or "Host key verification failed" in line
+             or ("Host key for" in line and "has changed" in line) for line in said):
+        text.append(f"\nThe host key of {cluster.destination} changed: ssh does not trust it. Ask the site whether that is "
+                    "expected before you remove the old key (ssh-keygen -R <host>) and log in again.", style="bold red")
+      elif said:
+        text.append("\nssh: " + " | ".join(said[-2:])[:160], style="dim")
+    return text
+
+  def ssh_said(self, cluster):
+    """The last lines of the login's terminal (what ssh printed)"""
+    t = cluster.login_terminal
+    if t is None or t.vt is None:
+      return []
+    return [line.strip() for line in t.vt.display if line.strip()]
 
   def jobs_label(self, cluster):
     if not cluster.loaded:

@@ -294,7 +294,9 @@ why), the SSH session, and the ways on: **Jobs** (`j`, with how many run and wai
 is none), **Quota** (`Q`) and **Health** (`C`, everything about the nodes and partitions); a line about the
 transfers from or to the tab while they run, wait or are scheduled (a click: the Transfers tab). Below them the site's
 status page and documentation (a click opens them). Not connected: **Connect**, and what happened to the connection (slurp does not log in at the start; a tab added
-with `+` logs in right away); connected: **Disconnect**. **SSH settings…**: how the tab logs in, its destination or
+with `+` logs in right away); connected: **Disconnect**. While it connects or reconnects (its session does not answer
+yet) it is not shown as connected: no Jobs and no health, what ssh printed last (a host key that changed: said
+plainly), and **Abort** gives up the login. **SSH settings…**: how the tab logs in, its destination or
 full SSH settings, what `~/.ssh/config` and `ssh -G` make of it, **Check**; saved, the next login uses them.
 `r` asks the cluster again (it does by itself after 5 minutes). *At the start a tab shows* in **Options** (`F3`) can
 open the job list instead.

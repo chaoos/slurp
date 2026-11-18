@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The overview no longer looks connected while a tab connects or reconnects
+  (a login that fails, e.g. on a host key that changed): no Jobs and no
+  health then, what ssh printed last (a changed host key said plainly), and
+  **Abort** instead of **Disconnect**.
 - **Transfers**: data from one tab to another (cluster to cluster, or this
   machine), with rsync over the tabs' own SSH sessions: Menu → Transfer
   data… (`T`) sets one up in a wizard (source, destination, the route with its

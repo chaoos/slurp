@@ -3604,3 +3604,34 @@ async def t_transfer_detached(app, pilot):
     pilot, lambda: isinstance(app.screen, DirScreen) and app.screen.path == src and app.cluster is lab and not app.in_transfers, 20),
     (type(app.screen).__name__, getattr(app.screen, "path", "")))
   app.leave_transfers(); await pilot.pause(0.2)
+
+
+async def t_host_key_changed(app, pilot):
+  """The host key of the cluster changed: the reconnect fails, and while slurp tries again the overview does not look
+  connected: no Jobs, no health asked, Abort instead of Disconnect, and it says the host key changed"""
+  lab = next(c for c in app.clusters if c.destination)
+  known = os.path.join(LAB, "known_hosts")
+  saved = open(known).read()
+  other = open(os.path.join(HERE, "share", "otherkey.pub")).read().split()[:2]
+  try:
+    open(known, "w").write(saved.split()[0] + " " + " ".join(other) + "\n") # (another key for the host)
+    app.activate_cluster(app.clusters.index(lab), connect=False)
+    app.show_overview(); await pilot.pause(0.3)
+    lab.connection.kill_session() # (the session breaks: slurp reconnects by itself, and fails)
+    ov = app.screen
+    said = lambda: str(ov.query_one("#ov-ssh").render())
+    check("the reconnect fails on the changed host key: said", await until(pilot, lambda: "host key" in said() and "changed" in said(), 60), said())
+    check("…not shown as connected: no Jobs, no health", not ov.query_one("#ov-links").display and not ov.query_one("#ov-health").display)
+    button = ov.query_one("#ov-disconnect")
+    check("…Abort instead of Disconnect", ov.query_one("#ov-disconnect-row").display and "Abort" in str(button.label), str(button.label))
+    button.press(); await pilot.pause(0.5)
+    check("Abort: not connected, Connect", ov.query_one("#ov-connect-row").display and not lab.connection.wanted)
+  finally:
+    open(known, "w").write(saved)
+  app.connect_tab()
+  await until(pilot, lambda: "passphrase" in term(app), 30); await pilot.pause(0.3)
+  await pilot.press(*"pw123", "enter")
+  check("the right key back: connected again", await until(pilot, lambda: lab.connection.ready, 30))
+  app.show_overview()
+  check("…Disconnect again", await until(pilot, lambda: isinstance(app.screen, OverviewScreen)
+                                          and "Disconnect" in str(app.screen.query_one("#ov-disconnect").label), 10))
