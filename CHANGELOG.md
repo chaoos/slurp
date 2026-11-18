@@ -22,7 +22,8 @@ version may need the helper of the same version).
   address). The connection window's Mount… maps the drive of its own tab.
 - Transfers: the route in the list and in the runs says what moves the data
   first: `rsync · relay · in slurp`, `rclone · on the cluster · transfer job`,
-  `Globus · at Globus`.
+  `Globus · at Globus`; rclone here reaching a cluster over slurp's SSH:
+  `rclone · relay · in slurp`.
 - Transfers: rclone on the cluster also where only the transfer partition's
   nodes have rclone (not the login nodes): it runs as a transfer job, and the
   wizard checks for rclone on a node of the partition first. The job test

@@ -510,6 +510,13 @@ def test_route_says_the_tool(check):
                                ("same-fs", "detached", "rsync · same filesystem · login node"), ("rclone-here", "slurp", "rclone · here · in slurp"),
                                ("rclone-cluster", "job", "rclone · on the cluster · transfer job"), ("globus", "globus", "Globus · at Globus")):
     check(f"{route}: {want}", how_text(route, runs_on) == want, how_text(route, runs_on))
+  from slurp.transfer import model as M
+  from slurp.ui.screens.transfers import route_text
+  over = M.Transfer(M.new_id(), "x", {"endpoint": "s3a", "paths": ["/a"]}, {"endpoint": "tab:daint", "tab": {"destination": "daint"}, "path": "/b"},
+                    route="rclone-here", runs_on="slurp")
+  check("rclone here with a cluster tab: relayed", route_text(over) == "rclone · relay · in slurp", route_text(over))
+  here = M.Transfer(M.new_id(), "y", {"endpoint": "s3a", "paths": ["/a"]}, {"endpoint": "local", "path": "/b"}, route="rclone-here", runs_on="slurp")
+  check("…with this machine: here", route_text(here) == "rclone · here · in slurp", route_text(here))
 
 
 def test_job_client(check):

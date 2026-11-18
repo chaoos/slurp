@@ -81,11 +81,17 @@ def rate_text(rate):
   return f"{human(rate)}/s" if rate else ""
 
 def route_text(t):
-  return how_text(t.route, t.runs_on)
+  return how_text(t.route, t.runs_on, relayed(t))
 
-def how_text(route, runs_on):
-  """The tool, the route and where it runs, short: rsync · relay · in slurp, rclone · on the cluster · transfer job"""
-  return " · ".join(w for w in (TOOLS.get(route, "rsync"), ROUTE_SHORT.get(route, route), RUNS_SHORT.get(runs_on, runs_on)) if w)
+def relayed(t):
+  """rclone here with a cluster tab as an end: it reaches the cluster over slurp's SSH, the data passes this machine"""
+  return t.route == "rclone-here" and any(E.ref_id(ref).startswith("tab:") for ref in (t.source, t.dest))
+
+def how_text(route, runs_on, relay=False):
+  """The tool, the route and where it runs, short: rsync · relay · in slurp, rclone · on the cluster · transfer job;
+  relay: rclone here reaching a cluster over slurp's SSH: rclone · relay · in slurp"""
+  return " · ".join(w for w in (TOOLS.get(route, "rsync"), "relay" if relay else ROUTE_SHORT.get(route, route),
+                                RUNS_SHORT.get(runs_on, runs_on)) if w)
 
 def dot(cluster):
   """● connected, ◌ connecting, ○ not connected (this machine: ⌂; a closed tab: ✕)"""
@@ -2717,7 +2723,7 @@ class TransferRunsScreen(TransfersBase):
       rows.append((str(r["started"]), [str(r.get("number") or first + i), stamp(r["started"]), stamp(r["ended"]), took(r),
                                        Text(M.STATES.get(r["result"], r["result"]), style=STATE_STYLES.get(r["result"], "")),
                                        human(r.get("bytes")), str(r.get("files") or 0), rate_text(r.get("rate")),
-                                       how_text(r.get("route", ""), r.get("runs_on", "")),
+                                       how_text(r.get("route", ""), r.get("runs_on", ""), relayed(t) and r.get("route") == t.route),
                                        where, (r.get("message") or "")[:80]]))
     fill_table(table, rows)
 
