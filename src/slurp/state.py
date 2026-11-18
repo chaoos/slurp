@@ -58,6 +58,7 @@ class ClusterSession:
   destination: str | None = None
   ssh: dict | None = None              # full SSH settings (sshsetup: user, host, port, jump, identities, options, name)
   pre_login: str = ""                  # a command run before every login, in the login's terminal (e.g. signing a key)
+  pre_login_fallback: bool = False     # …only when a login without it fails (a key still valid is not signed anew)
   connection: object | None = None
   terminal: object | None = None       # shell in the pane on the right while this tab is active
   login_terminal: object | None = None # the ssh login (control master) of the connection

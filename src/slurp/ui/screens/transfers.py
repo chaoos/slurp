@@ -2071,8 +2071,8 @@ class TransferScreen(TransfersBase):
     ref = t.source if side == "src" else t.dest
     if e.state == "tab not open":
       tab = ref.get("tab") or {}
-      self.app.add_cluster({"ssh": tab["ssh"], "pre_login": tab.get("pre_login", "")} if tab.get("ssh")
-                           else {"destination": tab.get("destination") or "", "pre_login": tab.get("pre_login", "")})
+      before = {"pre_login": tab.get("pre_login", ""), "pre_login_fallback": tab.get("pre_login_fallback", False)}
+      self.app.add_cluster({"ssh": tab["ssh"], **before} if tab.get("ssh") else {"destination": tab.get("destination") or "", **before})
       return
     if e.is_tab and e.cluster is not None:
       self.app.connect_cluster(e.cluster)

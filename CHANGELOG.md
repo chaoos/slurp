@@ -6,6 +6,17 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- **Run before login**: what the command exports (e.g. `eval "$(ssh-agent -s)"`)
+  is in the environment of the login. New box **only when the login fails
+  without it**: first a login without the command that asks nothing; only if
+  it fails, the command and the login again (a certificate that is still
+  valid is not made anew). **Check…** goes the same way.
+- A login the server ends after **too many authentication failures** (an
+  agent with many keys offers them before the configured one, e.g. a CSCS
+  certificate) is tried once more with only the configured keys
+  (`IdentitiesOnly=yes`), and slurp says how to keep it so in
+  `~/.ssh/config`.
+- The overview's **Disconnect** shows its whole label again.
 - The overview no longer looks connected while a tab connects or reconnects
   (a login that fails, e.g. on a host key that changed): no Jobs and no
   health then, what ssh printed last (a changed host key said plainly), and

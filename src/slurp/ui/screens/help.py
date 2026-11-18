@@ -480,7 +480,8 @@ The check of an SSH connection, in a terminal, as the tab's login goes:
 
 1. what needs no login: what ssh makes of the destination and settings (`ssh -G`), the keys (there, permissions, a
    passphrase), the host's name, the port, and the server's greeting; when one of these fails, it stops there;
-2. the command before the login (Run before login), if there is one: answer it here;
+2. the command before the login (Run before login), if there is one: answer it here (with "only when the login fails
+   without it": first a login without it that asks nothing; the command only if that fails);
 3. the login itself (`ssh -v`, its verbose log to a file): answer what it asks, a new host key (yes: it is kept, as
    at any login), a passphrase, a password, a one-time code.
 
@@ -547,7 +548,10 @@ the tab's name, and more ssh options, one `Key=Value` per line. They are kept wi
 
 **Run before login** (both ways): a command on this machine before every login of the tab, e.g. one that signs your
 key for the day (`cscs-keygen`, `step ssh login`, `tsh login`). It runs in the login pane: answer it there (a
-password, a one-time code; `Ctrl-C` ends only it); when it ends, the SSH login follows as usual.
+password, a one-time code; `Ctrl-C` ends only it); when it ends, the SSH login follows as usual, with what it exported
+(`eval "$(ssh-agent -s)"` in it: the login uses that agent). **only when the login fails without it**: first a login
+without the command that asks nothing; only if it fails, the command and the login again (a certificate still valid
+is not made anew).
 
 **Check…** tries the connection in a window with a terminal, as the tab's login goes: what needs no login (what ssh
 makes of the settings, the keys, the host name, the port and the server), the command before the login if there is

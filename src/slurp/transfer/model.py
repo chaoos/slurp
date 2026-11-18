@@ -51,6 +51,8 @@ def tab_ref(cluster):
     ref["ssh"] = cluster.ssh
   if cluster.pre_login:
     ref["pre_login"] = cluster.pre_login
+    if getattr(cluster, "pre_login_fallback", False):
+      ref["pre_login_fallback"] = True
   return ref
 
 def find_tab(clusters, ref):

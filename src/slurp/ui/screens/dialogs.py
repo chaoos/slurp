@@ -556,13 +556,14 @@ class SshCheckScreen(ModalScreen):
   """
   BINDINGS = [Binding("escape", "close", "Close"), Binding("ctrl+right_square_bracket", "close", "Close", priority=True)]
 
-  def __init__(self, destination, settings=None, pre_login=""):
+  def __init__(self, destination, settings=None, pre_login="", pre_login_fallback=False):
     super().__init__()
     import json
     from ...cluster import sshsetup
     self.what = sshsetup.label(settings) if settings else destination
     self.args = [sys.executable, "-m", "slurp.cluster.sshcheck",
-                 json.dumps({"destination": destination, "ssh": settings or None, "pre_login": pre_login or ""})]
+                 json.dumps({"destination": destination, "ssh": settings or None, "pre_login": pre_login or "",
+                             "pre_login_fallback": bool(pre_login_fallback)})]
     self.session = None
 
   def compose(self) -> ComposeResult:
@@ -678,7 +679,10 @@ class AddClusterScreen(ModalScreen):
           yield TextArea(id="ssh-options", soft_wrap=False)
         yield Label("Run before login (optional)")
         yield Input(placeholder="a command on this machine before every login, e.g. one that signs your key (cscs-keygen, step ssh login …)",
-                    id="ssh-pre-login", tooltip="it runs in the login pane: answer it there (a password, a code); then the login follows")
+                    id="ssh-pre-login", tooltip="it runs in the login pane: answer it there (a password, a code); then the login follows. "
+                    "What it exports (eval $(ssh-agent): SSH_AUTH_SOCK, …) is there for the login")
+        yield Checkbox("only when the login fails without it (first a login without it: a key or certificate that is still "
+                       "valid is not made anew)", id="ssh-pre-login-fallback", compact=True)
         if self.cluster is not None:
           yield Static(id="cluster-config")
       with Horizontal(id="cluster-actions"):
@@ -696,6 +700,7 @@ class AddClusterScreen(ModalScreen):
       return
     settings = cluster.ssh or {}
     self.query_one("#ssh-pre-login", Input).value = cluster.pre_login or ""
+    self.query_one("#ssh-pre-login-fallback", Checkbox).value = bool(cluster.pre_login_fallback)
     if settings:
       self.query_one("#cluster-full", Collapsible).collapsed = False
       for key in ("host", "user", "port", "jump", "name"):
@@ -769,9 +774,10 @@ class AddClusterScreen(ModalScreen):
     settings = self.settings()
     pre_login = self.query_one("#ssh-pre-login", Input).value.strip()
     destination = self.query_one("#cluster-destination", Input).value.strip()
+    before = {"pre_login": pre_login, **({"pre_login_fallback": True} if self.query_one("#ssh-pre-login-fallback", Checkbox).value else {})} if pre_login else {}
     if settings:
-      return {"ssh": settings, **({"pre_login": pre_login} if pre_login else {})}
-    return {"destination": destination, "pre_login": pre_login} if pre_login else destination
+      return {"ssh": settings, **before}
+    return {"destination": destination, **before} if pre_login else destination
 
   @on(Button.Pressed, "#cluster-check-button")
   def check_pressed(self, event):
@@ -786,7 +792,8 @@ class AddClusterScreen(ModalScreen):
     if not destination and not settings:
       self.notify("this machine: nothing to check (no SSH)", timeout=4)
       return
-    self.app.push_screen(SshCheckScreen(destination, settings, self.query_one("#ssh-pre-login", Input).value.strip()))
+    self.app.push_screen(SshCheckScreen(destination, settings, self.query_one("#ssh-pre-login", Input).value.strip(),
+                                        self.query_one("#ssh-pre-login-fallback", Checkbox).value))
 
   @on(Button.Pressed, "#cluster-cancel")
   def cancel_pressed(self):

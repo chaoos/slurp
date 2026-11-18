@@ -3477,10 +3477,36 @@ async def t_pre_login(app, pilot):
   await until(pilot, lambda: app.screen.session.done, 10); await pilot.pause(0.5)
   await pilot.press("escape"); await pilot.pause(0.3)
   await pilot.press("escape"); await pilot.pause(0.3)
+  # only when the login fails without it (the lab's key needs its passphrase: a login that asks nothing fails); what
+  # it exports is there for the login
+  os.unlink(signed)
+  command2 = f"printf 'one-time code: '; read code; echo \"signed with $code\" > {signed}; export SLURP_SIGNED=yes"
   app.edit_ssh_settings(cluster); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
+  app.screen.query_one("#ssh-pre-login").value = command2
+  app.screen.query_one("#ssh-pre-login-fallback").value = True
+  app.screen.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
+  check("the box: saved with the tab", cluster.pre_login_fallback and cluster.connection.pre_login_fallback
+        and any(t.get("pre_login_fallback") for t in load_config().get("tabs") or []))
+  app.disconnect(cluster); await pilot.pause(0.5)
+  calls = os.path.join(LAB, "ssh_calls.log")
+  before = len(open(calls).read().splitlines())
+  app.connect_tab()
+  ok = await until(pilot, lambda: "one-time code:" in term(app), 20)
+  masters = [l for l in open(calls).read().splitlines()[before:] if " -M " in l]
+  check("first a login without it that asks nothing (it failed), then the command", ok and masters and "BatchMode=yes" in masters[0]
+        and "BatchMode=yes" not in cluster.connection.argv and not os.path.exists(signed), (masters, term(app)[-300:]))
+  await pilot.press(*"43", "enter")
+  ok = await until(pilot, lambda: "passphrase" in term(app), 15)
+  check("…what it exported is there for the login", ok and "it set SLURP_SIGNED for the login" in term(app), term(app)[-400:])
+  await pilot.press(*"pw123", "enter")
+  ok = await until(pilot, lambda: cluster.connection.ready, 30)
+  check("…and it logs in", ok and open(signed).read().strip() == "signed with 43")
+  check("logged in: the next login tries without it first again", not cluster.connection.pre_login_due)
+  app.edit_ssh_settings(cluster); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
+  check("the dialog shows the box", app.screen.query_one("#ssh-pre-login-fallback").value)
   app.screen.query_one("#ssh-pre-login").value = ""
   app.screen.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
-  check("emptied: no command any more", cluster.pre_login == "" and cluster.connection.pre_login == "")
+  check("emptied: no command any more", cluster.pre_login == "" and cluster.connection.pre_login == "" and not cluster.pre_login_fallback)
 
 
 # ---- transfers: the lab's "cluster" is this machine, its login scripts print text (the junk) on every channel
