@@ -49,20 +49,52 @@ def version():
     return None
 
 def available():
-  """(True, "") if S3 endpoints can be used here; else (False, why)"""
+  """(True, "") if S3, SMB and WebDAV endpoints can be used here; else (False, why)"""
   if not installed():
     return False, "needs rclone on this machine (rclone.org/install)"
   return S.available()
 
-# ---- remotes
+# ---- remotes (S3, SMB, WebDAV)
+KINDS = ("s3", "smb", "webdav")
+REQUIRED = {"s3": ["access_key", "secret_key"], "smb": ["password"], "webdav": []} # (secrets a remote cannot do without)
+SECRET_WORDS = {"access_key": "access key", "secret_key": "secret key", "session_token": "session token",
+                "password": "password", "bearer_token": "token"}
+PLACEHOLDERS = {"access_key": "$AWS_ACCESS_KEY_ID", "secret_key": "$AWS_SECRET_ACCESS_KEY", "session_token": "$AWS_SESSION_TOKEN",
+                "password": "$PASSWORD", "bearer_token": "$TOKEN"}
+
 def remote_name(eid):
   """A remote's name for an endpoint (letters and digits: an environment variable's name)"""
   return "E" + re.sub(r"[^A-Za-z0-9]", "", eid).upper()
 
-def remote_env(name, settings, keys):
-  """The environment that makes the remote <name>: an S3 endpoint (settings: provider, endpoint, region; keys:
-  access_key, secret_key, session_token)"""
+def obscure(value):
+  """A password as rclone takes it (obscured: rclone obscure, the value on its stdin, not on a command line)"""
+  result = subprocess.run(["rclone", "obscure", "-"], input=value, capture_output=True, text=True, timeout=30)
+  if result.returncode:
+    raise RcloneError(f"rclone obscure failed: {said(result)}")
+  return result.stdout.strip()
+
+def remote_env(name, settings, keys, kind="s3", placeholder=False):
+  """The environment that makes the remote <name> of an endpoint of a kind (keys: its secrets; placeholder: they are
+  placeholders, for Copy as a command: a password is obscured by the command itself)"""
   p = f"RCLONE_CONFIG_{name}_"
+  def secret(key, option, obscured=False):
+    if keys.get(key):
+      value = keys[key]
+      env[p + option] = (f'$(printf %s "{value}" | rclone obscure -)' if placeholder else obscure(value)) if obscured else value
+  if kind == "smb":
+    env = {p + "TYPE": "smb", p + "HOST": settings.get("host", "")}
+    for key, option in (("port", "PORT"), ("user", "USER"), ("domain", "DOMAIN")):
+      if settings.get(key):
+        env[p + option] = str(settings[key])
+    secret("password", "PASS", obscured=True)
+    return env
+  if kind == "webdav":
+    env = {p + "TYPE": "webdav", p + "URL": settings.get("url", ""), p + "VENDOR": settings.get("vendor") or "other"}
+    if settings.get("user"):
+      env[p + "USER"] = settings["user"]
+    secret("password", "PASS", obscured=True)
+    secret("bearer_token", "BEARER_TOKEN")
+    return env
   env = {p + "TYPE": "s3", p + "PROVIDER": settings.get("provider") or ("AWS" if not settings.get("endpoint") else "Other"),
          p + "ENV_AUTH": "false", p + "NO_CHECK_BUCKET": "true"} # (no_check_bucket: copying needs no right to create it)
   if settings.get("endpoint"):
@@ -70,37 +102,52 @@ def remote_env(name, settings, keys):
   if settings.get("region"):
     env[p + "REGION"] = settings["region"]
   for key, option in (("access_key", "ACCESS_KEY_ID"), ("secret_key", "SECRET_ACCESS_KEY"), ("session_token", "SESSION_TOKEN")):
-    if keys.get(key):
-      env[p + option] = keys[key]
+    secret(key, option)
   return env
 
 def keys_of(definition):
-  """The keys of an S3 endpoint from the keyring (RcloneError if one it needs is missing)"""
+  """The secrets of an endpoint from the keyring (RcloneError if one it needs is missing)"""
   out = {name: S.get(S.user(definition.id, name)) for name in definition.secrets}
-  missing = [n for n in ("access_key", "secret_key") if n in definition.secrets and not out.get(n)]
+  missing = [n for n in REQUIRED.get(definition.kind, []) if not out.get(n)]
   if missing:
-    raise RcloneError(f"the keyring has no {' and no '.join(m.replace('_', ' ') for m in missing)} of {definition.name}: Edit… the endpoint")
+    raise RcloneError(f"the keyring has no {' and no '.join(SECRET_WORDS.get(m, m) for m in missing)} of {definition.name}: Edit… the endpoint")
   return {k: v for k, v in out.items() if v}
 
 def placeholders(definition):
-  """The keys as placeholders, for Copy as a command"""
-  return {"access_key": "$AWS_ACCESS_KEY_ID", "secret_key": "$AWS_SECRET_ACCESS_KEY",
-          **({"session_token": "$AWS_SESSION_TOKEN"} if "session_token" in definition.secrets else {})}
+  """The secrets as placeholders, for Copy as a command"""
+  return {name: PLACEHOLDERS.get(name, "$" + name.upper()) for name in definition.secrets}
 
-def path(name, settings, p):
-  """The rclone path of a path of the endpoint ("/" is the bucket's root)"""
+def path(name, settings, p, kind="s3"):
+  """The rclone path of a path of the endpoint: S3: in its bucket ("/" its root); SMB: in its share; WebDAV: under its URL"""
   key = posixpath.normpath("/" + (p or "/").lstrip("/")).lstrip("/")
-  return f"{name}:{settings.get('bucket', '')}" + (f"/{key}" if key else "")
+  if kind == "webdav":
+    return f"{name}:{key}"
+  root = settings.get("share" if kind == "smb" else "bucket", "")
+  return f"{name}:{root}" + (f"/{key}" if key else "")
+
+def address(definition, p):
+  """Where a path of an endpoint is, for people (to copy): s3://bucket/key, //server/share/path, the URL"""
+  s, key = definition.settings, "/" + (p or "/").lstrip("/")
+  if definition.kind == "smb":
+    return f"//{s.get('host', '')}/{s.get('share', '')}{key}"
+  if definition.kind == "webdav":
+    return s.get("url", "").rstrip("/") + key
+  return f"s3://{s.get('bucket', '')}{key}"
 
 class Endpoint:
-  """An S3 endpoint for rclone: its remote's environment and paths (keys: from the keyring, or placeholders)"""
-  def __init__(self, definition, keys=None):
-    self.definition, self.settings = definition, definition.settings
+  """An endpoint for rclone (S3, SMB, WebDAV): its remote's environment and paths (keys: its secrets, from the keyring
+  if None; placeholder: placeholders, for Copy as a command)"""
+  def __init__(self, definition, keys=None, placeholder=False):
+    self.definition, self.settings, self.kind = definition, definition.settings, definition.kind
     self.name = remote_name(definition.id)
-    self.env = remote_env(self.name, self.settings, keys if keys is not None else keys_of(definition))
+    self.env = remote_env(self.name, self.settings, keys if keys is not None else keys_of(definition), self.kind, placeholder)
 
   def path(self, p):
-    return path(self.name, self.settings, p)
+    return path(self.name, self.settings, p, self.kind)
+
+  def kind_of(self, p):
+    """"dir", "file" or None of a path of the endpoint"""
+    return kind(self.env, self.path(p), 0 if self.kind == "webdav" else 1)
 
 def run(args, env, timeout=120):
   """rclone args with the remotes of env (no config file) -> CompletedProcess"""
@@ -148,15 +195,18 @@ def lsjson(env, p, max_depth=1):
     out.append({"name": e["Name"], "dir": bool(e.get("IsDir")), "size": max(int(e.get("Size") or 0), 0), "mtime": mtime})
   return out
 
-def kind(env, p):
-  """"dir", "file" or None (not there). A key prefix is a folder; the bucket's root is one"""
-  folder, name = posixpath.split(p.rstrip("/"))
-  if not name or p.rstrip("/").endswith(":") or p.rstrip("/").count("/") == 0:
+def kind(env, p, root_depth=1):
+  """"dir", "file" or None (not there) of an rclone path ("NAME:rest"). A key prefix is a folder. root_depth: the
+  parts of rest that are the endpoint's root (S3: its bucket, SMB: its share: 1; WebDAV: none, 0)"""
+  remote, _, rest = p.partition(":")
+  parts = [x for x in rest.split("/") if x]
+  if len(parts) <= root_depth: # (the root of the endpoint)
     return "dir"
+  folder, name = f"{remote}:" + "/".join(parts[:-1]), parts[-1]
   try:
     entries = lsjson(env, folder)
   except RcloneError as e:
-    if "not found" in str(e).lower() or "directory not found" in str(e).lower():
+    if "not found" in str(e).lower() or "not there" in str(e).lower():
       return None
     raise
   entry = next((e for e in entries if e["name"] == name), None)

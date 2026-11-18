@@ -7,6 +7,7 @@ login(cluster, show=False), needs_login(cluster) and login_visible(cluster). Eve
 tick() (every second, on the UI thread) only looks at the state."""
 
 import os
+import posixpath
 import re
 import subprocess
 import threading
@@ -131,7 +132,7 @@ class Manager:
       self.start_globus(t)
       return
     if t.route == "rclone-cluster" and not self.secrets_agreed(t):
-      t.state, t.message = "failed", ("its run sends the keys of the S3 endpoint to the cluster: agree to it first "
+      t.state, t.message = "failed", ("its run sends the secrets of its endpoint (keys, a password) to the cluster: agree to it first "
                                       "(Edit…, Route), or run it through this machine")
       t.event(t.message)
       self.changed(t)
@@ -296,22 +297,22 @@ class Manager:
         self.followed[t.id] = 0 # (looked at at the next tick)
     used = None if transfers is None else {E.ref_id(r) for t in chosen for r in (t.source, t.dest)}
     for d in self.endpoint_store.defs:
-      if d.kind in ("s3", "globus") and (used is None or d.id in used) and self.endpoint_status.get(d.id, ("",))[0] != "connecting":
+      if d.kind in ("s3", "smb", "webdav", "globus") and (used is None or d.id in used) and self.endpoint_status.get(d.id, ("",))[0] != "connecting":
         self.endpoint_status.pop(d.id, None)
         self.ensure_tested(E.resolve(self.app, self.endpoint_store, {"endpoint": d.id}, self.endpoint_status))
     self.changed(None, save=False)
 
   def ensure_tested(self, endpoint):
-    """A Globus or S3 endpoint not tested yet in this session (that can be): tested now, once"""
+    """A Globus, S3, SMB or WebDAV endpoint not tested yet in this session (that can be): tested now, once"""
     if endpoint.id in self.endpoint_status or endpoint.state != "not connected":
       return
     if endpoint.kind == "globus" and G.logged_in():
       self.test_globus(endpoint)
-    elif endpoint.kind == "s3":
+    elif endpoint.kind in E.RCLONE_KINDS:
       self.test_s3(endpoint)
 
   def test_s3(self, endpoint, done=None, write=False):
-    """Connect/Test of an S3 endpoint (in a thread): its folder listed (write: also a marker written and deleted);
+    """Connect/Test of an S3, SMB or WebDAV endpoint (in a thread): its folder listed (write: also a marker written and deleted);
     its status of this session, then done(state, words) on the UI thread"""
     d = endpoint.definition
     self.endpoint_status[endpoint.id] = ("connecting", "asking it")
@@ -419,12 +420,12 @@ class Manager:
     return t.source if E.is_tab(E.ref_id(t.source)) else t.dest
 
   def s3_of(self, ref, keys=None):
-    """The S3 endpoint of an end for rclone (None: not one); keys None: from the keyring"""
+    """The rclone endpoint (S3, SMB, WebDAV) of an end (None: not one); keys None: from the keyring, else placeholders"""
     d = self.endpoint_store.get(E.ref_id(ref))
-    return RC.Endpoint(d, keys) if d is not None and d.kind == "s3" else None
+    return RC.Endpoint(d, keys, placeholder=keys is not None) if d is not None and d.kind in E.RCLONE_KINDS else None
 
   def secrets_agreed(self, t):
-    """Did the user agree to send the keys of its S3 endpoint to the cluster that runs rclone?"""
+    """Did the user agree to send the secrets of its endpoint (S3, SMB, WebDAV) to the cluster that runs rclone?"""
     tab = self.tab_end(t)
     s3 = t.dest if tab is t.source else t.source
     where = (tab.get("tab") or {}).get("destination") or ""
@@ -437,7 +438,7 @@ class Manager:
       if R.is_pattern(p):
         out.append((p, False))
       elif s3_src is not None:
-        out.append((p, RC.kind(s3_src.env, s3_src.path(p)) == "dir"))
+        out.append((p, s3_src.kind_of(p) == "dir"))
       elif src_cluster is not None and src_cluster.destination:
         found = Host(src_cluster).sh('[ -d "$1" ]', p)
         out.append((p, found.returncode == 0))
@@ -504,7 +505,7 @@ class Manager:
     self.from_thread(end)
 
   def run_rclone_cluster(self, t):
-    """rclone on the cluster of the tab (detached, or as a transfer job), through the runner; the keys of the S3
+    """rclone on the cluster of the tab (detached, or as a transfer job), through the runner; the secrets of the
     endpoint in the run's folder (the user agreed): read and deleted at the start"""
     try:
       tab = self.tab_end(t)
@@ -632,8 +633,13 @@ class Manager:
           found = RC.size({}, sized)
           plan["total_bytes"], plan["total_files"] = found["bytes"], found["files"]
           words.append(f"the sources hold {P.human(found['bytes'])} in {found['files']} files")
-      if dst_s3 is not None:
-        words.append("the destination: " + RC.test(dst_s3.env, dst_s3.path(t.dest.get("path", "/")), write=True))
+      if dst_s3 is not None: # (a folder not there yet is made by the run: the nearest one there is tested)
+        target = "/" + t.dest.get("path", "/").strip("/")
+        probe = target
+        while probe != "/" and dst_s3.kind_of(probe) is None:
+          probe = posixpath.dirname(probe.rstrip("/")) or "/"
+        words.append("the destination: " + RC.test(dst_s3.env, dst_s3.path(probe), write=True)
+                     + ("" if probe == target else f" (in {probe}: {target} is made at the run)"))
       plan["routes"][route] = {"ok": True, "runs_on": plan["runs_on"]}
       plan["recommended"] = route
       step("ok", "; ".join(words))
@@ -1155,7 +1161,8 @@ class Manager:
       d = self.endpoint_store.get(E.ref_id(ref))
       return RC.placeholders(d) if d is not None else {}
     lines = [f"# slurp transfer {t.name!r}: {M.ROUTES.get(t.route, t.route)} (rclone copy: it copies only what is missing "
-             "or changed, and deletes nothing)", "# the keys: export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY first"]
+             "or changed, and deletes nothing)", "# the secrets: export them first (" + ", ".join(
+               sorted({v.lstrip("$") for ref in (t.source, t.dest) for v in keys(ref).values()})) + ")"]
     if t.route == "rclone-cluster":
       lines.append(f"# on {M.tab_name((self.tab_end(t).get('tab') or {}))}:")
     for argv, env in self.rclone_steps(t, keys=keys):

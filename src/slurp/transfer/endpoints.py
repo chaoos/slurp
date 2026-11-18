@@ -21,7 +21,7 @@ from . import model as M
 
 LOCAL = "local"
 KINDS = {"local": "this machine", "tab": "cluster tab", "s3": "S3", "globus": "Globus", "smb": "SMB", "webdav": "WebDAV"}
-SECRETS = {"s3": ["access_key", "secret_key", "session_token"], "globus": ["refresh_token"], "smb": ["password"],
+SECRETS = {"s3": ["access_key", "secret_key", "session_token"], "globus": ["refresh_token"], "smb": ["password"],  # (webdav: password or token)
            "webdav": ["password"]}
 OPTIONAL_SECRETS = {"session_token"} # (an S3 session token: only for temporary keys)
 DEFINED = ("s3", "globus", "smb", "webdav") # (the kinds the user defines)
@@ -58,7 +58,7 @@ class EndpointDef:
     if self.kind == "globus":
       return s.get("collection_name") or s.get("collection", "")
     if self.kind == "smb":
-      return f"//{s.get('server', '')}/{s.get('share', '')}"
+      return f"//{s.get('host', '')}/{s.get('share', '')}" + (f" as {s['user']}" if s.get("user") else "")
     if self.kind == "webdav":
       return s.get("url", "")
     return ""
@@ -193,14 +193,15 @@ def listing(app, store, statuses=None):
 
 def default_state(definition):
   """(state, words) of a defined endpoint not connected yet in this session"""
-  if definition.kind == "s3":
+  if definition.kind in ("s3", "smb", "webdav"):
     from . import rclone as RC, secrets as S
     ok, why = RC.available()
     if not ok:
       return "not set up", why
-    missing = [n for n in S.missing(definition) if n not in OPTIONAL_SECRETS]
+    have = set(definition.secrets) - set(S.missing(definition))
+    missing = [n for n in RC.REQUIRED.get(definition.kind, []) if n not in have]
     if missing:
-      return "not set up", f"the keyring has no {' and no '.join(m.replace('_', ' ') for m in missing)}: Edit…"
+      return "not set up", f"the keyring has no {' and no '.join(RC.SECRET_WORDS.get(m, m) for m in missing)}: Edit…"
     return "not connected", ""
   if definition.kind == "globus":
     from . import globus as G
@@ -233,20 +234,25 @@ def globus_possible(store, source, dest):
   """Can Globus move the data between the ends (both have a collection)?"""
   return collection_of(store, source)[0] is not None and collection_of(store, dest)[0] is not None
 
-def is_s3(store, ref):
+RCLONE_KINDS = ("s3", "smb", "webdav") # (the kinds rclone moves the data of)
+
+def is_rclone(store, ref):
+  """Is the end an endpoint rclone reaches (S3, SMB, WebDAV)?"""
   d = store.get(ref_id(ref))
-  return d is not None and d.kind == "s3"
+  return d is not None and d.kind in RCLONE_KINDS
+
+is_s3 = is_rclone # (its first name)
 
 def rclone_pair(store, source, dest):
-  """rclone moves it: an end is an S3 endpoint"""
-  return is_s3(store, source) or is_s3(store, dest)
+  """rclone moves it: an end is an S3, SMB or WebDAV endpoint"""
+  return is_rclone(store, source) or is_rclone(store, dest)
 
 def rclone_routes(store, source, dest):
   """The rclone routes of a pair: rclone here (this machine and S3, or S3 and S3), or on the cluster of a tab"""
   if not rclone_pair(store, source, dest):
     return []
   tab = next((ref for ref in (source, dest) if ref_id(ref).startswith("tab:")), None)
-  if tab is not None and not (is_s3(store, source) and is_s3(store, dest)):
+  if tab is not None and not (is_rclone(store, source) and is_rclone(store, dest)):
     return ["rclone-cluster"]
   return ["rclone-here"]
 
