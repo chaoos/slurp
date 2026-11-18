@@ -82,6 +82,7 @@ class Transfer:
   next_run: float | None = None      # when the schedule runs it next (epoch)
   errors: list = field(default_factory=list)   # what rsync said about single files (of the last run)
   log: list = field(default_factory=list)      # events: [epoch, text]
+  pending: dict | None = None        # a run that waits for its tabs: {begin, scheduled, resume}
 
   @property
   def source_name(self): return tab_name(self.source.get("tab"))
@@ -102,7 +103,10 @@ class Transfer:
   def from_json(cls, data):
     known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
     t = cls(**known)
-    if t.state in ACTIVE and t.runs_on == "slurp": # (it ran in slurp, which ended: paused, Continue goes on)
+    if t.state in ACTIVE and (t.runs_on == "slurp" or not t.run.get("folder")):
+      # (it ran in slurp, which ended, or it was still starting: paused, Continue goes on)
+      if t.run:
+        record_run(t, "paused", "slurp ended")
       t.state, t.message = "paused", "paused (slurp ended)"
       t.run = {}
     return t

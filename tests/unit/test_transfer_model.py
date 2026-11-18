@@ -30,15 +30,20 @@ def test_store(check, tmp_path):
                  {"tab": {"destination": "jedi", "name": "jedi"}, "path": "/p/scratch"}, route="relay")
   t.state, t.run = "running", {"kind": "slurp", "started": 1.0}
   d = M.Transfer(M.new_id(), "job", t.source, t.dest, route="direct-push", runs_on="job")
-  d.state, d.run = "queued", {"kind": "job", "job": "123"}
+  d.state, d.run = "queued", {"kind": "job", "job": "123", "folder": "/h/.cache/slurp/transfers/x"}
+  cut = M.Transfer(M.new_id(), "cut", t.source, t.dest, route="direct-push", runs_on="detached")
+  cut.state, cut.run = "starting", {"kind": "detached", "started": 1.0}
   store.add(t)
   store.add(d)
+  store.add(cut)
   again = M.Store(store.path)
-  check("both read again", [x.name for x in again.transfers] == ["run42", "job"])
+  check("all read again", [x.name for x in again.transfers] == ["run42", "job", "cut"])
   r = again.get(t.id)
   check("a run in slurp that slurp's end cut off: paused (Continue goes on)", r.state == "paused" and r.run == {} and "slurp ended" in r.message, r)
   check("a transfer job goes on without slurp: as it was", again.get(d.id).state == "queued" and again.get(d.id).run["job"] == "123")
+  check("one that was still starting: paused, in the history", again.get(cut.id).state == "paused" and again.get(cut.id).runs[-1]["result"] == "paused")
   again.remove(again.get(d.id))
+  again.remove(again.get(cut.id))
   check("removed", [x.name for x in M.Store(store.path).transfers] == ["run42"])
   (tmp_path / "bad.json").write_text("{not json")
   check("a store that cannot be read: empty (a warning)", M.Store(str(tmp_path / "bad.json")).transfers == [])
