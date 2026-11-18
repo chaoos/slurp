@@ -253,8 +253,9 @@ step is a click away and the buttons are **Cancel** and **Save**: Save keeps the
 starts now) once every step is complete; its tooltip says what is missing (a changed source or destination: the
 check again, in Route).
 
-1. **Source**: a tab and one or more files or folders there (Browse…: Space marks several; or type a path). Each is
-   copied into the destination folder under its own name. Each shows what it holds, counted on its tab in the
+1. **Source**: a tab and one or more files or folders there (Browse…: Space marks several; or type a path), or
+   patterns such as `/path/to/dir/*.h5` (typed, or in Browse… the pattern field, which shows its matches, and **Choose
+   the pattern**): each match is copied. Each is copied into the destination folder under its own name. Each shows what it holds, counted on its tab in the
    background (its size, files, folders, links), and in all.
 2. **Destination**: a tab and a folder there (created if it is not there), with its home, scratch, project, …
 3. **Route**: slurp checks both sides and changes nothing: rsync on both, the paths, what remains to copy (an rsync
@@ -281,7 +282,9 @@ check again, in Route).
   "PickPathsScreen": ("Choose paths", """
 A folder of a tab: Enter or a click goes into a folder (`Backspace` or **Up**: the one above), the path at the top can
 be typed (Enter goes there), the buttons go to home, scratch, project, … To copy: `Space` marks files and folders,
-**Choose the marked** takes them; **Choose this folder** takes the folder shown.
+**Choose the marked** takes them; **Choose this folder** takes the folder shown; a pattern in the field below
+(`*.h5`, `run_??.out`) shows its matches in the list, and **Choose the pattern** (or Enter) takes it: each match is
+copied.
 """),
   "OverviewScreen": ("Overview", """
 The first subtab of every tab, always there (it cannot be closed): what a tab shows at the start, and when its other

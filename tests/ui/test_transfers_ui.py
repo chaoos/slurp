@@ -568,3 +568,44 @@ def test_job_tested(check, tmp_path, monkeypatch):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_pattern_source(check, tmp_path):
+  """A pattern as a source in the wizard: typed, or chosen in Browse… (the list shows its matches): what it matches,
+  where they go"""
+  from slurp.ui.screens.transfers import PickPathsScreen
+  data = tmp_path / "data"
+  data.mkdir()
+  for name in ("a.h5", "b.h5", "c.txt"):
+    (data / name).write_text("xx")
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      await pilot.press("T"); await pilot.pause(0.3)
+      w = app.screen
+      w.query_one("#tw-src-browse").press(); await pilot.pause(0.3)
+      picker = app.screen
+      check("Browse…: the picker", isinstance(picker, PickPathsScreen))
+      picker.query_one("#pp-path").value = str(data)
+      await pilot.click("#pp-path"); await pilot.press("enter")
+      await until(pilot, lambda: picker.entries, 10)
+      picker.query_one("#pp-pattern").value = "*.h5"; await pilot.pause(0.3)
+      table = picker.query_one("#pp-list")
+      check("a pattern: the list shows its matches", table.row_count == 2 and "2 matches" in str(picker.query_one("#pp-status").render()),
+            str(picker.query_one("#pp-status").render()))
+      picker.query_one("#pp-choose-pattern").press(); await pilot.pause(0.5)
+      check("Choose the pattern: a source", w.paths == [str(data / "*.h5")], w.paths)
+      check("…what it matches", await until(pilot, lambda: "2 matches · 4 Bytes · 2 files" in str(w.query_one("#tw-src-paths").render()), 10),
+            str(w.query_one("#tw-src-paths").render()))
+      w.query_one("#tw-src-path").value = str(data / "*.zip")
+      await pilot.click("#tw-src-path"); await pilot.press("enter")
+      check("a pattern that matches nothing: said", await until(pilot, lambda: "nothing matches" in str(w.query_one("#tw-src-paths").render()), 10))
+      w.query_one("#tw-dst-path").value = str(tmp_path / "dest"); await pilot.pause(0.3)
+      preview = str(w.query_one("#tw-dst-preview").render())
+      check("where they go: each match into the destination", f"*.h5 (each match)  →  Local:{tmp_path / 'dest'}/" in preview, preview)
+      w.dismiss(None); await pilot.pause(0.2)
+      await pilot.press("q")
+
+  asyncio.run(main())

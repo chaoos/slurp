@@ -18,7 +18,7 @@ from textual.widgets import Button, Checkbox, ContentSwitcher, Input, Label, Rad
 
 from ...cluster.listing import listing
 from ...cluster.remote import HEALTH_STYLES, connection_health, in_background
-from ...transfer import model as M, plan as P, schedule as S
+from ...transfer import model as M, plan as P, rsync as R, schedule as S
 from ...transfer.endpoint import Endpoint
 from ...transfer.manager import client_side, site_of
 from .. import icons
@@ -157,7 +157,8 @@ def if_slurp_closes(t, client_name="", host="", pack=None):
 
 class PickPathsScreen(ModalScreen):
   """Pick paths on a tab: a directory listing (Enter or a click: into a folder), Space marks entries (several:
-  multi), Choose. Dismissed with [paths] (the marked ones, or the folder shown), or None"""
+  multi), a pattern (*.h5: the listing shows its matches), Choose. Dismissed with [paths] (the marked ones, the folder
+  shown, or the pattern in it), or None"""
   DEFAULT_CSS = """
   PickPathsScreen { align: center middle; }
   #pp-dialog { width: 110; max-width: 96%; height: 90%; border: thick $accent; background: $surface; padding: 1 2; }
@@ -169,6 +170,8 @@ class PickPathsScreen(ModalScreen):
   #pp-places Button { margin-right: 1; }
   #pp-list { height: 1fr; margin-top: 1; }
   #pp-status { height: auto; color: $text-muted; }
+  #pp-pattern-row { height: auto; margin-top: 1; }
+  #pp-pattern { width: 1fr; margin-right: 1; }
   #pp-buttons { height: auto; align-horizontal: right; margin-top: 1; }
   #pp-buttons Button { margin-left: 1; }
   """
@@ -190,6 +193,11 @@ class PickPathsScreen(ModalScreen):
       yield Horizontal(id="pp-places")
       yield ClickTable(id="pp-list", cursor_type="row", zebra_stripes=True)
       yield Static(id="pp-status")
+      if self.multi:
+        with Horizontal(id="pp-pattern-row"):
+          yield Input(placeholder="or a pattern in this folder: *.h5, run_??.out, step_[0-9]*.log (the list shows its matches)",
+                      id="pp-pattern", tooltip="its matches are copied, each into the destination folder (as cp does)")
+          yield Button("Choose the pattern", id="pp-choose-pattern", compact=True, disabled=True)
       with Horizontal(id="pp-buttons"):
         yield Button("Cancel", id="pp-cancel", compact=True)
         if self.multi:
@@ -237,15 +245,39 @@ class PickPathsScreen(ModalScreen):
   def populate(self):
     table = self.query_one("#pp-list", ClickTable)
     table.clear()
-    if self.path != "/":
+    pattern = self.pattern()
+    if self.path != "/" and not pattern:
       table.add_row("", Text("..", style="bold"), "", "", key="..")
-    for e in sorted(self.entries, key=lambda e: (not e["dir"], e["name"].lower())):
+    import fnmatch
+    shown = [e for e in self.entries if not pattern or fnmatch.fnmatchcase(e["name"], pattern)]
+    for e in sorted(shown, key=lambda e: (not e["dir"], e["name"].lower())):
       table.add_row("✓" if e["name"] in self.marked else "", Text(e["name"] + ("/" if e["dir"] else ""), style="bold blue" if e["dir"] else ""),
                     "" if e["dir"] else human(e["size"]), datetime.fromtimestamp(e["mtime"]).strftime("%Y-%m-%d %H:%M"), key=e["name"])
     hint = "Space marks, Enter: into a folder" if self.multi else "Enter: into a folder"
-    self.query_one("#pp-status", Static).update(Text(f"{self.path} · {len(self.marked)} marked · {hint}" if self.multi else f"{self.path} · {hint}", style="dim"))
+    status = f"{self.path} · {len(self.marked)} marked · {hint}" if self.multi else f"{self.path} · {hint}"
+    if pattern:
+      status = f"{self.path}/{pattern}: {len(shown)} match{'es' if len(shown) != 1 else ''} (shown)"
+    self.query_one("#pp-status", Static).update(Text(status, style="dim"))
     for b in self.query("#pp-marked").results(Button):
       b.disabled = not self.marked
+    for b in self.query("#pp-choose-pattern").results(Button):
+      b.disabled = not pattern
+
+  def pattern(self):
+    found = self.query("#pp-pattern").results(Input)
+    text = next(iter(found)).value.strip() if found else ""
+    return text if text and "/" not in text else ""
+
+  @on(Input.Changed, "#pp-pattern")
+  def pattern_typed(self, event):
+    event.stop()
+    self.populate()
+
+  @on(Input.Submitted, "#pp-pattern")
+  def pattern_submitted(self, event):
+    event.stop()
+    if self.pattern():
+      self.dismiss([self.full(self.pattern())])
 
   def full(self, name):
     return os.path.join(self.path, name) if self.path != "/" else "/" + name
@@ -306,6 +338,9 @@ class PickPathsScreen(ModalScreen):
     elif bid == "pp-here":
       event.stop()
       self.dismiss([self.path])
+    elif bid == "pp-choose-pattern" and self.pattern():
+      event.stop()
+      self.dismiss([self.full(self.pattern())])
 
   def action_cancel(self):
     self.dismiss(None)
@@ -442,15 +477,15 @@ class TransferWizard(ModalScreen):
           yield Button(f"{i + 1} {name}", id=f"tw-goto-{i}", compact=True)
       with ContentSwitcher(id="tw-switch", initial="tw-step-0"):
         with VerticalScroll(id="tw-step-0"):
-          yield Static("What to copy: a tab, and one or more files or folders there. Each is copied into the destination "
-                       "folder under its own name.", classes="tw-note")
+          yield Static("What to copy: a tab, and one or more files or folders there, or patterns (/path/to/dir/*.h5: each "
+                       "match). Each is copied into the destination folder under its own name.", classes="tw-note")
           with Horizontal(classes="tw-row"):
             yield Label("From")
             yield Select(self.tab_options(), id="tw-src-tab", allow_blank=False, value=self.tab_value(self.src), compact=True)
           yield Static(id="tw-src-state", classes="tw-note")
           yield Static(id="tw-src-paths")
           with Horizontal(classes="tw-row"):
-            yield Input(placeholder="a path (Enter adds it; ~ and relative paths are in your home)", id="tw-src-path")
+            yield Input(placeholder="a path or a pattern (*.h5): Enter adds it; ~ and relative paths are in your home", id="tw-src-path")
             yield Button("Browse…", id="tw-src-browse", compact=True)
             yield Button("Remove the last", id="tw-src-remove", compact=True)
         with VerticalScroll(id="tw-step-1"):
@@ -790,7 +825,8 @@ class TransferWizard(ModalScreen):
     width = min(max(cell_len(p) for p in self.paths), 70)
     text, total, known = Text(), {"bytes": 0, "files": 0, "dirs": 0, "links": 0}, True
     def what(c):
-      words = f"{human(c['bytes'])} · {c['files']:,} file{'s' if c['files'] != 1 else ''}"
+      words = (f"{c['matches']:,} match{'es' if c['matches'] != 1 else ''} · " if "matches" in c else "") + (
+        f"{human(c['bytes'])} · {c['files']:,} file{'s' if c['files'] != 1 else ''}")
       if c["dirs"] > 1 or (c["dirs"] == 1 and c["files"] != 1):
         words += f" · {c['dirs']:,} folder{'s' if c['dirs'] != 1 else ''}"
       if c["links"]:
@@ -803,7 +839,7 @@ class TransferWizard(ModalScreen):
         text.append(f"{self.app.spinner()} counting …", style="yellow")
         known = False
       elif c is None:
-        text.append("not there", style="red")
+        text.append("nothing matches" if R.is_pattern(p) else "not there", style="red")
       elif c == "failed":
         text.append("not counted", style="dim")
         known = False
@@ -898,7 +934,8 @@ class TransferWizard(ModalScreen):
     if not self.paths or not self.dest_path or self.dst is None:
       preview.update("")
       return
-    lines = [f"  {os.path.basename(p.rstrip('/'))}  →  {self.dst.name}:{os.path.join(self.dest_path, os.path.basename(p.rstrip('/')))}"
+    lines = [(f"  {os.path.basename(p)} (each match)  →  {self.dst.name}:{self.dest_path.rstrip('/')}/" if R.is_pattern(p) else
+              f"  {os.path.basename(p.rstrip('/'))}  →  {self.dst.name}:{os.path.join(self.dest_path, os.path.basename(p.rstrip('/')))}")
              for p in self.paths[:6]]
     preview.update(Text("\n".join(["What goes where:", *lines, *(["  …"] if len(self.paths) > 6 else [])])))
 
