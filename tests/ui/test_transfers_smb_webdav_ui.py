@@ -192,6 +192,8 @@ def test_endpoint_window(check, webdav):
       settings = shown(w.query_one("#epd-settings"))
       check("its settings: the URL, the user; the password there, its value not", f"http://127.0.0.1:{port}" in settings and "dav" in settings
             and "password ✓" in settings and "pw456" not in settings, settings)
+      check("its server: what it says of itself (rclone serve webdav)", await until(pilot, lambda: "rclone/" in shown(w.query_one("#epd-server"))),
+            shown(w.query_one("#epd-server")))
       connection = shown(w.query_one("#epd-connection"))
       check("its connection: rclone here", "rclone" in connection and "on this machine" in connection, connection)
       await pilot.press("t")

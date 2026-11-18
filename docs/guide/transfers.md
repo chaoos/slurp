@@ -87,8 +87,11 @@ connected with its latency, ○ needs login, connecting, needs you, tab not open
 **Connect**, **Disconnect**, **Test**, **Edit…** and **Delete** (refused while transfers use it, which it names).
 **Enter** (or a click) opens its window: a tab's is its connection window (as in the tab); an S3, SMB, WebDAV or
 Globus endpoint has one alike, with its address and settings, its secrets (only whether the keyring has each, never a
-value), its connection (its state, its last test and how long it took, what reaches it: rclone here, or Globus and the
-Globus login), the transfers that use it, and the course of its tests; **Test**, **Edit…**, **Disconnect** and **Copy
+value), its server (what it says of itself without a change: WebDAV and S3 their software from their headers,
+Nextcloud's or ownCloud's version, the WebDAV classes, the bucket's region; SMB the protocol it speaks, signing,
+encryption, the logins it takes, Samba; the space where the server tells; Globus the collection's owner, organization,
+GCS version and storage), its connection (its state, its last test and how long it took, what reaches it: rclone here,
+or Globus and the Globus login), the transfers that use it, and the course of its tests; **Test**, **Edit…**, **Disconnect** and **Copy
 address** there.
 Secrets are kept only in the system keyring (Secret Service, Keychain, Windows
 Credential Manager), never in a file of slurp: where there is no keyring, the kinds that need one say so.

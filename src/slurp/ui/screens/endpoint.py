@@ -1,6 +1,7 @@
 """The window of an endpoint that is no tab (S3, SMB, WebDAV, Globus), as the connection window of a tab: where it
 points, its settings (its secrets: only whether the keyring has them), its connection (its state, its last test, what
 reaches it), the transfers that use it, and the course of its tests; Test, Edit…, Disconnect, Copy address"""
+import threading
 import time
 from datetime import datetime
 
@@ -60,12 +61,15 @@ class EndpointScreen(ModalScreen):
     super().__init__()
     self.eid = eid
     self.rclone = None # (rclone's version here: asked once, when it opens)
+    self.server = None # (what its server says of itself: [(label, value)]; None: being asked)
+    self.server_for = None # (the last test it was asked after)
 
   def compose(self) -> ComposeResult:
     with Vertical(id="epd-dialog"):
       yield Static(id="epd-title")
       with VerticalScroll(id="epd-body"):
-        for part, head in (("settings", "Settings"), ("connection", "Connection"), ("used", "Used by"), ("course", "Course of its tests")):
+        for part, head in (("settings", "Settings"), ("server", "Server"), ("connection", "Connection"), ("used", "Used by"),
+                           ("course", "Course of its tests")):
           yield Static(head, classes="epd-head")
           yield Static(id=f"epd-{part}", classes="epd-part")
       with Horizontal(id="epd-buttons"):
@@ -79,7 +83,28 @@ class EndpointScreen(ModalScreen):
     e = self.endpoint()
     if e is not None and e.kind in RC.KINDS:
       self.rclone = RC.version() or ()
+    self.ask_server()
     self.show()
+
+  def ask_server(self):
+    """What its server says of itself (software, version, protocol, space), in a thread; again after each test"""
+    e = self.endpoint()
+    if e is None or e.definition is None:
+      return
+    self.server, self.server_for = None, self.manager.endpoint_tested.get(self.eid)
+    from ...transfer import probe
+    def work():
+      try:
+        rows = probe.server_info(e.definition)
+      except Exception as err:
+        rows = [("Server", f"not asked: {err}")]
+      self.app.call_from_thread(self.got_server, rows)
+    threading.Thread(target=work, daemon=True, name=f"server info {e.name}").start()
+
+  def got_server(self, rows):
+    if self.is_attached:
+      self.server = rows
+      self.show()
     self.set_interval(1, self.show)
 
   @property
@@ -104,6 +129,9 @@ class EndpointScreen(ModalScreen):
     for other in STYLES:
       dialog.set_class(other == level, f"-{other}")
     self.query_one("#epd-settings", Static).update(self.settings_grid(d))
+    if self.server is not None and self.manager.endpoint_tested.get(self.eid) != self.server_for: # (tested again: asked again)
+      self.ask_server()
+    self.query_one("#epd-server", Static).update(self.server_grid())
     self.query_one("#epd-connection", Static).update(self.connection_grid(e))
     self.query_one("#epd-used", Static).update(self.used_text())
     self.query_one("#epd-course", Static).update(self.course_grid())
@@ -137,6 +165,16 @@ class EndpointScreen(ModalScreen):
         have.append("✓" if there else "✗ missing", style="green" if there else "red")
       have.append(" (in the keyring)", style="dim")
       g.add_row("Secrets", have)
+    return g
+
+  def server_grid(self):
+    if self.server is None:
+      return Text("asking it …", style="yellow")
+    if not self.server:
+      return Text("it says nothing of itself", style="dim")
+    g = self.grid()
+    for label, value in self.server:
+      g.add_row(label, str(value))
     return g
 
   def connection_grid(self, e):

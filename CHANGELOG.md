@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Endpoints: an endpoint's window says what its server is, without changing
+  anything: WebDAV and S3 software from their headers (Nextcloud/ownCloud
+  version from status.php, WebDAV classes, the bucket's region), SMB the
+  dialect, signing, encryption, logins and Samba (an SMB2 negotiate), the
+  space where the server tells, Globus what it knows of the collection.
 - Transfers: editing a transfer from S3, SMB, WebDAV or Globus shows its
   sources in step 1 (and what goes where in step 2); the list stayed empty.
 - Transfers: rclone on this machine reaching a cluster over slurp's SSH runs

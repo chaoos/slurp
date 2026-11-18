@@ -301,7 +301,12 @@ keyring lacks one of its keys. S3, SMB and WebDAV: rclone moves the data; secret
   "EndpointScreen": ("An endpoint", """
 The window of an S3, SMB, WebDAV or Globus endpoint, as a tab's connection window: its border says its state (green:
 connected, yellow: not tested or connecting, red: failed or not set up). **Settings**: its address and what its form
-holds; its secrets only as there (✓) or missing (✗) in the keyring, never their values. **Connection**: its state, its
+holds; its secrets only as there (✓) or missing (✗) in the keyring, never their values. **Server**: what its server
+says of itself without a change: WebDAV its software (the Server header, Nextcloud's or ownCloud's product and version)
+and WebDAV classes; S3 its software and the bucket's region; SMB the protocol it speaks (SMB 2.1, 3.0, …), signing,
+encryption and its other offers, the logins it takes, Samba; its space where the server tells (total, used, free);
+Globus what Globus knows of the collection (owner, organization, GCS version, storage). Asked when the window opens and
+after each test. **Connection**: its state, its
 last test (when, how long it took), what reaches it (rclone on this machine, as a remote of its environment; or Globus,
 and whether you are logged in and gave consent). **Used by**: the transfers that use it. **Course of its tests**: each
 test, with its result. **Test** (`t`), **Edit…** (`e`), **Disconnect**, **Copy address** (s3://…, //server/share, the
