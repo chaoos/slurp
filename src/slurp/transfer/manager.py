@@ -287,7 +287,7 @@ class Manager:
     if not t.run:
       return
     out = R.Output()
-    out.feed(status.get("log", ""))
+    out.feed(status.get("log", "").rpartition("== run ")[2]) # (the log has all runs: this one's part)
     out.close()
     p = RN.progress_of(status.get("progress"))
     if p:
