@@ -113,8 +113,11 @@ subtab of its own:
   for it, a destination that is not there yet as the nearest folder that is;
 - its progress: a bar, bytes of the total, the rate (for the relay also through slurp), the time left, files, the
   errors; the file it copies now; the rate over time;
-- what happens if slurp closes; its schedule; the errors rsync reported for single files; its runs (when, how it
-  ended, how much, the route, the job); what the check found; its log.
+- what happens if slurp closes; its schedule; the errors rsync reported for single files; **Runs**: how many times it
+  ran, how the runs ended and the last one. A click on it lists the runs, the last first (number, start, end, how long,
+  how it ended, how much and how many files, the rate, the route, the job or host, why it ended so); a click on a run
+  shows its details: what it copied of how much, where it ran (its job, its folder on the cluster), its options,
+  rsync's statistics, its errors and its events. `Esc` goes back. What the check found; its log.
 
 **Pause** (`p`) stops the run; rsync keeps the half-copied file in `.slurp-partial` on the destination and the next run
 goes on from it. A transfer job is cancelled for it, and loses its place in the queue and the time it used: slurp asks

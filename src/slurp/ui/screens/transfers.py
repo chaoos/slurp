@@ -1449,7 +1449,7 @@ class TransferScreen(TransfersBase):
       yield Static("Errors of the last run", classes="section", id="xd-errors-title")
       yield Static(id="xd-errors")
       yield Static("Runs", classes="section")
-      yield Static(id="xd-runs")
+      yield Button("", id="xd-runs", compact=True, tooltip="all its runs: when, how long, how they ended (a click on one: its details)")
       yield Static("The check", classes="section")
       yield Static(id="xd-check")
       yield Static("Log", classes="section")
@@ -1537,13 +1537,9 @@ class TransferScreen(TransfersBase):
     errors = t.errors or []
     q("#xd-errors-title", Static).display = q("#xd-errors", Static).display = bool(errors)
     q("#xd-errors", Static).update(Text("\n".join(errors[-30:]), style="yellow"))
-    runs = Text()
-    for r in reversed(t.runs[-15:]):
-      runs.append(f"{datetime.fromtimestamp(r['started']).strftime('%Y-%m-%d %H:%M')} – {datetime.fromtimestamp(r['ended']).strftime('%H:%M')}  ")
-      runs.append(f"{M.STATES.get(r['result'], r['result']):17}", style=STATE_STYLES.get(r["result"], ""))
-      runs.append(f" {human(r.get('bytes')):>10}  {ROUTE_SHORT.get(r.get('route'), r.get('route', ''))}, {RUNS_SHORT.get(r.get('runs_on'), '')}"
-                  + (f", job {r['job']}" if r.get("job") else "") + (f"  {r['message'][:80]}" if r.get("message") else "") + "\n")
-    q("#xd-runs", Static).update(runs if t.runs else Text("none yet", style="dim"))
+    q("#xd-runs", Button).label = runs_label(t)
+    q("#xd-runs", Button).disabled = not t.runs
+
     check = plan_text(t.plan) if t.plan.get("steps") else Text("no check", style="dim")
     if t.plan.get("routes"):
       check.append_text(routes_text(t.plan))
@@ -1603,6 +1599,8 @@ class TransferScreen(TransfersBase):
         self.app.connect_cluster(missing[0])
     elif bid == "xd-job":
       self.app.open_transfer_job(t)
+    elif bid == "xd-runs" and t.runs:
+      self.app.push_screen(TransferRunsScreen(t.id))
 
   def action_pause(self):
     if self.transfer is not None:
@@ -1619,6 +1617,186 @@ class TransferScreen(TransfersBase):
   def action_edit(self):
     if self.transfer is not None:
       self.edit(self.transfer)
+
+def runs_label(t):
+  """The Runs field: how many times it ran, how they ended, the last one"""
+  if not t.runs:
+    return "never ran yet"
+  counts = {}
+  for r in t.runs:
+    counts[r["result"]] = counts.get(r["result"], 0) + 1
+  parts = ", ".join(f"{n} {M.STATES.get(k, k)}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1]))
+  last = t.runs[-1]
+  shown = f" (the last {len(t.runs)}: {parts})" if t.run_count > len(t.runs) else f" ({parts})"
+  return (f"ran {t.run_count} time{'s' if t.run_count != 1 else ''}{shown} · last: {S.when_text(last['ended'])} "
+          f"{M.STATES.get(last['result'], last['result'])} · show all …")
+
+def took(r):
+  return P.duration(max(r["ended"] - r["started"], 0))
+
+def stamp(epoch):
+  return datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M:%S") if epoch else "—"
+
+RUN_COLUMNS = [("n", "#"), ("started", "Started"), ("ended", "Ended"), ("took", "Took"), ("result", "Result"),
+               ("bytes", "Copied"), ("files", "Files"), ("rate", "Rate"), ("how", "Route"), ("where", "Job / host"),
+               ("message", "Message")]
+
+class TransferRunsScreen(TransfersBase):
+  """The runs of a transfer, the last first: when, how long, how they ended, how much; a click on one: its details"""
+  SHOW_BACK = True
+  DEFAULT_CSS = """
+  #xr-title { height: auto; padding: 0 1; background: $panel; }
+  #xr-list { height: 1fr; }
+  """
+  BINDINGS = [Binding("escape", "back", "Back")]
+  icon_name = "transfer"
+
+  def __init__(self, tid):
+    super().__init__()
+    self.tid = tid
+    self.shown_keys = None
+
+  def compose_left(self):
+    yield Static(id="xr-title")
+    yield ClickTable(id="xr-list", cursor_type="row", zebra_stripes=True)
+
+  def on_mount(self):
+    table = self.query_one("#xr-list", ClickTable)
+    for key, label in RUN_COLUMNS:
+      table.add_column(label, key=key)
+    super().on_mount()
+    table.focus()
+
+  def refresh_view(self):
+    if not self.is_mounted:
+      return
+    t = self.manager.get(self.tid)
+    if t is None:
+      self.query_one("#xr-title", Static).update(Text("This transfer was deleted.", style="dim"))
+      return
+    self.query_one("#xr-title", Static).update(Text.assemble((t.name, "bold"), f": {runs_label(t).removesuffix(' · show all …')}"
+                                                             " · Enter or a click: the details of a run"))
+    keys = [str(r["started"]) for r in t.runs]
+    if keys == self.shown_keys: # (only when the runs changed: the cursor stays)
+      return
+    self.shown_keys = keys
+    table = self.query_one("#xr-list", ClickTable)
+    table.clear()
+    first = t.run_count - len(t.runs) + 1
+    for i, r in reversed(list(enumerate(t.runs))):
+      where = (f"job {r['job']}" if r.get("job") else "") or r.get("host", "")
+      table.add_row(str(r.get("number") or first + i), stamp(r["started"]), stamp(r["ended"]), took(r),
+                    Text(M.STATES.get(r["result"], r["result"]), style=STATE_STYLES.get(r["result"], "")),
+                    human(r.get("bytes")), str(r.get("files") or 0), rate_text(r.get("rate")),
+                    f"{ROUTE_SHORT.get(r.get('route'), r.get('route', ''))} · {RUNS_SHORT.get(r.get('runs_on'), '')}",
+                    where, (r.get("message") or "")[:80], key=str(r["started"]))
+
+  @on(ClickTable.RowSelected, "#xr-list")
+  def selected(self, event):
+    event.stop()
+    self.app.push_screen(TransferRunScreen(self.tid, float(event.row_key.value)))
+
+  def action_back(self):
+    self.app.pop_screen()
+
+class TransferRunScreen(TransfersBase):
+  """One run of a transfer: when and how long, how it ended and why, what it copied, where it ran, rsync's statistics,
+  its errors, its events"""
+  SHOW_BACK = True
+  DEFAULT_CSS = """
+  #xu-body { height: 1fr; padding: 0 1; }
+  #xu-body Static { height: auto; }
+  #xu-actions { height: auto; margin: 1 0 0 0; }
+  #xu-actions Button { margin-right: 1; }
+  """
+  BINDINGS = [Binding("escape", "back", "Back")]
+  icon_name = "transfer"
+
+  def __init__(self, tid, started):
+    super().__init__()
+    self.tid, self.started = tid, started
+
+  def compose_left(self):
+    with VerticalScroll(id="xu-body"):
+      yield Static(id="xu-head")
+      with Horizontal(id="xu-actions"):
+        yield Button(icons.label("jobs", "Its job"), id="xu-job", compact=True, tooltip="the job window of this run's transfer job")
+      yield Static(id="xu-facts")
+      yield Static("rsync's statistics", classes="section")
+      yield Static(id="xu-stats")
+      yield Static("Errors", classes="section", id="xu-errors-title")
+      yield Static(id="xu-errors")
+      yield Static("Events", classes="section")
+      yield Static(id="xu-events")
+
+  def run_and_transfer(self):
+    t = self.manager.get(self.tid)
+    r = next((r for r in (t.runs if t else []) if r["started"] == self.started), None)
+    return t, r
+
+  def refresh_view(self):
+    if not self.is_mounted:
+      return
+    t, r = self.run_and_transfer()
+    q = self.query_one
+    if r is None:
+      q("#xu-head", Static).update(Text("This run is no longer in the history.", style="dim"))
+      return
+    head = Text.assemble((f"Run {r.get('number') or '?'} of {t.name}", "bold"), "  ",
+                         (M.STATES.get(r["result"], r["result"]), STATE_STYLES.get(r["result"], "")))
+    if r.get("message"):
+      head.append(f" · {r['message']}")
+    q("#xu-head", Static).update(head)
+    q("#xu-job", Button).display = bool(r.get("job"))
+    facts = Text()
+    def row(label, value, style=""):
+      facts.append(f"{label:12}", style="bold")
+      facts.append(f"{value}\n", style=style)
+    row("Started", stamp(r["started"]))
+    row("Ended", stamp(r["ended"]))
+    row("Took", took(r))
+    row("Copied", human(r.get("bytes")) + (f" of {human(r['total'])}" if r.get("total") else "") + f", {r.get('files') or 0} files"
+        + (f", {rate_text(r['rate'])} on average" if r.get("rate") else ""))
+    row("Route", f"{M.ROUTES.get(r.get('route'), r.get('route', ''))}, {M.RUNS_ON.get(r.get('runs_on'), r.get('runs_on', ''))}")
+    if r.get("job") or r.get("host"):
+      row("Ran on", ", ".join(x for x in (f"job {r['job']}" if r.get("job") else "", r.get("host", "")) if x))
+    if r.get("folder"):
+      row("Its folder", r["folder"], "dim")
+    if r.get("sources"):
+      row("From", ", ".join(r["sources"]))
+      row("Into", r.get("dest", ""))
+    opts = [w for k, w in (("checksum", "checksums"), ("compress", "compressed"), ("temp_key", "temporary key")) if (r.get("options") or {}).get(k)]
+    if (r.get("options") or {}).get("bwlimit"):
+      opts.append(f"at most {r['options']['bwlimit']} MB/s")
+    row("Options", ", ".join(opts) or "—")
+    q("#xu-facts", Static).update(facts)
+    stats = r.get("stats") or {}
+    names = {"files": "files and folders", "transferred": "files copied", "created": "files created", "total_size": "total size",
+             "to_transfer": "size of the files copied", "literal": "data sent as is", "sent": "bytes sent", "received": "bytes received"}
+    text = Text()
+    for key, label in names.items():
+      if key in stats:
+        value = stats[key]
+        text.append(f"{label:26}", style="dim")
+        text.append((human(value) if key in ("total_size", "to_transfer", "literal", "sent", "received") else str(value)) + "\n")
+    q("#xu-stats", Static).update(text if stats else Text("none (it ended before rsync said them)", style="dim"))
+    errors = r.get("errors") or []
+    q("#xu-errors-title", Static).display = q("#xu-errors", Static).display = bool(errors or r.get("error_count"))
+    q("#xu-errors", Static).update(Text((f"{r.get('error_count')} errors" + (f", the first {len(errors)}:" if len(errors) < (r.get("error_count") or 0) else ":")
+                                         + "\n" + "\n".join(errors)), style="yellow"))
+    events = r.get("events") or []
+    q("#xu-events", Static).update(Text("\n".join(f"{stamp(ts)}  {words}" for ts, words in events), style="dim")
+                                   if events else Text("none", style="dim"))
+
+  @on(Button.Pressed, "#xu-job")
+  def job_pressed(self, event):
+    event.stop()
+    t, r = self.run_and_transfer()
+    if r is not None and r.get("job"):
+      self.app.open_transfer_job(t, r["job"])
+
+  def action_back(self):
+    self.app.pop_screen()
 
 def rates(history):
   """[(time, bytes per second)] from the progress history ([[time, bytes]])"""

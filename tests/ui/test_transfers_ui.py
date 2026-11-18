@@ -324,3 +324,52 @@ def test_paths_open(check, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_runs(check, tmp_path):
+  """The details have a Runs field: how many times it ran; a click: the list of runs (the last first); a click on one:
+  its details (times, what it copied, rsync's statistics, its events); Esc goes back"""
+  from slurp.transfer import model as M
+  from slurp.ui.screens.transfers import TransferRunScreen, TransferRunsScreen
+  src, dst = files(tmp_path)
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      ref = M.tab_ref(app.clusters[0])
+      t = M.Transfer(M.new_id(), "twice", {"tab": ref, "paths": [str(src)]}, {"tab": ref, "path": str(dst)}, route="relay", runs_on="slurp")
+      app.transfers.add(t)
+      app.open_transfer(t); await pilot.pause(0.4)
+      field = app.screen.query_one("#xd-runs")
+      check("no runs yet: said, nothing to open", str(field.label) == "never ran yet" and field.disabled, str(field.label))
+      for n in (1, 2):
+        app.transfers.start(t)
+        check(f"run {n} done", await until(pilot, lambda: len(t.runs) == n and t.state == "done", 30), (t.state, t.message))
+      await pilot.pause(1.2)
+      label = str(app.screen.query_one("#xd-runs").label)
+      check("the field: ran 2 times, how they ended, the last", label.startswith("ran 2 times (2 done) · last:"), label)
+      await pilot.click("#xd-runs"); await pilot.pause(0.5)
+      runs = app.screen
+      table = runs.query_one("#xr-list") if isinstance(runs, TransferRunsScreen) else None
+      check("a click: the list of runs", table is not None and table.row_count == 2, type(runs).__name__)
+      first_row = [str(c) for c in table.get_row_at(0)] if table is not None else []
+      check("…the last first, with its number, result, what it copied", first_row[:1] == ["2"] and first_row[4] == "done", first_row)
+      await pilot.press("enter"); await pilot.pause(0.5)
+      run = app.screen
+      check("Enter on a run: its details", isinstance(run, TransferRunScreen))
+      if isinstance(run, TransferRunScreen):
+        head, facts = str(run.query_one("#xu-head").render()), str(run.query_one("#xu-facts").render())
+        stats, events = str(run.query_one("#xu-stats").render()), str(run.query_one("#xu-events").render())
+        check("its head: run 2 of the transfer, done", "Run 2 of twice" in head and "done" in head, head)
+        check("its facts: times, how long, the route", "Started" in facts and "Took" in facts and "relay through slurp" in facts, facts)
+        check("rsync's statistics: the second run copied nothing", "files copied" in stats and "files copied              0" in stats, stats)
+        check("its events", "run started" in events, events)
+      await pilot.press("escape"); await pilot.pause(0.3)
+      check("Esc: the list again", isinstance(app.screen, TransferRunsScreen))
+      await pilot.press("escape"); await pilot.pause(0.3)
+      check("Esc: the transfer's details again", type(app.screen).__name__ == "TransferScreen")
+      check("the counter is kept", M.Store(app.transfers.store.path).get(t.id).run_count == 2)
+      await pilot.press("q")
+
+  asyncio.run(main())

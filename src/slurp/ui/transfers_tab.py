@@ -243,9 +243,9 @@ class TransfersTab:
     self.activate_cluster(self.clusters.index(cluster), connect=False)
     self.connect_tab()
 
-  def open_transfer_job(self, t):
-    """The job window of a transfer's job, in the tab of the cluster it runs on"""
-    jid = t.run.get("job") or next((r.get("job") for r in reversed(t.runs) if r.get("job")), "")
+  def open_transfer_job(self, t, jid=""):
+    """The job window of a transfer's job (of its run under way or its last one, or jid), in the tab of its cluster"""
+    jid = jid or t.run.get("job") or next((r.get("job") for r in reversed(t.runs) if r.get("job")), "")
     src, dst = self.transfers.ends(t)
     cluster = dst if client_side(t.route) == "dest" else src
     if not jid or cluster is None:

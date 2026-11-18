@@ -83,6 +83,10 @@ class Transfer:
   errors: list = field(default_factory=list)   # what rsync said about single files (of the last run)
   log: list = field(default_factory=list)      # events: [epoch, text]
   pending: dict | None = None        # a run that waits for its tabs: {begin, scheduled, resume}
+  runs_total: int = 0                # runs so far (the history keeps the last HISTORY of them)
+
+  @property
+  def run_count(self): return max(self.runs_total, len(self.runs))
 
   @property
   def source_name(self): return tab_name(self.source.get("tab"))
@@ -179,11 +183,21 @@ class Store:
         log.warning(f"cannot write {self.path}: {e}")
 
 def record_run(transfer, result, message=""):
-  """The run under way ended (result: a state, done, done-errors, failed, paused): into the history"""
+  """The run under way ended (result: a state, done, done-errors, failed, paused): into the history, with what it did
+  (its number, times, bytes, files, rate, rsync's statistics, the errors, where it ran, its events)"""
   run = dict(transfer.run or {})
-  entry = {"started": run.get("started") or time.time(), "ended": time.time(), "result": result,
-           "bytes": transfer.progress.get("bytes", 0), "files": transfer.progress.get("files", 0),
-           "route": transfer.route, "runs_on": transfer.runs_on, "job": run.get("job", ""), "message": message}
+  progress = transfer.progress or {}
+  started, ended = run.get("started") or time.time(), time.time()
+  transfer.runs_total = transfer.run_count + 1
+  done = progress.get("bytes", 0) or 0
+  entry = {"number": transfer.runs_total, "started": started, "ended": ended, "result": result,
+           "bytes": done, "files": progress.get("files", 0), "total": progress.get("total"),
+           "rate": done / (ended - started) if ended > started and done else 0.0,
+           "route": transfer.route, "runs_on": transfer.runs_on, "job": run.get("job", ""), "host": run.get("host", ""),
+           "folder": run.get("folder", ""), "message": message, "stats": dict(progress.get("stats") or {}),
+           "errors": list(transfer.errors or [])[:100], "error_count": progress.get("errors", 0) or len(transfer.errors or []),
+           "options": dict(transfer.options or {}), "sources": list(transfer.source.get("paths", [])),
+           "dest": transfer.dest.get("path", ""), "events": [e for e in transfer.log if e[0] >= started - 1][-60:]}
   transfer.runs.append(entry)
   del transfer.runs[:-HISTORY]
   transfer.run = {}

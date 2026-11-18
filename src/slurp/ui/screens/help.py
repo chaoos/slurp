@@ -217,13 +217,27 @@ folder as a directory view, a file in its view, a file that cannot be shown or a
 searched for it, a destination not there yet as the nearest folder that is), how far it is (bytes, rate, time left, files; for the relay also the rate through slurp), the file it
 copies now, its rate over time, what happens if slurp closes (in slurp: it stops as paused and Continue goes on;
 detached on the cluster or as a transfer job: it goes on without slurp), its schedule, the errors rsync reported for
-single files, its runs, what the check found, and its log.
+single files, **Runs** (how many times it ran, how they ended, the last one; a click: the list of its runs), what the
+check found, and its log.
 
 **Pause** (`p`) stops the run; rsync keeps the half-copied file in `.slurp-partial` and the next run goes on from it.
 A transfer job is cancelled for it (it loses its place in the queue): slurp asks first, and **Continue** (`c`) submits a
 new one. **Run now** (`s`), **Edit…** (`e`), **Its job** (the job window of its transfer job), **Connect …** (the tab
 it waits for), **Delete**. A transfer is idempotent: running it again copies only what is missing or changed, and
 nothing is ever deleted on the destination.
+"""),
+  "TransferRunsScreen": ("Runs of a transfer", """
+Every run of the transfer, the last first (the history keeps the last 50): its number, when it started and ended, how
+long it took, how it ended (done, done with errors, paused, failed, interrupted), how much it copied, how many files,
+its rate, the route and where it ran (its job, the host), and why it ended so. Enter or a click opens a run's
+details; `Esc` (or ←) goes back to the transfer.
+"""),
+  "TransferRunScreen": ("A run of a transfer", """
+One run: when it started and ended and how long it took, how it ended and why, what it copied (of how much), its
+average rate, the route and where it ran (its transfer job, the login node, its folder on the cluster), the sources and
+the destination, its options, rsync's statistics (files, how many it copied, sizes, bytes sent and received), the
+errors rsync reported for single files, and the events of the run. **Its job**: the job window of its transfer job.
+`Esc` (or ←) goes back to the list of runs.
 """),
   "TransferWizard": ("Transfer data", """
 Sets up a transfer in five steps; **Next** waits until a step is complete (its tooltip says what is missing). The
