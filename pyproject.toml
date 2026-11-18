@@ -41,7 +41,7 @@ web = ["textual-serve>=1.1", "textual-web"]    # slurp --serve, and a public lin
 transfers = ["keyring>=24", "globus-sdk>=3.40"] # endpoints with secrets (in the OS keyring), Globus collections
 all = ["asyncssh>=2.14", "h5py>=3", "numpy", "textual-serve>=1.1", "textual-web", "keyring>=24", "globus-sdk>=3.40"]  # (links, hdf5, web, transfers: listed, so that
                                                # it holds whatever the package is called on an index)
-dev = ["pytest>=8", "ruff", "pre-commit", "fonttools"]  # with all: pip install -e ".[all,dev]" (fonttools: tools/make_icon_font.py)
+dev = ["pytest>=8", "ruff", "pre-commit", "fonttools", "moto[server]>=5"]  # with all: pip install -e ".[all,dev]" (fonttools: tools/make_icon_font.py; moto: an S3 server for the tests)
 docs = ["mkdocs-material>=9.6,<10"]  # the documentation site: mkdocs serve, mkdocs build --strict
 
 [project.scripts]
