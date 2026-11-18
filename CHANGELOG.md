@@ -6,6 +6,26 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- **Transfers**: data from one tab to another (cluster to cluster, or this
+  machine), with rsync over the tabs' own SSH sessions: Menu → Transfer
+  data… (`T`) sets one up in a wizard (source, destination, a check, how,
+  when, summary: Go). The check (it changes nothing) says what remains to
+  copy, the room on the destination (free space, quota, a purged scratch),
+  and which routes work, each with its measured speed and an estimate: the
+  same filesystem, direct (one cluster logs in to the other by itself;
+  opt-in: a temporary key, restricted to rsync, that expires), or the relay
+  through slurp (always possible: the clusters need not reach each other).
+  Large transfers are pointed to Globus where sites offer it. A transfer
+  runs in slurp, detached on the cluster, or as a transfer job (a site's
+  transfer partition, e.g. `xfer` on Alps; its progress in `progress.json`);
+  now, at a time, repeatedly, daily, or after a job. It is idempotent: a run
+  copies only what is missing or changed, goes on from half-copied files,
+  and never deletes. The tab **Transfers** (there while transfers exist)
+  lists them; each has a subtab with its progress (rate, time left, files),
+  what happens if slurp closes, its runs and its log; Pause (a transfer job:
+  cancelled, after a warning), Continue (a new run or job), Run now, Edit.
+- Rule packs: `transfer_partition`, `transfer_hosts`, `globus`,
+  `login_node_limits` (transfers).
 - Progress: only lines like the progress count (the structure of the
   line, its numbers aside): a `checkpoint 1/1 saved` in the log is no
   longer taken for the progress and no longer breaks the current pace.
