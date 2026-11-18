@@ -8,8 +8,8 @@ from textual.widgets import Button, Static
 from .. import icons
 
 EVERYWHERE = """
-Tabs at the top are clusters (`+` adds one, `✕` closes one); under them the subtabs of the tab: **Jobs** and every
-window opened from it (`Ctrl-W` closes the one shown). `Ctrl-]` switches between the window and the shell pane on the
+Tabs at the top are clusters (`+` adds one, `✕` closes one), and, while there are transfers, **Transfers** at their
+left; under them the subtabs of the tab: **Jobs** and every window opened from it (`Ctrl-W` closes the one shown). `Ctrl-]` switches between the window and the shell pane on the
 right. The footer shows the keys of the window and, on the right, the state of the tab's connection (click it for the
 connection window). **? slurp** at the top right is about slurp in general: how it works, its version, the machine
 it runs on.
@@ -193,16 +193,66 @@ given days: red, close to it: yellow. An exclude regex leaves paths out.
   "MenuScreen": ("Menu", """
 What slurp does for the tab, each with the key that does the same from the job list or the overview: the job list (`j`),
 the health of the cluster (`C`), your quotas (`Q`), your oldest files in scratch (`X`), a shell on the cluster (`t`), a directory
-(`d`: home, scratch, project, … or a path; each time in a new subtab) and Map a directory (`F`: the login directory as a drive), an interactive job (`i`), a new job script (`n`), the
+(`d`: home, scratch, project, … or a path; each time in a new subtab) and Map a directory (`F`: the login directory as a drive), a transfer of data between two tabs (`T`), an interactive job (`i`), a new job script (`n`), the
 categories (`K`), this slurp in your browser (`W`), the guides (`F1`), the rule catalogue (`F2`), the options (`F3`),
 about slurp, and quit (`q`). Enter or a click does the item; `Esc` or a click elsewhere closes the menu.
+"""),
+  "TransfersScreen": ("Transfers", """
+The transfers of data between the tabs (clusters, or this machine): the first subtab of the **Transfers** tab, which is
+there while transfers exist (also finished ones). Each row: its name, from where to where (a dot for each tab's
+connection), its route and where it runs, its state, how far it is, its rate and the time left, and when it runs next
+(or when it ran last). The line below says more of the highlighted one (why it waits, how it failed, its schedule).
+Enter or a click opens its subtab with everything about it.
+
+**New transfer** (`n`, or Menu → Transfer data…, `T`) sets one up in a wizard. `p` pauses (a transfer job is
+cancelled for it: slurp asks first), `c` continues (rsync goes on where it stopped: what is there is not copied again),
+`s` runs it now (besides its schedule), `e` changes its settings (in the wizard), `Del` deletes it (its settings and
+history; the files stay). Keys that act on a cluster do nothing here: its tab first.
+"""),
+  "TransferScreen": ("A transfer", """
+One transfer: its state, the route (the tabs with their connections; through slurp for the relay), the sources and the
+destination, how far it is (bytes, rate, time left, files; for the relay also the rate through slurp), the file it
+copies now, its rate over time, what happens if slurp closes (in slurp: it stops as paused and Continue goes on;
+detached on the cluster or as a transfer job: it goes on without slurp), its schedule, the errors rsync reported for
+single files, its runs, what the check found, and its log.
+
+**Pause** (`p`) stops the run; rsync keeps the half-copied file in `.slurp-partial` and the next run goes on from it.
+A transfer job is cancelled for it (it loses its place in the queue): slurp asks first, and **Continue** (`c`) submits a
+new one. **Run now** (`s`), **Edit…** (`e`), **Its job** (the job window of its transfer job), **Connect …** (the tab
+it waits for), **Delete**. A transfer is idempotent: running it again copies only what is missing or changed, and
+nothing is ever deleted on the destination.
+"""),
+  "TransferWizard": ("Transfer data", """
+Sets up a transfer in six steps; **Next** waits until a step is complete (its tooltip says what is missing).
+
+1. **Source**: a tab and one or more files or folders there (Browse…: Space marks several; or type a path). Each is
+   copied into the destination folder under its own name.
+2. **Destination**: a tab and a folder there (created if it is not there), with its home, scratch, project, …
+3. **Check**: slurp looks at both sides and changes nothing: rsync on both, the paths, the same filesystem (a marker
+   file, removed at once), what remains to copy (an rsync dry run), the room there (free space, quota, a scratch that
+   is purged), and the routes with their speed: the same filesystem, direct (one cluster logs in to the other by
+   itself), the relay through slurp (always possible); an estimate for each. For large transfers it suggests Globus
+   or a similar service, where both sites offer it.
+4. **How**: the route (the recommended one first), where it runs (in slurp; detached on the cluster's login node; as
+   a transfer job where the site has a transfer partition, e.g. xfer), checksums, compression (the relay), a speed
+   limit, and for a direct route that cannot log in by itself the **temporary key** (opt-in, with its warning).
+5. **When**: now, once at a time, every so long, daily at a time, or after a job ends; whether slurp logs in to the
+   tabs by itself then, and what a missed run does.
+6. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes; **Go** (or **Save without
+   starting**).
+"""),
+  "PickPathsScreen": ("Choose paths", """
+A folder of a tab: Enter or a click goes into a folder (`Backspace` or **Up**: the one above), the path at the top can
+be typed (Enter goes there), the buttons go to home, scratch, project, … To copy: `Space` marks files and folders,
+**Choose the marked** takes them; **Choose this folder** takes the folder shown.
 """),
   "OverviewScreen": ("Overview", """
 The first subtab of every tab, always there (it cannot be closed): what a tab shows at the start, and when its other
 subtabs are closed; **Overview** at the left of the subtabs shows it any time. In its middle:
 the cluster (its site, the Slurm version, its nodes and partitions), its health (healthy, degraded or unhealthy, and
 why), the SSH session, and the ways on: **Jobs** (`j`, with how many run and wait; *No Slurm available* where there
-is none), **Quota** (`Q`) and **Health** (`C`, everything about the nodes and partitions). Below them the site's
+is none), **Quota** (`Q`) and **Health** (`C`, everything about the nodes and partitions); a line about the
+transfers from or to the tab while they run, wait or are scheduled (a click: the Transfers tab). Below them the site's
 status page and documentation (a click opens them). Not connected: **Connect**, and what happened to the connection (slurp does not log in at the start; a tab added
 with `+` logs in right away); connected: **Disconnect**. **SSH settings…**: how the tab logs in, its destination or
 full SSH settings, what `~/.ssh/config` and `ssh -G` make of it, **Check**; saved, the next login uses them.
