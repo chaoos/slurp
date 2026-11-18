@@ -33,7 +33,8 @@ STATE_STYLES = {"running": "bold green", "starting": "green", "queued": "cyan", 
 STATE_ICONS = {"running": "running", "starting": "running", "queued": "pending", "waiting": "pending", "pausing": "suspended",
                "paused": "suspended", "done": "completed", "done-errors": "completed",
                "failed": "failed", "new": "pending", "checking": "pending"}
-ROUTE_SHORT = {"same-fs": "same filesystem", "direct-push": "direct", "direct-pull": "direct (pull)", "relay": "relay", "globus": "Globus"}
+ROUTE_SHORT = {"same-fs": "same filesystem", "direct-push": "direct", "direct-pull": "direct (pull)", "relay": "relay", "globus": "Globus",
+               "rclone-here": "rclone here", "rclone-cluster": "rclone on the cluster"}
 RUNS_SHORT = {"slurp": "in slurp", "detached": "login node", "job": "transfer job", "globus": "at Globus"}
 
 def when_text(epoch):
@@ -95,6 +96,14 @@ def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=No
     boxes = [("collection", src_name, "a Globus collection"), (None, "Globus", "moves the data (not through this machine)"),
              ("collection", dst_name, "a Globus collection")]
     arrows = ["Globus", "Globus"]
+  elif route == "rclone-here": # (an end that is no tab: an S3 bucket)
+    boxes = [(src if src is not None else "collection", src_name, "S3" if src is None else "this machine"),
+             (None, "rclone", "on this machine: the data passes it"), (dst if dst is not None else "collection", dst_name, "S3" if dst is None else "this machine")]
+    arrows = ["rclone", "rclone"]
+  elif route == "rclone-cluster":
+    boxes = [(src if src is not None else "collection", src_name, f"rclone{' (' + where + ')' if where else ''}" if src is not None else "S3"),
+             (dst if dst is not None else "collection", dst_name, "S3" if dst is None else f"rclone{' (' + where + ')' if where else ''}")]
+    arrows = ["push" if src is not None else "pull"]
   elif route == "relay" and two_clusters:
     boxes = [(src, src_name, "rsync (sends)"), (None, "slurp", "passes the bytes"), (dst, dst_name, "rsync server (receives)")]
     arrows = ["relay", "relay"]
@@ -112,9 +121,9 @@ def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=No
     arrows = ["same filesystem"]
   cells = []
   for cluster, name, caption in boxes:
-    middle = cluster is None and name in ("slurp", "Globus")
+    middle = cluster is None and name in ("slurp", "Globus", "rclone")
     if middle:
-      label = Text("⇄ slurp" if name == "slurp" else "☁ Globus", style="bold cyan")
+      label = Text({"slurp": "⇄ slurp", "Globus": "☁ Globus", "rclone": "⇄ rclone"}[name], style="bold cyan")
     elif cluster == "collection":
       label = Text.assemble(("◆", "cyan"), " ", (name, "bold"))
     else:
@@ -396,7 +405,7 @@ def select(radio_set, button):
   radio_set._pressed_button = button
 
 STEP_STATE = {"running": ("…", "yellow"), "ok": ("✓", "green"), "bad": ("✗", "red"), "warn": ("!", "yellow"), "info": ("ⓘ", "dim")}
-STEP_ORDER = ["facts", "paths", "same-fs", "remaining", "relay", "direct-push", "direct-pull", "globus"]
+STEP_ORDER = ["facts", "paths", "same-fs", "remaining", "relay", "direct-push", "direct-pull", "globus", "rclone"]
 
 def plan_text(plan, spinner=""):
   """The steps of a check, as they came"""
@@ -447,7 +456,7 @@ class TransferWizard(ModalScreen):
   pass will do: Run now checks first), 5 summary (Add). A transfer runs only on Run now. Dismissed with
   {"transfer": Transfer, "go": bool} or None. editing: a transfer whose settings it changes (its id stays)"""
   STEPS = ["Source", "Destination", "Options", "Route", "Summary"]
-  ROUTE_ORDER = ("same-fs", "direct-push", "direct-pull", "relay", "globus")
+  ROUTE_ORDER = ("same-fs", "direct-push", "direct-pull", "relay", "globus", "rclone-here", "rclone-cluster")
   DEFAULT_CSS = """
   TransferWizard { align: center middle; }
   #tw-dialog { width: 120; max-width: 98%; height: 94%; border: thick $accent; background: $surface; padding: 0 2; }
@@ -493,7 +502,7 @@ class TransferWizard(ModalScreen):
     self.offline = []       # (editing: the ends not connected, so not checked again)
     manager = app.transfers
     # (the endpoints it offers: this machine, the cluster tabs, Globus collections; the others come with their movers)
-    self.endpoints = [e for e in E.listing(app, manager.endpoint_store, manager.endpoint_status) if e.is_tab or e.kind == "globus"]
+    self.endpoints = [e for e in E.listing(app, manager.endpoint_store, manager.endpoint_status) if e.is_tab or e.kind in ("globus", "s3")]
     self.tested = set() # (Globus endpoints tested in the wizard: once)
     by_id = {e.id: e for e in self.endpoints}
     draft = draft or {}
@@ -590,6 +599,9 @@ class TransferWizard(ModalScreen):
             yield Checkbox("Install a temporary key", id="tw-key", compact=True)
           yield Static(id="tw-key-warning")
           with Horizontal(classes="tw-row"):
+            yield Checkbox("Send the keys of the S3 endpoint to the cluster for each run", id="tw-secrets", compact=True)
+          yield Static(id="tw-secrets-warning", classes="tw-warn")
+          with Horizontal(classes="tw-row"):
             yield Button(icons.label("reload", "Check again"), id="tw-recheck", compact=True)
         with VerticalScroll(id="tw-step-2"):
           yield Static("How rsync copies: the same at every run.", classes="tw-note")
@@ -603,6 +615,10 @@ class TransferWizard(ModalScreen):
           with Horizontal(classes="tw-row", id="tw-compress-row"):
             yield Checkbox("compress (helps on the relay over slow links)", id="tw-compress", compact=True)
           yield Static(id="tw-compress-note", classes="tw-note")
+          with Horizontal(classes="tw-row", id="tw-transfers-row"):
+            yield Label("files at a time")
+            yield Input(placeholder="4", id="tw-transfers", compact=True)
+            yield Label("(rclone: more for many small files)")
           with Horizontal(classes="tw-row", id="tw-bwlimit-row"):
             yield Label("limit the speed to")
             yield Input(placeholder="MB/s (none)", id="tw-bwlimit", compact=True)
@@ -641,6 +657,15 @@ class TransferWizard(ModalScreen):
     store = self.app.transfers.endpoint_store
     return E.globus_only(store, {"endpoint": self.src_id}, {"endpoint": self.dst_id})
 
+  def rclone_pair(self):
+    """An end is an S3 endpoint: rclone moves the data"""
+    store = self.app.transfers.endpoint_store
+    return E.rclone_pair(store, {"endpoint": self.src_id}, {"endpoint": self.dst_id})
+
+  def rclone_routes(self):
+    store = self.app.transfers.endpoint_store
+    return E.rclone_routes(store, {"endpoint": self.src_id}, {"endpoint": self.dst_id})
+
   def globus_possible(self):
     store = self.app.transfers.endpoint_store
     return E.globus_possible(store, {"endpoint": self.src_id}, {"endpoint": self.dst_id})
@@ -677,7 +702,7 @@ class TransferWizard(ModalScreen):
     e, cluster = self.side(side), (self.src if side == "src" else self.dst)
     if e is None:
       return False, "choose an endpoint"
-    if e.kind == "globus":
+    if e.kind in ("globus", "s3"):
       state, words = self.live_state(side)
       return (True, "") if state == "connected" else (False, f"{e.name}: {words or state}" + (" (Connect)" if state == "not connected" else ""))
     if self.globus_only():
@@ -697,6 +722,8 @@ class TransferWizard(ModalScreen):
     value = value.strip()
     if self.side(side) is not None and self.side(side).kind == "globus":
       return "/~/" + value[2:] if value.startswith("~/") else "/~/" if value == "~" else value
+    if self.side(side) is not None and self.side(side).kind == "s3": # (keys of the bucket, as paths: / is its root)
+      return "/" + value.lstrip("/")
     return expand_path(value, (home_of(cluster) if cluster is not None else "") or "/")
 
   def snapshot(self):
@@ -719,12 +746,14 @@ class TransferWizard(ModalScreen):
 
   def prefill(self, t):
     self.query_one("#tw-name", Input).value = t.name
+    self.query_one("#tw-secrets", Checkbox).value = any(t.secrets_to.values()) if t.secrets_to else False
     self.prefill_options(t.options)
 
   def prefill_options(self, o):
     q = self.query_one
     q("#tw-checksum", Checkbox).value = bool(o.get("checksum"))
     q("#tw-verify", Checkbox).value = not o.get("no_verify")
+    q("#tw-transfers", Input).value = str(o.get("transfers") or "")
     q("#tw-compress", Checkbox).value = bool(o.get("compress"))
     q("#tw-bwlimit", Input).value = str(o.get("bwlimit") or "")
     q("#tw-key", Checkbox).value = bool(o.get("temp_key"))
@@ -888,9 +917,9 @@ class TransferWizard(ModalScreen):
       if e is None:
         continue
       state, words = self.live_state(side)
-      if e.kind == "globus" and state == "not connected" and e.id not in self.tested: # (logged in: tested at once)
+      if e.kind in ("globus", "s3") and state == "not connected" and e.id not in self.tested: # (tested at once)
         self.tested.add(e.id)
-        self.app.transfers.test_globus(e)
+        self.app.transfers.test_globus(e) if e.kind == "globus" else self.app.transfers.test_s3(e)
       mark, style = STATE_MARKS.get(state, ("○", "dim"))
       text = Text.assemble((mark, style), f" {E.KINDS.get(e.kind, e.kind)}: ", (state if state == words or not words else f"{state} ({words})", style))
       if e.is_tab and self.globus_only():
@@ -899,9 +928,10 @@ class TransferWizard(ModalScreen):
                     style="cyan" if cid else "yellow")
       self.query_one(f"#tw-{side}-state", Static).update(text)
       connect = self.query_one(f"#tw-{side}-connect", Button)
-      if e.kind == "globus":
+      if e.kind in ("globus", "s3"):
         connect.display = state not in ("connected", "connecting")
-        label = "Log in" if state in ("not set up", "expired", "needs consent") else "Connect"
+        label = ("Edit…" if e.kind == "s3" and state == "not set up" else
+                 "Log in" if state in ("not set up", "expired", "needs consent") else "Connect")
         if str(connect.label) != icons.label("connect", label):
           connect.label = icons.label("connect", label)
       else:
@@ -921,7 +951,7 @@ class TransferWizard(ModalScreen):
   def connect_side(self, side):
     """Connect: the tab's login; one that needs input shows itself in the tab (Log in in its tab)"""
     e = self.side(side)
-    if e is not None and e.kind == "globus":
+    if e is not None and e.kind in ("globus", "s3"):
       self.tested.add(e.id)
       self.app.connect_endpoint(self.app.endpoint_named(e.id))
       return
@@ -999,7 +1029,8 @@ class TransferWizard(ModalScreen):
       c = self.sizes.get((id(self.src), p))
       text.append(f"  {short_path(p, width):{width}}  ")
       if self.src is None or not self.ready(self.src): # (a Globus collection, a tab not connected: not counted)
-        text.append("not counted here (Globus looks at it when it runs)" if self.globus_only() else "not counted", style="dim")
+        text.append("not counted here (Globus looks at it when it runs)" if self.globus_only() else
+                    "counted at the check (Route)" if self.rclone_pair() else "not counted", style="dim")
         known = False
       elif c == "counting":
         text.append(f"{self.app.spinner()} counting …", style="yellow")
@@ -1055,12 +1086,18 @@ class TransferWizard(ModalScreen):
   def globus_picker(self, side, multi):
     """Browse… of a Globus endpoint: its collection listed through Globus (None: not one)"""
     e = self.side(side)
-    if e is None or e.kind != "globus" or e.definition is None:
+    if e is None or e.kind not in ("globus", "s3") or e.definition is None:
       return None
+    start = (self.paths[-1].rsplit("/", 1)[0] if side == "src" and self.paths else self.dest_path if side == "dst" else "")
+    if e.kind == "s3": # (S3: its bucket listed with rclone)
+      from ...transfer import rclone as RC
+      s3 = RC.Endpoint(e.definition)
+      return PickPathsScreen(None, start or e.definition.settings.get("path") or "/", multi=multi,
+                             lister=lambda path: RC.lsjson(s3.env, s3.path(path)), name=e.name)
     from ...transfer import globus as G
     cid = e.definition.settings.get("collection")
-    start = (self.paths[-1].rsplit("/", 1)[0] if side == "src" and self.paths else self.dest_path if side == "dst" else "") or e.definition.settings.get("path") or "/~/"
-    return PickPathsScreen(None, start, multi=multi, lister=lambda path: G.ls(G.client(), cid, path), name=e.name)
+    return PickPathsScreen(None, start or e.definition.settings.get("path") or "/~/", multi=multi,
+                           lister=lambda path: G.ls(G.client(), cid, path), name=e.name)
 
   @on(Button.Pressed, "#tw-src-remove")
   def src_remove(self, event):
@@ -1141,7 +1178,7 @@ class TransferWizard(ModalScreen):
     t = M.Transfer(self.tid, base.name if base else M.default_name(self.paths, source.get("tab") or {"name": src.name},
                                                                    dest.get("tab") or {"name": dst.name}), source, dest)
     if base:
-      for key in ("runs", "log", "created", "progress", "state", "message", "errors"):
+      for key in ("runs", "log", "created", "progress", "state", "message", "errors", "secrets_to"):
         setattr(t, key, getattr(base, key))
     return t
 
@@ -1168,7 +1205,7 @@ class TransferWizard(ModalScreen):
     if not self.is_mounted:
       return
     spinner = self.app.spinner() if self.checking is not None else ""
-    general = dict(self.plan, steps={k: v for k, v in self.plan.get("steps", {}).items() if k in ("facts", "paths", "remaining", "globus")})
+    general = dict(self.plan, steps={k: v for k, v in self.plan.get("steps", {}).items() if k in ("facts", "paths", "remaining", "globus", "rclone")})
     steps = plan_text(general, spinner) # (the routes: on their choices)
     if self.checking is not None and not self.plan.get("steps"):
       steps = Text(f" {spinner} starting the check …", style="yellow")
@@ -1191,9 +1228,12 @@ class TransferWizard(ModalScreen):
     routes, checking, spinner = plan.get("routes", {}), self.checking is not None, self.app.spinner()
     rs = self.query_one("#tw-route", RadioSet)
     buttons = {b.route: b for b in rs.query(RadioButton).results(RadioButton)}
-    only, possible = self.globus_only(), self.globus_possible()
-    for route, b in buttons.items(): # (Globus: where both ends have a collection; between Globus endpoints only it)
-      b.display = (route == "globus" and possible) or (route != "globus" and not only)
+    only, possible, rclone = self.globus_only(), self.globus_possible(), self.rclone_routes()
+    for route, b in buttons.items(): # (Globus: where both ends have a collection; between Globus endpoints only it; S3: rclone)
+      if rclone:
+        b.display = route in rclone
+      else:
+        b.display = (route == "globus" and possible) or (route not in ("globus", "rclone-here", "rclone-cluster") and not only)
     for route, b in buttons.items():
       info = routes.get(route)
       name = M.ROUTES[route]
@@ -1252,7 +1292,9 @@ class TransferWizard(ModalScreen):
     route = self.chosen_route()
     info = self.plan.get("routes", {}).get(route or "", {})
     client = self.dst if route == "direct-pull" else self.src
-    runs = (["slurp"] if route == "relay" else ["globus"] if route == "globus" else
+    if route == "rclone-cluster":
+      client = self.src if self.src is not None and self.side("src").is_tab else self.dst
+    runs = (["slurp"] if route in ("relay", "rclone-here") else ["globus"] if route == "globus" else
             ["detached"] + (["job"] if P.partition_of(client, site_of) else []))
     runs = info.get("runs_on") or runs
     if self.editing is not None and route == self.editing.route and self.editing.runs_on not in runs:
@@ -1266,6 +1308,8 @@ class TransferWizard(ModalScreen):
               "detached": "detached on the cluster's login node (goes on without slurp)",
               "job": "as a transfer job (Slurm; goes on without slurp)",
               "globus": "at Globus (goes on without slurp; Pause cancels the task, Continue submits a new one)"}
+    if route == "rclone-here":
+      labels["slurp"] = "on this machine (stops when slurp quits; Continue goes on, a half-copied file starts over)"
     buttons = []
     for kind in runs:
       b = RadioButton(labels[kind], classes=f"tw-o-{kind}")
@@ -1288,6 +1332,12 @@ class TransferWizard(ModalScreen):
     elif route == "globus":
       note = (f"Globus moves the data from {self.side_name('src')} to {self.side_name('dst')} itself: not through this "
               "machine. What is there already is skipped (by time and size; with checksums: by content).")
+    elif route == "rclone-here":
+      note = ("rclone copies on this machine: the data passes it (its connection sets the speed). What is there already "
+              "is skipped (size and time; with checksums: the hash); nothing is deleted on the destination.")
+    elif route == "rclone-cluster":
+      tab = self.side_name("src") if self.src is not None and self.side("src").is_tab else self.side_name("dst")
+      note = f"rclone copies on {tab}, between its files and the bucket: not through this machine."
     self.query_one("#tw-route-note", Static).update(note)
     key = self.query_one("#tw-key", Checkbox)
     # (only for a direct route that cannot log in by itself: one that can needs none, and its key would be the only one)
@@ -1297,6 +1347,7 @@ class TransferWizard(ModalScreen):
     elif key.value and route in ("direct-push", "direct-pull") and info.get("ok"):
       key.value = False
     key.display = bool(needs_key)
+    self.show_secrets()
 
   def chosen_runs_on(self):
     for b in self.query("#tw-runs-on RadioButton").results(RadioButton):
@@ -1468,6 +1519,28 @@ class TransferWizard(ModalScreen):
     event.stop()
     self.key_changed()
 
+  def show_secrets(self):
+    """rclone on a cluster needs the keys of the S3 endpoint there: asked, with what it means"""
+    route = self.chosen_route()
+    box, warning = self.query_one("#tw-secrets", Checkbox), self.query_one("#tw-secrets-warning", Static)
+    needed = route == "rclone-cluster"
+    box.display = warning.display = needed
+    if needed:
+      tab_side = "src" if self.src is not None and self.side("src").is_tab else "dst"
+      s3_side = "dst" if tab_side == "src" else "src"
+      tab, s3 = self.side_name(tab_side), self.side_name(s3_side)
+      box.label = f"Send the keys of {s3} to {tab} for each run"
+      warning.update(f"⚠ rclone on {tab} needs the keys of {s3}. For each run they are written to the run's folder there "
+                     "(~/.cache/slurp/transfers/…, readable only by you), read when the run starts and deleted at once "
+                     f"(and when it ends, in any case). Root and the administrators of {tab} could read them meanwhile. "
+                     "Without it: choose a route through this machine, where one is possible.")
+    self.update_next()
+
+  @on(Checkbox.Changed, "#tw-secrets")
+  def secrets_toggled(self, event):
+    event.stop()
+    self.update_next()
+
   def key_changed(self):
     route = self.chosen_route()
     on_ = self.query_one("#tw-key", Checkbox).value and route in ("direct-push", "direct-pull")
@@ -1492,6 +1565,8 @@ class TransferWizard(ModalScreen):
     strict = not self.manual()
     if strict and not info.get("ok") and not (info.get("keyable") and self.query_one("#tw-key", Checkbox).value):
       return False, "this route needs the temporary key" if info.get("keyable") else "this route did not pass the check"
+    if route == "rclone-cluster" and not self.query_one("#tw-secrets", Checkbox).value:
+      return False, "agree to send the keys of the S3 endpoint to the cluster (or choose another route)"
     if self.chosen_runs_on() is None:
       return False, "where it runs"
     if self.chosen_runs_on() == "job" and not self.query_one("#tw-time", Input).value.strip():
@@ -1518,6 +1593,9 @@ class TransferWizard(ModalScreen):
 
   # ---- 4: options
   def options_ok(self):
+    n = self.query_one("#tw-transfers", Input).value.strip()
+    if n and (not n.isdigit() or not 1 <= int(n) <= 64):
+      return False, "files at a time: a number from 1 to 64 (or empty)"
     bw = self.query_one("#tw-bwlimit", Input).value.strip()
     if bw:
       try:
@@ -1531,14 +1609,21 @@ class TransferWizard(ModalScreen):
     """The options as they suit the route chosen (compression only for the relay), and the estimate with them"""
     route = self.chosen_route()
     only, possible = self.globus_only(), self.globus_possible()
-    self.query_one("#tw-verify", Checkbox).display = possible
-    self.query_one("#tw-compress-row").display = self.query_one("#tw-bwlimit-row").display = not only
-    self.query_one("#tw-compress-note", Static).display = not only
+    rclone = self.rclone_pair()
+    self.query_one("#tw-verify", Checkbox).display = possible and not rclone
+    self.query_one("#tw-bwlimit-row").display = not only
+    self.query_one("#tw-compress-row").display = self.query_one("#tw-compress-note", Static).display = not only and not rclone
+    self.query_one("#tw-transfers-row").display = rclone
     self.query_one("#tw-compress-note", Static).update(
       "(used only on the relay through slurp; on the other routes it would slow rsync down: there it is left out)")
     self.checksum_note()
     words = self.estimate_words(route) if route else ""
     self.query_one("#tw-options-flow", Static).update(f"⏱ {words}" if words else "")
+
+  @on(Input.Changed, "#tw-transfers")
+  def transfers_typed(self, event):
+    event.stop()
+    self.update_next()
 
   @on(Input.Changed, "#tw-bwlimit")
   def bwlimit_typed(self, event):
@@ -1556,6 +1641,8 @@ class TransferWizard(ModalScreen):
          "no_verify": route == "globus" and not q("#tw-verify", Checkbox).value}
     if route == "globus":
       o["bwlimit"] = ""
+    if route in ("rclone-here", "rclone-cluster") and q("#tw-transfers", Input).value.strip().isdigit():
+      o["transfers"] = int(q("#tw-transfers", Input).value.strip())
     if self.chosen_runs_on() == "job":
       o.update(partition=q("#tw-partition", Input).value.strip(), time=q("#tw-time", Input).value.strip(),
                account=q("#tw-account", Input).value.strip(), resubmit=q("#tw-resubmit", Checkbox).value)
@@ -1566,6 +1653,10 @@ class TransferWizard(ModalScreen):
     t.name = self.query_one("#tw-name", Input).value.strip() or t.name
     t.route, t.runs_on = self.chosen_route(), self.chosen_runs_on()
     t.options, t.plan = self.options(), dict(self.plan)
+    t.secrets_to = {}
+    if t.route == "rclone-cluster" and self.query_one("#tw-secrets", Checkbox).value: # (agreed: the keys go there for each run)
+      tab, s3 = (t.source, t.dest) if E.is_tab(E.ref_id(t.source)) else (t.dest, t.source)
+      t.secrets_to = {(tab.get("tab") or {}).get("destination") or "": [E.ref_id(s3)]}
     return t
 
   def fill_summary(self):
@@ -1599,8 +1690,12 @@ class TransferWizard(ModalScreen):
     row("Estimate", (f"{P.duration(est[0])} – {P.duration(est[1])}" if est else "Globus says how far it is as it runs" if t.route == "globus" else "?") + (" (plus the time it waits in the queue)" if t.runs_on == "job" else "")
         + (" (with checksums: all of it is read on both sides)" if t.options.get("checksum") else ""))
     row("Runs", "when you click Run now (Copy as a command gives the command for scrontab or cron)")
+    if t.secrets_to:
+      row("Keys", f"the keys of the S3 endpoint go to {next(iter(t.secrets_to))} for each run (deleted when it starts)", "yellow")
     opts = [w for k, w in (("checksum", "checksums"), ("compress", "compressed"), ("temp_key", "temporary key"),
                             ("no_verify", "no checksum verification")) if t.options.get(k)]
+    if t.options.get("transfers"):
+      opts.append(f"{t.options['transfers']} files at a time")
     if t.options.get("bwlimit"):
       opts.append(f"at most {t.options['bwlimit']} MB/s")
     row("Options", ", ".join(opts) or "—")
@@ -1880,6 +1975,7 @@ class TransferScreen(TransfersBase):
   def __init__(self, tid):
     super().__init__()
     self.tid = tid
+    self.verifying = set() # (ids whose Verify goes on)
 
   @property
   def transfer(self):
@@ -1904,6 +2000,8 @@ class TransferScreen(TransfersBase):
         yield Button(icons.label("reload", "Run now"), id="xd-run", compact=True, tooltip="a run now (s): when its endpoints are connected")
         yield Button(icons.label("edit", "Edit…"), id="xd-edit", compact=True, tooltip="its settings, in the wizard (e)")
         yield Button(icons.label("jobs", "Its job"), id="xd-job", compact=True, tooltip="the job window of its transfer job")
+        yield Button(icons.label("check", "Verify"), id="xd-verify", compact=True,
+                     tooltip="rclone check: is everything of the sources on the destination, the same? (it copies nothing)")
         yield Button(icons.label("copy", "Copy as a command"), id="xd-copy", compact=True,
                      tooltip="the command of a run, to put into scrontab or cron by hand")
         yield Button(icons.label("cancel_job", "Delete"), id="xd-delete", variant="error", compact=True, tooltip="its settings and history (not the files)")
@@ -1958,8 +2056,11 @@ class TransferScreen(TransfersBase):
       route.append(f", job {t.run['job']}", style="dim")
     if t.run.get("task"):
       route.append(f", task {t.run['task']}", style="dim")
-    if t.route == "globus":
+    if t.route in ("globus", "rclone-cluster"):
       route.append(" · not through this machine", style="dim")
+    if t.secrets_to:
+      tab = next(iter(t.secrets_to))
+      route.append(f"\nthe keys of the S3 endpoint go to {tab} for each run (read and deleted when it starts)", style="yellow")
     q("#xd-route", Static).update(route)
     for side in ("src", "dst"):
       self.show_end(t, side)
@@ -1971,6 +2072,9 @@ class TransferScreen(TransfersBase):
     run.disabled = bool(waits_for) # (Run now: when every endpoint the mover needs is connected)
     run.tooltip = ("first " + " and ".join(waits_for)) if waits_for else "a run now (s)"
     q("#xd-job", Button).display = bool(t.run.get("job") or (t.runs and t.runs[-1].get("job")))
+    verify = q("#xd-verify", Button)
+    verify.display = t.route == "rclone-here"
+    verify.disabled = t.active or t.id in self.verifying or bool(waits_for)
     p = t.progress
     lines = Text()
     if p.get("percent") is not None or p.get("bytes"):
@@ -2034,6 +2138,17 @@ class TransferScreen(TransfersBase):
   def waits_for(self, t):
     """What Run now waits for, in words ("connect jedi", "log in to Globus"); a Globus transfer needs no tab"""
     ends = [self.end(t, "src"), self.end(t, "dst")]
+    if t.route in ("rclone-here", "rclone-cluster"):
+      out = []
+      for e in ends:
+        if e.kind == "s3" and not e.connected:
+          self.manager.ensure_tested(e)
+          out.append(f"{e.name}: {e.words} (Edit…)" if e.state == "not set up" else f"connect {e.name}")
+        elif e.kind == "tab" and t.route == "rclone-cluster" and not e.connected:
+          out.append(f"connect {e.name}")
+      if t.route == "rclone-cluster" and not self.manager.secrets_agreed(t):
+        out.append("agree to send the keys of the S3 endpoint to the cluster (Edit…, Route)")
+      return out
     if t.route == "globus":
       from ...transfer import globus as G
       out = [] if G.logged_in() else ["log in to Globus"]
@@ -2093,6 +2208,10 @@ class TransferScreen(TransfersBase):
         return
       cluster, path = src, paths[index]
     ref = t.dest if index < 0 else t.source
+    d = self.manager.endpoint_store.get(E.ref_id(ref))
+    if d is not None and d.kind == "s3": # (a bucket: its address, to copy)
+      copy_text(self.app, f"s3://{d.settings.get('bucket', '')}/{path.lstrip('/')}", "its S3 address")
+      return
     if E.is_globus(self.manager.endpoint_store, ref): # (a Globus collection: its folder in Globus's web app)
       from urllib.parse import quote
       cid = E.collection_of(self.manager.endpoint_store, ref)[0]
@@ -2123,6 +2242,17 @@ class TransferScreen(TransfersBase):
       self.delete(t)
     elif bid in ("xd-src-connect", "xd-dst-connect"):
       self.connect_end(t, bid.split("-")[1])
+    elif bid == "xd-verify":
+      self.verifying.add(t.id)
+      t.event("verifying (rclone check) …")
+      self.refresh_view()
+      def verified(result):
+        ok, words = result
+        self.verifying.discard(t.id)
+        t.event(f"verified: {words}")
+        self.manager.changed(t)
+        self.app.notify(words, title=f"{t.name}: Verify", severity="information" if ok else "warning", timeout=10)
+      self.manager.verify(t, verified)
     elif bid == "xd-copy":
       in_background(self, lambda: self.manager.command_text(t), lambda text: text and copy_text(self.app, text, "the command"),
                     group="xd-copy", name="the command of the transfer", connection=None)

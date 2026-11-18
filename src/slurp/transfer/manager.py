@@ -288,9 +288,36 @@ class Manager:
     threading.Thread(target=work, daemon=True, name=f"globus test {endpoint.name}").start()
 
   def ensure_tested(self, endpoint):
-    """A Globus endpoint not tested yet in this session (logged in): tested now, once"""
-    if endpoint.kind == "globus" and endpoint.id not in self.endpoint_status and G.logged_in():
+    """A Globus or S3 endpoint not tested yet in this session (that can be): tested now, once"""
+    if endpoint.id in self.endpoint_status or endpoint.state != "not connected":
+      return
+    if endpoint.kind == "globus" and G.logged_in():
       self.test_globus(endpoint)
+    elif endpoint.kind == "s3":
+      self.test_s3(endpoint)
+
+  def test_s3(self, endpoint, done=None, write=False):
+    """Connect/Test of an S3 endpoint (in a thread): its folder listed (write: also a marker written and deleted);
+    its status of this session, then done(state, words) on the UI thread"""
+    d = endpoint.definition
+    self.endpoint_status[endpoint.id] = ("connecting", "asking it")
+    self.changed(None, save=False)
+    def work():
+      try:
+        e = RC.Endpoint(d)
+        words = RC.test(e.env, e.path(d.settings.get("path", "/")), write=write)
+        result = ("connected", words)
+      except RC.RcloneError as err:
+        result = ("not set up" if "keyring has no" in str(err) else "failed", str(err))
+      except Exception as err:
+        result = ("failed", str(err))
+      def finish():
+        self.endpoint_status[endpoint.id] = result
+        self.changed(None, save=False)
+        if done is not None:
+          done(*result)
+      self.from_thread(finish)
+    threading.Thread(target=work, daemon=True, name=f"s3 test {endpoint.name}").start()
 
   def globus_check(self, t, report):
     """The check of a Globus transfer (in a thread): the login, both collections, the sources (each match of a
@@ -707,9 +734,10 @@ class Manager:
     this_run = status.get("log", "").rpartition("== run ")[2] # (the log has all runs: this one's part)
     out.feed(this_run)
     out.close()
+    errors, error_count, stats = out.errors, out.error_count, out.stats
     if t.route == "rclone-cluster": # (its errors: the lines rclone's command wrote, one per file)
-      out.errors = [l.strip() for l in this_run.splitlines()[1:] if l.strip() and not l.startswith(("==", "slurp:"))][-200:]
-      out.error_count, out.stats = len(out.errors), None
+      errors = [l.strip() for l in this_run.splitlines()[1:] if l.strip() and not l.startswith(("==", "slurp:"))][-200:]
+      error_count, stats = len(errors), None
     p = RN.progress_of(status.get("progress"))
     if p:
       # (before its first progress line rsync compares the files: with checksums that reads all of them)
@@ -719,7 +747,7 @@ class Manager:
         t.message = f"on {status['lock'].split()[1]}" if len(status.get("lock", "").split()) > 1 else ""
       self.progress(t, {"bytes": p.get("bytes", 0), "percent": p.get("percent", 0), "rate": p.get("rate", 0.0),
                         "eta": p.get("rsync_eta"), **({"left": p["left"], "checked": p["checked"]} if "left" in p else {})},
-                    current=p.get("current", ""), files=p.get("files", 0), errors=out.errors, error_count=out.error_count)
+                    current=p.get("current", ""), files=p.get("files", 0), errors=errors, error_count=error_count)
     job = status.get("job", "")
     if job and job_gone(0, job): # (listed as ended for a while after its end: gone)
       job = ""
@@ -749,7 +777,7 @@ class Manager:
     message = "" if result else "the run ended without a result" + (" (the job was cancelled, or its time was up)" if t.runs_on == "job" else "")
     if result and result.get("login") == "refused":
       message = self.login_refused(t, result, status.get("log", ""))
-    self.ended(t, code, message, stats=out.stats, stopped=stopped)
+    self.ended(t, code, message, stats=stats, stopped=stopped)
 
   def login_refused(self, t, result, log_text):
     """Why a direct run stopped at once: the host it ran on could not log in to the other cluster (the check had

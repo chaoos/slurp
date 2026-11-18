@@ -3510,6 +3510,68 @@ async def t_pre_login(app, pilot):
 
 
 # ---- transfers: the lab's "cluster" is this machine, its login scripts print text (the junk) on every channel
+async def t_transfer_s3(app, pilot):
+  """S3 with the lab's tab: rclone on the cluster (the lab is this machine, with an S3 server in the test): refused
+  without the user's agreement to send the keys; detached up into the bucket, then as a transfer job down from it; the
+  keys file is gone after each run; a run again copies nothing"""
+  import glob
+  import urllib.request
+  from moto.server import ThreadedMotoServer
+  import boto3
+  from slurp.transfer import endpoints as E, model as M, secrets as S
+  server = ThreadedMotoServer(ip_address="127.0.0.1", port=0)
+  server.start()
+  try:
+    host, port = server.get_host_and_port()
+    url = f"http://{host}:{port}"
+    urllib.request.urlopen(urllib.request.Request(url + "/moto-api/reset", method="POST")).read()
+    client = boto3.client("s3", endpoint_url=url, aws_access_key_id="AK", aws_secret_access_key="SK", region_name="us-east-1")
+    client.create_bucket(Bucket="lab")
+    store = app.transfers.endpoint_store
+    store.add(E.EndpointDef("s3lab", "lab bucket", "s3", {"provider": "Other", "endpoint": url, "region": "us-east-1", "bucket": "lab"},
+                            ["access_key", "secret_key"]))
+    S.put(S.user("s3lab", "access_key"), "AK")
+    S.put(S.user("s3lab", "secret_key"), "SK")
+    lab = next(c for c in app.clusters if c.destination)
+    ref = M.tab_ref(lab)
+    src, dst = xfer_tree("s3")
+    check("a tab and S3: rclone on the cluster", E.rclone_routes(store, {"endpoint": E.tab_id(lab)}, {"endpoint": "s3lab"}) == ["rclone-cluster"])
+    up = M.Transfer(M.new_id(), "up to S3", {"endpoint": E.tab_id(lab), "tab": ref, "paths": [src]},
+                    {"endpoint": "s3lab", "name": "lab bucket", "path": "/up"}, route="rclone-cluster", runs_on="detached")
+    app.transfers.add(up)
+    plan = app.transfers.rclone_check(up, lambda p: None)
+    check("the check: rclone on the lab, the bucket written", plan["routes"]["rclone-cluster"]["ok"] and "on lab" in plan["steps"]["rclone"]["text"]
+          and "can be written" in plan["steps"]["rclone"]["text"], plan)
+    up.plan = plan
+    app.transfers.run_now(up)
+    check("without the agreement to send the keys: refused", up.state == "failed" and "keys" in up.message, up.message)
+    up.secrets_to = {lab.destination: ["s3lab"]}
+    app.transfers.run_now(up)
+    check("detached: done", await until(pilot, lambda: up.state == "done", 90), (up.state, up.message, up.log[-4:]))
+    found = sorted(o["Key"] for o in client.list_objects_v2(Bucket="lab").get("Contents", []))
+    check("in the bucket", found == ["up/src/b.txt", "up/src/sub/a.bin"], found)
+    folder = up.runs[-1]["folder"]
+    check("the keys file is gone", folder and not os.path.exists(os.path.join(folder, "keys")), folder)
+    check("no key in the run's folder", not any("SK" in open(f, errors="replace").read().replace("SKIP", "")
+                                                for f in glob.glob(os.path.join(folder, "*")) if os.path.isfile(f)))
+    check("its progress was rclone's (bytes)", up.runs[-1]["bytes"] >= 400_000, up.runs[-1])
+    down = M.Transfer(M.new_id(), "down from S3", {"endpoint": "s3lab", "name": "lab bucket", "paths": ["/up/src"]},
+                      {"endpoint": E.tab_id(lab), "tab": ref, "path": dst}, route="rclone-cluster", runs_on="job",
+                      options={"time": "1:00:00"}, secrets_to={lab.destination: ["s3lab"]})
+    down.plan = {"routes": {"rclone-cluster": {"ok": True}}}
+    app.transfers.add(down)
+    app.transfers.run_now(down)
+    check("as a transfer job: done", await until(pilot, lambda: down.state == "done", 120), (down.state, down.message, down.log[-4:]))
+    check("the files", same_tree(src, os.path.join(dst, "src")))
+    check("…its keys gone too", not os.path.exists(os.path.join(down.runs[-1]["folder"], "keys")))
+    app.transfers.run_now(down)
+    check("a run again: done", await until(pilot, lambda: down.state == "done" and len(down.runs) == 2, 120), (down.state, down.message))
+    for t in (up, down):
+      app.transfers.delete(t)
+  finally:
+    server.stop()
+
+
 def xfer_tree(name, big=0):
   """A source tree in the lab (the cluster) and an empty destination folder -> (source, destination)"""
   src, dst = os.path.join(HERE, "xfer", name, "src"), os.path.join(HERE, "xfer", name, "dst")

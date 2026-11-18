@@ -227,16 +227,35 @@ class TransfersTab:
   # ---- endpoints (tabs, this machine, Globus; S3, SMB and WebDAV come later)
   def endpoint_kinds(self):
     """The kinds of endpoints that can be made here: {kind: "" (it can) or why not}"""
-    from ..transfer import globus as G
+    from ..transfer import globus as G, rclone as RC
     ok, why = G.available()
-    return {"ssh": "", "globus": "" if ok else why}
+    s3, s3_why = RC.available()
+    return {"ssh": "", "globus": "" if ok else why, "s3": "" if s3 else s3_why}
 
   def edit_endpoint(self, endpoint, kind):
     """New (endpoint None) or Edit… of an endpoint; for a tab ("tab"): its link to a Globus collection"""
     from .screens.globus import GlobusEndpointScreen
     from ..transfer.manager import site_of
     store = self.transfers.endpoint_store
-    if kind == "globus":
+    if kind == "s3":
+      from .screens.s3 import S3EndpointScreen
+      from ..transfer import secrets as S
+      def saved_s3(result):
+        if not result:
+          return
+        d = result["definition"]
+        try:
+          for name, value in result["keys"].items(): # (the keys: to the keyring only)
+            S.put(S.user(d.id, name), value)
+          store.add(d)
+        except (ValueError, RuntimeError) as e:
+          self.notify(str(e), title="Endpoints", severity="warning", timeout=10)
+          return
+        self.transfers.endpoint_status.pop(d.id, None)
+        self.transfers.changed(None)
+        self.connect_endpoint(self.endpoint_named(d.id))
+      self.push_screen(S3EndpointScreen(store, endpoint=endpoint), saved_s3)
+    elif kind == "globus":
       def saved(result):
         if not result:
           return
@@ -292,6 +311,16 @@ class TransfersTab:
     from ..transfer import globus as G
     if endpoint is None:
       return
+    if endpoint.kind == "s3":
+      if endpoint.state == "not set up":
+        self.edit_endpoint(endpoint, "s3") # (its keys: in the form, to the keyring)
+        return
+      def tested_s3(state, words):
+        if not quiet or state != "connected":
+          self.notify(f"{endpoint.name}: {state}" + (f" ({words})" if words else ""), title="Endpoints",
+                      severity="information" if state == "connected" else "warning", timeout=8)
+      self.transfers.test_s3(endpoint, tested_s3)
+      return
     if endpoint.kind != "globus":
       self.notify(f"{endpoint.name}: endpoints of the kind {endpoint.kind} are not there yet", title="Endpoints", severity="warning")
       return
@@ -332,6 +361,9 @@ class TransfersTab:
       self.notify(f"{endpoint.name} cannot be deleted: {e}", title="Endpoints", severity="warning", timeout=10)
       return
     self.transfers.endpoint_status.pop(endpoint.id, None)
+    from ..transfer import secrets as S
+    for name in (endpoint.definition.secrets if endpoint.definition is not None else []): # (its keys go with it)
+      S.delete(S.user(endpoint.id, name))
     self.transfers.changed(None)
 
   # ---- the wizard, editing, deleting
@@ -355,7 +387,7 @@ class TransfersTab:
     new = result["transfer"]
     self.wizard_draft = None
     if editing is not None:
-      for key in ("name", "source", "dest", "route", "runs_on", "options", "plan"):
+      for key in ("name", "source", "dest", "route", "runs_on", "options", "plan", "secrets_to"):
         setattr(editing, key, getattr(new, key))
       editing.event("settings changed")
       t = editing
