@@ -18,7 +18,7 @@ from textual.widgets import Button, Checkbox, ContentSwitcher, Input, Label, Rad
 
 from ...cluster.listing import listing
 from ...cluster.remote import HEALTH_STYLES, connection_health, in_background
-from ...transfer import model as M, plan as P, rsync as R, schedule as S
+from ...transfer import endpoints as E, model as M, plan as P, rsync as R
 from ...transfer.host import Host
 from ...transfer.manager import client_side, site_of
 from .. import icons
@@ -28,13 +28,25 @@ from .dialogs import ConfirmScreen
 from .files import expand_path, home_of, with_places
 
 STATE_STYLES = {"running": "bold green", "starting": "green", "queued": "cyan", "waiting": "yellow", "pausing": "yellow",
-                "paused": "yellow", "scheduled": "cyan", "done": "green", "done-errors": "bold yellow", "failed": "bold red",
+                "paused": "yellow", "done": "green", "done-errors": "bold yellow", "failed": "bold red",
                 "checking": "cyan", "new": "dim", "interrupted": "yellow"}
 STATE_ICONS = {"running": "running", "starting": "running", "queued": "pending", "waiting": "pending", "pausing": "suspended",
-               "paused": "suspended", "scheduled": "pending", "done": "completed", "done-errors": "completed",
+               "paused": "suspended", "done": "completed", "done-errors": "completed",
                "failed": "failed", "new": "pending", "checking": "pending"}
 ROUTE_SHORT = {"same-fs": "same filesystem", "direct-push": "direct", "direct-pull": "direct (pull)", "relay": "relay"}
 RUNS_SHORT = {"slurp": "in slurp", "detached": "login node", "job": "transfer job"}
+
+def when_text(epoch):
+  """A moment, short: 14:05 today, tomorrow 02:00, else the date"""
+  if not epoch:
+    return "—"
+  from datetime import timedelta
+  moment, today = datetime.fromtimestamp(epoch), datetime.now().date()
+  if moment.date() == today:
+    return moment.strftime("%H:%M")
+  if moment.date() == today - timedelta(days=1):
+    return moment.strftime("yesterday %H:%M")
+  return moment.strftime("%Y-%m-%d %H:%M")
 
 def state_text(t):
   return Text(icons.label(STATE_ICONS.get(t.state, ""), M.STATES.get(t.state, t.state)), style=STATE_STYLES.get(t.state, ""))
@@ -406,10 +418,11 @@ def globus_text(plan):
   return Text("ⓘ " + g["text"], style="bold cyan" if g.get("strong") else "cyan")
 
 class TransferWizard(ModalScreen):
-  """Set up a transfer: 1 source, 2 destination, 3 options (checksums, compression, a speed limit), 4 when, 5 route
-  (the check, the choice of what it found, where it runs: it must pass unless the transfer is manual), 6 summary. Dismissed with
+  """Set up a transfer: 1 source and 2 destination (each an endpoint and its paths), 3 options (checksums,
+  compression, a speed limit), 4 route (the check, the choice of what it found, where it runs; a route that did not
+  pass will do: Run now checks first), 5 summary (Add). A transfer runs only on Run now. Dismissed with
   {"transfer": Transfer, "go": bool} or None. editing: a transfer whose settings it changes (its id stays)"""
-  STEPS = ["Source", "Destination", "Options", "When", "Route", "Summary"]
+  STEPS = ["Source", "Destination", "Options", "Route", "Summary"]
   ROUTE_ORDER = ("same-fs", "direct-push", "direct-pull", "relay")
   DEFAULT_CSS = """
   TransferWizard { align: center middle; }
@@ -446,22 +459,33 @@ class TransferWizard(ModalScreen):
   """
   BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
-  def __init__(self, app, editing=None, source_cluster=None):
+  def __init__(self, app, editing=None, source_cluster=None, draft=None):
     super().__init__()
     self.editing = editing
     self.step = 0
     self.plan = dict(editing.plan) if editing else {}
     self.checking = None # (the stop event of a check under way)
     self.checked_for = None # (what the plan was made for: source, paths, destination)
-    clusters = app.clusters
-    self.tabs = list(clusters)
+    manager = app.transfers
+    # (the endpoints it offers: this machine and the cluster tabs; the others come with their movers)
+    self.endpoints = [e for e in E.listing(app, manager.endpoint_store, manager.endpoint_status) if e.is_tab]
+    by_id = {e.id: e for e in self.endpoints}
+    draft = draft or {}
     if editing:
-      self.src, self.dst = app.transfers.ends(editing)
+      self.src_id, self.dst_id = E.ref_id(editing.source), E.ref_id(editing.dest)
+      for end, eid in ((editing.source, self.src_id), (editing.dest, self.dst_id)):
+        if eid not in by_id: # (its tab is closed: listed as such)
+          by_id[eid] = E.resolve(app, manager.endpoint_store, end, manager.endpoint_status)
+          self.endpoints.append(by_id[eid])
       self.paths, self.dest_path = list(editing.source.get("paths", [])), editing.dest.get("path", "")
     else:
-      self.src = source_cluster if source_cluster in clusters else (clusters[0] if clusters else None)
-      self.dst = next((c for c in clusters if c is not self.src), self.src)
-      self.paths, self.dest_path = [], ""
+      first = E.tab_id(source_cluster) if source_cluster is not None and source_cluster in app.clusters else E.LOCAL
+      self.src_id = draft.get("src") if draft.get("src") in by_id else first
+      self.dst_id = draft.get("dst") if draft.get("dst") in by_id else next((e.id for e in self.endpoints if e.id != self.src_id), self.src_id)
+      self.paths, self.dest_path = list(draft.get("paths", [])), draft.get("dest_path", "")
+    self.draft_options = draft.get("options") or {}
+    self.src = by_id[self.src_id].cluster if self.src_id in by_id else None
+    self.dst = by_id[self.dst_id].cluster if self.dst_id in by_id else None
     self.tid = editing.id if editing else M.new_id()
     self.rebuilding = asyncio.Lock() # (the choices of step 4 are rebuilt one at a time)
     self.sizes = {}       # (id(tab), path) -> {"bytes", "files", "dirs", "links"} | None (not there) | "counting" | "failed"
@@ -478,11 +502,15 @@ class TransferWizard(ModalScreen):
           yield Button(f"{i + 1} {name}", id=f"tw-goto-{i}", compact=True)
       with ContentSwitcher(id="tw-switch", initial="tw-step-0"):
         with VerticalScroll(id="tw-step-0"):
-          yield Static("What to copy: a tab, and one or more files or folders there, or patterns (/path/to/dir/*.h5: each "
-                       "match). Each is copied into the destination folder under its own name.", classes="tw-note")
+          yield Static("What to copy: an endpoint (this machine, a cluster tab, …), and one or more files or folders there, or "
+                       "patterns (/path/to/dir/*.h5: each match). Each is copied into the destination folder under its own name.",
+                       classes="tw-note")
           with Horizontal(classes="tw-row"):
             yield Label("From")
-            yield Select(self.tab_options(), id="tw-src-tab", allow_blank=False, value=self.tab_value(self.src), compact=True)
+            yield Select(self.endpoint_options(), id="tw-src-tab", allow_blank=False, value=self.src_id, compact=True)
+            yield Button(icons.label("connect", "Connect"), id="tw-src-connect", compact=True, tooltip="log in to it")
+            yield Button("Log in in its tab", id="tw-src-login", compact=True,
+                         tooltip="its login needs you: its tab is shown with the login; T brings this back, as it is")
           yield Static(id="tw-src-state", classes="tw-note")
           yield Static(id="tw-src-paths")
           with Horizontal(classes="tw-row"):
@@ -490,17 +518,21 @@ class TransferWizard(ModalScreen):
             yield Button("Browse…", id="tw-src-browse", compact=True)
             yield Button("Remove the last", id="tw-src-remove", compact=True)
         with VerticalScroll(id="tw-step-1"):
-          yield Static("Where to: a tab, and the folder there the sources are copied into (created if it is not there).", classes="tw-note")
+          yield Static("Where to: an endpoint, and the folder there the sources are copied into (created if it is not there).",
+                       classes="tw-note")
           with Horizontal(classes="tw-row"):
             yield Label("To")
-            yield Select(self.tab_options(), id="tw-dst-tab", allow_blank=False, value=self.tab_value(self.dst), compact=True)
+            yield Select(self.endpoint_options(), id="tw-dst-tab", allow_blank=False, value=self.dst_id, compact=True)
+            yield Button(icons.label("connect", "Connect"), id="tw-dst-connect", compact=True, tooltip="log in to it")
+            yield Button("Log in in its tab", id="tw-dst-login", compact=True,
+                         tooltip="its login needs you: its tab is shown with the login; T brings this back, as it is")
           yield Static(id="tw-dst-state", classes="tw-note")
           with Horizontal(classes="tw-row"):
             yield Input(self.dest_path, placeholder="the destination folder", id="tw-dst-path")
             yield Button("Browse…", id="tw-dst-browse", compact=True)
           yield Horizontal(id="tw-dst-places", classes="tw-row")
           yield Static(id="tw-dst-preview", classes="tw-note")
-        with VerticalScroll(id="tw-step-4"):
+        with VerticalScroll(id="tw-step-3"):
           yield Static("slurp checks both sides (it changes nothing): what remains to copy, the room on the destination, "
                        "and each route, how fast it is. Choose one that passed.", classes="tw-note")
           yield Static(id="tw-check-steps")
@@ -547,33 +579,7 @@ class TransferWizard(ModalScreen):
             yield Input(placeholder="MB/s (none)", id="tw-bwlimit", compact=True)
             yield Label("MB/s (empty: no limit)")
           yield Static(id="tw-options-flow", classes="tw-note")
-        with VerticalScroll(id="tw-step-3"):
-          with RadioSet(id="tw-when"):
-            yield RadioButton("manual: only when I click Run now", value=True, id="tw-when-manual") # (the default)
-            yield RadioButton("now", id="tw-when-now")
-            yield RadioButton("once, at a time", id="tw-when-at")
-            yield RadioButton("repeatedly, every …", id="tw-when-every")
-            yield RadioButton("daily, at …", id="tw-when-daily")
-            yield RadioButton("after a job ends", id="tw-when-after")
-          with Horizontal(classes="tw-row"):
-            yield Label("at")
-            yield Input(placeholder="14:00, 2026-11-20 14:00, +2h", id="tw-at", compact=True)
-            yield Label("every")
-            yield Input("6h", placeholder="6h, 1d, 30m", id="tw-every", compact=True)
-            yield Label("daily at")
-            yield Input("02:00", id="tw-daily", compact=True)
-            yield Label("job")
-            yield Input(placeholder="job ID", id="tw-job-id", compact=True)
-          yield Checkbox("log in to the tabs by itself when it is time (a login that needs you waits, and says so)",
-                         value=True, id="tw-login", compact=True)
-          with Horizontal(classes="tw-row"):
-            yield Label("a run that was missed")
-            yield Select([("runs once, as soon as it can", "run"), ("is skipped", "skip")], value="run", allow_blank=False,
-                         id="tw-missed", compact=True)
-          yield Static("A repeated transfer copies only what changed since the run before: it keeps the destination in "
-                       "step with the source (nothing is deleted there).", classes="tw-note")
-          yield Static(id="tw-when-note", classes="tw-warn")
-        with VerticalScroll(id="tw-step-5"):
+        with VerticalScroll(id="tw-step-4"):
           with Horizontal(classes="tw-row"):
             yield Label("Name")
             yield Input(id="tw-name")
@@ -583,15 +589,21 @@ class TransferWizard(ModalScreen):
         yield Button("Cancel", id="tw-cancel", compact=True)
         yield Button("← Back", id="tw-back", compact=True)
         yield Button("Next →", id="tw-next", variant="primary", compact=True)
-        yield Button("Save without starting", id="tw-save", compact=True)
-        yield Button("Go", id="tw-go", variant="success", compact=True)
+        yield Button("Add", id="tw-go", variant="success", compact=True, tooltip="add it to the transfers; it runs when you click Run now")
         yield Button("Save", id="tw-store", variant="primary", compact=True) # (editing: Cancel and Save only)
 
-  def tab_options(self):
-    return [(f"{c.name}{'' if self.ready(c) else ' (not connected)'}", str(i)) for i, c in enumerate(self.tabs)]
+  def endpoint_options(self):
+    """The endpoints to pick: connected first (what each is, its state)"""
+    order = sorted(self.endpoints, key=lambda e: (not e.connected, e.kind != "local", e.name.lower()))
+    return [(f"{e.name}  ({E.KINDS.get(e.kind, e.kind)}{'' if e.connected else ': ' + e.words})", e.id) for e in order]
 
-  def tab_value(self, cluster):
-    return str(self.tabs.index(cluster)) if cluster in self.tabs else (str(0) if self.tabs else Select.BLANK)
+  def endpoint(self, eid):
+    return next((e for e in self.endpoints if e.id == eid), None)
+
+  def snapshot(self):
+    """What it says so far, to come back to (after a login in a tab)"""
+    return {"src": self.src_id, "dst": self.dst_id, "paths": list(self.paths), "dest_path": self.dest_path,
+            "options": self.options() if self.is_mounted else {}}
 
   def on_mount(self):
     if self.editing:
@@ -599,15 +611,19 @@ class TransferWizard(ModalScreen):
       if self.plan.get("done"): # (its check is for its sources and destination: the steps after it can be gone to)
         self.checked_for = (id(self.src), tuple(self.paths), id(self.dst), self.dest_path)
         self.refresh_routes()
+    elif self.draft_options: # (a wizard that stepped aside for a login: as it was)
+      self.prefill_options(self.draft_options)
     self.show_step()
     self.refresh_sources()
     self.refresh_dest()
     self.set_interval(0.5, self.tick)
 
   def prefill(self, t):
+    self.query_one("#tw-name", Input).value = t.name
+    self.prefill_options(t.options)
+
+  def prefill_options(self, o):
     q = self.query_one
-    q("#tw-name", Input).value = t.name
-    o = t.options
     q("#tw-checksum", Checkbox).value = bool(o.get("checksum"))
     q("#tw-compress", Checkbox).value = bool(o.get("compress"))
     q("#tw-bwlimit", Input).value = str(o.get("bwlimit") or "")
@@ -616,23 +632,13 @@ class TransferWizard(ModalScreen):
     q("#tw-time", Input).value = o.get("time", "24:00:00")
     q("#tw-account", Input).value = o.get("account", "")
     q("#tw-resubmit", Checkbox).value = o.get("resubmit", True)
-    s = t.schedule or {}
-    which = {"now": "now", "at": "at", "every": "every", "daily": "daily", "after_job": "after", "manual": "manual"}.get(s.get("kind", "now"), "now")
-    q(f"#tw-when-{which}", RadioButton).value = True
-    if s.get("at"):
-      q("#tw-at", Input).value = datetime.fromtimestamp(s["at"]).strftime("%Y-%m-%d %H:%M")
-    q("#tw-every", Input).value = s.get("every", "6h")
-    q("#tw-daily", Input).value = s.get("daily", "02:00")
-    q("#tw-job-id", Input).value = str(s.get("job", ""))
-    q("#tw-login", Checkbox).value = s.get("login", True)
-    q("#tw-missed", Select).value = s.get("missed", "run")
 
   def tick(self):
-    if self.step == 4 and self.checking is not None:
+    if self.step == 3 and self.checking is not None:
       self.show_plan()
-    if self.step == 4 and any(v[0] == "running" for v in self.node_checks.values()):
+    if self.step == 3 and any(v[0] == "running" for v in self.node_checks.values()):
       self.show_node_check()
-    if self.step == 4 and any(v[0] == "running" for v in self.job_tests.values()):
+    if self.step == 3 and any(v[0] == "running" for v in self.job_tests.values()):
       self.show_job_test()
     if self.step in (0, 1):
       self.refresh_states()
@@ -649,23 +655,14 @@ class TransferWizard(ModalScreen):
     q("#tw-back", Button).display = self.step > 0 and not editing
     q("#tw-next", Button).display = self.step < len(self.STEPS) - 1 and not editing
     last = self.step == len(self.STEPS) - 1
-    never = self.when_kind() == "manual"
     q("#tw-go", Button).display = last and not editing
-    q("#tw-save", Button).display = last and not never and not editing # (Add saves it already)
     q("#tw-store", Button).display = editing
-    go = "Save" if never and self.editing else "Add" if never else "Go"
-    if str(q("#tw-go", Button).label) != go:
-      q("#tw-go", Button).label = go
-    q("#tw-go", Button).tooltip = ("add it to the transfers; it runs when you click Run now" if never else
-                                   "start it now, or by its schedule")
     if self.step == 2:
       self.show_options()
     if self.step == 3:
-      self.when_changed()
-    if self.step == 4:
       self.start_check()
       self.refresh_routes()
-    if self.step == 5:
+    if self.step == 4:
       self.fill_summary()
     self.update_next()
 
@@ -707,12 +704,12 @@ class TransferWizard(ModalScreen):
     nxt = self.query_one("#tw-next", Button)
     nxt.disabled = not ok
     nxt.tooltip = why or None
-    self.query_one("#tw-go", Button).disabled = self.step == len(self.STEPS) - 1 and not (self.how_ok()[0] and self.options_ok()[0] and self.when_ok()[0])
+    self.query_one("#tw-go", Button).disabled = self.step == len(self.STEPS) - 1 and bool(self.incomplete())
     if self.editing is not None:
       store = self.query_one("#tw-store", Button)
       missing = self.incomplete()
       store.disabled = bool(missing)
-      store.tooltip = f"first: {missing}" if missing else "keep the changes (its schedule goes on; nothing starts now)"
+      store.tooltip = f"first: {missing}" if missing else "keep the changes (nothing starts now)"
 
   def plan_current(self):
     """Is the plan of the check for the sources and the destination chosen now?"""
@@ -722,45 +719,28 @@ class TransferWizard(ModalScreen):
     step = self.step if step is None else step
     if step == 0:
       if self.src is None:
-        return False, "no tab"
+        return False, "choose an endpoint" if self.endpoint(self.src_id) is None else f"open the tab of {self.endpoint(self.src_id).name}"
       if not self.ready(self.src):
         return False, f"connect {self.src.name} first"
       return bool(self.paths), "" if self.paths else "add what to copy"
     if step == 1:
-      if self.dst is None or not self.ready(self.dst):
-        return False, f"connect {self.dst.name if self.dst else 'the tab'} first"
+      if self.dst is None:
+        return False, "choose an endpoint" if self.endpoint(self.dst_id) is None else f"open the tab of {self.endpoint(self.dst_id).name}"
+      if not self.ready(self.dst):
+        return False, f"connect {self.dst.name} first"
       return bool(self.dest_path.strip()), "" if self.dest_path.strip() else "the destination folder"
     if step == 2:
       return self.options_ok()
     if step == 3:
-      return self.when_ok()
-    if step == 4 and self.manual():
-      # (manual: it runs only when the user clicks Run now, which checks first: a route that did not pass will do)
-      return (self.how_ok() if self.chosen_route() else (False, "choose a route (manual: also one that did not pass)"))
-    if step == 4:
-      # (the check of both sides, and of the route chosen: Next as soon as these passed, the other routes may go on)
-      plan, steps = self.plan, self.plan.get("steps", {})
-      if not plan.get("done") and (self.checking is None or step != self.step):
-        return False, "check first"
-      if not self.plan_current():
-        return False, "check again (the source or the destination changed)"
-      if steps.get("paths", {}).get("state") == "bad" or steps.get("facts", {}).get("state") == "bad":
-        return False, "fix that first (Back)"
-      if any(steps.get(name, {}).get("state", "running") == "running" for name in ("facts", "paths", "remaining")) and not plan.get("done"):
-        return False, "the check of both sides is not done"
-      route = self.chosen_route()
-      if route is None:
-        usable = [r for r, i in plan.get("routes", {}).items() if i.get("ok") or i.get("keyable")]
-        return False, "choose a route" if usable or not plan.get("done") else "no route works"
-      info = plan.get("routes", {}).get(route)
-      if info is None:
-        return False, f"{M.ROUTES[route]}: its check is not done"
-      return self.how_ok()
+      # (a transfer runs only on Run now, which checks first: a route that did not pass will do)
+      if self.rebuilding.locked(): # (its choices of where it runs are being built anew)
+        return False, "a moment …"
+      return self.how_ok() if self.chosen_route() else (False, "choose a route (also one that did not pass: Run now checks first)")
     return True, ""
 
   def manual(self):
-    """Manual (it runs only on Run now, which checks first): the route need not pass the check now"""
-    return self.when_kind() == "manual"
+    """(every transfer runs only on Run now, which checks first: a route need not pass the check now)"""
+    return True
 
   @staticmethod
   def ready(cluster):
@@ -794,20 +774,61 @@ class TransferWizard(ModalScreen):
   @on(Select.Changed, "#tw-src-tab")
   def src_changed(self, event):
     event.stop()
-    cluster = self.tabs[int(event.value)] if event.value not in (None, Select.BLANK) else None
-    if cluster is not self.src:
-      self.src, self.paths = cluster, []
-      self.refresh_sources()
+    if event.value in (None, Select.BLANK) or event.value == self.src_id:
+      return
+    self.src_id = event.value
+    e = self.endpoint(self.src_id)
+    self.src, self.paths = (e.cluster if e else None), []
+    self.refresh_sources()
 
   def refresh_states(self):
+    """The state of each endpoint chosen, live (its tab's login), and the buttons that fit it"""
     if not self.is_mounted:
       return
-    for sel, cluster in (("#tw-src-state", self.src), ("#tw-dst-state", self.dst)):
-      if cluster is None:
+    for side, eid, cluster in (("src", self.src_id, self.src), ("dst", self.dst_id, self.dst)):
+      e = self.endpoint(eid)
+      if e is None:
         continue
-      self.query_one(sel, Static).update(Text.assemble(dot(cluster), " ", (
-        "connected" if self.ready(cluster) else "not connected: connect it first (its tab's overview: Connect)")))
+      state, words = E.tab_state(cluster, self.app) if e.is_tab else (e.state, e.words)
+      marks = {"connected": ("●", "green"), "connecting": ("◌", "yellow"), "needs you": ("◌", "bold yellow"),
+               "not connected": ("○", "dim"), "tab not open": ("✕", "red")}
+      mark, style = marks.get(state, ("○", "dim"))
+      self.query_one(f"#tw-{side}-state", Static).update(Text.assemble(
+        (mark, style), f" {E.KINDS.get(e.kind, e.kind)}: ", (state if state == words or not words else f"{state} ({words})", style)))
+      self.query_one(f"#tw-{side}-connect", Button).display = state in ("not connected",) and cluster is not None
+      self.query_one(f"#tw-{side}-login", Button).display = state == "needs you"
     self.update_next()
+
+  def connect_side(self, side):
+    """Connect: the tab's login; one that needs input shows itself in the tab (Log in in its tab)"""
+    cluster = self.src if side == "src" else self.dst
+    if cluster is None or not cluster.destination:
+      return
+    if self.app.needs_login(cluster):
+      cluster.attempts = 0
+      self.app.login(cluster, show=False)
+    self.refresh_states()
+
+  def login_in_tab(self, side):
+    """Its login needs the user: the wizard steps aside (T brings it back as it is), the tab shows the login"""
+    cluster = self.src if side == "src" else self.dst
+    self.app.wizard_draft = self.snapshot()
+    if self.checking is not None:
+      self.checking.set()
+    self.dismiss(None)
+    if cluster is not None:
+      self.app.connect_cluster(cluster)
+      self.app.notify("log in, then T (Transfer data) brings the wizard back as it was", title=cluster.name, timeout=8)
+
+  @on(Button.Pressed, "#tw-src-connect, #tw-dst-connect")
+  def connect_pressed(self, event):
+    event.stop()
+    self.connect_side(event.button.id.split("-")[1])
+
+  @on(Button.Pressed, "#tw-src-login, #tw-dst-login")
+  def login_pressed(self, event):
+    event.stop()
+    self.login_in_tab(event.button.id.split("-")[1])
 
   def refresh_sources(self):
     self.count_sources()
@@ -905,10 +926,12 @@ class TransferWizard(ModalScreen):
   @on(Select.Changed, "#tw-dst-tab")
   def dst_changed(self, event):
     event.stop()
-    cluster = self.tabs[int(event.value)] if event.value not in (None, Select.BLANK) else None
-    if cluster is not self.dst:
-      self.dst = cluster
-      self.refresh_dest()
+    if event.value in (None, Select.BLANK) or event.value == self.dst_id:
+      return
+    self.dst_id = event.value
+    e = self.endpoint(self.dst_id)
+    self.dst = e.cluster if e else None
+    self.refresh_dest()
 
   def refresh_dest(self):
     self.refresh_states()
@@ -961,8 +984,10 @@ class TransferWizard(ModalScreen):
   def draft(self):
     """A transfer of what the wizard says so far (its id stays)"""
     base = self.editing
-    t = M.Transfer(self.tid, base.name if base else M.default_name(self.paths, M.tab_ref(self.src), M.tab_ref(self.dst)),
-                   {"tab": M.tab_ref(self.src), "paths": list(self.paths)}, {"tab": M.tab_ref(self.dst), "path": self.dest_path})
+    src, dst = self.endpoint(self.src_id), self.endpoint(self.dst_id)
+    source, dest = E.ref_of(src, paths=list(self.paths)), E.ref_of(dst, path=self.dest_path)
+    t = M.Transfer(self.tid, base.name if base else M.default_name(self.paths, source.get("tab") or {"name": src.name},
+                                                                   dest.get("tab") or {"name": dst.name}), source, dest)
     if base:
       for key in ("runs", "log", "created", "progress", "state", "message", "errors"):
         setattr(t, key, getattr(base, key))
@@ -997,7 +1022,7 @@ class TransferWizard(ModalScreen):
     self.query_one("#tw-check-steps", Static).update(steps)
     self.query_one("#tw-globus", Static).update(globus_text(self.plan))
     self.refresh_routes()
-    if self.step == 4:
+    if self.step == 3:
       self.show_flow() # (the bandwidth and the estimate, as the check measures them)
     self.update_next()
 
@@ -1059,6 +1084,7 @@ class TransferWizard(ModalScreen):
     async with self.rebuilding:
       await self.fill_runs()
     self.runs_changed()
+    self.update_next()
     self.key_changed()
 
   async def fill_runs(self):
@@ -1281,7 +1307,7 @@ class TransferWizard(ModalScreen):
     warning.display = on_
     if on_:
       client, server = (self.src, self.dst) if route == "direct-push" else (self.dst, self.src)
-      repeated = self.query_one("#tw-when-every", RadioButton).value or self.query_one("#tw-when-daily", RadioButton).value
+      repeated = False
       warning.update(f"⚠ This adds a line to {server.name}:~/.ssh/authorized_keys for a key that slurp makes on "
                      f"{client.name} (in the run's folder there, readable only by you). The key may only run an rsync "
                      "server (no shell, no forwarding) and expires after some hours; slurp removes the line when the run "
@@ -1348,75 +1374,7 @@ class TransferWizard(ModalScreen):
     self.update_next()
 
   # ---- 5: when
-  @on(RadioSet.Changed, "#tw-when")
-  def when_set(self, event):
-    event.stop()
-    self.when_changed()
-
-  @on(Input.Changed, "#tw-at, #tw-every, #tw-daily, #tw-job-id")
-  def when_typed(self, event):
-    event.stop()
-    self.when_changed()
-
-  def when_kind(self):
-    for kind, sel in (("now", "now"), ("at", "at"), ("every", "every"), ("daily", "daily"), ("after_job", "after"), ("manual", "manual")):
-      if self.query_one(f"#tw-when-{sel}", RadioButton).value:
-        return kind
-    return "now"
-
-  def schedule(self):
-    q = self.query_one
-    kind = self.when_kind()
-    s = {"kind": kind}
-    if kind not in ("now", "manual"):
-      s.update(login=q("#tw-login", Checkbox).value, missed=q("#tw-missed", Select).value or "run")
-    if kind == "at":
-      s["at"] = S.parse_at(q("#tw-at", Input).value)
-    elif kind == "every":
-      s["every"] = q("#tw-every", Input).value.strip()
-    elif kind == "daily":
-      s["daily"] = q("#tw-daily", Input).value.strip()
-    elif kind == "after_job":
-      s["job"] = q("#tw-job-id", Input).value.strip()
-      s["job_tab"] = M.tab_ref(self.src) if self.src else None
-    return s
-
-  def when_ok(self):
-    s = self.schedule()
-    kind = s["kind"]
-    if kind == "at" and not s.get("at"):
-      return False, "when: 14:00, 2026-11-20 14:00 or +2h"
-    if kind == "at" and s["at"] < time.time() - 60:
-      return False, "that time is past"
-    if kind == "every" and not S.every_seconds(s.get("every")):
-      return False, "every: 30m, 6h, 1d (at least 5 minutes)"
-    if kind == "daily" and not S.daily_time(s.get("daily")):
-      return False, "daily at: 02:00"
-    if kind == "after_job" and not s.get("job", "").replace("_", "").isdigit():
-      return False, "the job ID"
-    return True, ""
-
-  def when_changed(self):
-    if not self.is_mounted:
-      return
-    kind = self.when_kind()
-    q = self.query_one
-    for sel, k in (("#tw-at", "at"), ("#tw-every", "every"), ("#tw-daily", "daily"), ("#tw-job-id", "after_job")):
-      q(sel, Input).disabled = kind != k
-    q("#tw-login", Checkbox).display = q("#tw-missed", Select).display = kind not in ("now", "manual")
-    ok, why = self.when_ok()
-    note = why if not ok else ""
-    if ok and kind == "manual":
-      note = "It is added to the transfers and runs only when you click Run now (in its subtab or the list: s)."
-    elif ok and kind != "now" and self.chosen_runs_on() == "slurp":
-      note = "It runs through slurp: slurp must be running then (it may run in its session holder, without a terminal)."
-    if ok and kind == "at" and self.chosen_runs_on() == "job":
-      note = "The transfer job is submitted when you press Go, to start at that time (slurp need not run then)."
-    q("#tw-when-note", Static).update(note)
-    self.refresh_routes() # (manual or not: which routes can be chosen)
-    self.update_next()
-
-  # ---- 6: the summary
+  # ---- 5: the summary
   def options(self):
     q = self.query_one
     route = self.chosen_route()
@@ -1432,7 +1390,7 @@ class TransferWizard(ModalScreen):
     t = self.draft()
     t.name = self.query_one("#tw-name", Input).value.strip() or t.name
     t.route, t.runs_on = self.chosen_route(), self.chosen_runs_on()
-    t.options, t.schedule, t.plan = self.options(), self.schedule(), dict(self.plan)
+    t.options, t.plan = self.options(), dict(self.plan)
     return t
 
   def fill_summary(self):
@@ -1455,7 +1413,7 @@ class TransferWizard(ModalScreen):
     if self.plan.get("remaining_bytes") is not None:
       row("Moves", f"{human(self.plan['remaining_bytes'])} in {self.plan.get('remaining_files', '?')} files"
                    + (f" (of {human(self.plan.get('total_bytes'))})" if self.plan.get("total_bytes") else ""))
-    runs = M.RUNS_ON[t.runs_on]
+    runs = M.RUNS_ON.get(t.runs_on, "?")
     if t.runs_on == "job":
       runs += (f" ({t.options.get('partition') or 'the default partition'}, {t.options.get('time')}"
                + (", then the next one" if t.options.get("resubmit") else "") + ")")
@@ -1465,7 +1423,7 @@ class TransferWizard(ModalScreen):
                        self.plan.get("total_bytes"), checksum=True)
     row("Estimate", (f"{P.duration(est[0])} – {P.duration(est[1])}" if est else "?") + (" (plus the time it waits in the queue)" if t.runs_on == "job" else "")
         + (" (with checksums: all of it is read on both sides)" if t.options.get("checksum") else ""))
-    row("When", S.describe(t.schedule))
+    row("Runs", "when you click Run now (Copy as a command gives the command for scrontab or cron)")
     opts = [w for k, w in (("checksum", "checksums"), ("compress", "compressed"), ("temp_key", "temporary key")) if t.options.get(k)]
     if t.options.get("bwlimit"):
       opts.append(f"at most {t.options['bwlimit']} MB/s")
@@ -1491,21 +1449,16 @@ class TransferWizard(ModalScreen):
 
   @on(Button.Pressed, "#tw-go")
   def go_pressed(self, event):
+    """Add: it is added to the transfers (it runs on Run now)"""
     event.stop()
-    if self.how_ok()[0] and self.options_ok()[0] and self.when_ok()[0]:
-      self.dismiss({"transfer": self.build(), "go": True})
+    if not self.incomplete():
+      self.dismiss({"transfer": self.build()})
 
   @on(Button.Pressed, "#tw-store")
   def store_pressed(self, event):
     event.stop()
     if self.editing is not None and not self.incomplete():
-      self.dismiss({"transfer": self.build(), "go": False, "saved": True})
-
-  @on(Button.Pressed, "#tw-save")
-  def save_pressed(self, event):
-    event.stop()
-    if self.how_ok()[0] and self.options_ok()[0] and self.when_ok()[0]:
-      self.dismiss({"transfer": self.build(), "go": False})
+      self.dismiss({"transfer": self.build(), "saved": True})
 
   @on(Button.Pressed)
   def place_pressed(self, event):
@@ -1556,7 +1509,7 @@ class TransfersBase(SplitScreen):
 
   @staticmethod
   def can_continue(t):
-    """Only a paused transfer continues (mid-run: the run goes on; between runs: its schedule); one that ended runs
+    """Only a paused transfer continues (the run goes on where it stopped); one that ended runs
     anew with Run now"""
     return t.state == "paused"
 
@@ -1607,7 +1560,7 @@ def end_text(cluster, name, paths, width=34):
   return Text.assemble(dot(cluster), f" {name}:", (short_path(first, width - len(more)), "cyan"), (more, "dim"))
 
 COLUMNS = [("name", "Name"), ("from", "From"), ("to", "To"), ("how", "Route"), ("state", "State"), ("progress", "Progress"),
-           ("rate", "Rate"), ("left", "Left"), ("when", "Next / last run")]
+           ("rate", "Rate"), ("left", "Left"), ("when", "Last run")]
 
 class TransfersScreen(TransfersBase):
   """The list of transfers: the first subtab of the Transfers tab"""
@@ -1647,8 +1600,7 @@ class TransfersScreen(TransfersBase):
       p = t.progress
       shown = p.get("percent") if t.state in ("running", "pausing", "paused", "done", "done-errors", "failed", "waiting") else None
       last = t.runs[-1] if t.runs else None
-      when = (S.when_text(t.next_run) if t.next_run else
-              (f"{S.when_text(last['ended'])} {M.STATES.get(last['result'], last['result'])}" if last else ""))
+      when = f"{when_text(last['ended'])} {M.STATES.get(last['result'], last['result'])}" if last else ""
       rows.append((t.id, [Text(t.name, style="bold"), end_text(src, t.source_name, t.source.get("paths", [])),
                           end_text(dst, t.dest_name, [t.dest.get("path", "")]), route_text(t), state_text(t),
                           Text(f"{self.app.spinner()} comparing", style="yellow") if t.state == "running" and p.get("phase") == "comparing"
@@ -1671,8 +1623,6 @@ class TransfersScreen(TransfersBase):
     text = Text.assemble((t.name, "bold"), ": ", state_text(t))
     if t.message:
       text.append(f" · {t.message}")
-    if t.schedule and t.schedule.get("kind", "now") not in ("now", "manual"):
-      text.append(f" · {S.describe(t.schedule, t.next_run)}", style="cyan")
     text.append(f"\n{t.source_name}:{', '.join(t.source.get('paths', []))}  →  {t.dest_name}:{t.dest.get('path', '')}", style="dim")
     note.update(text)
 
@@ -1731,7 +1681,7 @@ class TransfersScreen(TransfersBase):
       self.delete(t)
 
 class TransferScreen(TransfersBase):
-  """A transfer: its state, route, progress (a bar, the rate over time), what happens if slurp closes, its schedule,
+  """A transfer: its state, route, progress (a bar, the rate over time), what happens if slurp closes,
   the errors of its last run, its runs, its check and its log"""
   DEFAULT_CSS = """
   #xd-body { height: 1fr; padding: 0 1; }
@@ -1766,7 +1716,7 @@ class TransferScreen(TransfersBase):
       with Horizontal(id="xd-actions"):
         yield Button(icons.label("suspended", "Pause"), id="xd-pause", variant="warning", compact=True, tooltip="stop the run; Continue goes on (p)")
         yield Button(icons.label("running", "Continue"), id="xd-resume", variant="primary", compact=True, tooltip="a new run: it goes on where it stopped (c)")
-        yield Button(icons.label("reload", "Run now"), id="xd-run", compact=True, tooltip="a run now, besides the schedule (s)")
+        yield Button(icons.label("reload", "Run now"), id="xd-run", compact=True, tooltip="a run now (s): when its endpoints are connected")
         yield Button(icons.label("edit", "Edit…"), id="xd-edit", compact=True, tooltip="its settings, in the wizard (e)")
         yield Button(icons.label("jobs", "Its job"), id="xd-job", compact=True, tooltip="the job window of its transfer job")
         yield Button(icons.label("connect", "Connect"), id="xd-connect", compact=True, tooltip="log in to the tab it waits for")
@@ -1777,8 +1727,6 @@ class TransferScreen(TransfersBase):
       yield TimePlot(color="green", fmt=lambda v: human(v) + "/s", id="xd-rate")
       yield Static("If slurp closes", classes="section")
       yield Static(id="xd-closes")
-      yield Static("Schedule", classes="section")
-      yield Static(id="xd-schedule")
       yield Static("Errors of the last run", classes="section", id="xd-errors-title")
       yield Static(id="xd-errors")
       yield Static("Runs", classes="section")
@@ -1824,13 +1772,8 @@ class TransferScreen(TransfersBase):
       route.append(f", job {t.run['job']}", style="dim")
     q("#xd-route", Static).update(route)
     q("#xd-paths", Static).update(self.paths_text(t))
-    q("#xd-pause", Button).display = t.active or t.state in ("scheduled", "waiting")
+    q("#xd-pause", Button).display = t.active or t.state == "waiting"
     q("#xd-resume", Button).display = self.can_continue(t)
-    resume = "Continue" if self.manager.paused_mid_run(t) else "Resume schedule"
-    if str(q("#xd-resume", Button).label) != icons.label("running", resume):
-      q("#xd-resume", Button).label = icons.label("running", resume)
-      q("#xd-resume", Button).tooltip = ("a new run: it goes on where the paused one stopped (c)" if resume == "Continue" else
-                                         "its schedule goes on, without a run now (c)")
     q("#xd-run", Button).display = not t.active and t.state != "waiting"
     q("#xd-job", Button).display = bool(t.run.get("job") or (t.runs and t.runs[-1].get("job")))
     missing = [c for c in self.manager.not_ready(t) if c is not None]
@@ -1873,11 +1816,6 @@ class TransferScreen(TransfersBase):
     q("#xd-rate", TimePlot).set_data(rates(p.get("history") or []))
     client = dst if client_side(t.route) == "dest" else src
     q("#xd-closes", Static).update(if_slurp_closes(t, client.name if client else "", t.run.get("host", ""), site_of(client)))
-    sched = S.describe(t.schedule, t.next_run)
-    if t.schedule and t.schedule.get("kind", "now") not in ("now", "manual"):
-      sched += ("; logs in by itself" if t.schedule.get("login", True) else "; does not log in by itself")
-      sched += "; a missed run " + ("is skipped" if t.schedule.get("missed") == "skip" else "runs once")
-    q("#xd-schedule", Static).update(sched)
     errors = t.errors or []
     q("#xd-errors-title", Static).display = q("#xd-errors", Static).display = bool(errors)
     q("#xd-errors", Static).update(Text("\n".join(errors[-30:]), style="yellow"))
@@ -1892,7 +1830,7 @@ class TransferScreen(TransfersBase):
                        "check it again as it is set up: what remains (in sync?), both sides, the routes and their speed")
     check = plan_text(t.plan, self.app.spinner() if checking else "") if t.plan.get("steps") else Text("no check", style="dim")
     if t.plan.get("ended") and not checking:
-      check.append(f" checked {S.when_text(t.plan['ended'])}\n", style="dim")
+      check.append(f" checked {when_text(t.plan['ended'])}\n", style="dim")
     if t.plan.get("routes"):
       check.append_text(routes_text(t.plan))
     q("#xd-check", Static).update(check)
@@ -1981,14 +1919,14 @@ def sync_state(t):
   last = next((r for r in reversed(t.runs) if r["result"] in ("done", "done-errors")), None)
   if last is not None and (not checked or last["ended"] >= checked_at):
     if last["result"] == "done":
-      return "yes", f"as of the last run ({S.when_text(last['ended'])}): it copied all there was"
-    return "no", (f"the last run ({S.when_text(last['ended'])}) could not copy {last.get('error_count') or 'some'} "
+      return "yes", f"as of the last run ({when_text(last['ended'])}): it copied all there was"
+    return "no", (f"the last run ({when_text(last['ended'])}) could not copy {last.get('error_count') or 'some'} "
                   "files (its errors)")
   if checked:
     files, size = plan.get("remaining_files") or 0, plan.get("remaining_bytes") or 0
     if not files and not size:
-      return "yes", f"as of the check ({S.when_text(checked_at)}): nothing to copy"
-    return "no", f"as of the check ({S.when_text(checked_at)}): {human(size)} in {files} file{'s' if files != 1 else ''} to copy"
+      return "yes", f"as of the check ({when_text(checked_at)}): nothing to copy"
+    return "no", f"as of the check ({when_text(checked_at)}): {human(size)} in {files} file{'s' if files != 1 else ''} to copy"
   return "unknown", "not checked yet, and no run ended well: Check again (below) finds out"
 
 SYNC_LOOK = {"yes": ("● in sync", "bold green"), "no": ("● not in sync", "bold yellow"), "unknown": ("○ in sync?", "bold dim")}
@@ -2000,7 +1938,7 @@ def sync_text(t, checking=False, spinner=""):
   mark, style = SYNC_LOOK[state]
   return Text.assemble((mark, style), f"  {words}" + ("; the source may have changed since" if state == "yes" else ""))
 
-STATUS_BORDER = {"running": "green", "starting": "green", "queued": "cyan", "scheduled": "cyan", "checking": "cyan",
+STATUS_BORDER = {"running": "green", "starting": "green", "queued": "cyan", "checking": "cyan",
                  "waiting": "yellow", "pausing": "yellow", "paused": "yellow", "done": "green", "done-errors": "orange",
                  "failed": "red", "new": "grey"}
 
@@ -2019,14 +1957,11 @@ def status_text(t, manager, spinner=""):
   elif t.state in ("starting", "pausing", "checking"):
     more = f"{spinner} {t.message}" if t.message else spinner
   elif t.state == "paused":
-    more = ("mid-run: Continue goes on where it stopped" + (f" ({t.message})" if t.message and t.message != "paused" else "")
-            if manager.paused_mid_run(t) else "its schedule waits: Resume schedule lets it go on")
-  elif t.state == "scheduled":
-    more = S.describe(t.schedule, t.next_run)
+    more = "Continue goes on where it stopped" + (f" ({t.message})" if t.message and t.message != "paused" else "")
   elif t.state in ("done", "done-errors", "failed"):
-    more = (f"{S.when_text(last['ended'])}" if last else "") + (f": {t.message}" if t.message else "")
+    more = (f"{when_text(last['ended'])}" if last else "") + (f": {t.message}" if t.message else "")
   elif t.state == "new":
-    more = t.message or ("runs when you click Run now" if (t.schedule or {}).get("kind") == "manual" else "Run now starts it")
+    more = t.message or "Run now starts it"
   else: # (queued, waiting)
     more = t.message
   return Text.assemble((f"{mark} {word}", STATE_STYLES.get(t.state, "bold")), ("  " + more if more else "", ""))
@@ -2073,7 +2008,7 @@ def runs_label(t):
   parts = ", ".join(f"{n} {M.STATES.get(k, k)}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1]))
   last = t.runs[-1]
   shown = f" (the last {len(t.runs)}: {parts})" if t.run_count > len(t.runs) else f" ({parts})"
-  return (f"ran {t.run_count} time{'s' if t.run_count != 1 else ''}{shown} · last: {S.when_text(last['ended'])} "
+  return (f"ran {t.run_count} time{'s' if t.run_count != 1 else ''}{shown} · last: {when_text(last['ended'])} "
           f"{M.STATES.get(last['result'], last['result'])} · show all …")
 
 def took(r):

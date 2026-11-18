@@ -1,6 +1,6 @@
 """Transfers: the manager with both ends on this machine (an app that only has what the manager needs): a relay run
 in slurp with its progress and end, a pause and Continue (idempotent: what is there is not copied again), a detached
-run followed in its folder, a schedule, a run that waits for its tab, the lines for the overview and the footer"""
+run followed in its folder, a run that waits for its tab, the lines for the overview and the footer"""
 import os
 import queue
 import shutil
@@ -73,7 +73,7 @@ def test_relay_run(check, tmp_path):
   mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
   t = make(tmp_path, app)
   mg.add(t)
-  mg.go(t)
+  mg.start(t)
   check("done", until(app, mg, lambda: t.state == "done"), (t.state, t.message))
   check("the files are there", (tmp_path / "dst" / "src" / "sub" / "b.bin").read_bytes() == (tmp_path / "src" / "sub" / "b.bin").read_bytes())
   check("its progress: all of it", t.progress.get("percent") == 100.0 and t.progress.get("bytes") == 300_005, t.progress)
@@ -87,7 +87,7 @@ def test_pause_and_continue(check, tmp_path):
   mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
   t = make(tmp_path, app, big=30_000_000, bwlimit=8)
   mg.add(t)
-  mg.go(t)
+  mg.start(t)
   until(app, mg, lambda: t.progress.get("bytes", 0) > 3_000_000, 30)
   mg.pause(t)
   check("paused", until(app, mg, lambda: t.state == "paused"), (t.state, t.message))
@@ -107,7 +107,7 @@ def test_detached(check, tmp_path):
   t = make(tmp_path, app, runs_on="detached", route="same-fs")
   mg.add(t)
   mg.shown.add(t.id)
-  mg.go(t)
+  mg.start(t)
   check("done", until(app, mg, lambda: t.state == "done", 60), (t.state, t.message, t.log[-3:]))
   check("its folder on the 'cluster'", t.runs[-1]["runs_on"] == "detached" and (tmp_path / "dst" / "src" / "a.txt").exists())
   again = MG.Manager(app, M.Store(mg.store.path))
@@ -126,29 +126,13 @@ def test_waits_for_its_tab(check, tmp_path, monkeypatch):
   mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
   t = make(tmp_path, app)
   t.dest["tab"] = M.tab_ref(remote)
-  t.schedule = {"kind": "every", "every": "6h", "login": True}
   mg.add(t)
-  mg.go(t)
+  mg.start(t)
   check("waits: not connected", t.state == "waiting" and "far" in t.message, (t.state, t.message))
-  check("the next run is planned", t.next_run and t.next_run > time.time() + 5 * 3600)
-  mg.start(t, scheduled=True)
-  check("a scheduled run logs in by itself", app.logins == ["far"], app.logins)
+  check("it logs in nowhere by itself", app.logins == [], app.logins)
   remote.connection = types.SimpleNamespace(ready=True) # (as if it logged in)
-  check("connected: it starts and ends", until(app, mg, lambda: t.runs and t.runs[-1]["result"] == "done"), (t.state, t.message))
-  check("repeated: scheduled again", t.state == "scheduled" and "next run" in t.message, (t.state, t.message))
-
-
-def test_schedule_tick(check, tmp_path):
-  app = App()
-  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
-  t = make(tmp_path, app)
-  t.schedule = {"kind": "at", "at": time.time() + 1}
-  mg.add(t)
-  mg.go(t)
-  check("scheduled", t.state == "scheduled" and t.next_run, (t.state, t.next_run))
-  check("at its time: it runs, once", until(app, mg, lambda: t.state == "done", 30) and t.next_run is None, (t.state, t.next_run))
-  mg.pause(t)
-  check("pause of an ended one: nothing", t.state == "done")
+  check("connected: it starts and ends", until(app, mg, lambda: t.runs and t.runs[-1]["result"] == "done" and t.state == "done"),
+        (t.state, t.message))
 
 
 def test_texts(check, tmp_path):
@@ -173,14 +157,12 @@ def test_job_gone(check):
   check("squeue failed otherwise: not gone (asked again)", not MG.job_gone(1, "", "Socket timed out"))
 
 
-def test_manual(check, tmp_path):
+def test_added_runs_on_run_now(check, tmp_path):
   app = App()
   mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
   t = make(tmp_path, app)
-  t.schedule = {"kind": "manual"}
   mg.add(t)
-  mg.go(t)
-  check("Add: it is there, it does not run", t.state == "new" and not t.run and t.next_run is None and "Run now" in t.message, (t.state, t.message))
+  check("added: it is there, it does not run", t.state == "new" and not t.run, (t.state, t.message))
   until(app, mg, lambda: False, 2)
   check("…not by itself either", t.state == "new" and not t.runs)
   mg.start(t)
@@ -199,23 +181,6 @@ def test_comparing(check, tmp_path):
   mg.polled(t, {"progress": {"phase": "copying", "bytes": 10, "percent": 1, "rate": "1.00MB/s", "eta": "0:00:09"},
                 "result": None, "alive": True, "lock": "1 host", "job": "", "log": ""})
   check("its first progress line: copying", t.progress.get("phase") == "copying" and t.progress.get("bytes") == 10, t.progress)
-
-
-def test_reschedule(check, tmp_path):
-  """Saved after editing: its schedule armed again, nothing runs now"""
-  app = App()
-  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
-  t = make(tmp_path, app)
-  mg.add(t)
-  for schedule, state in (({"kind": "daily", "daily": "02:00"}, "scheduled"), ({"kind": "every", "every": "6h"}, "scheduled"),
-                          ({"kind": "at", "at": time.time() + 3600}, "scheduled"), ({"kind": "after_job", "job": "9"}, "scheduled"),
-                          ({"kind": "manual"}, "new")):
-    t.state, t.schedule, t.next_run = "new", schedule, None
-    mg.reschedule(t)
-    later = schedule["kind"] in ("daily", "every", "at")
-    check(f"{schedule['kind']}: {state}, " + ("its next time ahead" if later else "no time"), t.state == state and not t.run
-          and (bool(t.next_run and t.next_run > time.time() + 60) if later else t.next_run is None), (t.state, t.next_run))
-  check("nothing ran", not t.runs)
 
 
 def test_login_refused_message(check, tmp_path):
@@ -243,11 +208,9 @@ def test_continue_only_paused(check, tmp_path):
   t.state, t.runs = "done", [{"started": 1.0, "ended": 2.0, "result": "done"}]
   mg.resume(t)
   check("an ended transfer does not continue", t.state == "done" and not t.run)
-  t.state, t.schedule = "scheduled", {"kind": "daily", "daily": "02:00"}
+  t.state, t.pending = "waiting", {}
   mg.pause(t)
-  check("a scheduled one paused: its schedule waits, not mid-run", t.state == "paused" and not mg.paused_mid_run(t))
-  mg.resume(t)
-  check("…Continue: its schedule again, no run now", t.state == "scheduled" and t.next_run and not t.run, (t.state, t.next_run))
+  check("one that waits for its tabs, paused: it no longer waits", t.state == "new" and t.pending is None, (t.state, t.pending))
   t.state = "paused"
   t.runs.append({"started": 3.0, "ended": 4.0, "result": "paused"})
   check("paused mid-run", mg.paused_mid_run(t))
@@ -259,7 +222,7 @@ def test_run_now_checks_first(check, tmp_path):
   app = App()
   mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
   t = make(tmp_path, app, route="same-fs", runs_on="detached")
-  t.schedule, t.plan = {"kind": "manual"}, {"routes": {"same-fs": {"ok": False, "why": "not checked"}}}
+  t.plan = {"routes": {"same-fs": {"ok": False, "why": "not checked"}}}
   mg.add(t)
   mg.run_now(t)
   check("checked first, then it ran (here both ends share their filesystem)", until(app, mg, lambda: t.runs and t.runs[-1]["result"] == "done", 60)

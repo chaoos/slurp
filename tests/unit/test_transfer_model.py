@@ -58,3 +58,28 @@ def test_history(check):
   for _ in range(M.HISTORY + 5):
     M.record_run(t, "failed")
   check("the history is limited", len(t.runs) == M.HISTORY)
+
+
+def test_older_store(check, tmp_path):
+  """A store of an older slurp: ends with tabs only, a schedule, a scheduled state: read as endpoints, the schedule
+  gone (said, in its log), the state not started"""
+  import json
+  path = tmp_path / "transfers.json"
+  path.write_text(json.dumps({"transfers": [
+    {"id": "a", "name": "nightly", "source": {"tab": {"destination": "daint", "name": "alps"}, "paths": ["/s"]},
+     "dest": {"tab": {"destination": None, "name": "Local"}, "path": "/d"}, "schedule": {"kind": "daily", "daily": "02:00"},
+     "next_run": 1.0, "state": "scheduled", "pending": {"begin": None, "scheduled": True}},
+    {"id": "b", "name": "by hand", "source": {"tab": {"destination": "daint", "name": "alps"}, "paths": ["/s"]},
+     "dest": {"tab": {"destination": "jedi", "name": "jedi"}, "path": "/d"}, "schedule": {"kind": "never"}}]}))
+  store = M.Store(str(path))
+  a, b = store.get("a"), store.get("b")
+  check("the ends name their endpoints", a.source["endpoint"] == "tab:daint" and a.dest["endpoint"] == "local"
+        and b.dest["endpoint"] == "tab:jedi", (a.source, a.dest))
+  check("a schedule: gone, said once (its log), not started", a.unscheduled and a.state == "new" and "schedule is gone" in a.log[-1][1]
+        and not hasattr(a, "schedule") and not hasattr(a, "next_run"), (a.state, a.log))
+  check("…what waited for it: no more", a.pending == {}, a.pending)
+  check("one that ran by hand (never, manual): nothing to say", not b.unscheduled)
+  store.save()
+  again = M.Store(str(path))
+  keys = set(json.loads(path.read_text())["transfers"][0])
+  check("written back: no schedule left, nothing said again", not again.get("a").unscheduled and not keys & {"schedule", "next_run"}, keys)

@@ -26,7 +26,15 @@ class TransfersTab:
     self.in_transfers = False   # the Transfers tab is shown
     self.transfer_views = []    # its subtabs besides the list (View, key "transfer <id>")
     self.transfers_current = TRANSFERS_MODE # the mode it shows
+    self.wizard_draft = None    # what a wizard that stepped aside for a login had (T brings it back)
     self.transfers = Manager(self)
+    gone = [t.name for t in self.transfers.transfers if t.unscheduled]
+    if gone: # (transfers of an older slurp with a schedule: said once, the store written without it)
+      self.transfers.store.save()
+      names = ", ".join(gone[:5]) + (f" and {len(gone) - 5} more" if len(gone) > 5 else "")
+      self.call_later(lambda: self.notify(f"{names}: their schedules are gone, they run on Run now. Copy as a command (in "
+                                          "their details) gives the command for scrontab or cron.", title="Transfers",
+                                          severity="warning", timeout=20))
 
   # ---- the tab
   def is_transfers_mode(self, mode):
@@ -192,7 +200,8 @@ class TransfersTab:
       return
     from .screens.transfers import TransferWizard
     source = None if self.in_transfers else self.cluster
-    self.push_screen(TransferWizard(self, source_cluster=source), lambda result: self.wizard_done(result, None))
+    draft, self.wizard_draft = self.wizard_draft, None # (one that stepped aside for a login: as it was)
+    self.push_screen(TransferWizard(self, source_cluster=source, draft=draft), lambda result: self.wizard_done(result, None))
 
   def edit_transfer(self, t):
     from .screens.transfers import TransferWizard
@@ -202,23 +211,18 @@ class TransfersTab:
     if not result:
       return
     new = result["transfer"]
+    self.wizard_draft = None
     if editing is not None:
-      for key in ("name", "source", "dest", "route", "runs_on", "options", "schedule", "plan"):
+      for key in ("name", "source", "dest", "route", "runs_on", "options", "plan"):
         setattr(editing, key, getattr(new, key))
-      editing.next_run = None
-      if editing.state in ("scheduled", "new"):
-        editing.state, editing.message = "new", ""
       editing.event("settings changed")
       t = editing
       self.transfers.changed(t)
-    else:
+    else: # (added: it runs when the user clicks Run now)
       t = new
+      t.state, t.message = "new", ""
       t.event("set up")
       self.transfers.add(t)
-    if result.get("go"):
-      self.transfers.go(t)
-    elif result.get("saved"): # (edited: its schedule goes on, nothing starts now)
-      self.transfers.reschedule(t)
     self.open_transfer(t)
 
   def delete_transfer(self, t):

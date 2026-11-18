@@ -1,22 +1,21 @@
 """The transfers of the app: it runs them (the relay in slurp; detached runs and transfer jobs on a cluster), follows
-them (their progress, their end), pauses and continues them, and runs their schedules.
+them (their progress, their end), pauses and continues them. A transfer runs only when the user says so (Run now):
+there are no schedules (Copy as a command gives the command for scrontab or cron).
 
 It needs of the app: clusters (the tabs), notify(message, title=, severity=, timeout=), call_from_thread(fn, *args),
-login(cluster, show=False) and needs_login(cluster). Everything that waits for a cluster runs in threads of its own;
+login(cluster, show=False), needs_login(cluster) and login_visible(cluster). Everything that waits for a cluster runs in threads of its own;
 tick() (every second, on the UI thread) only looks at the state."""
 
 import threading
 import time
 
 from ..state import log
-from . import endpoints as E, model as M, plan as P, relay as RL, rsync as R, runner as RN, schedule as S
+from . import endpoints as E, model as M, plan as P, relay as RL, rsync as R, runner as RN
 from .host import Host, NotConnected
 
 POLL_SHOWN = 3      # seconds between looks at a run on a cluster while its transfer is shown
 POLL_HIDDEN = 15    # … while it is not
-LOGIN_WAIT = 120    # seconds a scheduled run waits for the logins it started before it says so
 RATE_POINTS = 120   # points of the rate kept for the sparkline
-JOB_WATCH = 30      # seconds between looks at the job a transfer waits for
 
 QUEUED_STATES = ("PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED", "REQUEUED", "REQUEUE_HOLD",
                  "REQUEUE_FED", "RESIZING", "SIGNALING", "STAGE_OUT", "STOPPED", "PREEMPTED")
@@ -34,23 +33,21 @@ def client_side(route):
   return "dest" if route == "direct-pull" else "source"
 
 class Manager:
-  def __init__(self, app, store=None):
+  def __init__(self, app, store=None, endpoints=None):
     self.app = app
     self.store = store or M.Store()
+    self.endpoint_store = endpoints or E.EndpointStore()
+    self.endpoint_status = {} # id of a defined endpoint -> (state, words) of this session
     self.relays = {}        # id -> Relay (runs in slurp)
     self.followed = {}      # id -> next time to look at its run on the cluster
     self.polling = set()    # ids being looked at now
     self.shown = set()      # ids whose details (or the list) are shown: looked at more often
     self.listeners = []     # fn(transfer or None) on the UI thread when something changed
-    self.login_started = {} # id -> when the logins for a scheduled run started
-    self.job_watch = {}     # id -> next look at the job it waits for
     self.checking = set()   # ids being checked again (their details: Check again)
     self.lock = threading.RLock()
     for t in self.store.transfers: # (runs that went on without slurp: followed again)
       if t.run and t.runs_on in ("detached", "job"):
         self.followed[t.id] = 0
-      if S.repeated(t.schedule) and t.next_run is None and t.state not in M.ACTIVE:
-        t.next_run = S.first_time(t.schedule)
 
   # ---- the transfers
   @property
@@ -73,7 +70,7 @@ class Manager:
       return M.find_tab(self.app.clusters, ref.get("tab") or {"destination": eid[4:]})
     return None
 
-  def endpoints(self, t):
+  def hosts(self, t):
     src, dst = self.ends(t)
     if src is None or dst is None:
       missing = M.tab_name(t.source.get("tab")) if src is None else M.tab_name(t.dest.get("tab"))
@@ -115,70 +112,18 @@ class Manager:
     self.changed(None)
 
   # ---- starting a run
-  def go(self, t):
-    """The wizard's Go (and Continue, Run now): now, or by its schedule"""
-    kind = (t.schedule or {}).get("kind", "now")
-    if kind == "manual": # (only added: it runs when the user clicks Run now)
-      t.state, t.message, t.next_run = "new", "runs when you click Run now", None
-      self.changed(t)
-      return
-    if kind in ("at", "daily") and not t.run:
-      t.next_run = S.first_time(t.schedule)
-      if t.runs_on == "job" and kind == "at": # (a single run later: the job is submitted now, with --begin)
-        self.start(t, begin=t.next_run)
-        t.next_run = None
-        return
-      t.state, t.message = "scheduled", S.describe(t.schedule, t.next_run)
-      self.changed(t)
-      return
-    if kind == "after_job":
-      t.state, t.message = "scheduled", S.describe(t.schedule)
-      self.job_watch[t.id] = 0
-      self.changed(t)
-      return
-    if kind == "every" and t.next_run is None:
-      t.next_run = S.after_run(t.schedule, time.time())
-    self.start(t)
-
-  def reschedule(self, t):
-    """Its schedule anew, after its settings changed: the next time it runs, without running now (manual:
-    when the user clicks Run now; now: as it was)"""
-    kind = (t.schedule or {}).get("kind", "now")
-    now = time.time()
-    if kind in ("at", "daily"):
-      t.next_run = S.first_time(t.schedule, now)
-    elif kind == "every":
-      t.next_run = S.after_run(t.schedule, now, now)
-    else:
-      t.next_run = None
-    if kind in ("at", "daily", "every") and t.next_run:
-      t.state, t.message = "scheduled", S.describe(t.schedule, t.next_run)
-    elif kind == "after_job":
-      t.state, t.message = "scheduled", S.describe(t.schedule)
-      self.job_watch[t.id] = 0
-    elif kind == "manual":
-      t.message = "runs when you click Run now"
-    self.changed(t)
-
-  def start(self, t, begin=None, scheduled=False):
-    """A run now (begin: a transfer job that may start then). Not connected ends: it waits for them (a scheduled
-    run logs in to them if its schedule says so)"""
+  def start(self, t):
+    """A run now. Ends that are not connected: it waits for them (they log in in their tabs)"""
     if t.active:
       return
     missing = self.not_ready(t)
     if missing:
       names = ", ".join(c.name if c else "a closed tab" for c in missing)
       t.state, t.message = "waiting", f"waiting for {names} (not connected)"
-      t.pending = {"begin": begin, "scheduled": scheduled}
-      if scheduled and (t.schedule or {}).get("login", True):
-        for c in missing:
-          if c is not None and self.app.needs_login(c):
-            self.app.login(c, show=False)
-        self.login_started.setdefault(t.id, time.time())
+      t.pending = {}
       self.changed(t)
       return
     t.pending = None
-    self.login_started.pop(t.id, None)
     t.state, t.message, t.errors = "starting", "", []
     total = t.plan.get("remaining_bytes") if not t.runs else None
     last = t.runs[-1] if t.runs else {}
@@ -189,12 +134,12 @@ class Manager:
     t.event(f"run started ({M.ROUTES.get(t.route, t.route)}, {M.RUNS_ON.get(t.runs_on, t.runs_on)})")
     self.changed(t)
     target = self.run_relay if t.runs_on == "slurp" else self.run_on_cluster
-    threading.Thread(target=target, args=(t, begin), daemon=True, name=f"transfer {t.name}").start()
+    threading.Thread(target=target, args=(t,), daemon=True, name=f"transfer {t.name}").start()
 
   # ---- the relay (in slurp)
-  def run_relay(self, t, begin=None):
+  def run_relay(self, t):
     try:
-      source, dest = self.endpoints(t)
+      source, dest = self.hosts(t)
       facts = P.facts(source)
       relay = RL.Relay(source, dest, t.source["paths"], t.dest["path"], t.options, facts.get("version")).start()
     except Exception as e:
@@ -236,19 +181,19 @@ class Manager:
       t.event(f"the connection broke ({message or code}): going on when both are connected")
       M.record_run(t, "interrupted", message or f"rsync ended with {code}")
       t.state, t.message = "waiting", "the connection broke: it goes on when both tabs are connected"
-      t.pending = {"begin": None, "scheduled": False, "resume": True}
+      t.pending = {"resume": True}
       self.changed(t)
       return
     self.ended(t, code, message, stats=relay.output.stats, stopped=relay.stopped)
 
   # ---- runs on a cluster (detached, transfer job)
   def client(self, t):
-    source, dest = self.endpoints(t)
+    source, dest = self.hosts(t)
     return source if client_side(t.route) == "source" else dest
 
-  def run_on_cluster(self, t, begin=None):
+  def run_on_cluster(self, t):
     try:
-      source, dest = self.endpoints(t)
+      source, dest = self.hosts(t)
       client = source if client_side(t.route) == "source" else dest
       facts = P.facts(client)
       if not facts.get("version"):
@@ -270,9 +215,9 @@ class Manager:
         self.install_key(t, client, source if client is dest else dest, folder)
       run = {"folder": folder, "client": client_side(t.route), "target": run_target}
       if t.runs_on == "job":
-        run["job"] = RN.submit(client, folder, begin)
+        run["job"] = RN.submit(client, folder)
         state = "queued"
-        message = f"transfer job {run['job']}" + (f", starts at {S.when_text(begin)}" if begin else "")
+        message = f"transfer job {run['job']}"
       else:
         run["host"] = RN.start_detached(client, folder)
         state, message = "running", f"on {run['host'] or client.name}"
@@ -301,7 +246,7 @@ class Manager:
       return
     def work():
       try:
-        source, dest = self.endpoints(t)
+        source, dest = self.hosts(t)
         server = dest if t.route == "direct-push" else source
         if server.ready and RN.remove_key(server, t):
           self.from_thread(t.event, f"temporary key removed from {server.name}")
@@ -439,9 +384,6 @@ class Manager:
     self.remove_key(t)
     if state in ("done", "done-errors") and t.progress.get("total"):
       t.progress["percent"] = 100.0
-    nxt = t.next_run
-    if state in ("done", "done-errors") and S.repeated(t.schedule) and nxt:
-      t.state, t.message = "scheduled", f"{M.STATES[state]}; next run {S.when_text(nxt)}"
     self.changed(t)
     severity = {"done": "information", "done-errors": "warning", "paused": "information"}.get(state, "error")
     self.say(t, {"done": "done", "done-errors": f"done, with errors ({t.progress.get('errors', 0)} files)",
@@ -450,10 +392,10 @@ class Manager:
 
   # ---- pause, continue
   def pause(self, t):
-    """Stop the run as a pause (a transfer job is cancelled: the UI warns first); a scheduled one: off schedule"""
-    if t.state in ("scheduled", "waiting") and not t.run:
-      t.state, t.message, t.next_run, t.pending = "paused", "paused (its schedule waits)", None, None
-      self.job_watch.pop(t.id, None)
+    """Stop the run as a pause (a transfer job is cancelled: the UI warns first); one that waits for its tabs: it no
+    longer waits"""
+    if t.state == "waiting" and not t.run:
+      t.state, t.message, t.pending = "new", "it no longer waits", None
       self.changed(t)
       return
     if not t.active:
@@ -491,22 +433,15 @@ class Manager:
     return t.state == "paused" and bool(t.runs) and t.runs[-1]["result"] in ("paused", "interrupted")
 
   def resume(self, t):
-    """Continue a paused transfer: paused mid-run, a new run (rsync goes on where it stopped); its schedule paused
-    between runs, the schedule again (no run now). Only a paused transfer continues: one that ended runs anew (Run now)"""
+    """Continue a paused transfer: a new run (rsync goes on where it stopped). Only a paused transfer continues: one
+    that ended runs anew (Run now)"""
     if t.state != "paused":
       return
-    if not self.paused_mid_run(t):
-      t.state, t.message = "new", ""
-      t.event("its schedule goes on")
-      self.reschedule(t)
-      return
-    if S.repeated(t.schedule) and t.next_run is None:
-      t.next_run = S.after_run(t.schedule, time.time())
     self.start(t)
 
   # ---- every second (on the UI thread)
   def tick(self):
-    now, mono = time.time(), time.monotonic()
+    mono = time.monotonic()
     for t in list(self.transfers):
       # runs on a cluster: look at them
       if t.id in self.followed and t.id not in self.polling and mono >= self.followed[t.id]:
@@ -515,55 +450,8 @@ class Manager:
         threading.Thread(target=self.poll, args=(t,), daemon=True).start()
       # waiting for its tabs
       if t.state == "waiting" and getattr(t, "pending", None) is not None and not self.not_ready(t):
-        pending = t.pending
         t.state = "new"
-        self.start(t, begin=pending.get("begin"), scheduled=pending.get("scheduled", False))
-        continue
-      if t.state == "waiting" and t.id in self.login_started and now - self.login_started[t.id] > LOGIN_WAIT:
-        self.login_started[t.id] = float("inf") # (said once)
-        names = ", ".join(c.name if c else "a closed tab" for c in self.not_ready(t))
-        t.message = f"needs a login: {names} (open its tab and Connect)"
-        self.say(t, t.message, "warning", 15)
-        self.changed(t)
-      # by its schedule
-      if t.next_run and not t.active and t.state not in ("paused", "waiting") and now >= t.next_run:
-        run, nxt = S.catch_up(t.schedule, t.next_run, now)
-        if run:
-          planned = t.next_run
-          t.next_run = S.after_run(t.schedule, planned, now) if S.repeated(t.schedule) else None
-          t.event(f"scheduled run ({S.describe(t.schedule)})")
-          self.start(t, scheduled=True)
-        else:
-          t.next_run = nxt
-          t.event("a scheduled run was missed: skipped")
-          if nxt is None:
-            t.state, t.message = "new", "the scheduled run was missed"
-          self.changed(t)
-      # after a job
-      if (t.schedule or {}).get("kind") == "after_job" and t.state == "scheduled" and now >= self.job_watch.get(t.id, 0):
-        self.job_watch[t.id] = now + JOB_WATCH
-        threading.Thread(target=self.watch_job, args=(t,), daemon=True).start()
-
-  def watch_job(self, t):
-    """Has the job the transfer waits for ended? (on the source's tab, or the tab the schedule names)"""
-    s = t.schedule
-    cluster = M.find_tab(self.app.clusters, s.get("job_tab") or t.source.get("tab"))
-    if cluster is None:
-      return
-    end = Host(cluster)
-    if not end.ready:
-      return
-    result = end.run(["squeue", "-h", "-j", str(s.get("job")), "-o", "%T"], timeout=60)
-    if job_gone(result.returncode, result.stdout, result.stderr):
-      def run():
-        if t.state != "scheduled":
-          return
-        t.event(f"job {s.get('job')} ended")
-        t.schedule = {**s, "kind": "now", "after": s.get("job")}
-        self.job_watch.pop(t.id, None)
-        t.state = "new"
-        self.start(t, scheduled=True)
-      self.from_thread(run)
+        self.start(t)
 
   # ---- checks
   def probe_node(self, t, route, partition, account, done):
@@ -571,7 +459,7 @@ class Manager:
     done((True | False | None, words)) on the UI thread; None: no node within a while (not checked)"""
     def work():
       try:
-        source, dest = self.endpoints(t)
+        source, dest = self.hosts(t)
         src, dst = self.ends(t)
         client, other = (source, dst) if route == "direct-push" else (dest, src)
         target = P.target_of(other)
@@ -588,7 +476,7 @@ class Manager:
     thread): done((True | False, words)) on the UI thread"""
     def work():
       try:
-        source, dest = self.endpoints(t)
+        source, dest = self.hosts(t)
         client = dest if client_side(route) == "dest" else source
         folder = RN.folder_of(client, t)
         client.sh('mkdir -p "$1" && chmod 700 "$1"', folder, retry=False)
@@ -659,7 +547,7 @@ class Manager:
     stop = threading.Event()
     def work():
       try:
-        source, dest = self.endpoints(t)
+        source, dest = self.hosts(t)
         src, dst = self.ends(t)
         plan = P.check(source, dest, t, src, dst, report=lambda p: self.from_thread(report, _copy(p)), stop=stop.is_set,
                        site=site_of)
@@ -690,8 +578,8 @@ class Manager:
     return [t for t in self.transfers if t.state in ("running", "starting", "queued", "pausing", "waiting")]
 
   def summary_for(self, cluster):
-    """A line for the overview of a tab: the transfers from or to it that run, wait or are scheduled"""
-    mine = [t for t in self.transfers if cluster in self.ends(t) and t.state in ("running", "queued", "waiting", "scheduled", "starting")]
+    """A line for the overview of a tab: the transfers from or to it that run or wait"""
+    mine = [t for t in self.transfers if cluster in self.ends(t) and t.state in ("running", "queued", "waiting", "starting")]
     if not mine:
       return ""
     parts = []

@@ -15,7 +15,6 @@ from ..state import log
 STATES = {
   "new":         "not started",
   "checking":    "checking",
-  "scheduled":   "scheduled",
   "queued":      "queued",        # a transfer job waits in the queue
   "starting":    "starting",
   "running":     "running",
@@ -66,12 +65,12 @@ def tab_name(ref):
 class Transfer:
   id: str
   name: str
-  source: dict                       # {"tab": tab_ref, "paths": [path, …]} (each is copied into the destination)
-  dest: dict                         # {"tab": tab_ref, "path": directory}
+  source: dict                       # {"endpoint": id, "name", "tab": tab_ref (a tab), "paths": [path, …]}: each path is
+                                     # copied into the destination (endpoints.py)
+  dest: dict                         # {"endpoint": id, "name", "tab": tab_ref (a tab), "path": directory}
   route: str = "relay"               # ROUTES
   runs_on: str = "slurp"             # RUNS_ON
   options: dict = field(default_factory=dict)  # checksum, bwlimit (MB/s), compress, temp_key, partition, time, account, resubmit
-  schedule: dict = field(default_factory=dict) # {"kind": now|at|every|daily|after_job, …} (schedule.py)
   state: str = "new"
   message: str = ""                  # why it waits, how it failed, …
   progress: dict = field(default_factory=dict) # of the run: bytes, total, rate, eta, files, files_total, current, errors
@@ -79,10 +78,9 @@ class Transfer:
   run: dict = field(default_factory=dict)      # the run under way: kind, started, pid/job, dir, host
   runs: list = field(default_factory=list)     # the runs so far: {started, ended, result, bytes, files, job, message}
   created: float = field(default_factory=time.time)
-  next_run: float | None = None      # when the schedule runs it next (epoch)
   errors: list = field(default_factory=list)   # what rsync said about single files (of the last run)
   log: list = field(default_factory=list)      # events: [epoch, text]
-  pending: dict | None = None        # a run that waits for its tabs: {begin, scheduled, resume}
+  pending: dict | None = None        # a run that waits for its tabs: {resume: after a broken connection}
   runs_total: int = 0                # runs so far (the history keeps the last HISTORY of them)
 
   @property
@@ -107,8 +105,20 @@ class Transfer:
   def from_json(cls, data):
     known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
     t = cls(**known)
-    if (t.schedule or {}).get("kind") == "never": # (its name before: manual)
-      t.schedule = {**t.schedule, "kind": "manual"}
+    # (older transfers: their ends name their endpoint; a schedule is gone: they run on Run now, said once)
+    for end in (t.source, t.dest):
+      if "endpoint" not in end:
+        tab = end.get("tab") or {}
+        end["endpoint"] = f"tab:{tab['destination']}" if tab.get("destination") else "local"
+    schedule = data.get("schedule") or {}
+    t.unscheduled = schedule.get("kind") not in (None, "now", "manual", "never")
+    if t.unscheduled:
+      t.event("its schedule is gone: it runs on Run now (Copy as a command gives the command for scrontab or cron)")
+    if t.state in ("scheduled",):
+      t.state, t.message = "new", ""
+    if isinstance(t.pending, dict):
+      t.pending.pop("scheduled", None)
+      t.pending.pop("begin", None)
     if t.state in ACTIVE and (t.runs_on == "slurp" or not t.run.get("folder")):
       # (it ran in slurp, which ended, or it was still starting: paused, Continue goes on)
       if t.run:
@@ -127,6 +137,8 @@ def default_name(source_paths, source, dest):
 
 def store_path():
   return os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "slurp", "transfers.json")
+
+Transfer.unscheduled = False # (read from an older store with a schedule: said once at the start)
 
 class Store:
   """All transfers, written atomically (on changes; while runs go on at most every few seconds)"""
