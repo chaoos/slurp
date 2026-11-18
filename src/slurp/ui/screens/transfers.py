@@ -479,7 +479,7 @@ class TransferWizard(ModalScreen):
   #tw-route, #tw-runs-on, #tw-when { height: auto; width: 1fr; }
   #tw-job { height: auto; border: round $panel; padding: 0 1; margin-top: 1; }
   #tw-partition, #tw-time, #tw-account { width: 24; margin-right: 2; }
-  #tw-account-list { width: 20; margin-right: 2; }
+  #tw-account-list { width: 32; margin-right: 2; }
   #tw-bwlimit, #tw-every, #tw-daily, #tw-job-id { width: 16; margin-right: 2; }
   #tw-at { width: 24; margin-right: 2; }
   #tw-key-warning { height: auto; color: $warning; border: round $warning; padding: 0 1; display: none; }
@@ -590,8 +590,9 @@ class TransferWizard(ModalScreen):
               yield Label("time limit")
               yield Input("24:00:00", id="tw-time", compact=True)
               yield Label("account")
+              # (your accounts there, to choose from; where they cannot be looked up: a field to type one)
+              yield Select([], prompt="looking up your accounts …", id="tw-account-list", compact=True, disabled=True)
               yield Input(id="tw-account", placeholder="(default)", compact=True)
-              yield Select([], prompt="pick", id="tw-account-list", compact=True)
             yield Checkbox("submit the next job when the time limit ends", value=True, id="tw-resubmit", compact=True)
             yield Static(id="tw-job-test")
             yield Static(id="tw-node-check")
@@ -1398,23 +1399,34 @@ class TransferWizard(ModalScreen):
     self.update_next()
 
   def fill_accounts(self, cluster):
-    """The Slurm accounts of the cluster that runs the job, to pick (looked up once per tab)"""
+    """The Slurm accounts of the cluster that runs the job: a list to choose from (looked up once per tab); none found
+    (no sacctmgr, no associations): a field to type one"""
     if cluster is None:
       return
+    pick, field = self.query_one("#tw-account-list", Select), self.query_one("#tw-account", Input)
     def show(accounts):
       if accounts is not None:
         cluster.accounts = list(accounts)
-      found = cluster.accounts or []
-      pick = self.query_one("#tw-account-list", Select)
+      found = list(cluster.accounts or [])
+      if accounts is None and cluster.accounts is None: # (the lookup failed: not kept, looked up again next time)
+        found = []
+      if field.value and field.value not in found: # (one set before, not among them: kept, to choose again)
+        found.append(field.value)
+      pick.display, field.display = bool(found), not found
+      if not found:
+        return
       pick.set_options([(a, a) for a in found])
-      field = self.query_one("#tw-account", Input)
-      from textual.suggester import SuggestFromList
-      field.suggester = SuggestFromList(found, case_sensitive=False)
+      pick.prompt = "choose one of your accounts"
+      pick.disabled = False
       if not field.value and len(found) == 1: # (one account: that one)
         field.value = found[0]
+      if field.value:
+        with pick.prevent(Select.Changed):
+          pick.value = field.value
     if cluster.accounts is not None:
       show(None)
       return
+    pick.display, field.display, pick.disabled = True, False, True
     from ...cluster.jobs import slurm_accounts
     in_background(self, slurm_accounts, show, group="tw-accounts", name="looking up your Slurm accounts",
                   connection=cluster.connection if cluster.destination else None)
@@ -1422,8 +1434,7 @@ class TransferWizard(ModalScreen):
   @on(Select.Changed, "#tw-account-list")
   def account_picked(self, event):
     event.stop()
-    if event.value not in (None, Select.BLANK):
-      self.query_one("#tw-account", Input).value = str(event.value)
+    self.query_one("#tw-account", Input).value = "" if event.value in (None, Select.BLANK) else str(event.value)
 
   # (a transfer job: its batch script tested with sbatch --test-only as soon as it is chosen, and when its partition,
   # time limit or account change; refused: Next refuses, and says what Slurm said)

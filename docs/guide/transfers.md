@@ -169,7 +169,8 @@ sites forbid this, or overwrite the file (keys managed in a portal, certificates
   pack can say so: `login_node_limits`).
 - **As a transfer job** (same filesystem, direct; where the site has a transfer partition, e.g. `xfer` on CSCS Alps,
   `transfer_partition` in its rule pack): a Slurm job with the partition, time limit and account chosen (the account
-  one of yours there, to pick; where you have accounts, one must be chosen). The wizard tests its batch script with
+  a list of yours there to choose from, looked up with sacctmgr; where none can be found, a field to type one; where you
+  have accounts, one must be chosen). The wizard tests its batch script with
   `sbatch --test-only` as soon as it is chosen and when these change: it shows when and where the job would start, or
   Slurm's error, and then does not go on. It goes on
   without slurp. When its time limit ends, slurp can submit the next job (the default): the next run goes on where this

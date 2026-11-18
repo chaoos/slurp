@@ -572,7 +572,8 @@ def test_job_tested(check, tmp_path, monkeypatch):
       w.query_one("#tw-partition").value = "xfer"
       w.query_one(".tw-o-job").value = True; w.runs_changed(); await pilot.pause(1.5)
       picks = [v for _, v in w.query_one("#tw-account-list")._options if isinstance(v, str)]
-      check("the accounts to pick", picks == ["g1", "g2"], picks)
+      check("the accounts: a list to choose from (no field to type)", picks == ["g1", "g2"] and w.query_one("#tw-account-list").display
+            and not w.query_one("#tw-account-list").disabled and not w.query_one("#tw-account").display, picks)
       check("no account: Next asks for one", w.query_one("#tw-next").disabled and "account" in str(w.query_one("#tw-next").tooltip),
             w.query_one("#tw-next").tooltip)
       w.query_one("#tw-account-list").value = "g2"; await pilot.pause(1.5)
@@ -584,6 +585,10 @@ def test_job_tested(check, tmp_path, monkeypatch):
       test = str(w.query_one("#tw-job-test").render())
       check("another account: tested again, accepted: when and where", "✓ sbatch --test-only" in test and "to start at" in test
             and not w.query_one("#tw-next").disabled, (test, w.query_one("#tw-next").tooltip))
+      app.clusters[0].accounts = [] # (none could be found there: a field to type one)
+      w.query_one("#tw-account").value = ""
+      w.fill_accounts(app.clusters[0]); await pilot.pause(0.2)
+      check("no accounts known: the field instead", w.query_one("#tw-account").display and not w.query_one("#tw-account-list").display)
       w.dismiss(None); await pilot.pause(0.2)
       await pilot.press("q")
 

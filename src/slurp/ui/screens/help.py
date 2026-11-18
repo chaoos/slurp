@@ -274,7 +274,7 @@ runs can be changed, and the check is not run again (what the last one found sta
    picture shows how the data flows (push, pull, relay through slurp, the same filesystem, where rsync runs), the
    bandwidth measured under its arrows and the estimate below it (with checksums: their time too). A direct route
    as a transfer job is checked from a node of its partition too (srun): refused there, Next refuses. As a transfer
-   job: its account (one of yours there, to pick), and its batch script tested with `sbatch --test-only` as soon as
+   job: its account (a list of yours there to choose from; a field where none can be found), and its batch script tested with `sbatch --test-only` as soon as
    it is chosen and when its partition, time limit or account change: when and where it would start, or Slurm's
    error (then Next refuses). Below: where it runs (in slurp; detached on the cluster's login node; as a transfer job
    where the site has a transfer partition, e.g. xfer), and for a direct route that cannot log in by itself the
