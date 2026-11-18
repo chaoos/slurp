@@ -127,7 +127,7 @@ rclone commands of a run, with the keys as `$AWS_ACCESS_KEY_ID` and `$AWS_SECRET
 
 **New endpoint… → Globus collection** makes a Globus endpoint: a collection (a site's storage, a guest collection),
 found by **Search** (its name, at Globus) or its id, and a folder where Browse… starts. A **tab** can be linked to its
-site's collection too (**Edit…** of the tab in the Endpoints list; a rule pack's `globus` is suggested): which folder of
+site's collection too (**Globus link…** of the tab in the Endpoints list; a rule pack's `globus` is suggested): which folder of
 the tab is which folder in the collection (`/capstor/scratch/cscs/me` ↔ `/`). Between two Globus endpoints, or a
 Globus endpoint and a linked tab, only Globus can move the data; between two linked tabs the wizard offers the
 **Globus transfer** next to the rsync routes.

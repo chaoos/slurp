@@ -791,7 +791,7 @@ class TransferWizard(ModalScreen):
       return (True, "") if state == "connected" else (False, f"{e.name}: {words or state}" + (" (Connect)" if state == "not connected" else ""))
     if self.globus_only():
       if E.collection_of(self.app.transfers.endpoint_store, {"endpoint": e.id})[0] is None:
-        return False, (f"{e.name} is not linked to a Globus collection (Endpoints → Edit…): only Globus moves the data of "
+        return False, (f"{e.name} is not linked to a Globus collection (Endpoints → Globus link…): only Globus moves the data of "
                        "a Globus collection")
       return True, "" # (Globus moves it: the tab need not be connected)
     if cluster is None:
@@ -1008,7 +1008,7 @@ class TransferWizard(ModalScreen):
       text = Text.assemble((mark, style), f" {E.KINDS.get(e.kind, e.kind)}: ", (state if state == words or not words else f"{state} ({words})", style))
       if e.is_tab and self.globus_only():
         cid = E.collection_of(self.app.transfers.endpoint_store, {"endpoint": e.id})[0]
-        text.append("  · Globus moves the data: " + ("its linked collection" if cid else "it is not linked to a collection (Endpoints → Edit…)"),
+        text.append("  · Globus moves the data: " + ("its linked collection" if cid else "it is not linked to a collection (Endpoints → Globus link…)"),
                     style="cyan" if cid else "yellow")
       self.query_one(f"#tw-{side}-state", Static).update(text)
       connect = self.query_one(f"#tw-{side}-connect", Button)
@@ -2835,7 +2835,8 @@ class EndpointsScreen(TransfersBase):
   #ep-note { height: auto; max-height: 4; padding: 0 1; background: $panel; }
   """
   BINDINGS = [Binding("n", "new", "New endpoint"), Binding("c", "connect", "Connect"), Binding("t", "test", "Test"),
-              Binding("e", "edit", "Edit"), Binding("delete", "delete", "Delete")]
+              Binding("e", "edit", "Edit"), Binding("g", "globus_link", "Globus link", show=False),
+              Binding("delete", "delete", "Delete")]
   icon_name = "transfer"
 
   def compose_left(self):
@@ -2846,7 +2847,9 @@ class EndpointsScreen(TransfersBase):
       yield Button(icons.label("connect", "Connect"), id="ep-connect", compact=True, tooltip="log in to it (c)")
       yield Button(icons.label("disconnect", "Disconnect"), id="ep-disconnect", compact=True)
       yield Button(icons.label("check", "Test"), id="ep-test", compact=True, tooltip="does it answer? (t)")
-      yield Button(icons.label("edit", "Edit…"), id="ep-edit", compact=True, tooltip="(e)")
+      yield Button(icons.label("edit", "Edit…"), id="ep-edit", compact=True, tooltip="its settings (a cluster tab: its SSH settings) (e)")
+      yield Button("Globus link…", id="ep-globus", compact=True,
+                   tooltip="a cluster tab: the Globus collection of its site, so that Globus can move its data (g)")
       yield Button(icons.label("cancel_job", "Delete"), id="ep-delete", variant="error", compact=True, tooltip="(Del)")
     yield ClickTable(id="ep-list", cursor_type="row", zebra_stripes=True)
     yield Static(id="ep-note")
@@ -2902,6 +2905,8 @@ class EndpointsScreen(TransfersBase):
     q("#ep-connect", Button).disabled = e.connected or e.kind == "local"
     q("#ep-disconnect", Button).disabled = not e.connected or e.kind == "local"
     q("#ep-delete", Button).disabled = e.is_tab
+    q("#ep-edit", Button).disabled = e.kind == "local"
+    q("#ep-globus", Button).display = e.kind == "tab"
 
   @on(ClickTable.RowHighlighted, "#ep-list")
   def highlighted(self, event):
@@ -2913,7 +2918,8 @@ class EndpointsScreen(TransfersBase):
       return # (the Reload of every view of the Transfers tab)
     event.stop()
     {"ep-new": self.action_new, "ep-connect": self.action_connect, "ep-disconnect": self.action_disconnect,
-     "ep-test": self.action_test, "ep-edit": self.action_edit, "ep-delete": self.action_delete}[event.button.id]()
+     "ep-test": self.action_test, "ep-edit": self.action_edit, "ep-globus": self.action_globus_link,
+     "ep-delete": self.action_delete}[event.button.id]()
 
   def action_new(self):
     def chosen(kind):
@@ -2957,10 +2963,21 @@ class EndpointsScreen(TransfersBase):
     e = self.current()
     if e is None:
       return
-    if e.is_tab and e.kind == "tab":
-      self.app.edit_endpoint(e, "tab") # (a tab: its link to a Globus collection)
-    elif not e.is_tab:
+    if e.kind == "tab": # (a cluster tab, an SSH endpoint: its SSH settings, as its tab's SSH settings…)
+      if e.cluster is not None:
+        self.app.edit_ssh_settings(e.cluster)
+      else:
+        self.app.notify(f"{e.name}: its tab is not open", title="Endpoints", severity="warning")
+    elif e.kind == "local":
+      self.app.notify("this machine has nothing to set", title="Endpoints", timeout=4)
+    else:
       self.app.edit_endpoint(e, e.kind)
+
+  def action_globus_link(self):
+    """A cluster tab: its link to a Globus collection (its site's)"""
+    e = self.current()
+    if e is not None and e.kind == "tab":
+      self.app.edit_endpoint(e, "tab")
 
   def action_delete(self):
     e = self.current()

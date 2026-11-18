@@ -971,3 +971,37 @@ def test_source_with_braces(check, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_edit_ssh_endpoint(check):
+  """Endpoints: Edit… of a cluster tab: its SSH settings (the + dialog, filled in); its Globus link is a button of its
+  own; this machine has neither"""
+  from slurp.state import ClusterSession
+  from slurp.ui.screens.dialogs import AddClusterScreen
+  from slurp.ui.screens.globus import GlobusEndpointScreen
+  from slurp.ui.screens.transfers import EndpointsScreen
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      app.clusters.append(ClusterSession("jedi", "jedi"))
+      await app.run_action("endpoints"); await pilot.pause(0.6)
+      screen = app.screen
+      table = screen.query_one("#ep-list")
+      table.move_cursor(row=table.get_row_index("tab:jedi")); await pilot.pause(0.3)
+      check("a cluster tab: Edit… and Globus link…", isinstance(screen, EndpointsScreen) and not screen.query_one("#ep-edit").disabled
+            and screen.query_one("#ep-globus").display)
+      await pilot.press("e"); await pilot.pause(0.4)
+      check("Edit…: its SSH settings, filled in", isinstance(app.screen, AddClusterScreen)
+            and app.screen.query_one("#cluster-destination").value == "jedi", type(app.screen).__name__)
+      app.screen.dismiss(None); await pilot.pause(0.3)
+      await pilot.press("g"); await pilot.pause(0.4)
+      check("Globus link…: the Globus form of the tab", isinstance(app.screen, GlobusEndpointScreen) and app.screen.tab is not None,
+            type(app.screen).__name__)
+      app.screen.dismiss(None); await pilot.pause(0.3)
+      table.move_cursor(row=table.get_row_index("local")); await pilot.pause(0.3)
+      check("this machine: no Edit…, no Globus link", screen.query_one("#ep-edit").disabled and not screen.query_one("#ep-globus").display)
+      await pilot.press("q")
+
+  asyncio.run(main())

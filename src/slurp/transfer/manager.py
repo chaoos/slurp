@@ -166,7 +166,7 @@ class Manager:
     dst_cid, dst_map = E.collection_of(self.endpoint_store, t.dest)
     for cid, ref in ((src_cid, t.source), (dst_cid, t.dest)):
       if cid is None:
-        raise G.GlobusError("failed", f"{ref.get('name') or E.ref_id(ref)} has no Globus collection (a tab: link it, Endpoints → Edit…)")
+        raise G.GlobusError("failed", f"{ref.get('name') or E.ref_id(ref)} has no Globus collection (a tab: link it, Endpoints → Globus link…)")
     paths = []
     for p in R.sources(t):
       mapped = src_map(p)

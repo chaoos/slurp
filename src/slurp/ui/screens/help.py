@@ -291,8 +291,9 @@ Where transfers take data from and put it: this machine, every tab (a cluster ta
 as it is open), S3 buckets, SMB shares, WebDAV folders and Globus collections. Each row: its name, its kind, where it is (a tab linked to a Globus collection:
 which), its state (● connected, ○ needs login, connecting, needs you, tab not open; Globus: not set up until you log
 in, expired or needs consent: log in again) and how many transfers use it. **Connect** logs in (a tab: in its tab;
-Globus: the Globus login if there is none, then a test), **Disconnect**, **Test**, **Edit…** (a Globus endpoint: its
-collection; a tab: its link to a Globus collection; S3: its settings and keys), **Delete** (refused while transfers
+Globus: the Globus login if there is none, then a test), **Disconnect**, **Test**, **Edit…** (a cluster tab: its SSH
+settings; a Globus endpoint: its collection; S3, SMB, WebDAV: its settings and secrets), **Globus link…** (`g`, a
+cluster tab: the Globus collection of its site), **Delete** (refused while transfers
 use it; its keys leave the keyring too; a tab goes away when it is closed). An S3 endpoint is "not set up" while the
 keyring lacks one of its keys. S3, SMB and WebDAV: rclone moves the data; secrets are kept only in the system keyring.
 """),
