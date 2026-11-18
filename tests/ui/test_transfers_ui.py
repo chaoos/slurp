@@ -256,6 +256,10 @@ def test_flow_diagram(check):
   check("the data flows left to right", all("▶" in d and "◀" not in d for d in (relay, push, pull)))
   moving = flow_diagram("relay", "slurp", alps, jedi, "alps", "jedi", moving=2).plain
   check("while it runs: a dot on the arrows", "●" in moving)
+  for kind, label in (("s3", "S3"), ("smb", "SMB share"), ("webdav", "WebDAV")):
+    up = flow_diagram("rclone-here", "slurp", here, None, "Local", "files", dst_kind=kind).plain
+    down = flow_diagram("rclone-cluster", "job", None, alps, "files", "alps", src_kind=kind).plain
+    check(f"{kind}: its end labelled {label}", label in up and label in down and (kind == "s3" or "S3" not in up + down), (up, down))
 
 
 def test_comparing_shown(check, tmp_path):

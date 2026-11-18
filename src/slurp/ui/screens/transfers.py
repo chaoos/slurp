@@ -95,12 +95,16 @@ def dot(cluster):
 
 RUNS_WHERE = {"slurp": "", "detached": "on the login node", "job": "as a transfer job"}
 
-def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=None, rate=None, estimate=None, measuring=False):
+STORE_KINDS = {"s3": "S3", "smb": "SMB share", "webdav": "WebDAV"}
+
+def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=None, rate=None, estimate=None, measuring=False,
+                 src_kind="", dst_kind=""):
   """How the data flows, as boxes and arrows: the source, slurp (the relay between two clusters), the destination; on
   each arrow how (push, pull, relay, the same filesystem), under it the bandwidth measured (rate; measuring: not yet),
   under each box what runs there, and below all the estimate (a line of words). moving: a frame number while it runs
-  (a dot moves along the arrows)"""
+  (a dot moves along the arrows); src_kind, dst_kind: the kinds of ends that are no tab (s3, smb, webdav)"""
   import textwrap
+  src_store, dst_store = STORE_KINDS.get(src_kind, "storage"), STORE_KINDS.get(dst_kind, "storage")
   from rich.cells import cell_len
   where = f"transfer job {job}" if job and runs_on == "job" else RUNS_WHERE.get(runs_on, "")
   def rsync(extra=""):
@@ -110,13 +114,13 @@ def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=No
     boxes = [("collection", src_name, "a Globus collection"), (None, "Globus", "moves the data (not through this machine)"),
              ("collection", dst_name, "a Globus collection")]
     arrows = ["Globus", "Globus"]
-  elif route == "rclone-here": # (an end that is no tab: an S3 bucket)
-    boxes = [(src if src is not None else "collection", src_name, "S3" if src is None else "this machine"),
-             (None, "rclone", "on this machine: the data passes it"), (dst if dst is not None else "collection", dst_name, "S3" if dst is None else "this machine")]
+  elif route == "rclone-here": # (an end that is no tab: S3, an SMB share, WebDAV)
+    boxes = [(src if src is not None else "collection", src_name, src_store if src is None else "this machine"),
+             (None, "rclone", "on this machine: the data passes it"), (dst if dst is not None else "collection", dst_name, dst_store if dst is None else "this machine")]
     arrows = ["rclone", "rclone"]
   elif route == "rclone-cluster":
-    boxes = [(src if src is not None else "collection", src_name, f"rclone{' (' + where + ')' if where else ''}" if src is not None else "S3"),
-             (dst if dst is not None else "collection", dst_name, "S3" if dst is None else f"rclone{' (' + where + ')' if where else ''}")]
+    boxes = [(src if src is not None else "collection", src_name, f"rclone{' (' + where + ')' if where else ''}" if src is not None else src_store),
+             (dst if dst is not None else "collection", dst_name, dst_store if dst is None else f"rclone{' (' + where + ')' if where else ''}")]
     arrows = ["push" if src is not None else "pull"]
   elif route == "relay" and two_clusters:
     boxes = [(src, src_name, "rsync (sends)"), (None, "slurp", "passes the bytes"), (dst, dst_name, "rsync server (receives)")]
@@ -1518,7 +1522,11 @@ class TransferWizard(ModalScreen):
     info = self.plan.get("routes", {}).get(route or "", {})
     flow.update(flow_diagram(route, self.chosen_runs_on(), self.src, self.dst, self.side_name("src"),
                              self.side_name("dst"), rate=info.get("rate"), estimate=self.estimate_words(route),
-                             measuring=self.checking is not None and not info) if route else "")
+                             measuring=self.checking is not None and not info, **self.kinds()) if route else "")
+
+  def kinds(self):
+    """The kinds of both ends, for the flow diagram"""
+    return {f"{side}_kind": getattr(self.side(side), "kind", "") or "" for side in ("src", "dst")}
 
   def runs_changed(self):
     self.show_flow()
@@ -1818,7 +1826,8 @@ class TransferWizard(ModalScreen):
     client = self.dst if t.route == "direct-pull" else self.src
     self.query_one("#tw-summary-flow", Static).update(
       flow_diagram(t.route, t.runs_on, self.src, self.dst, self.side_name("src"), self.side_name("dst"),
-                   rate=self.plan.get("routes", {}).get(t.route, {}).get("rate"), estimate=self.estimate_words(t.route)))
+                   rate=self.plan.get("routes", {}).get(t.route, {}).get("rate"), estimate=self.estimate_words(t.route),
+                   **self.kinds()))
     text = Text()
     def row(label, value, style=""):
       text.append(f"{label:10}", style="bold")
@@ -2285,8 +2294,10 @@ class TransferScreen(TransfersBase):
     status.update(status_text(t, self.manager, self.app.spinner()))
     status.styles.border = ("round", STATUS_BORDER.get(t.state, "grey"))
     self.frame = getattr(self, "frame", 0) + 1
+    store = self.app.transfers.endpoint_store
+    kind = lambda end: getattr(store.get(end.get("endpoint", "")), "kind", "") or ""
     route = flow_diagram(t.route, t.runs_on, src, dst, t.source_name, t.dest_name, t.run.get("job", ""),
-                         moving=self.frame if t.state == "running" else None)
+                         moving=self.frame if t.state == "running" else None, src_kind=kind(t.source), dst_kind=kind(t.dest))
     route.append(f"\n{M.ROUTES.get(t.route, t.route)}, {M.RUNS_ON.get(t.runs_on, t.runs_on)}", style="dim")
     if t.run.get("job"):
       route.append(f", job {t.run['job']}", style="dim")

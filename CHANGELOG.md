@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: the flow picture names an SMB share and WebDAV as such (both
+  were labelled S3).
 - Transfers: **New folder…** checks the new folder can be written (a test
   file written and deleted in it), on every endpoint. On S3 a folder could
   not be made and no error was said (S3 has no empty folders: rclone's mkdir
