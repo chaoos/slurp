@@ -53,6 +53,7 @@ from ..config import load_config, update_config
 from ..links.share import ShareManager, SFTP_SERVERS, MAX_FAILURES, available as share_available
 from .screens.links import ShellChoiceScreen, LinkSetupScreen, LinkScreen, DriveScreen
 from .screens.script import ScriptScreen # (registers the view of batch scripts)
+from .transfers_tab import CLUSTER_ACTIONS, TransfersTab
 from ..links import mounts
 from ..checks.engine import check_jobs, counts as checks_counts, SEVERITY_ICON, SEVERITY_STYLE, ERROR, WARNING
 
@@ -85,7 +86,7 @@ def new_session(cluster):
   return RemoteSSH(cluster.destination, sshsetup.ssh_args(cluster.ssh), cluster.pre_login)
 
 
-class Slurp(App):
+class Slurp(TransfersTab, App):
   TITLE = "slurp"
   ENABLE_COMMAND_PALETTE = False # (Textual's palette and its ⭘ in the header: the menu of the job list has what slurp does)
   CSS = """
@@ -136,6 +137,7 @@ class Slurp(App):
   #cluster-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 1; }
   #cluster-tabs Button.cluster-tab { margin-right: 0; }
   #cluster-tabs #about { dock: right; margin-right: 0; text-style: bold; }
+  #cluster-tabs Button.transfers-tab { margin-right: 3; }
   #view-tabs { height: 1; padding: 0 1; background: $boost; }
   #view-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 0; }
   #view-tabs Button.view-close { width: 3; min-width: 3; padding: 0; margin-right: 1; color: $text-muted; }
@@ -262,6 +264,7 @@ class Slurp(App):
     Binding("t", "cluster_shell", "Shell", show=False),
     Binding("d", "login_dir", "Open a directory", show=False),
     Binding("F", "cluster_drive", "Map a directory", show=False),
+    Binding("T", "transfer_data", "Transfer data", show=False),
     Binding("W", "web_access", "Web", show=False),
     Binding("i", "interactive_job", "Interactive job", show=False),
     Binding("C", "cluster_info", "Health", show=False),
@@ -314,6 +317,7 @@ class Slurp(App):
     self.problems_only = False # the job list shows only jobs with errors or warnings of the checks
     self.job_column_keys = None
     self.spinner_frame = 0
+    self.init_transfers() # (the Transfers tab: transfers_tab.py)
 
   def get_default_screen(self):
     return MainScreen()
@@ -425,6 +429,10 @@ class Slurp(App):
   def shutdown(self):
     """End the shells, logins and remote shells of all tabs (their subtabs are kept for the next start first)"""
     try:
+      self.transfers.shutdown() # (runs through slurp: paused, so that rsync keeps what it copied)
+    except Exception as e:
+      log.debug(f"pausing the transfers at the end: {e!r}")
+    try:
       self.save_tabs()
       from .restore import session_ended
       session_ended() # (a clean end: the subtabs open again at the next start)
@@ -490,6 +498,7 @@ class Slurp(App):
     if not 0 <= index < len(self.clusters):
       return
     cluster = self.clusters[index]
+    self.in_transfers = False # (a cluster tab is shown)
     if connect and self.needs_login(cluster):
       cluster.attempts = 0
       self.login(cluster)
@@ -576,6 +585,10 @@ class Slurp(App):
 
   def select_cluster(self, index):
     """A click on a tab: show it (one without a session shows Connect); on the active tab again: log in"""
+    if self.in_transfers: # (from the Transfers tab: that tab is shown)
+      self.leave_transfers(index)
+      self.save_tabs()
+      return
     if index == self.cluster_index:
       if self.needs_login(self.cluster):
         self.connect_tab()
@@ -674,7 +687,7 @@ class Slurp(App):
       mode = "overview"
       if self.clusters:
         self.cluster.current_view = mode
-    if self.clusters:
+    if self.clusters and not self.is_transfers_mode(mode):
       history = self.cluster.view_history
       if mode in history:
         history.remove(mode)
@@ -732,6 +745,9 @@ class Slurp(App):
     self.refresh_status()
 
   def action_close_view(self):
+    if self.in_transfers:
+      self.close_current_transfer_view()
+      return
     if self.current_mode == "_default":
       self.close_jobs()
       return
@@ -756,6 +772,9 @@ class Slurp(App):
                                    "Close"), lambda ok: self.close_view(view) if ok else None)
 
   def refresh_view_tabs(self, screen):
+    if getattr(screen, "TRANSFERS", False): # (a window of the Transfers tab: its own subtabs)
+      self.refresh_transfer_tabs(screen)
+      return
     bar = screen.query("#view-tabs").first(Horizontal) if screen.query("#view-tabs") else None
     jobs = bar.query("#view-jobs") if bar is not None else None
     if not jobs:
@@ -808,6 +827,9 @@ class Slurp(App):
       what.append(f"its {shells} shell{'s' if shells > 1 else ''}")
     if len(cluster.views) > shells:
       what.append(f"its other subtabs ({len(cluster.views) - shells})")
+    moving = self.transfers_for_tab(cluster)
+    if moving:
+      what.append(f"the connection of {len(moving)} transfer{'s' if len(moving) > 1 else ''} under way (they wait for the tab)")
     self.push_screen(ConfirmScreen(f"Close the tab {cluster.name}?", f"This ends {', '.join(what[:-1])} and {what[-1]}."
                                    if len(what) > 1 else f"This ends {what[0]}.", "Close tab"),
                      lambda ok: self.close_cluster(cluster) if ok else None)
@@ -819,7 +841,7 @@ class Slurp(App):
     if cluster not in self.clusters:
       return
     index = self.clusters.index(cluster)
-    current = cluster is self.cluster
+    current = cluster is self.cluster and not self.in_transfers
     if cluster.loader is not None:
       cluster.loader.abort.set()
       cluster.loader.cancel()
@@ -849,8 +871,9 @@ class Slurp(App):
         self.cluster_index = 0
         remote.ssh_connection = None
         self.populate()
-    elif index < self.cluster_index:
-      self.cluster_index -= 1
+    elif index < self.cluster_index or (self.in_transfers and self.cluster_index >= len(self.clusters)):
+      self.cluster_index = max(0, min(self.cluster_index - (index < self.cluster_index), len(self.clusters) - 1))
+      remote.ssh_connection = self.cluster.connection if self.clusters else None
     self.main.set_class(not self.clusters, "-no-tabs")
     self.refresh_status()
     self.save_tabs()
@@ -868,7 +891,7 @@ class Slurp(App):
                          "collapse_arrays": c.collapse_arrays, **({"ssh": c.ssh, "name": c.name} if c.ssh else {}),
                          **({"pre_login": c.pre_login} if c.pre_login else {}), "views": views(c)}
                         for c in self.clusters],
-                  active=self.cluster_index)
+                  active=self.cluster_index, transfers_tab=self.transfers_state())
 
   def restore_views(self, cluster=None):
     """The subtabs of the last run of a tab, opened again when it is ready (connected, its job list loaded)"""
@@ -990,6 +1013,8 @@ class Slurp(App):
         button.display = bool(self.new_version)
         if self.new_version and str(button.label) != f"⬆ slurp {self.new_version}":
           button.label = f"⬆ slurp {self.new_version}"
+    if self.spinner_frame % 4 == 0: # (each second) the transfers: their schedules, the runs on clusters
+      self.transfers.tick()
     if self.spinner_frame % 4 == 0: # (each second) the drives on this machine
       for c in self.clusters:
         if c.drive is not None:
@@ -1155,7 +1180,7 @@ class Slurp(App):
         continue
       existing = {button.id: button for button in tabs.query("Button.cluster-tab")}
       for index, cluster in enumerate(self.clusters):
-        variant = "primary" if index == self.cluster_index else "default"
+        variant = "primary" if index == self.cluster_index and not self.in_transfers else "default"
         label = self.tab_label(cluster)
         button_id = f"cluster-tab-{index}"
         if button_id in existing:
@@ -1168,6 +1193,7 @@ class Slurp(App):
           tabs.mount(Button(label, id=button_id, classes="cluster-tab", variant=variant, compact=True),
                      Button("✕", id=f"cluster-close-{index}", classes="cluster-close", compact=True, tooltip="close the tab"),
                      before=add.first())
+      self.refresh_transfers_button(tabs)
       for button in tabs.query("Button.cluster-tab, Button.cluster-close"): # of closed tabs
         if int(button.id.rsplit("-", 1)[1]) >= len(self.clusters):
           button.remove()
@@ -1180,9 +1206,14 @@ class Slurp(App):
         self.refresh_view_tabs(screen)
     cluster = self.cluster
     loading, connection = self.load_text(cluster), self.connection_text(cluster)
+    if self.in_transfers: # (the Transfers tab has no connection of its own)
+      loading, connection = Text(""), Text("Transfers", style="dim")
     links = self.links_text()
     if links is not None:
       connection = Text.assemble(connection, links)
+    moving = self.transfers.footer()
+    if moving:
+      connection = Text.assemble(connection, (f" · {moving}", "bold cyan"))
     for screen in dict.fromkeys([self.main, *self.screen_stack]):
       if not isinstance(screen, SplitScreen) or not screen.is_mounted:
         continue
@@ -1192,7 +1223,7 @@ class Slurp(App):
       for widget in screen.query("#connstatus"):
         widget.update(connection)
         for other in HEALTH_STYLES:
-          widget.set_class(other == level and bool(cluster.destination), f"-{other}")
+          widget.set_class(other == level and bool(cluster.destination) and not self.in_transfers, f"-{other}")
       if isinstance(screen, MainScreen) and screen.query("#reload"):
         self.show_no_slurm(cluster)
         stale = self.stale_text(cluster)
@@ -1457,6 +1488,8 @@ class Slurp(App):
     button = self.screen.query_one("#menu", Button)
     at = (button.region.x, button.region.y + 1)
     def chosen(action):
+      if action and self.in_transfers and action in CLUSTER_ACTIONS: # (it acts on a cluster: its tab first)
+        self.leave_transfers()
       if action:
         self.call_later(self.run_action, action)
     self.push_screen(MenuScreen(at), chosen)
@@ -1793,6 +1826,8 @@ class Slurp(App):
   def check_action(self, action, parameters):
     if not self.clusters and action not in ("quit", "command_palette", "help_quit", "view_help", "about", "guides", "rule_catalogue", "options"):
       return False # no tab: only + (and quit)
+    if self.in_transfers and action in CLUSTER_ACTIONS:
+      return False # (the Transfers tab: no cluster of its own; from the menu the cluster tab is shown first)
     if action == "reload": # a key of the job table, not of the other windows
       return self.screen is self.main
     if action in ("switch_side", "close_shell"):

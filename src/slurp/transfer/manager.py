@@ -500,6 +500,21 @@ class Manager:
     threading.Thread(target=work, daemon=True, name=f"check {t.name}").start()
     return stop
 
+  def shutdown(self):
+    """slurp ends: its relay runs are paused (rsync keeps what it copied; Continue goes on at the next start); the
+    runs on clusters go on"""
+    for tid, relay in list(self.relays.items()):
+      relay.stop()
+    end = time.monotonic() + 5
+    for tid, relay in list(self.relays.items()):
+      relay.wait(max(0.1, end - time.monotonic()))
+      t = self.get(tid)
+      if t is not None and t.state in M.ACTIVE:
+        M.record_run(t, "paused", "slurp ended")
+        t.state, t.message = "paused", "paused (slurp ended)"
+    self.relays.clear()
+    self.store.save()
+
   # ---- for the overview and the footer
   def active(self):
     return [t for t in self.transfers if t.state in ("running", "starting", "queued", "pausing", "waiting")]
