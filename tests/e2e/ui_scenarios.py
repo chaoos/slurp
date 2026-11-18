@@ -3855,3 +3855,18 @@ async def t_host_key_changed(app, pilot):
   app.show_overview()
   check("…Disconnect again", await until(pilot, lambda: isinstance(app.screen, OverviewScreen)
                                           and "Disconnect" in str(app.screen.query_one("#ov-disconnect").label), 10))
+
+async def t_shell_here(app, pilot):
+  """The directory browser on the lab: Shell here (s): a shell in a subtab that starts in that directory, there"""
+  from slurp.ui.screens.files import DirScreen, open_path
+  folder = os.path.join(LAB, "shell here")
+  os.makedirs(folder, exist_ok=True)
+  open_path(app, ["files"], folder); await pilot.pause(1.0)
+  check("the directory browser", isinstance(app.screen, DirScreen), type(app.screen).__name__)
+  app.screen.query_one("#dir").focus(); await pilot.press("s")
+  ok = await until(pilot, lambda: isinstance(app.screen, TerminalScreen), 15)
+  await pilot.pause(2.0) # (its login: the lab's slow login scripts)
+  await pilot.press(*"pwd", "enter")
+  check("a shell, in that directory on the lab", ok and await until(pilot, lambda: sterm(app).count(folder) >= 1 and "pwd" in sterm(app), 15),
+        sterm(app)[-400:])
+  app.action_close_view(); await pilot.pause(0.5)

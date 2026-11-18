@@ -237,6 +237,7 @@ class Slurp(TransfersTab, App):
   #dpath:focus { background: $surface; }
   #dplaces { width: auto; height: 1; }
   #dplaces Button { margin-left: 1; min-width: 6; }
+  #dshell { margin-left: 1; min-width: 6; }
   #dir { height: 1fr; }
   #hstatus, #hpage { height: 1; padding: 0 1; background: $panel; }
   #hbody { height: 1fr; }

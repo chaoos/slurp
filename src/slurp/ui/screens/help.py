@@ -107,6 +107,7 @@ A directory of the cluster.
 
 - The path at the top is an input: edit it and Enter goes there (`~` is your home; `Esc` puts it back). The buttons next
   to it go to your home, scratch, project, … (`$SCRATCH`, `$PROJECT`, `$STORE`, `$WORK`, those set on the cluster).
+  **Shell here** (`s`) opens a shell in a subtab that starts in this directory (your login shell, on the cluster).
 - Enter opens an entry: folders here (← goes back), files in a subtab of their own (the directory stays), in the
   matching view (text, Markdown, HDF5, core dumps, batch scripts in the script view with their checks). A file
   open already: its subtab.

@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Directories: **Shell here** (`s`) opens a shell in a subtab that starts in
+  the directory shown (your login shell, on the cluster or this machine).
 - Transfers: the root of an S3, SMB or WebDAV endpoint as the source (Choose
   this folder at its top) copies all of it; rclone's filter matched nothing
   and the run ended "done" at once.

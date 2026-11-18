@@ -24,7 +24,8 @@ subtab, or the overview). A file or
 directory always opens in a subtab of its own, wherever you open it (the
 files of a job, a path in a file, a file in a directory), and where you
 opened it stays as it was. A folder you enter in a directory view opens in
-that subtab (`←` or `Esc` goes back). Other windows you open inside a subtab
+that subtab (`←` or `Esc` goes back); **Shell here** (`s`) opens a shell in a
+subtab that starts in the directory shown. Other windows you open inside a subtab
 open in it, and back from its first window shows the job list (or the
 overview). Opening a job, file or directory again shows its subtab. Switching tabs keeps the subtabs. They are also kept
 for the next start: starting slurp again, a tab's job windows, array windows, files and directories, the
