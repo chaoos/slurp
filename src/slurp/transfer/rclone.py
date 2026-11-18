@@ -419,14 +419,21 @@ function str(key,   v) { if (match($0, "\"" key "\":\"[^\"]*\"")) { v = substr($
   next
 }
 /"level":"(error|critical)"/ { o = str("object"); g = str("msg"); print (o != "" ? o ": " : "") g > "/dev/stderr"; next }
+/^[{]/ || /^[ \t]/ || /^(Usage:|Flags|Global Flags|Additional help|Important flags|Use "rclone)/ { next }
+NF { print > "/dev/stderr" }
 """
+# (the last rules: what rclone says in plain text (an option it does not know, a remote it cannot make): it comes
+# before its JSON log starts, and is the reason of an exit 1 or 2; dropped, the run failed without a word. Its usage
+# (indented, under Usage: and Flags…): left out)
 
 def cluster_command(transfer, local_side, s3, s3_paths, local_paths, dest):
   """The command of an rclone run on a cluster (the file `command`): local_side "source" (the cluster's files to S3)
   or "dest"; s3: the Endpoint (its remote's environment comes from the file `keys`)"""
   lines = ["#!/bin/sh", f"# the rclone command of slurp transfer {transfer.id}",
            'd=$(dirname "$0")', 'if [ -f "$d/keys" ]; then set -a; . "$d/keys"; set +a; rm -f "$d/keys"; fi',
-           "command -v rclone >/dev/null 2>&1 || { echo 'slurp: rclone is not installed here' >&2; exit 127; }",
+           """command -v rclone >/dev/null 2>&1 || { echo "slurp: rclone is not installed on $(hostname) (PATH: $PATH)" >&2; exit 127; }""",
+           # (lines with == are the log's own: what runs where; slurp does not take them as errors)
+           'echo "== $(command -v rclone): $(rclone version 2>/dev/null | head -n 1) on $(hostname)" >> "$d/log"',
            # (Pause: TERM to this script, passed on to rclone; the pipeline runs in the background, so that the trap
            # runs at once, not after it)
            "stop=0; rc=0",
@@ -436,11 +443,14 @@ def cluster_command(transfer, local_side, s3, s3_paths, local_paths, dest):
     src = folder if local_side == "source" else s3.path(folder)
     dst = s3.path(dest) if local_side == "source" else dest
     argv = ["rclone", "--config", "", *copy_argv(src, dst, rules, transfer.options)]
+    shown = shlex.join(a for a in argv if a not in ("--use-json-log",))
     lines += ['if [ $stop = 0 ]; then',
+              f"  echo {shlex.quote('== ' + shown)} >> \"$d/log\"",
               f"  ( {{ {shlex.join(argv)} 2>&1 >/dev/null & echo $! > \"$d/rclone.pid\"; wait $!; echo $? > \"$d/rclone.rc\"; }}"
               f" | awk '{PROGRESS_AWK}' ) &",
               "  p=$!; wait $p; while kill -0 $p 2>/dev/null; do wait $p; done",
-              '  r=$(cat "$d/rclone.rc" 2>/dev/null || echo 1); [ "$r" -ne 0 ] && rc=$r',
+              '  r=$(cat "$d/rclone.rc" 2>/dev/null || echo 1)',
+              '  if [ "$r" -ne 0 ]; then rc=$r; [ $stop = 1 ] || echo "slurp: rclone ended with $r" >&2; fi',
               "fi"]
   lines += ['rm -f "$d/rclone.pid" "$d/rclone.rc"', "[ $stop = 1 ] && exit 143", "exit $rc"]
   return "\n".join(lines) + "\n"

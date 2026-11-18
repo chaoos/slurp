@@ -3870,3 +3870,59 @@ async def t_shell_here(app, pilot):
   check("a shell, in that directory on the lab", ok and await until(pilot, lambda: sterm(app).count(folder) >= 1 and "pwd" in sterm(app), 15),
         sterm(app)[-400:])
   app.action_close_view(); await pilot.pause(0.5)
+
+async def t_transfer_rclone_errors(app, pilot):
+  """rclone on the cluster that fails in plain text (an older rclone: an option it does not know, exit 1), as a transfer
+  job: the cause in the transfer's message and errors, in the run's log, and in the job's output file (it was empty)"""
+  import glob
+  import socket
+  import subprocess
+  import time
+  from slurp.transfer import endpoints as E, model as M, secrets as S
+  davroot = os.path.join(HERE, "rcerr-dav")
+  os.makedirs(os.path.join(davroot, "run1"), exist_ok=True)
+  open(os.path.join(davroot, "run1", "a.txt"), "w").write("a")
+  with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+  dav = subprocess.Popen(["rclone", "--config", "", "serve", "webdav", davroot, "--addr", f"127.0.0.1:{port}", "--user", "dav", "--pass", "pw"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+  for _ in range(50):
+    try:
+      socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+      break
+    except OSError:
+      time.sleep(0.2)
+  fake = os.path.join(LAB, "fakebin", "rclone")
+  with open(fake, "w") as f:
+    f.write('#!/bin/sh\nif [ "$1" = version ]; then echo "rclone v1.50.2"; exit 0; fi\n'
+            'echo "Error: unknown flag: --use-json-log" >&2\necho "Usage:" >&2\necho "  rclone copy source:path dest:path [flags]" >&2\n'
+            'echo "2026/11/18 20:00:00 Fatal error: unknown flag: --use-json-log" >&2\nexit 1\n')
+  os.chmod(fake, 0o755)
+  try:
+    store = app.transfers.endpoint_store
+    store.add(E.EndpointDef("davx", "dav", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"]))
+    S.put(S.user("davx", "password"), "pw")
+    lab = next(c for c in app.clusters if c.destination)
+    _, dst = xfer_tree("rcerr")
+    t = M.Transfer(M.new_id(), "dav to lab", {"endpoint": "davx", "name": "dav", "paths": ["/run1"]},
+                   {"endpoint": E.tab_id(lab), "tab": M.tab_ref(lab), "path": dst}, route="rclone-cluster", runs_on="job",
+                   options={"partition": "normal", "time": "0:10:00"}, secrets_to={lab.destination: ["davx"]})
+    t.plan = {"routes": {"rclone-cluster": {"ok": True, "runs_on": ["detached", "job"]}}}
+    app.transfers.add(t)
+    app.transfers.run_now(t)
+    check("failed", await until(pilot, lambda: t.state == "failed", 90), (t.state, t.message))
+    check("its message: rclone's cause", "unknown flag: --use-json-log" in t.message and "Usage" not in t.message, t.message)
+    check("…its errors too, without rclone's usage", any("unknown flag" in e for e in t.errors) and not any("rclone copy source" in e for e in t.errors), t.errors)
+    folder = t.runs[-1]["folder"] if t.runs else ""
+    check("it ran (in its folder)", bool(folder), (t.message, t.runs[-1:], t.log[-5:]))
+    log = open(os.path.join(folder, "log")).read() if folder else ""
+    check("the run's log: the rclone it ran, its command, the cause", "rclone v1.50.2" in log and "== rclone --config" in log
+          and "unknown flag" in log and "slurp: rclone ended with 1" in log, log[-800:])
+    outs = glob.glob(os.path.join(folder, "job-*.out"))
+    out = open(outs[0]).read() if outs else ""
+    check("the job's output file: the run and its log, not empty", "== run" in out and "unknown flag" in out and "the run ended with 1" in out, out[-800:])
+    app.transfers.delete(t)
+  finally:
+    os.remove(fake)
+    dav.kill()

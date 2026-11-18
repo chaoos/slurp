@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: runs on a cluster say why they failed. rclone's plain-text errors
+  (an option an older rclone does not know, a remote it cannot make) were
+  dropped, so a failed run said nothing; now they are the run's errors and
+  message. The run's log names the rclone and its command, and a failed
+  run writes its log into its output (a transfer job's `job-<id>.out`).
 - Directories: **Shell here** (`s`) opens a shell in a subtab that starts in
   the directory shown (your login shell, on the cluster or this machine).
 - Transfers: the root of an S3, SMB or WebDAV endpoint as the source (Choose

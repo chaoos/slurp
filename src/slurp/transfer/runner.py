@@ -36,7 +36,8 @@ touch alive
 beat=$!
 srand_now='BEGIN { srand(); t = srand(); print t }'
 printf '{"phase": "scanning", "updated": %s}\n' "$(awk "$srand_now")" > progress.json
-echo "== run $(date) on $(hostname)${SLURM_JOB_ID:+, job $SLURM_JOB_ID}" >> log
+start=$(wc -l < log 2>/dev/null || echo 0)
+echo "== run $(date) on $(hostname)${SLURM_JOB_ID:+, job $SLURM_JOB_ID}" | tee -a log
 if [ -f preflight ]; then # (a direct route: the login to the other cluster first, here where rsync runs)
   if ! sh ./preflight </dev/null > preflight.out 2>&1; then
     { echo "slurp: $(hostname) cannot log in to the other cluster by itself:"; grep -v '^ *$' preflight.out | tail -n 5; } >> log
@@ -83,6 +84,10 @@ wait $apid
 rm -f pipe
 printf '{"exit": %s, "ended": %s, "host": "%s", "job": "%s"}\n' "$rc" "$(awk "$srand_now")" "$(hostname)" "${SLURM_JOB_ID:-}" > result.json
 echo "== ended with $rc" >> log
+if [ "$rc" -ne 0 ]; then # (its log, also where the run's own output goes: a job's job-<id>.out, a detached run's out)
+  echo "slurp: the run ended with $rc; its log ($d/log):" >&2
+  tail -n +"$((start + 1))" log | tail -n 60 >&2
+fi
 rm -f keys rclone.rc # (the keys of an rclone run: never left behind)
 kill $beat 2>/dev/null
 rm -rf lock

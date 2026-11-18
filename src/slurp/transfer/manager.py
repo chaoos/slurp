@@ -839,7 +839,7 @@ class Manager:
     out.close()
     errors, error_count, stats = out.errors, out.error_count, out.stats
     if t.route == "rclone-cluster": # (its errors: the lines rclone's command wrote, one per file)
-      errors = [l.strip() for l in this_run.splitlines()[1:] if l.strip() and not l.startswith(("==", "slurp:"))][-200:]
+      errors = [l.strip() for l in this_run.splitlines()[1:] if l.strip() and not l.startswith("==")][-200:]
       error_count, stats = len(errors), None
     p = RN.progress_of(status.get("progress"))
     if p:
@@ -881,7 +881,8 @@ class Manager:
     if result and result.get("login") == "refused":
       message = self.login_refused(t, result, status.get("log", ""))
     if t.route == "rclone-cluster" and code and not stopped and not message: # (why, from rclone's errors)
-      message = RC.causes([e for e in map(RC.error_of, errors) if e])
+      message = RC.causes([e for e in map(RC.error_of, errors) if e]) or (
+        f"rclone said nothing: its log is {t.run.get('folder')}/log on the cluster" if t.run.get("folder") else "")
     self.ended(t, code, message, stats=stats, stopped=stopped)
 
   def login_refused(self, t, result, log_text):
