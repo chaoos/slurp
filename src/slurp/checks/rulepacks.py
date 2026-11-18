@@ -19,6 +19,10 @@ Keys (all optional):
   options = ["uenv", "view"]       # sbatch options of site plugins (S04)
   docs = "https://docs.cscs.ch"    # the site's documentation (guides)
   status = "https://status.cscs.ch" # the site's status page (outages, maintenance): shown when the login fails
+  transfer_partition = "xfer"      # transfers: the Slurm partition for data transfers (transfer jobs run there)
+  transfer_hosts = ["ela.cscs.ch"] # transfers: data mover nodes (shown in the check of a transfer)
+  globus = "https://…"             # transfers: the site's Globus collection or its page (suggested for large transfers)
+  login_node_limits = "…"          # transfers: what the site does to long processes on login nodes
   [[advice]]                       # E03: a pattern in the script and what to say about it
   pattern = "conda activate"
   text = "..."
@@ -67,13 +71,18 @@ def load_packs():
 def status_page(tab, destination):
   """The status page of the site of a tab (its pack's "status"), "" if none: matched by the tab's name and its SSH
   destination only (it is wanted when the login fails, before the login node can say who it is)"""
+  url = str(site_pack(tab, destination).get("status") or "")
+  return url if url.startswith(("https://", "http://")) else ""
+
+@functools.lru_cache(maxsize=64)
+def site_pack(tab, destination):
+  """The pack of the site of a tab, matched by the tab's name and its SSH destination only ({} if none)"""
   names = [n.lower() for n in (tab, destination) if n]
   names += [n.split("@")[-1] for n in names if "@" in n]
   for pack in load_packs():
     if any(fnmatch.fnmatch(n, pattern.lower()) for pattern in pack.get("match", []) for n in names):
-      url = str(pack.get("status") or "")
-      return url if url.startswith(("https://", "http://")) else ""
-  return ""
+      return pack
+  return {}
 
 def pack_for(tab, destination, facts):
   """The first pack that matches the tab, its destination or the login node's host name ({} if none)"""
