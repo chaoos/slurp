@@ -3478,3 +3478,112 @@ async def t_pre_login(app, pilot):
   app.screen.query_one("#ssh-pre-login").value = ""
   app.screen.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
   check("emptied: no command any more", cluster.pre_login == "" and cluster.connection.pre_login == "")
+
+
+# ---- transfers: the lab's "cluster" is this machine, its login scripts print text (the junk) on every channel
+def xfer_tree(name, big=0):
+  """A source tree in the lab (the cluster) and an empty destination folder -> (source, destination)"""
+  src, dst = os.path.join(HERE, "xfer", name, "src"), os.path.join(HERE, "xfer", name, "dst")
+  os.makedirs(os.path.join(src, "sub"), exist_ok=True)
+  os.makedirs(dst, exist_ok=True)
+  with open(os.path.join(src, "sub", "a.bin"), "wb") as f:
+    f.write(os.urandom(400_000))
+  with open(os.path.join(src, "b.txt"), "w") as f:
+    f.write("hello")
+  if big:
+    with open(os.path.join(src, "big.bin"), "wb") as f:
+      f.write(os.urandom(big))
+  return src, dst
+
+def same_tree(a, b):
+  for root, _, files in os.walk(a):
+    for name in files:
+      p = os.path.join(root, name)
+      q = os.path.join(b, os.path.relpath(p, a))
+      if not os.path.exists(q) or open(p, "rb").read() != open(q, "rb").read():
+        return False
+  return True
+
+async def t_transfer_wizard(app, pilot):
+  """lab → this machine with the wizard: the check over SSH, the relay chosen, Go, done; Run now copies nothing"""
+  from slurp.ui.screens.transfers import TransferScreen, TransferWizard
+  src, dst = xfer_tree("wizard")
+  lab = app.cluster
+  await pilot.press("T"); await pilot.pause(0.4)
+  w = app.screen
+  check("T: the wizard, from the tab shown", isinstance(w, TransferWizard) and w.src is lab)
+  w.query_one("#tw-src-path").value = src
+  await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
+  w.query_one("#tw-next").press(); await pilot.pause(0.3)
+  local = next(c for c in app.clusters if not c.destination)
+  w.query_one("#tw-dst-tab").value = str(app.clusters.index(local)); await pilot.pause(0.3)
+  w.query_one("#tw-dst-path").value = dst; await pilot.pause(0.2)
+  w.query_one("#tw-next").press()
+  check("the check over SSH ends", await until(pilot, lambda: w.plan.get("done"), 90), w.plan.get("steps"))
+  steps = str(w.query_one("#tw-check-steps").render())
+  check("rsync on both, what remains, the relay's speed", "rsync 3" in steps and "in 2 files to copy" in steps and "through slurp" in steps, steps)
+  check("a direct route needs a login by itself: not from this machine", not w.plan["routes"]["direct-pull"]["ok"])
+  w.query_one("#tw-next").press(); await pilot.pause(0.5)
+  w.query_one(".tw-r-relay").value = True; await pilot.pause(0.4)
+  check("the relay: in slurp", w.chosen_route() == "relay" and w.chosen_runs_on() == "slurp", (w.chosen_route(), w.chosen_runs_on()))
+  w.query_one("#tw-next").press(); await pilot.pause(0.2)
+  w.query_one("#tw-next").press(); await pilot.pause(0.3)
+  w.query_one("#tw-go").press()
+  await pilot.pause(0.5)
+  t = app.transfers.transfers[-1]
+  check("Go: done through the relay", await until(pilot, lambda: t.state == "done", 90), (t.state, t.message, t.log[-4:]))
+  check("the files are on this machine", same_tree(src, os.path.join(dst, "src")))
+  check("its subtab", isinstance(app.screen, TransferScreen) and app.in_transfers)
+  app.transfers.start(t)
+  check("Run now: done again", await until(pilot, lambda: t.state == "done" and len(t.runs) == 2, 60), (t.state, t.message))
+  check("…and it copied nothing (idempotent)", (t.progress.get("stats") or {}).get("transferred") == 0, t.progress.get("stats"))
+  app.leave_transfers(); await pilot.pause(0.3)
+
+async def t_transfer_job(app, pilot):
+  """A transfer job on the lab: its progress from progress.json, Pause (scancel, after the warning), Continue (a new job), done"""
+  from slurp.transfer import model as M
+  from slurp.ui.screens.transfers import TransferScreen
+  src, dst = xfer_tree("job", big=30_000_000)
+  lab = next(c for c in app.clusters if c.destination)
+  ref = M.tab_ref(lab)
+  t = M.Transfer(M.new_id(), "job run", {"tab": ref, "paths": [src]}, {"tab": ref, "path": dst}, route="same-fs", runs_on="job",
+                 options={"partition": "normal", "time": "01:00:00", "bwlimit": "4"}, plan={"remaining_bytes": 30_400_005})
+  app.transfers.add(t)
+  app.transfers.go(t)
+  app.open_transfer(t); await pilot.pause(0.3)
+  check("submitted: a transfer job", await until(pilot, lambda: t.run.get("job"), 30) and t.state in ("queued", "running"), (t.state, t.message))
+  check("its progress from the cluster", await until(pilot, lambda: t.state == "running" and t.progress.get("bytes", 0) > 1_000_000, 40),
+        (t.state, t.progress))
+  calls = open(os.path.join(LAB, "sbatch_calls")).read()
+  check("sbatch with the job's script", f"XFER={t.run['job']}" in calls)
+  first = t.run["job"]
+  screen = app.screen
+  check("the details", isinstance(screen, TransferScreen))
+  await pilot.click("#xd-pause"); await pilot.pause(0.4)
+  check("Pause: it warns (the job is cancelled)", isinstance(app.screen, ConfirmScreen) and "cancels Slurm job" in str(app.screen.dialog_message))
+  await pilot.click("#confirm-yes")
+  check("paused", await until(pilot, lambda: t.state == "paused", 40), (t.state, t.message))
+  check("scancel of its job", first in open(os.path.join(LAB, "scancel_calls")).read())
+  t.options["bwlimit"] = ""
+  await pilot.click("#xd-resume")
+  check("Continue: a new job, done", await until(pilot, lambda: t.state == "done", 60), (t.state, t.message, t.log[-4:]))
+  check("another job", t.runs[-1]["job"] and t.runs[-1]["job"] != first, t.runs)
+  check("the history: paused, done", [r["result"] for r in t.runs] == ["paused", "done"], t.runs)
+  check("the files are whole", same_tree(src, os.path.join(dst, "src")))
+  folder = os.path.join(LAB, "cache", "slurp", "transfers", t.id)
+  check("its folder on the cluster: progress.json, result.json, the log", all(os.path.exists(os.path.join(folder, f)) for f in ("progress.json", "result.json", "log")))
+  app.leave_transfers(); await pilot.pause(0.3)
+
+async def t_transfer_detached(app, pilot):
+  """Detached on the lab's login node: followed in its folder there, done"""
+  from slurp.transfer import model as M
+  src, dst = xfer_tree("detached")
+  lab = next(c for c in app.clusters if c.destination)
+  ref = M.tab_ref(lab)
+  t = M.Transfer(M.new_id(), "detached run", {"tab": ref, "paths": [src]}, {"tab": ref, "path": dst}, route="same-fs", runs_on="detached")
+  app.transfers.add(t)
+  app.transfers.go(t)
+  check("done", await until(pilot, lambda: t.state == "done", 60), (t.state, t.message, t.log[-4:]))
+  check("the files", same_tree(src, os.path.join(dst, "src")))
+  ov_line = app.transfers.summary_for(lab)
+  check("nothing under way: no line in the overview", ov_line == "", ov_line)

@@ -117,7 +117,7 @@ AllowTcpForwarding yes
 X11Forwarding no
 AllowAgentForwarding no
 AcceptEnv FAKE_*
-SetEnv PATH={d}/fakebin:/usr/local/bin:/usr/bin:/bin SCRATCH={d}/scratch
+SetEnv PATH={d}/fakebin:/usr/local/bin:/usr/bin:/bin SCRATCH={d}/scratch XDG_CACHE_HOME={d}/cache
 Subsystem sftp internal-sftp
 ForceCommand {d}/force.sh
 """)

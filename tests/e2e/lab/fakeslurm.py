@@ -60,7 +60,23 @@ with open(os.path.join(S, "slurm_calls"), "a") as f:
   f.write(prog + " " + " ".join(args) + "\n")
 def opt(name):
   return args[args.index(name) + 1] if name in args else None
-if prog == "squeue":
+XFER = os.path.join(S, "xfer_jobs") # transfer jobs (slurp-xfer-*): they really run, "<id> <pid>" per line
+def xfer_jobs():
+  try:
+    return dict(line.split()[:2] for line in open(XFER) if line.strip())
+  except OSError:
+    return {}
+def alive(pid):
+  try:
+    os.kill(int(pid), 0)
+    stat = open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()
+    return stat[0] != "Z"
+  except (OSError, ValueError, IndexError):
+    return False
+if prog == "squeue" and opt("-j") in xfer_jobs():
+  if alive(xfer_jobs()[opt("-j")]):
+    print((opt("-o") or "%T").replace("%T", "RUNNING").replace("%r", "None"))
+elif prog == "squeue":
   fmt = next(a for a in args if a.startswith("--format=")).split("=", 1)[1]
   codes = {"%i": "JobID", "%j": "JobName", "%u": "User", "%a": "Account", "%P": "Partition", "%T": "State", "%r": "Reason",
            "%D": "NNodes", "%M": "Elapsed", "%l": "Timelimit", "%S": "Start", "%V": "Submit", "%Z": "WorkDir", "%N": "NodeList"}
@@ -115,6 +131,11 @@ elif prog == "sacctmgr":
 elif prog == "scancel":
   with open(os.path.join(S, "scancel_calls"), "a") as f:
     f.write(" ".join(args) + "\n")
+  for jid in args:
+    pid = xfer_jobs().get(jid)
+    if pid and alive(pid): # (as Slurm: TERM to the job's processes)
+      import signal
+      os.killpg(int(pid), signal.SIGTERM)
 elif prog == "sinfo" and "--version" in args:
   print("slurm 23.11.4")
 elif prog == "sinfo":
@@ -145,6 +166,18 @@ elif prog == "sbatch" and "--version" in args:
   print("slurm 23.02.7")
 elif prog == "sbatch" and "--test-only" in args:
   print("sbatch: Job 9101 to start at 2026-11-14T18:00:00 using 256 processors on nodes nid[0001-0002] in partition normal", file=sys.stderr)
+elif prog == "sbatch" and any("slurp-xfer-" in open(a).read() for a in args if a.endswith(".sh") and os.path.exists(a)):
+  import subprocess
+  script = next(a for a in args if a.endswith(".sh"))
+  jid = str(9200 + len(xfer_jobs()))
+  out = next((l.split("=", 1)[1] for l in open(script) if l.startswith("#SBATCH --output=")), "/dev/null").strip().replace("%j", jid)
+  with open(os.path.join(S, "sbatch_calls"), "a") as f:
+    f.write(repr(args) + f" XFER={jid}\n")
+  proc = subprocess.Popen(["sh", script], env=dict(os.environ, SLURM_JOB_ID=jid), stdin=subprocess.DEVNULL,
+                          stdout=open(out, "a"), stderr=subprocess.STDOUT, start_new_session=True)
+  with open(XFER, "a") as f:
+    f.write(f"{jid} {proc.pid}\n")
+  print(jid if "--parsable" in args else f"Submitted batch job {jid}")
 elif prog == "sbatch":
   with open(os.path.join(S, "sbatch_calls"), "a") as f:
     script = next((a for a in args if a.endswith(".sh")), None)
