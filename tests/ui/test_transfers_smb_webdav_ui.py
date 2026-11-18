@@ -155,3 +155,68 @@ def test_new_folder_on_webdav(check, webdav):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def shown(widget):
+  """The text a Static shows (a Rich table too)"""
+  from rich.console import Console
+  console = Console(width=200, record=True, file=open("/dev/null", "w"))
+  console.print(widget.content)
+  return console.export_text()
+
+
+def test_endpoint_window(check, webdav):
+  """Enter on an endpoint in the Endpoints: its window. WebDAV: its settings, its secret only as there or not (never
+  its value), its connection (rclone here, the last test), Test: the course, connected; Disconnect; Copy address. This
+  machine (a tab): its connection window"""
+  from slurp.transfer import endpoints as E
+  from slurp.ui.screens.connection import ConnectionScreen
+  from slurp.ui.screens.endpoint import EndpointScreen
+  port, root = webdav
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      store = app.transfers.endpoint_store
+      store.add(E.EndpointDef("w9", "dav", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"]))
+      S.put(S.user("w9", "password"), "pw456")
+      await app.run_action("endpoints"); await pilot.pause(0.6)
+      screen = app.screen
+      table = screen.query_one("#ep-list")
+      rows = [table.coordinate_to_cell_key((i, 0)).row_key.value for i in range(table.row_count)]
+      table.move_cursor(row=rows.index("w9")); await pilot.pause(0.2)
+      table.focus(); await pilot.press("enter"); await pilot.pause(0.6)
+      w = app.screen
+      check("Enter: its window", isinstance(w, EndpointScreen), type(w).__name__)
+      settings = shown(w.query_one("#epd-settings"))
+      check("its settings: the URL, the user; the password there, its value not", f"http://127.0.0.1:{port}" in settings and "dav" in settings
+            and "password ✓" in settings and "pw456" not in settings, settings)
+      connection = shown(w.query_one("#epd-connection"))
+      check("its connection: rclone here", "rclone" in connection and "on this machine" in connection, connection)
+      await pilot.press("t")
+      check("Test: connected, in the course, the last test", await until(pilot, lambda: "connected" in shown(w.query_one("#epd-course"))
+                                                                       and "took" in shown(w.query_one("#epd-connection"))),
+            (shown(w.query_one("#epd-course")), shown(w.query_one("#epd-connection"))))
+      check("…its border green", w.query_one("#epd-dialog").has_class("-good"))
+      w.query_one("#epd-disconnect").press(); await pilot.pause(0.3)
+      check("Disconnect: not connected", app.transfers.endpoint_status["w9"][0] == "not connected" and "disconnected" in shown(w.query_one("#epd-course")))
+      copied = []
+      import slurp.ui.screens.dialogs as D
+      original = D.copy_text
+      D.copy_text = lambda app_, text, what="": copied.append(text)
+      try:
+        w.query_one("#epd-copy").press(); await pilot.pause(0.2)
+      finally:
+        D.copy_text = original
+      check("Copy address: its URL", copied == [f"http://127.0.0.1:{port}/"], copied)
+      await pilot.press("escape"); await pilot.pause(0.3)
+      table = app.screen.query_one("#ep-list")
+      rows = [table.coordinate_to_cell_key((i, 0)).row_key.value for i in range(table.row_count)]
+      table.move_cursor(row=rows.index("local")); await pilot.pause(0.2)
+      table.focus(); await pilot.press("enter"); await pilot.pause(0.6)
+      check("this machine: its connection window", isinstance(app.screen, ConnectionScreen), type(app.screen).__name__)
+      await pilot.press("escape"); await pilot.pause(0.3)
+      await pilot.press("q")
+
+  asyncio.run(main())

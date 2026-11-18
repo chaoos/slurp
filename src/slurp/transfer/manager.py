@@ -43,6 +43,8 @@ class Manager:
     self.store = store or M.Store()
     self.endpoint_store = endpoints or E.EndpointStore()
     self.endpoint_status = {} # id of a defined endpoint -> (state, words) of this session
+    self.endpoint_events = {} # id (a tab's Globus link: link:<id>) -> [(time, text, state)]: its tests, for its window
+    self.endpoint_tested = {} # id -> (when, seconds it took) of its last test
     self.relays = {}        # id -> Relay (runs in slurp)
     self.rclones = {}       # id -> the rclone process of a run on this machine
     self.stopping = set()   # ids of runs on this machine being paused
@@ -261,6 +263,19 @@ class Manager:
       self.followed[t.id] = 0
     threading.Thread(target=work, daemon=True).start()
 
+  def endpoint_event(self, key, text, state=""):
+    """A line of an endpoint's course (its window shows them): a test began or ended"""
+    events = self.endpoint_events.setdefault(key, [])
+    events.append((time.time(), text, state))
+    del events[:-100]
+
+  def endpoint_finished(self, key, started, result, what):
+    """A test ended: its state, the course, when and how long"""
+    took = time.monotonic() - started
+    self.endpoint_status[key] = result
+    self.endpoint_tested[key] = (time.time(), took)
+    self.endpoint_event(key, f"{what}: {result[0]}" + (f" ({result[1]})" if result[1] else "") + f" · {took:.1f} s", result[0])
+
   def test_globus(self, endpoint, done=None):
     """Connect/Test of a Globus endpoint (or of the link of a tab): the login, the collection, its folder listed (in a
     thread); its status of this session, then done(state, words) on the UI thread"""
@@ -272,6 +287,8 @@ class Manager:
       cid, base = link.get("collection"), link.get("collection_path") or "/~/"
     key = endpoint.id if d is not None else f"link:{endpoint.id}"
     self.endpoint_status[key] = ("connecting", "asking Globus")
+    self.endpoint_event(key, f"testing: the Globus login, the collection {cid or '?'}, its folder {base} listed", "connecting")
+    started = time.monotonic()
     self.changed(None, save=False)
     def work():
       try:
@@ -286,7 +303,7 @@ class Manager:
       except Exception as e:
         result = ("failed", str(e))
       def finish():
-        self.endpoint_status[key] = result
+        self.endpoint_finished(key, started, result, "Globus")
         self.changed(None, save=False)
         if done is not None:
           done(*result)
@@ -321,6 +338,9 @@ class Manager:
     its status of this session, then done(state, words) on the UI thread"""
     d = endpoint.definition
     self.endpoint_status[endpoint.id] = ("connecting", "asking it")
+    self.endpoint_event(endpoint.id, f"testing: its folder {d.settings.get('path') or '/'} listed with rclone" + (", a marker written and deleted" if write else ""),
+                        "connecting")
+    started = time.monotonic()
     self.changed(None, save=False)
     def work():
       try:
@@ -332,7 +352,7 @@ class Manager:
       except Exception as err:
         result = ("failed", str(err))
       def finish():
-        self.endpoint_status[endpoint.id] = result
+        self.endpoint_finished(endpoint.id, started, result, "rclone")
         self.changed(None, save=False)
         if done is not None:
           done(*result)

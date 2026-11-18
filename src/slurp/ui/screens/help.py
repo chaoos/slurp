@@ -296,6 +296,16 @@ settings; a Globus endpoint: its collection; S3, SMB, WebDAV: its settings and s
 cluster tab: the Globus collection of its site), **Delete** (refused while transfers
 use it; its keys leave the keyring too; a tab goes away when it is closed). An S3 endpoint is "not set up" while the
 keyring lacks one of its keys. S3, SMB and WebDAV: rclone moves the data; secrets are kept only in the system keyring.
+**Enter** or a click opens its window: a tab's connection window, or the window of an S3, SMB, WebDAV or Globus endpoint.
+"""),
+  "EndpointScreen": ("An endpoint", """
+The window of an S3, SMB, WebDAV or Globus endpoint, as a tab's connection window: its border says its state (green:
+connected, yellow: not tested or connecting, red: failed or not set up). **Settings**: its address and what its form
+holds; its secrets only as there (✓) or missing (✗) in the keyring, never their values. **Connection**: its state, its
+last test (when, how long it took), what reaches it (rclone on this machine, as a remote of its environment; or Globus,
+and whether you are logged in and gave consent). **Used by**: the transfers that use it. **Course of its tests**: each
+test, with its result. **Test** (`t`), **Edit…** (`e`), **Disconnect**, **Copy address** (s3://…, //server/share, the
+URL, the collection).
 """),
   "RcloneEndpointScreen": ("An S3, SMB or WebDAV endpoint", """
 An endpoint rclone moves data to and from. **S3** (AWS or S3-compatible: Ceph, MinIO, a site's object store): the

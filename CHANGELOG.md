@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Endpoints: Enter (or a click) opens an endpoint's window: a cluster tab's
+  connection window, or for S3, SMB, WebDAV and Globus a window alike (address,
+  settings, secrets as there or missing, connection and last test, the
+  transfers using it, the course of its tests; Test, Edit…, Disconnect, Copy
+  address). The connection window's Mount… maps the drive of its own tab.
 - Transfers: the route in the list and in the runs says what moves the data
   first: `rsync · relay · in slurp`, `rclone · on the cluster · transfer job`,
   `Globus · at Globus`.

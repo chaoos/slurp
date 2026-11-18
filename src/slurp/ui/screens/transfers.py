@@ -2955,7 +2955,7 @@ class EndpointsScreen(TransfersBase):
     if e is None:
       note.update("")
       return
-    text = Text.assemble((e.name, "bold"), f" · {E.KINDS.get(e.kind, e.kind)}", (f" · {e.where}" if e.where else ""), " · ",
+    text = Text.assemble(("Enter: its window · ", "dim"), (e.name, "bold"), f" · {E.KINDS.get(e.kind, e.kind)}", (f" · {e.where}" if e.where else ""), " · ",
                          endpoint_state_text(e))
     users = self.used_by(e.id)
     if users:
@@ -2971,6 +2971,26 @@ class EndpointsScreen(TransfersBase):
   @on(ClickTable.RowHighlighted, "#ep-list")
   def highlighted(self, event):
     self.show_note()
+
+  @on(ClickTable.RowSelected, "#ep-list")
+  def selected(self, event):
+    """Enter or a click: its window (a tab: its connection window, as the tab's; the others: theirs)"""
+    event.stop()
+    self.action_open()
+
+  def action_open(self):
+    e = self.current()
+    if e is None:
+      return
+    if e.is_tab:
+      if e.cluster is None:
+        self.app.notify(f"{e.name}: its tab is not open", title="Endpoints", severity="warning")
+        return
+      from .connection import ConnectionScreen
+      self.app.push_screen(ConnectionScreen(e.cluster))
+      return
+    from .endpoint import EndpointScreen
+    self.app.push_screen(EndpointScreen(e.id))
 
   @on(Button.Pressed, "#ep-toolbar Button")
   def pressed(self, event):

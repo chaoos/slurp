@@ -3610,6 +3610,22 @@ async def t_transfer_s3(app, pilot):
       check("…in the bucket", found == ["relay/src/b.txt", "relay/src/sub/a.bin"], found)
       text = app.transfers.command_text(relay)
       check("Copy as a command: plain ssh, no control socket", "ssh lab" in text.replace("'", "") or lab.destination in text, text)
+    # the Endpoints: Enter on the lab's tab: its connection window; on the bucket: its window
+    from slurp.ui.screens.connection import ConnectionScreen
+    from slurp.ui.screens.endpoint import EndpointScreen
+    await app.run_action("endpoints"); await pilot.pause(0.6)
+    table = app.screen.query_one("#ep-list")
+    keys = [table.coordinate_to_cell_key((i, 0)).row_key.value for i in range(table.row_count)]
+    table.move_cursor(row=keys.index(E.tab_id(lab))); table.focus(); await pilot.pause(0.2)
+    await pilot.press("enter"); await pilot.pause(0.6)
+    check("Endpoints: Enter on the lab: its connection window", isinstance(app.screen, ConnectionScreen) and app.screen.cluster is lab,
+          type(app.screen).__name__)
+    await pilot.press("escape"); await pilot.pause(0.3)
+    table = app.screen.query_one("#ep-list")
+    table.move_cursor(row=keys.index("s3lab")); table.focus(); await pilot.pause(0.2)
+    await pilot.press("enter"); await pilot.pause(0.6)
+    check("…on the bucket: its window", isinstance(app.screen, EndpointScreen) and app.screen.eid == "s3lab", type(app.screen).__name__)
+    await pilot.press("escape"); await pilot.pause(0.3)
     for t in (up, down, relay):
       app.transfers.delete(t)
   finally:

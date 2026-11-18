@@ -85,6 +85,11 @@ itself while it is open; closed, a transfer's endpoint shows *tab not open*, wit
 **Menu → Endpoints…** shows them in a subtab of the Transfers tab: each with its kind, where it is, its state (●
 connected with its latency, ○ needs login, connecting, needs you, tab not open) and how many transfers use it, with
 **Connect**, **Disconnect**, **Test**, **Edit…** and **Delete** (refused while transfers use it, which it names).
+**Enter** (or a click) opens its window: a tab's is its connection window (as in the tab); an S3, SMB, WebDAV or
+Globus endpoint has one alike, with its address and settings, its secrets (only whether the keyring has each, never a
+value), its connection (its state, its last test and how long it took, what reaches it: rclone here, or Globus and the
+Globus login), the transfers that use it, and the course of its tests; **Test**, **Edit…**, **Disconnect** and **Copy
+address** there.
 Secrets are kept only in the system keyring (Secret Service, Keychain, Windows
 Credential Manager), never in a file of slurp: where there is no keyring, the kinds that need one say so.
 
