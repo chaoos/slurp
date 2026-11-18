@@ -171,3 +171,17 @@ def test_job_gone(check):
   check("listed as ended for a while: gone", MG.job_gone(0, "COMPLETED") and MG.job_gone(0, "TIMEOUT") and MG.job_gone(0, "CANCELLED by 1"))
   check("no longer known: gone", MG.job_gone(1, "", "slurm_load_jobs error: Invalid job id specified"))
   check("squeue failed otherwise: not gone (asked again)", not MG.job_gone(1, "", "Socket timed out"))
+
+
+def test_never(check, tmp_path):
+  app = App()
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app)
+  t.schedule = {"kind": "never"}
+  mg.add(t)
+  mg.go(t)
+  check("Add: it is there, it does not run", t.state == "new" and not t.run and t.next_run is None and "Run now" in t.message, (t.state, t.message))
+  until(app, mg, lambda: False, 2)
+  check("…not by itself either", t.state == "new" and not t.runs)
+  mg.start(t)
+  check("Run now: it runs", until(app, mg, lambda: t.state == "done"), (t.state, t.message))

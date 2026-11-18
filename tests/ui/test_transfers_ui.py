@@ -132,3 +132,47 @@ def test_wizard_and_tab(check, tmp_path):
 
   asyncio.run(main())
   asyncio.run(again())
+
+
+def test_never(check, tmp_path):
+  """When: never by itself: Go reads Add, no Save without starting; Add adds it, and it runs only on Run now"""
+  src, dst = files(tmp_path)
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      await pilot.press("T"); await pilot.pause(0.4)
+      w = app.screen
+      w.query_one("#tw-src-path").value = str(src)
+      await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2)
+      w.query_one("#tw-dst-path").value = str(dst); await pilot.pause(0.2)
+      w.query_one("#tw-next").press()
+      await until(pilot, lambda: w.plan.get("done"), 30)
+      w.query_one("#tw-next").press(); await pilot.pause(0.4)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2)
+      w.query_one("#tw-when-never").value = True; await pilot.pause(0.2)
+      note = str(w.query_one("#tw-when-note").render())
+      check("never: it says when it runs", "only when you click Run now" in note, note)
+      check("no login, no missed runs for it", not w.query_one("#tw-login").display and not w.query_one("#tw-missed").display)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2)
+      go = w.query_one("#tw-go")
+      check("the last step: Add instead of Go, no Save without starting", str(go.label) == "Add" and go.display
+            and not w.query_one("#tw-save").display, (str(go.label), w.query_one("#tw-save").display))
+      check("the summary says so", "only on Run now" in str(w.query_one("#tw-summary").render()))
+      go.press()
+      check("Add: its subtab", await until(pilot, lambda: isinstance(app.screen, TransferScreen)))
+      t = app.transfers.transfers[0]
+      await pilot.pause(1.5)
+      check("it does not run", t.state == "new" and not t.runs and not os.path.exists(dst / "run42"), (t.state, t.runs))
+      check("its subtab offers Run now", app.screen.query_one("#xd-run").display)
+      await pilot.click("#xd-run")
+      check("Run now: it runs", await until(pilot, lambda: t.state == "done", 30), (t.state, t.message))
+      app.edit_transfer(t); await pilot.pause(0.4)
+      e = app.screen
+      check("edited: never is chosen", e.query_one("#tw-when-never").value)
+      e.dismiss(None); await pilot.pause(0.2)
+      await pilot.press("q")
+
+  asyncio.run(main())

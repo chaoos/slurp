@@ -18,7 +18,8 @@ version may need the helper of the same version).
   Large transfers are pointed to Globus where sites offer it. A transfer
   runs in slurp, detached on the cluster, or as a transfer job (a site's
   transfer partition, e.g. `xfer` on Alps; its progress in `progress.json`);
-  now, at a time, repeatedly, daily, or after a job. It is idempotent: a run
+  now, at a time, repeatedly, daily, after a job, or only on Run now (the
+  wizard's Go then reads Add). It is idempotent: a run
   copies only what is missing or changed, goes on from half-copied files,
   and never deletes. The tab **Transfers** (there while transfers exist)
   lists them; each has a subtab with its progress (rate, time left, files),

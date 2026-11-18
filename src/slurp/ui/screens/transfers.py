@@ -417,6 +417,7 @@ class TransferWizard(ModalScreen):
             yield RadioButton("repeatedly, every …", id="tw-when-every")
             yield RadioButton("daily, at …", id="tw-when-daily")
             yield RadioButton("after a job ends", id="tw-when-after")
+            yield RadioButton("never by itself: only when I click Run now", id="tw-when-never")
           with Horizontal(classes="tw-row"):
             yield Label("at")
             yield Input(placeholder="14:00, 2026-11-20 14:00, +2h", id="tw-at", compact=True)
@@ -474,7 +475,7 @@ class TransferWizard(ModalScreen):
     q("#tw-account", Input).value = o.get("account", "")
     q("#tw-resubmit", Checkbox).value = o.get("resubmit", True)
     s = t.schedule or {}
-    which = {"now": "now", "at": "at", "every": "every", "daily": "daily", "after_job": "after"}.get(s.get("kind", "now"), "now")
+    which = {"now": "now", "at": "at", "every": "every", "daily": "daily", "after_job": "after", "never": "never"}.get(s.get("kind", "now"), "now")
     q(f"#tw-when-{which}", RadioButton).value = True
     if s.get("at"):
       q("#tw-at", Input).value = datetime.fromtimestamp(s["at"]).strftime("%Y-%m-%d %H:%M")
@@ -502,7 +503,15 @@ class TransferWizard(ModalScreen):
     q = self.query_one
     q("#tw-back", Button).display = self.step > 0
     q("#tw-next", Button).display = self.step < len(self.STEPS) - 1
-    q("#tw-go", Button).display = q("#tw-save", Button).display = self.step == len(self.STEPS) - 1
+    last = self.step == len(self.STEPS) - 1
+    never = self.when_kind() == "never"
+    q("#tw-go", Button).display = last
+    q("#tw-save", Button).display = last and not never # (Add saves it already)
+    go = "Save" if never and self.editing else "Add" if never else "Go"
+    if str(q("#tw-go", Button).label) != go:
+      q("#tw-go", Button).label = go
+    q("#tw-go", Button).tooltip = ("add it to the transfers; it runs when you click Run now" if never else
+                                   "start it now, or by its schedule")
     if self.step == 2:
       self.start_check()
     if self.step == 3:
@@ -893,7 +902,7 @@ class TransferWizard(ModalScreen):
     self.when_changed()
 
   def when_kind(self):
-    for kind, sel in (("now", "now"), ("at", "at"), ("every", "every"), ("daily", "daily"), ("after_job", "after")):
+    for kind, sel in (("now", "now"), ("at", "at"), ("every", "every"), ("daily", "daily"), ("after_job", "after"), ("never", "never")):
       if self.query_one(f"#tw-when-{sel}", RadioButton).value:
         return kind
     return "now"
@@ -902,7 +911,7 @@ class TransferWizard(ModalScreen):
     q = self.query_one
     kind = self.when_kind()
     s = {"kind": kind}
-    if kind != "now":
+    if kind not in ("now", "never"):
       s.update(login=q("#tw-login", Checkbox).value, missed=q("#tw-missed", Select).value or "run")
     if kind == "at":
       s["at"] = S.parse_at(q("#tw-at", Input).value)
@@ -937,10 +946,12 @@ class TransferWizard(ModalScreen):
     q = self.query_one
     for sel, k in (("#tw-at", "at"), ("#tw-every", "every"), ("#tw-daily", "daily"), ("#tw-job-id", "after_job")):
       q(sel, Input).disabled = kind != k
-    q("#tw-login", Checkbox).display = q("#tw-missed", Select).display = kind != "now"
+    q("#tw-login", Checkbox).display = q("#tw-missed", Select).display = kind not in ("now", "never")
     ok, why = self.when_ok()
     note = why if not ok else ""
-    if ok and kind != "now" and self.chosen_runs_on() == "slurp":
+    if ok and kind == "never":
+      note = "It is added to the transfers and runs only when you click Run now (in its subtab or the list: s)."
+    elif ok and kind != "now" and self.chosen_runs_on() == "slurp":
       note = "It runs through slurp: slurp must be running then (it may run in its session holder, without a terminal)."
     if ok and kind == "at" and self.chosen_runs_on() == "job":
       note = "The transfer job is submitted when you press Go, to start at that time (slurp need not run then)."
@@ -1157,7 +1168,7 @@ class TransfersScreen(TransfersBase):
     text = Text.assemble((t.name, "bold"), ": ", state_text(t))
     if t.message:
       text.append(f" · {t.message}")
-    if t.schedule and t.schedule.get("kind", "now") != "now":
+    if t.schedule and t.schedule.get("kind", "now") not in ("now", "never"):
       text.append(f" · {S.describe(t.schedule, t.next_run)}", style="cyan")
     note.update(text)
 
@@ -1340,7 +1351,7 @@ class TransferScreen(TransfersBase):
     client = dst if client_side(t.route) == "dest" else src
     q("#xd-closes", Static).update(if_slurp_closes(t, client.name if client else "", t.run.get("host", ""), site_of(client)))
     sched = S.describe(t.schedule, t.next_run)
-    if t.schedule and t.schedule.get("kind", "now") != "now":
+    if t.schedule and t.schedule.get("kind", "now") not in ("now", "never"):
       sched += ("; logs in by itself" if t.schedule.get("login", True) else "; does not log in by itself")
       sched += "; a missed run " + ("is skipped" if t.schedule.get("missed") == "skip" else "runs once")
     q("#xd-schedule", Static).update(sched)

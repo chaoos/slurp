@@ -109,6 +109,10 @@ class Manager:
   def go(self, t):
     """The wizard's Go (and Continue, Run now): now, or by its schedule"""
     kind = (t.schedule or {}).get("kind", "now")
+    if kind == "never": # (only added: it runs when the user clicks Run now)
+      t.state, t.message, t.next_run = "new", "runs when you click Run now", None
+      self.changed(t)
+      return
     if kind in ("at", "daily") and not t.run:
       t.next_run = S.first_time(t.schedule)
       if t.runs_on == "job" and kind == "at": # (a single run later: the job is submitted now, with --begin)

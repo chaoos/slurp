@@ -50,3 +50,8 @@ def test_words(check):
   check("daily", S.describe({"kind": "daily", "daily": "02:00"}).startswith("daily at 02:00"))
   check("after a job", S.describe({"kind": "after_job", "job": "123"}) == "after job 123 ends")
   check("repeated", S.repeated({"kind": "daily"}) and not S.repeated({"kind": "at"}))
+
+
+def test_never(check):
+  check("never: in words", S.describe({"kind": "never"}) == "never by itself: only on Run now")
+  check("never: no time", S.first_time({"kind": "never"}) is None and S.after_run({"kind": "never"}, 1.0) is None and not S.repeated({"kind": "never"}))

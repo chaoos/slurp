@@ -32,10 +32,11 @@ waits until a step is complete (its tooltip says what is missing); **Back** goes
 4. **How**: the route (the recommended one is chosen), where it runs, and the options: checksums (slower; finds
    changes that keep size and time), compression (the relay only: it helps on slow links), a limit in MB/s.
 5. **When**: now, once at a time (`14:00`, `2026-11-20 14:00`, `+2h`), every so long (`6h`, `1d`, `30m`), daily at a
-   time, or after a job ends. For a schedule: whether slurp logs in to the tabs by itself then (a login that needs
+   time, after a job ends, or never by itself: only when you click **Run now** (`s`). For a schedule: whether slurp logs in to the tabs by itself then (a login that needs
    you waits, and says so), and whether a missed run runs once as soon as it can or is skipped.
 6. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes. **Go** starts it (or schedules
-   it); **Save without starting** keeps it for later.
+   it); **Save without starting** keeps it for later. With *never by itself* the button reads **Add**: the transfer
+   is added and runs each time you click **Run now**.
 
 ## Routes
 
