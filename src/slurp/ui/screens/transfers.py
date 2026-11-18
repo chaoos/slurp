@@ -221,14 +221,19 @@ class PickPathsScreen(ModalScreen):
   #pp-pattern-row { height: auto; margin-top: 1; }
   #pp-pattern { width: 1fr; margin-right: 1; }
   #pp-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #pp-new-row { height: auto; margin-top: 1; display: none; }
+  #pp-new-row.-open { display: block; }
+  #pp-new-name { width: 1fr; margin-right: 1; }
+  #pp-new-row Button { margin-left: 1; }
   #pp-buttons Button { margin-left: 1; }
   """
   BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("space", "mark", "Mark"), Binding("backspace", "up", "Up", show=False)]
 
-  def __init__(self, cluster, start="", multi=True, title="", lister=None, name=""):
+  def __init__(self, cluster, start="", multi=True, title="", lister=None, name="", maker=None):
     super().__init__()
     self.cluster, self.multi = cluster, multi
     self.lister = lister # (instead of a tab: lister(path) -> entries, e.g. of a Globus collection)
+    self.maker = maker   # (with a lister: maker(path) makes a folder there; raises with why it cannot)
     self.path = start or (home_of(cluster) if cluster is not None else "/~/") or "/"
     self.entries, self.marked = [], set()
     name = name or (cluster.name if cluster is not None else "?")
@@ -248,7 +253,14 @@ class PickPathsScreen(ModalScreen):
           yield Input(placeholder="or a pattern in this folder: *.h5, run_??.out, step_[0-9]*.log (the list shows its matches)",
                       id="pp-pattern", tooltip="its matches are copied, each into the destination folder (as cp does)")
           yield Button("Choose the pattern", id="pp-choose-pattern", compact=True, disabled=True)
+      if not self.multi: # (the destination: a new folder in the one shown)
+        with Horizontal(id="pp-new-row"):
+          yield Input(placeholder="the name of the new folder (in the folder shown)", id="pp-new-name")
+          yield Button("Create", id="pp-new-create", variant="primary", compact=True)
+          yield Button("Cancel", id="pp-new-cancel", compact=True)
       with Horizontal(id="pp-buttons"):
+        if not self.multi:
+          yield Button("New folder…", id="pp-new", compact=True, tooltip="a new folder in the one shown, then into it")
         yield Button("Cancel", id="pp-cancel", compact=True)
         if self.multi:
           yield Button("Choose the marked", id="pp-marked", compact=True, disabled=True)
@@ -322,6 +334,53 @@ class PickPathsScreen(ModalScreen):
     for b in self.query("#pp-choose-pattern").results(Button):
       b.disabled = not pattern
 
+  def new_folder(self):
+    """Create: the folder named in the folder shown (a tab: mkdir there; Globus, S3, SMB, WebDAV: theirs), then into it"""
+    name = self.query_one("#pp-new-name", Input).value.strip()
+    status = self.query_one("#pp-status", Static)
+    if not name or "/" in name or name in (".", ".."):
+      status.update(Text("a folder's name: no / in it, not . or ..", style="yellow"))
+      return
+    path = self.full(name)
+    if any(e["name"] == name for e in self.entries):
+      status.update(Text(f"{name} is there already: into it", style="dim"))
+      self.close_new()
+      self.go(path)
+      return
+    status.update(Text(f"creating {path} …", style="yellow"))
+    def work():
+      try:
+        if self.lister is not None:
+          if self.maker is None:
+            return "this place cannot make folders here: type the path (the run makes it)"
+          self.maker(path)
+          return ""
+        from ...cluster.remote import run_cmd
+        result = run_cmd(["mkdir", "--", path], timeout=60, retry=False)
+        return "" if result.returncode == 0 else (result.stderr or "").strip()[:200] or f"mkdir ended with {result.returncode}"
+      except Exception as e:
+        return getattr(e, "words", None) or str(e)
+    def made(error):
+      if error:
+        status.update(Text(f"not created: {error}", style="red"))
+        return
+      self.close_new()
+      self.app.notify(f"{path} created", timeout=4)
+      self.go(path)
+    in_background(self, work, made, group="pp-mkdir", name="creating the folder",
+                  connection=self.cluster.connection if self.cluster is not None and self.cluster.destination else None)
+
+  def close_new(self):
+    row = self.query_one("#pp-new-row")
+    row.remove_class("-open")
+    self.query_one("#pp-new-name", Input).value = ""
+    self.query_one("#pp-list", ClickTable).focus()
+
+  @on(Input.Submitted, "#pp-new-name")
+  def new_name_submitted(self, event):
+    event.stop()
+    self.new_folder()
+
   def pattern(self):
     """The pattern typed ("" when none, or in a picker without one: the destination's)"""
     found = list(self.query("#pp-pattern").results(Input))
@@ -389,6 +448,16 @@ class PickPathsScreen(ModalScreen):
     elif bid == "pp-up":
       event.stop()
       self.action_up()
+    elif bid == "pp-new":
+      event.stop()
+      self.query_one("#pp-new-row").add_class("-open")
+      self.query_one("#pp-new-name", Input).focus()
+    elif bid == "pp-new-create":
+      event.stop()
+      self.new_folder()
+    elif bid == "pp-new-cancel":
+      event.stop()
+      self.close_new()
     elif bid == "pp-cancel":
       event.stop()
       self.dismiss(None)
@@ -1108,11 +1177,13 @@ class TransferWizard(ModalScreen):
       from ...transfer import rclone as RC
       s3 = RC.Endpoint(e.definition)
       return PickPathsScreen(None, start or e.definition.settings.get("path") or "/", multi=multi,
-                             lister=lambda path: RC.lsjson(s3.env, s3.path(path)), name=e.name)
+                             lister=lambda path: RC.lsjson(s3.env, s3.path(path)), name=e.name,
+                             maker=lambda path: RC.check(RC.run(["mkdir", s3.path(path)], s3.env)))
     from ...transfer import globus as G
     cid = e.definition.settings.get("collection")
     return PickPathsScreen(None, start or e.definition.settings.get("path") or "/~/", multi=multi,
-                           lister=lambda path: G.ls(G.client(), cid, path), name=e.name)
+                           lister=lambda path: G.ls(G.client(), cid, path), name=e.name,
+                           maker=lambda path: G.call(G.client().operation_mkdir, cid, path))
 
   @on(Button.Pressed, "#tw-src-remove")
   def src_remove(self, event):

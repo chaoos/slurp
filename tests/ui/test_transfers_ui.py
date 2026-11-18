@@ -906,3 +906,39 @@ def test_reload(check):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_new_folder(check, tmp_path):
+  """The destination's picker: New folder… makes a folder in the one shown and goes into it (Choose this folder takes
+  it); a name with / is refused; one that is there: into it"""
+  from slurp.ui.screens.transfers import PickPathsScreen
+  (tmp_path / "old").mkdir()
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      chosen = []
+      app.push_screen(PickPathsScreen(app.clusters[0], str(tmp_path), multi=False), chosen.append)
+      await pilot.pause(0.6)
+      picker = app.screen
+      check("New folder… in the destination's picker", picker.query("#pp-new") and not picker.query_one("#pp-new-row").has_class("-open"))
+      picker.query_one("#pp-new").press(); await pilot.pause(0.2)
+      check("…its name asked", picker.query_one("#pp-new-row").has_class("-open") and picker.focused is picker.query_one("#pp-new-name"))
+      picker.query_one("#pp-new-name").value = "a/b"
+      picker.query_one("#pp-new-create").press(); await pilot.pause(0.3)
+      check("a name with / refused", "no /" in str(picker.query_one("#pp-status").render()) and not (tmp_path / "a").exists())
+      picker.query_one("#pp-new-name").value = "results"
+      await pilot.press("enter")
+      check("created, and into it", await until(pilot, lambda: picker.path == str(tmp_path / "results"), 10)
+            and (tmp_path / "results").is_dir() and not picker.query_one("#pp-new-row").has_class("-open"), picker.path)
+      picker.action_up(); await until(pilot, lambda: picker.path == str(tmp_path), 10)
+      picker.query_one("#pp-new").press(); await pilot.pause(0.2)
+      picker.query_one("#pp-new-name").value = "old"
+      picker.query_one("#pp-new-create").press()
+      check("one that is there: into it", await until(pilot, lambda: picker.path == str(tmp_path / "old"), 10), picker.path)
+      picker.query_one("#pp-here").press(); await pilot.pause(0.3)
+      check("Choose this folder: it", chosen == [[str(tmp_path / "old")]], chosen)
+      await pilot.press("q")
+
+  asyncio.run(main())

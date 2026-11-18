@@ -333,7 +333,9 @@ A folder of a tab: Enter or a click goes into a folder (`Backspace` or **Up**: t
 be typed (Enter goes there), the buttons go to home, scratch, project, … To copy: `Space` marks files and folders,
 **Choose the marked** takes them; **Choose this folder** takes the folder shown; a pattern in the field below
 (`*.h5`, `run_??.out`) shows its matches in the list, and **Choose the pattern** (or Enter) takes it: each match is
-copied.
+copied. Choosing the destination: **New folder…** makes a folder in the one shown (its name, then **Create** or Enter)
+and goes into it, for **Choose this folder** (on a tab, Globus, S3, SMB or WebDAV; on S3 a folder is there once files
+are in it).
 """),
   "OverviewScreen": ("Overview", """
 The first subtab of every tab, always there (it cannot be closed): what a tab shows at the start, and when its other

@@ -129,3 +129,29 @@ def test_webdav_and_smb_forms(check, webdav, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_new_folder_on_webdav(check, webdav):
+  """New folder… in the picker of a WebDAV endpoint: made with rclone, then into it"""
+  from slurp.transfer import endpoints as E, rclone as RC
+  from slurp.ui.screens.transfers import PickPathsScreen
+  port, root = webdav
+  d = E.EndpointDef("w2", "dav", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"])
+  e = RC.Endpoint(d, {"password": "pw456"})
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      app.push_screen(PickPathsScreen(None, "/", multi=False, lister=lambda p: RC.lsjson(e.env, e.path(p)), name="dav",
+                                      maker=lambda p: RC.check(RC.run(["mkdir", e.path(p)], e.env))))
+      await pilot.pause(0.6)
+      picker = app.screen
+      picker.query_one("#pp-new").press(); await pilot.pause(0.2)
+      picker.query_one("#pp-new-name").value = "made"
+      picker.query_one("#pp-new-create").press()
+      check("made on the WebDAV server, and into it", await until(pilot, lambda: picker.path == "/made", 15) and (root / "made").is_dir(),
+            (picker.path, str(picker.query_one("#pp-status").render())))
+      await pilot.press("q")
+
+  asyncio.run(main())
