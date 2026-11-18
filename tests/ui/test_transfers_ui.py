@@ -79,6 +79,9 @@ def test_wizard_and_tab(check, tmp_path):
       await pilot.click(w.query_one(".tw-o-detached")); await pilot.pause(0.3)
       check("and it can still be changed", pressed("#tw-runs-on") == ["detached"] and w.chosen_runs_on() == "detached", pressed("#tw-runs-on"))
       check("no temporary key for it", not w.query_one("#tw-key").display)
+      flow = str(w.query_one("#tw-flow").render())
+      check("how the data flows: the two tabs as boxes, the same filesystem on the arrow, rsync on the login node",
+            flow.count("┌") == 2 and "same filesystem" in flow and "▶" in flow and "(on the login node)" in flow, flow)
       await pilot.click("#tw-next"); await pilot.pause(0.2)
       check("step 5: now", w.when_kind() == "now")
       w.query_one("#tw-when-every").value = True
@@ -89,6 +92,7 @@ def test_wizard_and_tab(check, tmp_path):
       summary = str(w.query_one("#tw-summary").render())
       check("step 6: the summary, what happens if slurp closes", "If slurp closes" in summary and "Nothing is deleted" in summary, summary)
       check("a name", w.query_one("#tw-name").value == "run42 Local → Local")
+      check("the summary shows the flow", "┌" in str(w.query_one("#tw-summary-flow").render()))
       w.query_one("#tw-name").value = "my run"
       await pilot.click("#tw-go")
       check("Go: its subtab in the Transfers tab", await until(pilot, lambda: isinstance(app.screen, TransferScreen)) and app.in_transfers)
@@ -103,6 +107,8 @@ def test_wizard_and_tab(check, tmp_path):
             bar.query_one("#view-transfers").display and not bar.query_one("#view-overview").display and any((b.id or "").startswith("xfer-tab-") for b in bar.query("Button")))
       head = str(app.screen.query_one("#xd-head").render())
       check("the details: its name and state", "my run" in head and "done" in head, head)
+      route = str(app.screen.query_one("#xd-route").render())
+      check("…and how the data flows", route.count("┌") == 2 and "same filesystem" in route, route)
       await pilot.press("t"); await pilot.pause(0.3)
       check("a cluster's key does nothing here (t: a shell)", isinstance(app.screen, TransferScreen) and app.shell is None)
       await pilot.click("#view-transfers"); await pilot.pause(0.3)
@@ -176,3 +182,24 @@ def test_never(check, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_flow_diagram(check):
+  """How the data flows: boxes, the arrow says how, under each box what runs there"""
+  import types
+  from slurp.ui.screens.transfers import flow_diagram
+  alps, jedi = types.SimpleNamespace(destination="daint", connection=None), types.SimpleNamespace(destination="jedi", connection=None)
+  here = types.SimpleNamespace(destination=None, connection=None)
+  relay = flow_diagram("relay", "slurp", alps, jedi, "alps", "jedi").plain
+  check("the relay between two clusters: alps → slurp → jedi", relay.count("┌") == 3 and relay.index("alps") < relay.index("slurp") < relay.index("jedi")
+        and relay.count("relay") == 2 and "passes the bytes" in relay, relay)
+  local = flow_diagram("relay", "slurp", here, jedi, "Local", "jedi").plain
+  check("with this machine as an end: no box for slurp", local.count("┌") == 2 and "over slurp's SSH" in local, local)
+  push = flow_diagram("direct-push", "job", alps, jedi, "alps", "jedi", "1234").plain
+  check("push: rsync on the source logs in to the destination, in its job", "push" in push and "logs in to jedi" in push
+        and "transfer job 1234" in push and push.count("┌") == 2, push)
+  pull = flow_diagram("direct-pull", "detached", alps, jedi, "alps", "jedi").plain
+  check("pull: rsync on the destination logs in to the source", "pull" in pull and "logs in to alps" in pull and "login node" in pull, pull)
+  check("the data flows left to right", all("▶" in d and "◀" not in d for d in (relay, push, pull)))
+  moving = flow_diagram("relay", "slurp", alps, jedi, "alps", "jedi", moving=2).plain
+  check("while it runs: a dot on the arrows", "●" in moving)

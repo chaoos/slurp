@@ -64,6 +64,71 @@ def dot(cluster):
     return Text("●", style=HEALTH_STYLES[connection_health(c)[0]])
   return Text("◌" if c is not None and c.state == "connecting" else "○", style="dim")
 
+RUNS_WHERE = {"slurp": "", "detached": "on the login node", "job": "as a transfer job"}
+
+def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=None):
+  """How the data flows, as boxes and arrows: the source, slurp (the relay between two clusters), the destination; on
+  each arrow how (push, pull, relay, the same filesystem), under each box what runs there. moving: a frame number
+  while it runs (a dot moves along the arrows)"""
+  import textwrap
+  from rich.cells import cell_len
+  where = f"transfer job {job}" if job and runs_on == "job" else RUNS_WHERE.get(runs_on, "")
+  def rsync(extra=""):
+    return "rsync" + (f" {extra}" if extra else "") + (f" ({where})" if where else "")
+  two_clusters = src is not None and dst is not None and src.destination and dst.destination
+  if route == "relay" and two_clusters:
+    boxes = [(src, src_name, "rsync (sends)"), (None, "slurp", "passes the bytes"), (dst, dst_name, "rsync server (receives)")]
+    arrows = ["relay", "relay"]
+  elif route == "relay":
+    boxes = [(src, src_name, "rsync (sends)"), (dst, dst_name, "rsync server (receives)")]
+    arrows = ["over slurp's SSH"]
+  elif route == "direct-push":
+    boxes = [(src, src_name, rsync(f"logs in to {dst_name}")), (dst, dst_name, "rsync server (receives)")]
+    arrows = ["push"]
+  elif route == "direct-pull":
+    boxes = [(src, src_name, "rsync server (sends)"), (dst, dst_name, rsync(f"logs in to {src_name}"))]
+    arrows = ["pull"]
+  else: # (same-fs)
+    boxes = [(src, src_name, rsync("folder to folder")), (dst, dst_name, "the same filesystem: no network")]
+    arrows = ["same filesystem"]
+  cells = []
+  for cluster, name, caption in boxes:
+    label = Text.assemble(dot(cluster), " ", (name, "bold")) if cluster is not None or name != "slurp" else Text("⇄ slurp", style="bold cyan")
+    inner = cell_len(label.plain) + 2
+    caption = textwrap.wrap(caption, max(22, inner + 2)) # (a few short lines: the boxes stay close)
+    width = max([inner + 2, *map(cell_len, caption)])
+    cells.append((label, inner, width, caption, cluster is None and name == "slurp"))
+  rows = max(len(c[3]) for c in cells)
+  arrow_widths = [max(cell_len(a) + 4, 10) for a in arrows]
+  lines = [Text() for _ in range(3 + rows)]
+  for i, (label, inner, width, caption, relay_box) in enumerate(cells):
+    pad = width - inner - 2
+    left, right = pad // 2, pad - pad // 2
+    style = "cyan" if relay_box else ""
+    lines[0].append(" " * left + "┌" + "─" * inner + "┐" + " " * right, style=style)
+    lines[1].append(" " * left + "│ ", style=style)
+    lines[1].append_text(label)
+    lines[1].append(" │" + " " * right, style=style)
+    lines[2].append(" " * left + "└" + "─" * inner + "┘" + " " * right, style=style)
+    for r in range(rows):
+      words = caption[r] if r < len(caption) else ""
+      cpad = width - cell_len(words)
+      lines[3 + r].append(" " * (cpad // 2) + words + " " * (cpad - cpad // 2), style="dim")
+    if i < len(arrows):
+      w = arrow_widths[i]
+      name = arrows[i]
+      npad = w - cell_len(name)
+      lines[0].append(" " * (npad // 2) + name + " " * (npad - npad // 2), style="italic")
+      shaft = ["─"] * (w - 3)
+      if moving is not None and shaft:
+        shaft[moving % len(shaft)] = "●"
+      lines[1].append(" " + "".join(shaft) + "▶ ", style="bold green" if moving is not None else "")
+      for line in lines[2:]:
+        line.append(" " * w)
+  for line in lines:
+    line.rstrip()
+  return Text("\n").join(lines)
+
 def if_slurp_closes(t, client_name="", host="", pack=None):
   """What happens to a transfer when slurp ends (the details and the wizard say it)"""
   pack = pack or {}
@@ -322,6 +387,7 @@ class TransferWizard(ModalScreen):
   #tw-key-warning { height: auto; color: $warning; border: round $warning; padding: 0 1; display: none; }
   #tw-name { width: 1fr; }
   #tw-summary { height: auto; }
+  #tw-flow, #tw-summary-flow { height: auto; margin: 1 0; }
   #tw-buttons { height: auto; align-horizontal: right; margin: 1 0; }
   #tw-buttons Button { margin-left: 1; }
   #tw-missed { width: 40; }
@@ -387,6 +453,7 @@ class TransferWizard(ModalScreen):
         with VerticalScroll(id="tw-step-3"):
           yield Label("Route")
           yield RadioSet(id="tw-route")
+          yield Static(id="tw-flow")
           yield Static(id="tw-route-note", classes="tw-note")
           yield Label("Runs")
           yield RadioSet(id="tw-runs-on")
@@ -440,6 +507,7 @@ class TransferWizard(ModalScreen):
           with Horizontal(classes="tw-row"):
             yield Label("Name")
             yield Input(id="tw-name")
+          yield Static(id="tw-summary-flow")
           yield Static(id="tw-summary")
       with Horizontal(id="tw-buttons"):
         yield Button("Cancel", id="tw-cancel", compact=True)
@@ -839,7 +907,14 @@ class TransferWizard(ModalScreen):
     event.stop()
     self.runs_changed()
 
+  def show_flow(self):
+    route = self.chosen_route()
+    flow = self.query_one("#tw-flow", Static)
+    flow.update(flow_diagram(route, self.chosen_runs_on(), self.src, self.dst, self.src.name if self.src else "?",
+                             self.dst.name if self.dst else "?") if route else "")
+
   def runs_changed(self):
+    self.show_flow()
     job = self.chosen_runs_on() == "job"
     self.query_one("#tw-job", Vertical).display = job
     route = self.chosen_route()
@@ -985,6 +1060,8 @@ class TransferWizard(ModalScreen):
     info = self.plan.get("routes", {}).get(t.route, {})
     est = info.get("estimate")
     client = self.dst if t.route == "direct-pull" else self.src
+    self.query_one("#tw-summary-flow", Static).update(
+      flow_diagram(t.route, t.runs_on, self.src, self.dst, self.src.name, self.dst.name))
     text = Text()
     def row(label, value, style=""):
       text.append(f"{label:10}", style="bold")
@@ -1301,16 +1378,10 @@ class TransferScreen(TransfersBase):
     if t.message:
       head.append(f" · {t.message}")
     q("#xd-head", Static).update(head)
-    hops = [Text.assemble(dot(src), f" {t.source_name}")]
-    if t.route == "relay" and src is not None and dst is not None and src.destination and dst.destination:
-      hops.append(Text("slurp (this machine)", style="cyan"))
-    hops.append(Text.assemble(dot(dst), f" {t.dest_name}"))
-    route = Text()
-    for i, h in enumerate(hops):
-      if i:
-        route.append("  ──▶  ", style="dim")
-      route.append_text(h)
-    route.append(f"   {M.ROUTES.get(t.route, t.route)}, {M.RUNS_ON.get(t.runs_on, t.runs_on)}", style="dim")
+    self.frame = getattr(self, "frame", 0) + 1
+    route = flow_diagram(t.route, t.runs_on, src, dst, t.source_name, t.dest_name, t.run.get("job", ""),
+                         moving=self.frame if t.state == "running" else None)
+    route.append(f"\n{M.ROUTES.get(t.route, t.route)}, {M.RUNS_ON.get(t.runs_on, t.runs_on)}", style="dim")
     if t.run.get("job"):
       route.append(f", job {t.run['job']}", style="dim")
     q("#xd-route", Static).update(route)

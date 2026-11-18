@@ -210,7 +210,9 @@ cancelled for it: slurp asks first), `c` continues (rsync goes on where it stopp
 history; the files stay). Keys that act on a cluster do nothing here: its tab first.
 """),
   "TransferScreen": ("A transfer", """
-One transfer: its state, the route (the tabs with their connections; through slurp for the relay), the sources and the
+One transfer: its state, how the data flows (a picture: the tabs as boxes with their connections, slurp between them
+for the relay; on the arrow push, pull, relay or the same filesystem; under each box what runs there; while it runs a
+dot moves along the arrows), the sources and the
 destination, how far it is (bytes, rate, time left, files; for the relay also the rate through slurp), the file it
 copies now, its rate over time, what happens if slurp closes (in slurp: it stops as paused and Continue goes on;
 detached on the cluster or as a transfer job: it goes on without slurp), its schedule, the errors rsync reported for
@@ -233,7 +235,8 @@ Sets up a transfer in six steps; **Next** waits until a step is complete (its to
    is purged), and the routes with their speed: the same filesystem, direct (one cluster logs in to the other by
    itself), the relay through slurp (always possible); an estimate for each. For large transfers it suggests Globus
    or a similar service, where both sites offer it.
-4. **How**: the route (the recommended one first), where it runs (in slurp; detached on the cluster's login node; as
+4. **How**: the route (the recommended one first; a picture shows how the data flows: push, pull, relay through slurp,
+   the same filesystem, and where rsync runs), where it runs (in slurp; detached on the cluster's login node; as
    a transfer job where the site has a transfer partition, e.g. xfer), checksums, compression (the relay), a speed
    limit, and for a direct route that cannot log in by itself the **temporary key** (opt-in, with its warning).
 5. **When**: now, once at a time, every so long, daily at a time, after a job ends, or never by itself (only when you

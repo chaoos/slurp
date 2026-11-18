@@ -29,7 +29,19 @@ waits until a step is complete (its tooltip says what is missing); **Back** goes
     For a large transfer (about a terabyte, or hours) slurp suggests Globus or a similar service, where both sites
     offer it: parallel streams, retries, and it runs without slurp. A rule pack can name a site's Globus collection
     (`globus = "…"`); with both sites' it is named.
-4. **How**: the route (the recommended one is chosen), where it runs, and the options: checksums (slower; finds
+4. **How**: the route (the recommended one is chosen), where it runs, and the options. A picture shows how the data
+   flows, here and in the summary and the transfer's subtab:
+
+    ```
+     ┌────────┐    relay     ┌─────────┐     relay    ┌────────┐
+     │ ● alps │   ───────▶   │ ⇄ slurp │    ───────▶  │ ● jedi │
+     └────────┘              └─────────┘              └────────┘
+    rsync (sends)          passes the bytes          rsync server
+                                                      (receives)
+    ```
+
+    A direct route says **push** (rsync on the source logs in to the destination) or **pull** (the other way); under
+    each box what runs there (on the login node, in a transfer job). The options: checksums (slower; finds
    changes that keep size and time), compression (the relay only: it helps on slow links), a limit in MB/s.
 5. **When**: now, once at a time (`14:00`, `2026-11-20 14:00`, `+2h`), every so long (`6h`, `1d`, `30m`), daily at a
    time, after a job ends, or never by itself: only when you click **Run now** (`s`). For a schedule: whether slurp logs in to the tabs by itself then (a login that needs
