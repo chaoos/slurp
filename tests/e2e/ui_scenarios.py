@@ -3514,6 +3514,8 @@ async def t_transfer_wizard(app, pilot):
   check("T: the wizard, from the tab shown", isinstance(w, TransferWizard) and w.src is lab)
   w.query_one("#tw-src-path").value = src
   await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
+  check("what the source holds, counted on the cluster", await until(pilot, lambda: "2 files" in str(w.query_one("#tw-src-paths").render()), 30),
+        str(w.query_one("#tw-src-paths").render()))
   w.query_one("#tw-next").press(); await pilot.pause(0.3)
   local = next(c for c in app.clusters if not c.destination)
   w.query_one("#tw-dst-tab").value = str(app.clusters.index(local)); await pilot.pause(0.3)

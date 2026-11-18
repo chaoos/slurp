@@ -101,3 +101,15 @@ def test_login_from_a_node(check, tmp_path, monkeypatch):
   (tmp_path / "busy").write_text("")
   ok, words = P.login_works_on(local(), target, str(tmp_path), "xfer")
   check("no node free: not checked (None)", ok is None and "not checked" in words, (ok, words))
+
+
+def test_count(check, tmp_path):
+  """What the sources hold: bytes of the files, files, folders, links; a path that is not there"""
+  (tmp_path / "a" / "b").mkdir(parents=True)
+  (tmp_path / "a" / "x").write_bytes(b"1" * 1000)
+  (tmp_path / "a" / "b" / "y").write_bytes(b"2" * 500)
+  (tmp_path / "a" / "l").symlink_to("x")
+  found = P.count(local(), [str(tmp_path / "a"), str(tmp_path / "a" / "x"), str(tmp_path / "nope")])
+  check("a folder: its files, folders, links, bytes", found[str(tmp_path / "a")] == {"files": 2, "dirs": 2, "links": 1, "bytes": 1500}, found)
+  check("a file", found[str(tmp_path / "a" / "x")] == {"files": 1, "dirs": 0, "links": 0, "bytes": 1000})
+  check("not there: None", found[str(tmp_path / "nope")] is None)

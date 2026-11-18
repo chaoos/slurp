@@ -254,7 +254,8 @@ starts now) once every step is complete; its tooltip says what is missing (a cha
 check again, in Route).
 
 1. **Source**: a tab and one or more files or folders there (Browse…: Space marks several; or type a path). Each is
-   copied into the destination folder under its own name.
+   copied into the destination folder under its own name. Each shows what it holds, counted on its tab in the
+   background (its size, files, folders, links), and in all.
 2. **Destination**: a tab and a folder there (created if it is not there), with its home, scratch, project, …
 3. **Route**: slurp checks both sides and changes nothing: rsync on both, the paths, what remains to copy (an rsync
    dry run), the room there (free space, quota, a scratch that is purged). Each route is a choice that shows what its

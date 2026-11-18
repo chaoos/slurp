@@ -19,6 +19,7 @@ from textual.widgets import Button, Checkbox, ContentSwitcher, Input, Label, Rad
 from ...cluster.listing import listing
 from ...cluster.remote import HEALTH_STYLES, connection_health, in_background
 from ...transfer import model as M, plan as P, schedule as S
+from ...transfer.endpoint import Endpoint
 from ...transfer.manager import client_side, site_of
 from .. import icons
 from ..widgets import ClickTable, TimePlot
@@ -427,6 +428,7 @@ class TransferWizard(ModalScreen):
       self.paths, self.dest_path = [], ""
     self.tid = editing.id if editing else M.new_id()
     self.rebuilding = asyncio.Lock() # (the choices of step 4 are rebuilt one at a time)
+    self.sizes = {}       # (id(tab), path) -> {"bytes", "files", "dirs", "links"} | None (not there) | "counting" | "failed"
     self.node_checks = {} # (route, partition, account) -> ("running" | True | False | None, words): the login from a node
     self.job_tests = {}   # (route, partition, time, account) -> ("running" | True | False, words): sbatch --test-only
     self.node_timer = None
@@ -593,6 +595,10 @@ class TransferWizard(ModalScreen):
       self.show_job_test()
     if self.step in (0, 1):
       self.refresh_states()
+    if self.step == 0 and "counting" in self.sizes.values():
+      self.show_sources()
+    if self.step == 0 and self.paths and self.ready(self.src) and any((id(self.src), p) not in self.sizes for p in self.paths):
+      self.refresh_sources() # (its tab connected meanwhile: counted now)
 
   # ---- the steps
   def show_step(self):
@@ -751,12 +757,65 @@ class TransferWizard(ModalScreen):
     self.update_next()
 
   def refresh_sources(self):
-    text = Text()
-    for p in self.paths:
-      text.append(f"  {p}\n")
-    self.query_one("#tw-src-paths", Static).update(text if self.paths else Text("  nothing yet: Browse… or type a path", style="dim"))
+    self.count_sources()
+    self.show_sources()
     self.refresh_states()
     self.refresh_preview()
+
+  def count_sources(self):
+    """What the sources hold (size, files, folders), counted on their tab in the background (each path once)"""
+    cluster = self.src
+    if cluster is None or not self.ready(cluster):
+      return
+    wanted = [p for p in self.paths if (id(cluster), p) not in self.sizes]
+    if not wanted:
+      return
+    for p in wanted:
+      self.sizes[(id(cluster), p)] = "counting"
+    def done(found):
+      for p in wanted:
+        self.sizes[(id(cluster), p)] = (found or {}).get(p, "failed") if found is not None else "failed"
+      self.show_sources()
+    in_background(self, lambda: P.count(cluster and Endpoint(cluster), wanted), done, group=f"tw-count-{len(self.sizes)}",
+                  name="counting the sources", connection=cluster.connection if cluster.destination else None)
+
+  def show_sources(self):
+    """The sources with what each holds, and in all"""
+    if not self.is_mounted:
+      return
+    if not self.paths:
+      self.query_one("#tw-src-paths", Static).update(Text("  nothing yet: Browse… or type a path", style="dim"))
+      return
+    from rich.cells import cell_len
+    width = min(max(cell_len(p) for p in self.paths), 70)
+    text, total, known = Text(), {"bytes": 0, "files": 0, "dirs": 0, "links": 0}, True
+    def what(c):
+      words = f"{human(c['bytes'])} · {c['files']:,} file{'s' if c['files'] != 1 else ''}"
+      if c["dirs"] > 1 or (c["dirs"] == 1 and c["files"] != 1):
+        words += f" · {c['dirs']:,} folder{'s' if c['dirs'] != 1 else ''}"
+      if c["links"]:
+        words += f" · {c['links']:,} link{'s' if c['links'] != 1 else ''}"
+      return words
+    for p in self.paths:
+      c = self.sizes.get((id(self.src), p))
+      text.append(f"  {short_path(p, width):{width}}  ")
+      if c == "counting":
+        text.append(f"{self.app.spinner()} counting …", style="yellow")
+        known = False
+      elif c is None:
+        text.append("not there", style="red")
+      elif c == "failed":
+        text.append("not counted", style="dim")
+        known = False
+      else:
+        text.append(what(c), style="cyan")
+        for k in total:
+          total[k] += c[k]
+      text.append("\n")
+    if len(self.paths) > 1 or not known:
+      text.append(f"  {'in all':{width}}  ", style="bold")
+      text.append(what(total) + ("" if known else " so far"), style="bold cyan" if known else "dim")
+    self.query_one("#tw-src-paths", Static).update(text)
 
   @on(Input.Submitted, "#tw-src-path")
   def src_typed(self, event):

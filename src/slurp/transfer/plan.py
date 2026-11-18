@@ -55,6 +55,25 @@ def sources(endpoint, paths):
       found[parts[3]] = {"path": parts[3], "exists": parts[0] == "1", "dir": parts[1] == "1", "readable": parts[2] == "1"}
   return [found.get(p, {"path": p, "exists": False, "dir": False, "readable": False}) for p in paths]
 
+COUNT_SCRIPT = ('for p in "$@"; do if [ -e "$p" ] || [ -L "$p" ]; then '
+                'find "$p" -printf "%y %s\\n" 2>/dev/null | awk -v p="$p" \'$1 == "f" { f++; b += $2 } $1 == "d" { d++ } '
+                '$1 == "l" { l++ } END { printf "%s\\t%d\\t%d\\t%d\\t%.0f\\n", p, f, d, l, b }\'; '
+                'else printf "%s\\t-\\n" "$p"; fi; done')
+
+def count(endpoint, paths, timeout=600):
+  """What the sources hold (one find through each): {path: {"files", "dirs", "links", "bytes"} or None if it is not
+  there}"""
+  result = endpoint.sh(COUNT_SCRIPT, *paths, timeout=timeout)
+  out = {p: None for p in paths}
+  for line in (result.stdout or "").splitlines():
+    parts = line.split("\t")
+    if len(parts) == 5 and parts[0] in out:
+      try:
+        out[parts[0]] = {"files": int(parts[1]), "dirs": int(parts[2]), "links": int(parts[3]), "bytes": int(float(parts[4]))}
+      except ValueError:
+        pass
+  return out
+
 DEST_SCRIPT = ('p=$1; a=$p; while [ ! -e "$a" ] && [ "$a" != / ]; do a=$(dirname "$a"); done; '
                'e=0; d=0; w=0; [ -e "$p" ] && e=1; [ -d "$p" ] && d=1; [ -w "$a" ] && w=1; '
                'printf "dest\\t%s\\t%s\\t%s\\t%s\\n" "$e" "$d" "$w" "$a"; '

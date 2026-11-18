@@ -17,7 +17,8 @@ goes on as set, without a run now.
 
 1. **Source**: a tab and one or more files or folders there: **Browse…** (`Space` marks several, **Choose the
    marked**; **Choose this folder** takes the folder shown) or a path typed in. Each is copied into the destination
-   folder under its own name. Both tabs must be connected.
+   folder under its own name. Both tabs must be connected. Each source shows what it holds, counted on its tab in
+   the background (one `find` through it): its size, its files, folders and links; with several, also in all.
 2. **Destination**: a tab and a folder there (created if it is not there), with buttons for its home, scratch,
    project, … The wizard shows what goes where.
 3. **Route**: slurp checks both sides and changes nothing (except a marker file it removes at once), and you choose
