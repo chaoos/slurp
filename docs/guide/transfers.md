@@ -9,7 +9,9 @@ destination.
 ## Setting one up
 
 **Menu → Transfer data…** (`T`), or **New transfer** in the list of transfers, opens a wizard of six steps. **Next**
-waits until a step is complete (its tooltip says what is missing); **Back** goes back.
+waits until a step is complete (its tooltip says what is missing); **Back** goes back. The steps at the top can be
+clicked: any step whose steps before it are complete. So **Edit…** of a transfer (all its steps are) goes straight to
+the step to change; after another source or destination, the steps after the check wait for a new check.
 
 1. **Source**: a tab and one or more files or folders there: **Browse…** (`Space` marks several, **Choose the
    marked**; **Choose this folder** takes the folder shown) or a path typed in. Each is copied into the destination

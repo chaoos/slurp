@@ -46,6 +46,7 @@ def test_wizard_and_tab(check, tmp_path):
       w = app.screen
       check("T: the wizard", isinstance(w, TransferWizard))
       check("step 1: Next waits for a source", w.query_one("#tw-next").disabled)
+      check("a new transfer: the steps ahead cannot be jumped to", all(w.query_one(f"#tw-goto-{i}").disabled for i in range(1, 6)))
       w.query_one("#tw-src-path").value = str(src)
       await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
       check("a path typed: added", w.paths == [str(src)] and not w.query_one("#tw-next").disabled, w.paths)
@@ -178,6 +179,21 @@ def test_never(check, tmp_path):
       app.edit_transfer(t); await pilot.pause(0.4)
       e = app.screen
       check("edited: never is chosen", e.query_one("#tw-when-never").value)
+      await pilot.pause(0.3)
+      check("editing: every step can be gone to", all(not e.query_one(f"#tw-goto-{i}").disabled for i in range(6)),
+            [e.query_one(f"#tw-goto-{i}").disabled for i in range(6)])
+      await pilot.click("#tw-goto-5"); await pilot.pause(0.3)
+      check("a click on Summary: that step", e.step == 5 and "only on Run now" in str(e.query_one("#tw-summary").render()))
+      await pilot.click("#tw-goto-3"); await pilot.pause(0.4)
+      check("a click on How: its choices as they were", e.step == 3 and e.chosen_route() == t.route and e.chosen_runs_on() == t.runs_on,
+            (e.step, e.chosen_route(), e.chosen_runs_on()))
+      await pilot.click("#tw-goto-0"); await pilot.pause(0.3)
+      e.query_one("#tw-src-path").value = str(src / "sub")
+      await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.3)
+      check("another source: the steps after the check wait for a new check", e.step == 0 and not e.query_one("#tw-goto-2").disabled
+            and all(e.query_one(f"#tw-goto-{i}").disabled for i in (3, 4, 5)), [e.query_one(f"#tw-goto-{i}").disabled for i in range(6)])
+      await pilot.click("#tw-goto-2")
+      check("the check: its steps can be gone to again after it", await until(pilot, lambda: e.plan.get("done") and not e.query_one("#tw-goto-5").disabled, 30))
       e.dismiss(None); await pilot.pause(0.2)
       await pilot.press("q")
 

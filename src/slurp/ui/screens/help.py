@@ -225,7 +225,9 @@ it waits for), **Delete**. A transfer is idempotent: running it again copies onl
 nothing is ever deleted on the destination.
 """),
   "TransferWizard": ("Transfer data", """
-Sets up a transfer in six steps; **Next** waits until a step is complete (its tooltip says what is missing).
+Sets up a transfer in six steps; **Next** waits until a step is complete (its tooltip says what is missing). The
+steps at the top can be clicked: any step whose steps before it are complete (editing a transfer: all of them at once;
+a changed source or destination needs the check again first).
 
 1. **Source**: a tab and one or more files or folders there (Browse…: Space marks several; or type a path). Each is
    copied into the destination folder under its own name.

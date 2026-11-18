@@ -366,7 +366,9 @@ class TransferWizard(ModalScreen):
   TransferWizard { align: center middle; }
   #tw-dialog { width: 120; max-width: 98%; height: 94%; border: thick $accent; background: $surface; padding: 0 2; }
   #tw-title { text-style: bold; margin: 1 0 0 0; height: auto; }
-  #tw-steps { height: auto; color: $text-muted; margin-bottom: 1; }
+  #tw-steps { height: 1; margin-bottom: 1; }
+  #tw-steps Button { margin-right: 1; }
+  #tw-steps Button:disabled { color: $text-disabled; }
   #tw-switch { height: 1fr; }
   #tw-switch > VerticalScroll { height: 1fr; }
   .tw-row { height: auto; margin-top: 1; }
@@ -417,7 +419,9 @@ class TransferWizard(ModalScreen):
   def compose(self) -> ComposeResult:
     with Vertical(id="tw-dialog"):
       yield Static("Edit the transfer" if self.editing else "Transfer data", id="tw-title")
-      yield Static(id="tw-steps")
+      with Horizontal(id="tw-steps"):
+        for i, name in enumerate(self.STEPS):
+          yield Button(f"{i + 1} {name}", id=f"tw-goto-{i}", compact=True)
       with ContentSwitcher(id="tw-switch", initial="tw-step-0"):
         with VerticalScroll(id="tw-step-0"):
           yield Static("What to copy: a tab, and one or more files or folders there. Each is copied into the destination "
@@ -525,6 +529,9 @@ class TransferWizard(ModalScreen):
   def on_mount(self):
     if self.editing:
       self.prefill(self.editing)
+      if self.plan.get("done"): # (its check is for its sources and destination: the steps after it can be gone to)
+        self.checked_for = (id(self.src), tuple(self.paths), id(self.dst), self.dest_path)
+        self.call_later(self.fill_how)
     self.show_step()
     self.refresh_sources()
     self.refresh_dest()
@@ -562,12 +569,6 @@ class TransferWizard(ModalScreen):
   # ---- the steps
   def show_step(self):
     self.query_one("#tw-switch", ContentSwitcher).current = f"tw-step-{self.step}"
-    parts = []
-    for i, name in enumerate(self.STEPS):
-      if i:
-        parts.append((" › ", "dim"))
-      parts.append((f" {i + 1} {name} ", "bold reverse" if i == self.step else "" if i < self.step else "dim"))
-    self.query_one("#tw-steps", Static).update(Text.assemble(*parts))
     q = self.query_one
     q("#tw-back", Button).display = self.step > 0
     q("#tw-next", Button).display = self.step < len(self.STEPS) - 1
@@ -590,37 +591,69 @@ class TransferWizard(ModalScreen):
       self.fill_summary()
     self.update_next()
 
+  def reachable(self, step):
+    """A step can be gone to when every step before it is complete (editing: all of them, at once)"""
+    return step == self.step or all(self.step_ok(i)[0] for i in range(step))
+
+  def update_steps(self):
+    """The steps at the top: the one shown, those that can be gone to (a click), the others not yet"""
+    for i in range(len(self.STEPS)):
+      b = self.query_one(f"#tw-goto-{i}", Button)
+      b.variant = "primary" if i == self.step else "default"
+      b.disabled = not self.reachable(i)
+      b.tooltip = None if i == self.step else ("go to this step" if not b.disabled else
+                                                f"first: {next(why for j in range(i) for ok, why in [self.step_ok(j)] if not ok) or 'the steps before'}")
+
+  @on(Button.Pressed, "#tw-steps Button")
+  async def goto_pressed(self, event):
+    event.stop()
+    step = int(event.button.id.rsplit("-", 1)[1])
+    if step == self.step or not self.reachable(step):
+      return
+    if step > 3 and not self.query("#tw-route RadioButton"): # (its choices are needed by the steps after it)
+      await self.fill_how()
+    self.step = step
+    self.show_step()
+
   def update_next(self):
     if not self.is_mounted:
       return
+    self.update_steps()
     ok, why = self.step_ok()
     nxt = self.query_one("#tw-next", Button)
     nxt.disabled = not ok
     nxt.tooltip = why or None
     self.query_one("#tw-go", Button).disabled = self.step == 5 and not (self.how_ok()[0] and self.when_ok()[0])
 
-  def step_ok(self):
-    if self.step == 0:
+  def plan_current(self):
+    """Is the plan of the check for the sources and the destination chosen now?"""
+    return self.checked_for == (id(self.src), tuple(self.paths), id(self.dst), self.dest_path)
+
+  def step_ok(self, step=None):
+    step = self.step if step is None else step
+    if step == 0:
       if self.src is None:
         return False, "no tab"
       if not self.ready(self.src):
         return False, f"connect {self.src.name} first"
       return bool(self.paths), "" if self.paths else "add what to copy"
-    if self.step == 1:
+    if step == 1:
       if self.dst is None or not self.ready(self.dst):
         return False, f"connect {self.dst.name if self.dst else 'the tab'} first"
       return bool(self.dest_path.strip()), "" if self.dest_path.strip() else "the destination folder"
-    if self.step == 2:
+    if step == 2:
       plan = self.plan
       if not plan.get("done"):
         return False, "the check is not done"
+      if step != self.step and not self.plan_current():
+        return False, "check again (the source or the destination changed)"
       if plan.get("steps", {}).get("paths", {}).get("state") == "bad" or plan.get("steps", {}).get("facts", {}).get("state") == "bad":
         return False, "fix that first (Back)"
       usable = [r for r, i in plan.get("routes", {}).items() if i.get("ok") or i.get("keyable")]
       return bool(usable), "" if usable else "no route works"
-    if self.step == 3:
+    if step == 3:
       return self.how_ok()
-    if self.step == 4:
+    if step == 4:
       return self.when_ok()
     return True, ""
 
