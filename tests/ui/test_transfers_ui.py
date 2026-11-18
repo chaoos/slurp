@@ -655,3 +655,30 @@ def test_list_keeps_scrolling(check, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_pick_destination_folder(check, tmp_path):
+  """Browse… of the destination: its folders are listed (a picker without a pattern field), Enter goes into one,
+  Choose this folder takes it"""
+  from slurp.ui.screens.transfers import PickPathsScreen
+  (tmp_path / "dest" / "inner").mkdir(parents=True)
+  (tmp_path / "dest" / "file.txt").write_text("x")
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      await pilot.press("T"); await pilot.pause(0.3)
+      w = app.screen
+      w.query_one("#tw-dst-path").value = str(tmp_path / "dest"); await pilot.pause(0.2)
+      w.query_one("#tw-dst-browse").press(); await pilot.pause(0.3)
+      p = app.screen
+      check("the picker of the destination", isinstance(p, PickPathsScreen) and not p.multi)
+      check("its folders listed", await until(pilot, lambda: p.query_one("#pp-list").row_count == 3, 10),
+            (p.query_one("#pp-list").row_count, str(p.query_one("#pp-status").render())))
+      p.query_one("#pp-here").press(); await pilot.pause(0.3)
+      check("Choose this folder: the destination", w.query_one("#tw-dst-path").value == str(tmp_path / "dest"))
+      w.dismiss(None); await pilot.pause(0.2)
+      await pilot.press("q")
+
+  asyncio.run(main())

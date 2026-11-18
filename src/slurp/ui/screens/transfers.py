@@ -264,8 +264,9 @@ class PickPathsScreen(ModalScreen):
       b.disabled = not pattern
 
   def pattern(self):
-    found = self.query("#pp-pattern").results(Input)
-    text = next(iter(found)).value.strip() if found else ""
+    """The pattern typed ("" when none, or in a picker without one: the destination's)"""
+    found = list(self.query("#pp-pattern").results(Input))
+    text = found[0].value.strip() if found else ""
     return text if text and "/" not in text else ""
 
   @on(Input.Changed, "#pp-pattern")
