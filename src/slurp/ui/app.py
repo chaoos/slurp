@@ -483,6 +483,24 @@ class Slurp(TransfersTab, App):
     cluster.attempts += 1
     cluster.ready_generation = None
 
+  def too_many_keys(self, c, lines):
+    """The server ended the login after too many keys (ssh offers the agent's keys before the configured one, e.g. a
+    certificate it offers last): once, the login again with only the configured keys (IdentitiesOnly=yes: they may come
+    from the agent too), and how to keep it so. True if it logs in again"""
+    if not any("Too many authentication failures" in line for line in lines) or "IdentitiesOnly=yes" in c.ssh_options:
+      return False
+    cluster = next((x for x in self.clusters if x.connection is c), None)
+    if cluster is None:
+      return False
+    c.ssh_options += ["-o", "IdentitiesOnly=yes"]
+    c.event("too many authentication failures: logging in again with only the configured keys (IdentitiesOnly=yes)")
+    self.notify(f"{cluster.destination} refused after too many keys (the agent's are offered first): logging in again with "
+                f"only the configured key. To keep it so, add \"IdentitiesOnly yes\" to Host {cluster.destination} in "
+                "~/.ssh/config", title=cluster.name, severity="warning", timeout=15)
+    cluster.broken_at = None
+    self.login(cluster, show=cluster.show_login)
+    return True
+
   def needs_login(self, cluster):
     """A remote tab without a live session (none yet, closed, or broken with the login process gone)"""
     if not cluster.destination:
@@ -1042,6 +1060,8 @@ class Slurp(TransfersTab, App):
         lines = [line.strip() for line in t.vt.display if line.strip()] if t.vt is not None else []
         if lines and c.state != "closed":
           c.event("ssh said: " + " | ".join(lines[-3:]))
+        if c.state == "broken" and c.wanted and self.too_many_keys(c, lines):
+          continue # (logging in again, with the configured keys only)
       if c.ready and cluster.ready_generation != c.generation: # (re)connected
         cluster.ready_generation, cluster.attempts, cluster.show_login = c.generation, 0, False
         cluster.broken_at = None
