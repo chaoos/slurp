@@ -77,3 +77,27 @@ def test_checksum_estimate(check):
   check("nothing to copy: next to no time", plain[1] < 1, plain)
   check("with checksums: all of it is read (10 GiB at 100 MiB/s: about 100 s)", 80 < summed[0] < 85 and 160 < summed[1] < 170, summed)
   check("the time of checksums", P.checksum_seconds(10 << 30, 100 << 20) == 102.4 and P.checksum_seconds(None, 1) is None)
+
+
+def test_login_from_a_node(check, tmp_path, monkeypatch):
+  """The login of a direct route from a node of a partition (srun): works, refused, or no node free (not checked)"""
+  fake = tmp_path / "bin"
+  fake.mkdir()
+  (fake / "srun").write_text('#!/bin/sh\nif [ -f "$SRUN_BUSY" ]; then echo "srun: error: Unable to allocate resources: Immediate execution impossible" >&2; exit 1; fi\n'
+                             'while [ "${1#-}" != "$1" ]; do shift; done\nexec "$@"\n')
+  (fake / "ssh").write_text('#!/bin/sh\nif [ -f "$SSH_REFUSE" ]; then echo "u@jureca: Permission denied (publickey)." >&2; exit 255; fi\n'
+                            'echo "Welcome"; printf "\\nSLURP-DIRECT rsync  version 3.2.7  protocol version 31\\n"\n')
+  for f in ("srun", "ssh"):
+    (fake / f).chmod(0o755)
+  monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+  monkeypatch.setenv("SRUN_BUSY", str(tmp_path / "busy"))
+  monkeypatch.setenv("SSH_REFUSE", str(tmp_path / "refuse"))
+  target = {"host": "jureca", "port": "22", "user": "u", "jump": "", "known_hosts": ""}
+  ok, words = P.login_works_on(local(), target, str(tmp_path), "xfer")
+  check("it logs in from a node", ok is True and "a node of xfer logs in to jureca" in words, (ok, words))
+  (tmp_path / "refuse").write_text("")
+  ok, words = P.login_works_on(local(), target, str(tmp_path), "xfer")
+  check("refused from the node: said, with what ssh said", ok is False and "Permission denied (publickey)" in words, (ok, words))
+  (tmp_path / "busy").write_text("")
+  ok, words = P.login_works_on(local(), target, str(tmp_path), "xfer")
+  check("no node free: not checked (None)", ok is None and "not checked" in words, (ok, words))

@@ -195,6 +195,32 @@ def login_works(client, target, folder, key=False):
   said = [l for l in out.splitlines() if l.strip()]
   return False, said[-1][:200] if said else "the login did not work"
 
+NODE_SCRIPT = ('printf "%s" "$1" > "$2/known_hosts"; chmod 600 "$2/known_hosts"; shift 2; '
+               'srun "$@" 2>&1 | tail -n 8')
+NO_NODE = ("Immediate execution impossible", "Unable to allocate resources", "allocation failure", "Job submit/allocate failed",
+           "Requested node configuration is not available", "Invalid partition", "Invalid account")
+
+def login_works_on(client, target, folder, partition, account="", seconds=60):
+  """The same login as login_works, from a node of a partition (srun --immediate: if no node is free within seconds
+  it is not checked). -> (True | False | None, words)"""
+  if not target or target.get("error"):
+    return False, (target or {}).get("error") or "the other side cannot be reached"
+  srun = [f"--partition={partition}", "--ntasks=1", "--time=00:05:00", f"--immediate={int(seconds)}", "--job-name=slurp-check"]
+  if account:
+    srun.append(f"--account={account}")
+  ssh = ["ssh", *RN.ssh_options(target, folder), target["host"], LOGIN_REMOTE]
+  result = client.sh(NODE_SCRIPT, target.get("known_hosts", ""), folder, *srun, "sh", "-c",
+                     'ssh "$@" </dev/null 2>&1 | tail -n 5', "sh", *ssh[1:], timeout=seconds + 120, retry=False)
+  out = result.stdout or ""
+  for line in out.splitlines():
+    if line.strip().startswith(RN.DIRECT_MARK):
+      version = R.version_of(line)
+      return (True, f"a node of {partition} logs in to {target['host']}") if version else (False, f"no rsync on {target['host']}")
+  said = [l.strip() for l in out.splitlines() if l.strip()]
+  if any(n in out for n in NO_NODE):
+    return None, f"no node of {partition} within {seconds} s: not checked there ({said[-1][:120] if said else ''})"
+  return False, f"a node of {partition} cannot log in to {target['host']} by itself: {said[-1][:160] if said else 'refused'}"
+
 TIMED_SCRIPT = ('t0=$(date +%s%N); sh -c "$1" >/dev/null 2>&1; r=$?; t1=$(date +%s%N); '
                 'printf "%s %s\\n" "$r" "$(( (t1 - t0) / 1000000 ))"')
 

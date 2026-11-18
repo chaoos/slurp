@@ -426,6 +426,8 @@ class TransferWizard(ModalScreen):
       self.paths, self.dest_path = [], ""
     self.tid = editing.id if editing else M.new_id()
     self.rebuilding = asyncio.Lock() # (the choices of step 4 are rebuilt one at a time)
+    self.node_checks = {} # (route, partition, account) -> ("running" | True | False | None, words): the login from a node
+    self.node_timer = None
 
   # ---- the window
   def compose(self) -> ComposeResult:
@@ -483,6 +485,7 @@ class TransferWizard(ModalScreen):
               yield Label("account")
               yield Input(id="tw-account", placeholder="(default)", compact=True)
             yield Checkbox("submit the next job when the time limit ends", value=True, id="tw-resubmit", compact=True)
+            yield Static(id="tw-node-check")
           with Horizontal(classes="tw-row"):
             yield Checkbox("checksums: compare the contents (every file is read on both sides, at every run, also when "
                            "nothing changed: much slower)", id="tw-checksum", compact=True)
@@ -580,6 +583,8 @@ class TransferWizard(ModalScreen):
   def tick(self):
     if self.step == 2 and self.checking is not None:
       self.show_plan()
+    if self.step == 2 and any(v[0] == "running" for v in self.node_checks.values()):
+      self.show_node_check()
     if self.step in (0, 1):
       self.refresh_states()
 
@@ -970,9 +975,13 @@ class TransferWizard(ModalScreen):
       note = f"Both see the same filesystem: rsync runs on {self.src.name if self.src else '?'}, no network."
     self.query_one("#tw-route-note", Static).update(note)
     key = self.query_one("#tw-key", Checkbox)
-    key.display = route in ("direct-push", "direct-pull")
-    if route in ("direct-push", "direct-pull") and not info.get("ok") and info.get("keyable"):
+    # (only for a direct route that cannot log in by itself: one that can needs none, and its key would be the only one)
+    needs_key = route in ("direct-push", "direct-pull") and not info.get("ok") and info.get("keyable")
+    if needs_key:
       key.value = True
+    elif key.value and route in ("direct-push", "direct-pull") and info.get("ok"):
+      key.value = False
+    key.display = bool(needs_key)
 
   def chosen_runs_on(self):
     for b in self.query("#tw-runs-on RadioButton").results(RadioButton):
@@ -1017,6 +1026,46 @@ class TransferWizard(ModalScreen):
     if job and not part.value:
       part.value = str(site_of(client).get("transfer_partition") or "")
     self.query_one("#tw-compress", Checkbox).display = route == "relay"
+    self.ensure_node_check()
+    self.update_next()
+
+  # (a direct route as a transfer job: rsync logs in from a node of the partition, not from the login node the check
+  # ran on; some sites accept a key only from some hosts: the login is checked there too, before Next)
+  def node_check_key(self):
+    route = self.chosen_route()
+    info = self.plan.get("routes", {}).get(route or "", {})
+    if route not in ("direct-push", "direct-pull") or self.chosen_runs_on() != "job" or not info.get("ok"):
+      return None
+    return route, self.query_one("#tw-partition", Input).value.strip(), self.query_one("#tw-account", Input).value.strip()
+
+  def ensure_node_check(self):
+    key = self.node_check_key()
+    if key is not None and key[1] and key not in self.node_checks:
+      route, partition, account = key
+      self.node_checks[key] = ("running", f"checking the login from a node of {partition} (srun) …")
+      def done(result):
+        self.node_checks[key] = result
+        self.show_node_check()
+        self.update_next()
+      self.app.transfers.probe_node(self.draft(), route, partition, account, done)
+    self.show_node_check()
+
+  def show_node_check(self):
+    if not self.is_mounted:
+      return
+    key = self.node_check_key()
+    state, words = self.node_checks.get(key, (None, "")) if key else (None, "")
+    if key is not None and not key[1]:
+      state, words = None, "no partition: the login is not checked from a node of it"
+    mark, style = {"running": (self.app.spinner(), "yellow"), True: ("✓", "green"), False: ("✗", "red"), None: ("ⓘ", "dim")}[state]
+    self.query_one("#tw-node-check", Static).update(Text(f"{mark} {words}", style=style) if words else "")
+
+  @on(Input.Changed, "#tw-partition, #tw-account")
+  def job_place_typed(self, event):
+    event.stop()
+    if self.node_timer is not None:
+      self.node_timer.stop()
+    self.node_timer = self.set_timer(1.0, self.ensure_node_check)
     self.update_next()
 
   @on(Checkbox.Changed, "#tw-checksum")
@@ -1068,6 +1117,13 @@ class TransferWizard(ModalScreen):
       return False, "where it runs"
     if self.chosen_runs_on() == "job" and not self.query_one("#tw-time", Input).value.strip():
       return False, "the time limit of the job"
+    key = self.node_check_key()
+    if key is not None and key[1]:
+      state, words = self.node_checks.get(key, ("running", ""))
+      if state == "running":
+        return False, f"checking the login from a node of {key[1]}"
+      if state is False:
+        return False, words
     bw = self.query_one("#tw-bwlimit", Input).value.strip()
     if bw:
       try:

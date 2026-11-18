@@ -76,6 +76,13 @@ goes on as set, without a run now.
   may be slow). With one end this machine, the relay is a direct copy over slurp's SSH session. slurp checks what the
   source's rsync asks for: an rsync server that receives into the destination, nothing else.
 
+The check logs in from the login node of the session. A run logs in once more before rsync starts, with the same
+ssh, where it runs: on the login node it starts on, or on a node of the transfer partition for a transfer job. Sites
+may accept a key only from some hosts (JSC, for example, `from=` in `authorized_keys`): refused there, the run ends at
+once and says which host could not log in where, what ssh said, and where the check had logged in. A direct route as
+a transfer job is therefore checked from a node of the partition too, in the wizard (`srun --immediate`, a minute at
+most): refused there, the wizard does not go on; with no node free, it says it could not check there.
+
 A direct route that cannot log in by itself, where the other cluster's SSH server answers, can use a **temporary
 key** (opt-in, in step 4, with a warning): slurp makes a key on the cluster that runs rsync (in the run's folder there,
 readable only by you) and adds a line for it to `~/.ssh/authorized_keys` on the other one. The key may only run an

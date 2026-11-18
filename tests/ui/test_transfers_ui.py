@@ -413,3 +413,46 @@ def test_sync_and_recheck(check, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_direct_job_checked_on_a_node(check, tmp_path, monkeypatch):
+  """A direct route as a transfer job: the login is checked from a node of the partition before Next (refused there:
+  Next refuses, and says why; no node free: Next, with a note); no temporary key for a route that logs in by itself"""
+  src, dst = files(tmp_path)
+  answers = []
+  def probe(manager, t, route, partition, account, done):
+    answers.append((route, partition, account))
+    done((False, f"a node of {partition} cannot log in to jureca by itself: Permission denied (publickey)."))
+  from slurp.transfer.manager import Manager
+  monkeypatch.setattr(Manager, "probe_node", probe)
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      await pilot.press("T"); await pilot.pause(0.3)
+      w = app.screen
+      w.query_one("#tw-src-path").value = str(src)
+      await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2)
+      w.query_one("#tw-dst-path").value = str(dst); await pilot.pause(0.2)
+      w.query_one("#tw-next").press()
+      await until(pilot, lambda: w.plan.get("done"), 30); await pilot.pause(0.5)
+      # (as on two clusters: the direct route passed from the login node, the site has a transfer partition)
+      w.plan["routes"]["direct-push"] = {"ok": True, "rate": 100 << 20, "estimate": [1, 2], "runs_on": ["detached", "job"]}
+      w.show_plan(); await pilot.pause(0.2)
+      await pilot.click(w.query_one(".tw-r-direct-push")); await pilot.pause(0.4)
+      check("a route that logs in by itself: no temporary key offered", not w.query_one("#tw-key").display and not w.query_one("#tw-key").value)
+      await pilot.click(w.query_one(".tw-o-job")); await pilot.pause(0.3)
+      w.query_one("#tw-partition").value = "xfer"; await pilot.pause(1.5)
+      check("as a job: the login checked from a node of the partition", answers and answers[-1][:2] == ("direct-push", "xfer"), answers)
+      node = str(w.query_one("#tw-node-check").render())
+      check("refused there: said", "✗" in node and "Permission denied" in node, node)
+      check("…and Next refuses, with why", w.query_one("#tw-next").disabled and "Permission denied" in str(w.query_one("#tw-next").tooltip),
+            w.query_one("#tw-next").tooltip)
+      await pilot.click(w.query_one(".tw-o-detached")); await pilot.pause(0.3)
+      check("detached on the login node (where the check logged in): Next", not w.query_one("#tw-next").disabled, w.query_one("#tw-next").tooltip)
+      w.dismiss(None); await pilot.pause(0.2)
+      await pilot.press("q")
+
+  asyncio.run(main())
