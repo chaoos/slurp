@@ -19,7 +19,7 @@ as they are (they can be changed once it is connected), the other steps can be c
 
 1. **Source**: an endpoint (below) and one or more files or folders there: **Browse…** (`Space` marks several, **Choose the
    marked**; **Choose this folder** takes the folder shown; a pattern such as `*.h5` in its field shows the matches,
-   **Choose the pattern** takes it) or a path typed in. A source can be a pattern, `/path/to/dir/*.h5`: each match is
+   **Choose the pattern** takes it; **Reload** (`r`) lists the folder shown again, the marks kept) or a path typed in. A source can be a pattern, `/path/to/dir/*.h5`: each match is
    copied into the destination folder, as `cp /path/to/dir/*.h5 dest/` would; a pattern that matches nothing is
    reported as not there. Braces are expanded as bash does: `/scratch/run_{1..1000..20}`, `/data/{in,out}/*.h5`,
    `step_{001..100}` (zero padded), `{a..f}`, nested; a source with braces is one line in the list and stands for all
@@ -29,7 +29,7 @@ as they are (they can be changed once it is connected), the other steps can be c
    wizard shows their state, with **Connect** (or **Log in in its tab**, for a login that needs you). Each source shows what it holds, counted on its tab in
    the background (one `find` through it): its size, its files, folders and links; with several, also in all.
 2. **Destination**: an endpoint and a folder there (Browse…: **New folder…** makes one in the folder shown and goes
-   into it) (created if it is not there), with buttons for its home, scratch,
+   into it; **Reload**, `r`, lists it again) (created if it is not there), with buttons for its home, scratch,
    project, … The wizard shows what goes where.
 3. **Options**: how rsync copies, the same at every run:
 

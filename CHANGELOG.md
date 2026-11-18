@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: the pickers of the source and the destination (Browse…) have a
+  **Reload** button (`r`): the folder shown is listed again, the marks kept.
 - **Run before login**: what the command exports (e.g. `eval "$(ssh-agent -s)"`)
   is in the environment of the login. New box **only when the login fails
   without it**: first a login without the command that asks nothing; only if

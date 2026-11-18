@@ -944,6 +944,46 @@ def test_new_folder(check, tmp_path):
   asyncio.run(main())
 
 
+def test_picker_reload(check, tmp_path):
+  """Reload in both pickers (the source's and the destination's): the folder shown listed again, new entries in it,
+  gone ones out; the marks kept where their entries still are"""
+  from slurp.ui.screens.transfers import PickPathsScreen
+  for n in ("a", "b", "c"):
+    (tmp_path / n).write_text(n)
+
+  def names(picker):
+    return {e["name"] for e in picker.entries}
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      app.push_screen(PickPathsScreen(app.clusters[0], str(tmp_path), multi=True))
+      picker = app.screen
+      await until(pilot, lambda: names(picker) == {"a", "b", "c"}, 10)
+      check("a Reload button in the source's picker", bool(picker.query("#pp-reload")))
+      picker.marked = {"a", "b"}
+      (tmp_path / "b").unlink()
+      (tmp_path / "d").write_text("d")
+      picker.query_one("#pp-reload").press()
+      check("reloaded: the new one in, the gone one out", await until(pilot, lambda: names(picker) == {"a", "c", "d"}, 10), names(picker))
+      check("the marks kept where still there", picker.marked == {"a"}, picker.marked)
+      await pilot.press("escape"); await pilot.pause(0.3)
+
+      app.push_screen(PickPathsScreen(app.clusters[0], str(tmp_path), multi=False))
+      picker = app.screen
+      await until(pilot, lambda: "d" in names(picker), 10)
+      check("a Reload button in the destination's picker", bool(picker.query("#pp-reload")))
+      (tmp_path / "e").mkdir()
+      picker.query_one("#pp-list").focus()
+      await pilot.press("r")
+      check("r reloads", await until(pilot, lambda: "e" in names(picker), 10), names(picker))
+      await pilot.press("escape"); await pilot.pause(0.3)
+      await pilot.press("q")
+
+  asyncio.run(main())
+
+
 def test_source_with_braces(check, tmp_path):
   """A source typed with braces: one line, counted over its paths (how many are there), the preview says how many;
   too many: refused"""

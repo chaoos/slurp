@@ -227,7 +227,8 @@ class PickPathsScreen(ModalScreen):
   #pp-new-row Button { margin-left: 1; }
   #pp-buttons Button { margin-left: 1; }
   """
-  BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("space", "mark", "Mark"), Binding("backspace", "up", "Up", show=False)]
+  BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("space", "mark", "Mark"), Binding("backspace", "up", "Up", show=False),
+              Binding("r", "reload", "Reload")]
 
   def __init__(self, cluster, start="", multi=True, title="", lister=None, name="", maker=None):
     super().__init__()
@@ -245,6 +246,7 @@ class PickPathsScreen(ModalScreen):
       with Horizontal(id="pp-bar"):
         yield Button("↑ Up", id="pp-up", compact=True, tooltip="the folder above (Backspace)")
         yield Input(self.path, id="pp-path", tooltip="a folder: Enter goes there (~: your home)")
+        yield Button(icons.label("reload", "Reload"), id="pp-reload", compact=True, tooltip="list the folder shown again (r)")
       yield Horizontal(id="pp-places")
       yield ClickTable(id="pp-list", cursor_type="row", zebra_stripes=True)
       yield Static(id="pp-status")
@@ -285,7 +287,8 @@ class PickPathsScreen(ModalScreen):
       buttons.append(button)
     bar_.mount(*buttons)
 
-  def go(self, path):
+  def go(self, path, keep=False):
+    """List path (keep: the same folder again, its marks and the cursor kept where they still are)"""
     self.query_one("#pp-status", Static).update(Text(f"listing {path} …", style="dim"))
     def work():
       try:
@@ -307,9 +310,14 @@ class PickPathsScreen(ModalScreen):
       if where is None:
         self.query_one("#pp-status", Static).update(Text(error, style="red"))
         return
-      self.path, self.entries, self.marked = where, entries, set()
+      table = self.query_one("#pp-list", ClickTable)
+      cursor = table.cursor_row if keep else 0
+      names = {e["name"] for e in entries}
+      self.path, self.entries, self.marked = where, entries, (self.marked & names if keep else set())
       self.query_one("#pp-path", Input).value = where
       self.populate()
+      if keep and table.row_count:
+        table.move_cursor(row=min(cursor, table.row_count - 1))
     in_background(self, work, listed, group="pp-list", name="listing the folder",
                   connection=self.cluster.connection if self.cluster is not None and self.cluster.destination else None)
 
@@ -430,6 +438,9 @@ class PickPathsScreen(ModalScreen):
     if table.row_count:
       self.toggle(table.coordinate_to_cell_key((table.cursor_row, 0)).row_key.value)
 
+  def action_reload(self):
+    self.go(self.path, keep=True)
+
   def action_up(self):
     if self.path not in ("/", "/~/", "/~"):
       self.go(os.path.dirname(self.path.rstrip("/")) or "/")
@@ -448,6 +459,9 @@ class PickPathsScreen(ModalScreen):
     elif bid == "pp-up":
       event.stop()
       self.action_up()
+    elif bid == "pp-reload":
+      event.stop()
+      self.action_reload()
     elif bid == "pp-new":
       event.stop()
       self.query_one("#pp-new-row").add_class("-open")
