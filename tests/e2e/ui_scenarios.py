@@ -3901,7 +3901,7 @@ async def t_transfer_rclone_errors(app, pilot):
   os.chmod(fake, 0o755)
   try:
     store = app.transfers.endpoint_store
-    store.add(E.EndpointDef("davx", "dav", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"]))
+    store.add(E.EndpointDef("davx", "dav failing", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"]))
     S.put(S.user("davx", "password"), "pw")
     lab = next(c for c in app.clusters if c.destination)
     _, dst = xfer_tree("rcerr")
@@ -3925,4 +3925,59 @@ async def t_transfer_rclone_errors(app, pilot):
     app.transfers.delete(t)
   finally:
     os.remove(fake)
+    dav.kill()
+
+async def t_transfer_job_queued(app, pilot):
+  """A transfer job that waits in the queue, after a run before it: not taken as ended by the result of that run (it
+  was: the new run "ended" at once with the old exit code, and its keys were removed before the job started: rclone
+  found no remote, "didn't find section in config file")"""
+  import socket
+  import subprocess
+  import time
+  from slurp.transfer import endpoints as E, model as M, secrets as S
+  davroot = os.path.join(HERE, "queued-dav")
+  os.makedirs(os.path.join(davroot, "run1"), exist_ok=True)
+  open(os.path.join(davroot, "run1", "a.txt"), "w").write("a")
+  with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+  dav = subprocess.Popen(["rclone", "--config", "", "serve", "webdav", davroot, "--addr", f"127.0.0.1:{port}", "--user", "dav", "--pass", "pw",
+                          "--dir-cache-time", "0s"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) # (no cache: a file added is seen)
+  queue = os.path.join(LAB, "xfer_queue")
+  try:
+    for _ in range(50):
+      try:
+        socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+        break
+      except OSError:
+        time.sleep(0.2)
+    store = app.transfers.endpoint_store
+    store.add(E.EndpointDef("davq", "dav queued", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"]))
+    S.put(S.user("davq", "password"), "pw")
+    lab = next(c for c in app.clusters if c.destination)
+    _, dst = xfer_tree("queued")
+    t = M.Transfer(M.new_id(), "dav to lab, queued", {"endpoint": "davq", "name": "dav", "paths": ["/run1"]},
+                   {"endpoint": E.tab_id(lab), "tab": M.tab_ref(lab), "path": dst}, route="rclone-cluster", runs_on="job",
+                   options={"partition": "normal", "time": "0:10:00"}, secrets_to={lab.destination: ["davq"]})
+    t.plan = {"routes": {"rclone-cluster": {"ok": True, "runs_on": ["detached", "job"]}}}
+    app.transfers.add(t)
+    app.transfers.run_now(t)
+    check("the first run: done", await until(pilot, lambda: t.state == "done", 90), (t.state, t.message))
+    open(os.path.join(davroot, "run1", "b.txt"), "w").write("b")
+    open(queue, "w").write("8")
+    app.transfers.run_now(t)
+    check("the second: submitted", await until(pilot, lambda: t.run.get("job") and t.state in ("queued", "running"), 30), (t.state, t.message))
+    folder = t.run.get("folder", "")
+    await pilot.pause(4)
+    app.transfers.reload([t]); await pilot.pause(2)
+    check("while it waits in the queue: not ended by the run before", t.state in ("queued", "running") and len(t.runs) == 1,
+          (t.state, t.message, len(t.runs)))
+    check("…its keys still there for it", os.path.exists(os.path.join(folder, "keys")), os.listdir(folder) if folder else None)
+    check("then it runs: done, the new file there", await until(pilot, lambda: t.state == "done" and len(t.runs) == 2, 90)
+          and os.path.exists(os.path.join(dst, "run1", "b.txt")), (t.state, t.message, t.errors[-3:], [os.path.join(r, f) for r, _, fs in os.walk(dst) for f in fs],
+                                                                  open(os.path.join(folder, "log")).read()[-1500:] if folder else ""))
+    app.transfers.delete(t)
+  finally:
+    if os.path.exists(queue):
+      os.remove(queue)
     dav.kill()

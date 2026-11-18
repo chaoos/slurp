@@ -857,6 +857,8 @@ class Manager:
     if job and t.state == "queued":
       t.message = f"transfer job {t.run.get('job')}: {job.lower()}"
     result = status.get("result")
+    if result and t.run.get("job") and str(result.get("job") or "") not in ("", str(t.run["job"])):
+      result = None # (the result of another job, a run before: this one has not ended, it may wait in the queue)
     ended = result is not None and not status.get("lock")
     if t.runs_on == "job" and not job and result is None and not status.get("lock"):
       ended = True # (the job is gone without a result: cancelled, its time was up, its node failed)

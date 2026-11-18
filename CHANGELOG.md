@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: a transfer job that waits in the queue is no longer taken as
+  ended by the result of the run before it. It "ended" at once with the old
+  exit code, and an rclone job's keys were removed before it started (rclone:
+  "didn't find section in config file"). A new run starts without the old
+  result, and a result of another job is not this run's.
 - Transfers: runs on a cluster say why they failed. rclone's plain-text errors
   (an option an older rclone does not know, a remote it cannot make) were
   dropped, so a failed run said nothing; now they are the run's errors and

@@ -158,7 +158,9 @@ def folder_of(host, transfer):
 def prepare(host, transfer, command_text, job=False, known_hosts="", login=""):
   """The run's folder on the cluster with its files (login: the preflight of a direct route) -> the folder"""
   folder = folder_of(host, transfer)
-  result = host.sh('mkdir -p "$1" && chmod 700 "$1" && rm -f "$1/preflight" "$1/preflight.out"', folder, retry=False)
+  # (the result and progress of the run before: gone, or a new run that waits in the queue would look ended at once)
+  result = host.sh('mkdir -p "$1" && chmod 700 "$1" && rm -f "$1/preflight" "$1/preflight.out" "$1/result.json" "$1/progress.json"',
+                   folder, retry=False)
   if result.returncode:
     raise OSError(f"cannot create {folder} on {host.name}: {(result.stderr or '').strip()[:200]}")
   host.write(f"{folder}/run.sh", RUNNER, 0o700)

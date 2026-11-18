@@ -185,7 +185,9 @@ elif prog == "sbatch" and any("slurp-xfer-" in open(a).read() for a in args if a
   out = next((l.split("=", 1)[1] for l in open(script) if l.startswith("#SBATCH --output=")), "/dev/null").strip().replace("%j", jid)
   with open(os.path.join(S, "sbatch_calls"), "a") as f:
     f.write(repr(args) + f" XFER={jid}\n")
-  proc = subprocess.Popen(["sh", script], env=dict(os.environ, SLURM_JOB_ID=jid), stdin=subprocess.DEVNULL,
+  wait = open(os.path.join(S, "xfer_queue")).read().strip() if os.path.exists(os.path.join(S, "xfer_queue")) else "0"
+  # (xfer_queue: seconds a transfer job waits in the queue before it runs)
+  proc = subprocess.Popen(["sh", "-c", 'sleep "$1"; exec sh "$2"', "sh", wait, script], env=dict(os.environ, SLURM_JOB_ID=jid), stdin=subprocess.DEVNULL,
                           stdout=open(out, "a"), stderr=subprocess.STDOUT, start_new_session=True)
   with open(XFER, "a") as f:
     f.write(f"{jid} {proc.pid}\n")
