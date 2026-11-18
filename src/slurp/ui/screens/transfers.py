@@ -14,7 +14,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, ContentSwitcher, Input, Label, RadioButton, RadioSet, Select, Static
+from textual.widgets import Button, Checkbox, ContentSwitcher, DataTable, Input, Label, RadioButton, RadioSet, Select, Static
 
 from ...cluster.listing import listing
 from ...cluster.remote import HEALTH_STYLES, connection_health, in_background
@@ -1843,6 +1843,28 @@ def end_text(cluster, name, paths, width=34):
 
 COLUMNS = [("name", "Name"), ("from", "From"), ("to", "To"), ("how", "Route"), ("state", "State"), ("progress", "Progress"),
            ("rate", "Rate"), ("left", "Left"), ("when", "Last run")]
+# (sorting the list by a column: a click on its header; again: the other way. Under way first, then waiting, …)
+STATE_ORDER = ["running", "starting", "pausing", "queued", "checking", "waiting", "paused", "failed", "done-errors", "done", "new"]
+SORT_FIRST_DOWN = ("progress", "rate", "when") # (these first from the most: the fastest, the latest)
+
+def sort_key(column, manager):
+  """The key of a transfer for sorting the list by a column"""
+  def percent(t):
+    p = t.progress.get("percent")
+    return p if p is not None and t.state in ("running", "pausing", "paused", "done", "done-errors", "failed", "waiting") else -1
+  keys = {
+    "name": lambda t: t.name.lower(),
+    "from": lambda t: (t.source_name.lower(), (t.source.get("paths") or [""])[0]),
+    "to": lambda t: (t.dest_name.lower(), t.dest.get("path", "")),
+    "how": lambda t: route_text(t).lower(),
+    "state": lambda t: STATE_ORDER.index(t.state) if t.state in STATE_ORDER else len(STATE_ORDER),
+    "progress": percent,
+    "rate": lambda t: (t.progress.get("rate") or 0) if t.state == "running" else 0,
+    "left": lambda t: t.progress.get("eta") if t.state == "running" and t.progress.get("eta") else float("inf"),
+    "when": lambda t: t.runs[-1]["ended"] if t.runs else 0,
+  }
+  key = keys.get(column, lambda t: t.created)
+  return lambda t: (key(t), t.created) # (equal: in the order they were made)
 
 class TransfersScreen(TransfersBase):
   """The list of transfers: the first subtab of the Transfers tab"""
@@ -1876,8 +1898,11 @@ class TransfersScreen(TransfersBase):
       return
     table = self.query_one("#xfer-list", ClickTable)
     transfers = self.manager.transfers
+    column, reverse = self.list_order()
+    shown_order = sorted(transfers, key=sort_key(column, self.manager), reverse=reverse) if column else list(transfers)
+    self.mark_sort_column(table, column, reverse)
     rows = []
-    for t in transfers:
+    for t in shown_order:
       src, dst = self.manager.ends(t)
       p = t.progress
       shown = p.get("percent") if t.state in ("running", "pausing", "paused", "done", "done-errors", "failed", "waiting") else None
@@ -1895,6 +1920,34 @@ class TransfersScreen(TransfersBase):
       f"{len(transfers)} transfer{'s' if len(transfers) != 1 else ''}" + (f", {running} running" if running else "")
       + " · Enter: its details · p pause, c continue, s run now, e edit, Del delete")
     self.show_note()
+
+  def list_order(self):
+    """(column, reverse) the list is sorted by (no column: in the order the transfers were made); kept for the next start"""
+    order = getattr(self.app, "transfer_sort", None)
+    if order is None:
+      from ...config import load_config
+      saved = load_config().get("transfer_sort") or {}
+      order = self.app.transfer_sort = (saved.get("column") or "", bool(saved.get("reverse")))
+    return order
+
+  def mark_sort_column(self, table, column, reverse):
+    """▲ (ascending) or ▼ (descending) after the label of the column it is sorted by"""
+    for key, col in table.columns.items():
+      label = dict(COLUMNS).get(key.value, str(col.label)) + ((" ▼" if reverse else " ▲") if key.value == column else "")
+      if str(col.label) != label:
+        col.label = Text(label)
+        col.content_width = max(col.content_width, len(label))
+
+  @on(DataTable.HeaderSelected, "#xfer-list")
+  def header_clicked(self, event):
+    """A click on a column's header: sorted by it; again: the other way"""
+    event.stop()
+    column, reverse = self.list_order()
+    key = event.column_key.value
+    self.app.transfer_sort = (key, not reverse) if key == column else (key, key in SORT_FIRST_DOWN)
+    from ...config import update_config
+    update_config(transfer_sort={"column": self.app.transfer_sort[0], "reverse": self.app.transfer_sort[1]})
+    self.refresh_view()
 
   def show_note(self):
     t = self.current()

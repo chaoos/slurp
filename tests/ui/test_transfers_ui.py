@@ -785,3 +785,56 @@ def test_edit_offline(check, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_list_sorted(check, tmp_path):
+  """The list of transfers sorted by a click on a column's header (▲), the other way by another click (▼); by state:
+  the running ones first; kept for the next start"""
+  from textual.widgets import DataTable
+  from slurp.transfer import model as M
+
+  def names(app):
+    table = app.screen.query_one("#xfer-list")
+    return [str(table.get_row_at(i)[0]) for i in range(table.row_count)]
+
+  async def header(app, pilot, key):
+    table = app.screen.query_one("#xfer-list")
+    column = next(k for k in table.columns if k.value == key)
+    index = [k.value for k in table.columns].index(key)
+    table.post_message(DataTable.HeaderSelected(table, column, index, table.columns[column].label))
+    await pilot.pause(0.4)
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      ref = M.tab_ref(app.clusters[0])
+      for name, state in (("beta", "done"), ("alpha", "new"), ("gamma", "running")):
+        t = M.Transfer(M.new_id(), name, {"endpoint": "local", "tab": ref, "paths": ["/x"]}, {"endpoint": "local", "tab": ref, "path": "/y"})
+        t.state = state
+        app.transfers.store.transfers.append(t)
+      app.transfers.changed(None)
+      app.show_transfers(); await pilot.pause(0.6)
+      check("first: in the order they were made", names(app) == ["beta", "alpha", "gamma"], names(app))
+      await header(app, pilot, "name")
+      table = app.screen.query_one("#xfer-list")
+      label = lambda key: str(next(c.label for k, c in table.columns.items() if k.value == key))
+      check("a click on Name: by name, ▲", names(app) == ["alpha", "beta", "gamma"] and label("name").endswith("▲"), (names(app), label("name")))
+      await header(app, pilot, "name")
+      check("again: the other way, ▼", names(app) == ["gamma", "beta", "alpha"] and label("name").endswith("▼"), names(app))
+      await header(app, pilot, "state")
+      check("by state: the running one first; the mark moves", names(app) == ["gamma", "beta", "alpha"] and label("state").endswith("▲")
+            and not label("name").endswith(("▲", "▼")), (names(app), label("state"), label("name")))
+      app.transfers.store.save()
+      await pilot.press("q")
+
+  async def again():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      app.show_transfers(); await pilot.pause(0.6)
+      check("a new start: sorted as before", names(app) == ["gamma", "beta", "alpha"], names(app))
+      await pilot.press("q")
+
+  asyncio.run(main())
+  asyncio.run(again())

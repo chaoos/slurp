@@ -187,7 +187,9 @@ While transfers exist (also finished ones), the tab **Transfers** is at the left
 how many run. Its first subtab is the list: each transfer with its name, from where and to where (each tab with a dot
 for its connection and its path; a long path is shortened in the middle, `/very/long/…/in/its/path`, and the full
 paths are below the list for the transfer highlighted), its route and where it runs, its state, how far it is, its rate, the time left, and when it ran
-last; the line below says why it waits or how it failed. `Enter` or a click opens a transfer in a
+last; the line below says why it waits or how it failed. A click on a column's header sorts the list by it (▲;
+again: the other way, ▼; by State the running ones first), and the order is kept for the next start. `Enter` or a
+click opens a transfer in a
 subtab of its own:
 
 - its state at the top, in big: RUNNING (how far, the rate, the time left), PAUSED,
