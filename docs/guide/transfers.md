@@ -80,8 +80,34 @@ itself while it is open; closed, a transfer's endpoint shows *tab not open*, wit
 **Menu → Endpoints…** shows them in a subtab of the Transfers tab: each with its kind, where it is, its state (●
 connected with its latency, ○ needs login, connecting, needs you, tab not open) and how many transfers use it, with
 **Connect**, **Disconnect**, **Test**, **Edit…** and **Delete** (refused while transfers use it, which it names).
-S3, SMB and WebDAV come later; secrets are kept only in the system keyring (Secret Service, Keychain, Windows
+SMB and WebDAV come later; secrets are kept only in the system keyring (Secret Service, Keychain, Windows
 Credential Manager), never in a file of slurp: where there is no keyring, the kinds that need one say so.
+
+## S3
+
+**New endpoint… → S3** makes an S3 endpoint: a bucket of AWS S3 or an S3-compatible store (Ceph, MinIO, a site's
+object store) with its provider, endpoint URL, region, a folder where Browse… starts, and its keys (access key,
+secret key, a session token for temporary keys). The keys go to the system keyring only, never to a file of slurp;
+without them in the keyring the endpoint is *not set up*. **Test** lists it, and **as a destination** also writes a
+marker object and deletes it. Paths in a bucket are written as paths: `/` is the bucket's root, `/runs/2026` the
+prefix `runs/2026/`.
+
+[rclone](https://rclone.org) moves the data (`rclone copy`: what is there already, by size and time or with checksums
+by hash, is skipped; nothing is deleted on the destination). It reads no rclone config: the bucket is given to it in
+its environment, the keys too, never on a command line. Which rclone runs:
+
+- **rclone on this machine**: this machine and a bucket, or two buckets; the data passes this machine. Pause stops
+  rclone; Continue runs it again (a file half copied starts over).
+- **rclone on the cluster**: a tab and a bucket; rclone must be installed there (the check says so). It runs detached
+  on the login node or as a transfer job, as rsync's runs do, and goes on without slurp. For it the keys must go to the
+  cluster: the Route step asks, with what it means. For each run they are written to the run's folder there (readable
+  only by you), read when the run starts and deleted at once, and removed when it ends in any case; the transfer's
+  subtab says that its keys go there.
+
+The check asks rclone where it runs, counts what the sources hold, and tests the destination bucket for writing.
+**Options**: checksums, files at a time, a speed limit. The subtab of such a transfer has **Verify** (`rclone check`,
+for rclone on this machine): is everything of the sources on the destination, the same? **Copy as a command** gives the
+rclone commands of a run, with the keys as `$AWS_ACCESS_KEY_ID` and `$AWS_SECRET_ACCESS_KEY`.
 
 ## Globus
 

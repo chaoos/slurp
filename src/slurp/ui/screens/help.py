@@ -233,7 +233,8 @@ A transfer job is cancelled for it (it loses its place in the queue): slurp asks
 new one. **Run now** (`s`), **Edit…** (`e`), **Its job** (the job window of its transfer job), **Copy as a command**
 (the rsync line of a run, or its `sbatch --wrap`, to put into scrontab or cron yourself: slurp has no schedules),
 **Delete**. A transfer is idempotent: running it again copies only what is missing or changed, and
-nothing is ever deleted on the destination.
+nothing is ever deleted on the destination. With an S3 endpoint (rclone): **Verify** (`rclone check`: is everything of
+the sources on the destination, the same?), and a file half copied when it was paused starts over at Continue.
 """),
   "TransferRunsScreen": ("Runs of a transfer", """
 Every run of the transfer, the last first (the history keeps the last 50): its number, when it started and ended, how
@@ -283,12 +284,21 @@ runs can be changed, and the check is not run again (what the last one found sta
 """),
   "EndpointsScreen": ("Endpoints", """
 Where transfers take data from and put it: this machine, every tab (a cluster tab is an endpoint by itself, as long
-as it is open), and Globus collections. Each row: its name, its kind, where it is (a tab linked to a Globus collection:
+as it is open), S3 buckets and Globus collections. Each row: its name, its kind, where it is (a tab linked to a Globus collection:
 which), its state (● connected, ○ needs login, connecting, needs you, tab not open; Globus: not set up until you log
 in, expired or needs consent: log in again) and how many transfers use it. **Connect** logs in (a tab: in its tab;
 Globus: the Globus login if there is none, then a test), **Disconnect**, **Test**, **Edit…** (a Globus endpoint: its
-collection; a tab: its link to a Globus collection), **Delete** (refused while transfers use it; a tab goes away when
-it is closed). S3, SMB and WebDAV come with later versions; secrets are kept only in the system keyring.
+collection; a tab: its link to a Globus collection; S3: its settings and keys), **Delete** (refused while transfers
+use it; its keys leave the keyring too; a tab goes away when it is closed). An S3 endpoint is "not set up" while the
+keyring lacks one of its keys. SMB and WebDAV come with later versions; secrets are kept only in the system keyring.
+"""),
+  "S3EndpointScreen": ("An S3 endpoint", """
+A bucket of AWS S3 or of an S3-compatible store (Ceph, MinIO, a site's object store): its name, the provider, the
+endpoint URL (empty: AWS), the region, the bucket, its folder (where Browse… starts), and its keys (access key, secret
+key; a session token for temporary keys). The keys go to the keyring of this machine only: editing, an empty key field
+keeps the one there. **Test** lists the folder; with **as a destination** it also writes a marker object
+(`.slurp-test-…`) and deletes it, and says when it cannot (no right to write). rclone moves the data (it must be
+installed on this machine, and for a tab's files on that cluster).
 """),
   "NewEndpointScreen": ("New endpoint", """
 Choose the kind of the new endpoint, then **Next** for its settings (`Esc` or **Cancel** closes it). A cluster is

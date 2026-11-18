@@ -55,6 +55,13 @@ version may need the helper of the same version).
   submits a new one. One Globus login (its token only in the system
   keyring), with the consents collections need. New extra `transfers`
   (keyring, globus-sdk), also in `all`.
+  **S3 buckets** (AWS or S3-compatible) are endpoints as well: their keys
+  only in the keyring, Test with a write test for destinations; rclone
+  copies on this machine (this machine or another bucket) or on the
+  cluster of a tab (detached or as a transfer job, after you agree to send
+  the keys there for each run: read and deleted when the run starts), with
+  its progress, Pause, Continue, Verify (`rclone check`) and Copy as a
+  command (the keys as placeholders).
 - Rule packs: `transfer_partition`, `transfer_hosts`, `globus`,
   `login_node_limits` (transfers).
 - Progress: only lines like the progress count (the structure of the
