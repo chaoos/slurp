@@ -76,8 +76,9 @@ category, with their numbers: `c` there (or on any job of the window) puts
 the job selected in a category.
 **New** (`n`), **Rename** (`e`: another path moves it with all it has, into an
 existing category they merge), **Delete** (`Del`: its jobs go to the category
-it is in), **Categorize…** (`c`) and **Take job out** (`x`) for the job
-selected, **In the job list** (`l`) and **Reload** (`r`). **Notes…** (`o`)
+it is in), **Categorize…** (`c`) and **Take job out** (`x`) for the marked
+jobs or else the one selected (`m` marks a job and moves on, `M` marks all of
+them or none, as in the job list), **In the job list** (`l`) and **Reload** (`r`). **Notes…** (`o`)
 annotates the category selected in Markdown (what it is for, how its runs
 differ, links); the window shows the notes rendered under its numbers, a
 rename takes them along.

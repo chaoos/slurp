@@ -1350,6 +1350,29 @@ async def t_categories(app, pilot):
   ok = await until(pilot, lambda: cluster.categories.category_of("9003") == "proj X/checks", 10); await pilot.pause(0.4)
   check("c there: the job into a category; it leaves 'not categorized'", ok and "9003" not in [str(k.value) for k in jt.rows]
         and str(loose_node().label) == f"not categorized  {n_loose - 1}", (str(loose_node().label), cs.path == NONE, "9003" in [str(k.value) for k in jt.rows], type(app.screen).__name__, app.focused))
+  # marking there, as in the job list: m marks (and moves on), c and x work on the marked ones, M all or none
+  jt.focus(); jt.move_cursor(row=0)
+  two = [str(k.value) for k in jt.rows][:2]
+  await pilot.press("m", "m"); await pilot.pause(0.3)
+  cells = [str(jt.get_row(j)[0]) for j in two]
+  check("m in the categories window: two marked, shown with ●; the buttons say so", cs.marked == set(two) and all(c.startswith("● ") for c in cells)
+        and "Categorize 2 jobs" in str(cs.query_one("#cat-categorize").label) and "Take 2 jobs out" in str(cs.query_one("#cat-take-out").label),
+        (cs.marked, cells))
+  await pilot.press("c"); await pilot.pause(0.5)
+  check("c: the dialog, for the 2 marked jobs", isinstance(app.screen, CategorizeScreen) and "2 jobs" in str(app.screen.query_one("#cz-title").render()))
+  app.screen.query_one("#cz-path").value = "proj X/batch"; await pilot.press("enter")
+  ok = await until(pilot, lambda: all(cluster.categories.category_of(j) == "proj X/batch" for j in two), 10); await pilot.pause(0.4)
+  check("both in the category; the marks gone", ok and not cs.marked and "Categorize…" == str(cs.query_one("#cat-categorize").label), cs.marked)
+  tree.move_cursor(find_node(tree, "proj X/batch")); await pilot.pause(0.5)
+  jt.focus()
+  await pilot.press("M"); await pilot.pause(0.3)
+  check("M: all of its jobs marked", cs.marked == set(two), cs.marked)
+  await pilot.press("M"); await pilot.pause(0.2)
+  check("M again: none", not cs.marked)
+  await pilot.press("M", "x")
+  ok = await until(pilot, lambda: not any(cluster.categories.category_of(j) for j in two), 10); await pilot.pause(0.4)
+  check("x: the marked ones out of their category", ok and not cs.marked)
+  tree.move_cursor(loose_node()); await pilot.pause(0.5)
   await pilot.press("l"); await pilot.pause(0.8)
   shown = [str(k.value) for k in table.rows] if app.screen is app.main else []
   check("In the job list (l): cat:- lists the jobs in no category", app.main.query_one("#jfilter").value == "cat:-" and shown

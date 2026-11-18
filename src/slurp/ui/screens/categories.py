@@ -267,6 +267,8 @@ class CategoriesScreen(SplitScreen):
     Binding("delete", "delete", "Delete category"),
     Binding("x", "take_out", "Take job out"),
     Binding("c", "categorize", "Categorize job"),
+    Binding("m", "mark", "Mark"),
+    Binding("M", "mark_all", "Mark all / none", show=False),
     Binding("l", "in_list", "In the job list"),
     Binding("r", "reload", "Reload"),
     Binding("o", "notes", "Notes"),
@@ -298,6 +300,7 @@ class CategoriesScreen(SplitScreen):
     self.asked = set()         # job ids asked from Slurm (also those it no longer knows)
     self.fetching = False
     self.loose = {}            # "not categorized" shown: its jobs, {job or array id: [jobs]}
+    self.marked = set()        # job ids marked (m) among those shown: c and x work on them
 
   @property
   def cluster(self):
@@ -323,8 +326,8 @@ class CategoriesScreen(SplitScreen):
         with Horizontal(id="cat-main-buttons"):
           yield Button(icons.label("reload", "Reload"), id="cat-reload", variant="primary", tooltip="ask Slurm again (r)", compact=True)
           yield Button("In the job list", id="cat-list", tooltip="the job list filtered to this category (l)", compact=True)
-          yield Button("Categorize…", id="cat-categorize", tooltip="the job selected in a category, another or a new one (c)", compact=True)
-          yield Button("Take job out", id="cat-take-out", variant="warning", tooltip="the job selected leaves its category (x)", compact=True)
+          yield Button("Categorize…", id="cat-categorize", tooltip="the marked jobs (m), else the one selected, in a category, another or a new one (c)", compact=True)
+          yield Button("Take job out", id="cat-take-out", variant="warning", tooltip="the marked jobs (m), else the one selected, leave their category (x)", compact=True)
           yield Button("Notes…", id="cat-notes-edit", tooltip="notes of the category, in Markdown (o)", compact=True)
         yield ClickTable(id="cat-jobs", cursor_type="row", zebra_stripes=True)
 
@@ -506,6 +509,7 @@ class CategoriesScreen(SplitScreen):
       except Exception:
         pass
     table.clear()
+    self.marked &= set(ids) # (marks of jobs no longer shown: gone)
     for jid in ids:
       jobs = self.jobs_of(jid)
       where = store.jobs[jid]["category"] if jid in store.jobs else ""
@@ -513,14 +517,14 @@ class CategoriesScreen(SplitScreen):
       if not jobs:
         state = (Text("not known to Slurm", style="dim") if jid in self.asked else Text("cluster not reachable", style="yellow")
                  if self.app.offline(self.cluster) else Text("asking Slurm …", style="yellow"))
-        table.add_row(jid, store.jobs[jid].get("name") or "", category_text(rel), state, "", "", "", "", "", "",
+        table.add_row(self.job_cell(jid, False), store.jobs[jid].get("name") or "", category_text(rel), state, "", "", "", "", "", "",
                       short_reason(store.cancel_reason_of(jid)), key=jid)
         continue
       array = len(jobs) > 1 or "_" in jobs[0].jid and "_" not in jid
       first = jobs[0].rec
       m = cat.summary(jobs)
       ends = [j.rec["End"] for j in jobs if is_time(j.rec.get("End") or "")]
-      table.add_row(Text(f"{jid} ({len(jobs)} tasks)", style="bold") if array else jid, first.get("JobName") or "",
+      table.add_row(self.job_cell(jid, array, len(jobs)), first.get("JobName") or "",
                     category_text(rel), self.app.mixed_state(jobs) if array else state_text(jobs[0].state),
                     first.get("NNodes") or "", "" if array else first.get("Elapsed") or "", hours_text(m["node_hours"]),
                     hours_text(m["gpu_hours"]) if m["gpu_hours"] else "",
@@ -531,6 +535,53 @@ class CategoriesScreen(SplitScreen):
         table.move_cursor(row=table.get_row_index(current))
       except Exception:
         pass
+    self.show_marked()
+
+  def job_cell(self, jid, array, tasks=0):
+    """The Job cell: marked as in the job list (● and bold)"""
+    words = f"{jid} ({tasks} tasks)" if array else jid
+    if jid in self.marked:
+      return Text.assemble(("● ", "bold magenta"), (words, "bold"))
+    return Text(words, style="bold") if array else words
+
+  def show_marked(self):
+    """The buttons say what they work on: the marked jobs, or the one selected"""
+    n = len(self.marked)
+    self.query_one("#cat-categorize", Button).label = f"Categorize {n} job{'s' if n != 1 else ''}…" if n else "Categorize…"
+    self.query_one("#cat-take-out", Button).label = f"Take {n} job{'s' if n != 1 else ''} out" if n else "Take job out"
+
+  def refresh_row(self, jid):
+    jobs = self.jobs_of(jid)
+    array = len(jobs) > 1 or bool(jobs) and "_" in jobs[0].jid and "_" not in jid
+    self.query_one("#cat-jobs", ClickTable).update_cell(jid, "job", self.job_cell(jid, array, len(jobs)), update_width=True)
+
+  def action_mark(self):
+    """m: mark the job under the cursor (again: unmark it), then the next row"""
+    jid = self.selected_job()
+    if jid is None:
+      return
+    self.marked ^= {jid}
+    self.refresh_row(jid)
+    table = self.query_one("#cat-jobs", ClickTable)
+    table.move_cursor(row=min(table.cursor_row + 1, table.row_count - 1))
+    self.show_marked()
+
+  def action_mark_all(self):
+    """M: mark every job shown; if some are marked: none"""
+    table = self.query_one("#cat-jobs", ClickTable)
+    before = set(self.marked)
+    self.marked = set() if self.marked else {str(k.value) for k in table.rows}
+    for jid in before | self.marked:
+      self.refresh_row(jid)
+    self.show_marked()
+
+  def targets(self):
+    """The jobs c and x work on: the marked ones (in the order shown), else the one selected"""
+    if self.marked:
+      table = self.query_one("#cat-jobs", ClickTable)
+      return [str(k.value) for k in table.rows if str(k.value) in self.marked]
+    jid = self.selected_job()
+    return [jid] if jid is not None else []
 
   @on(ClickTable.RowSelected, "#cat-jobs")
   def job_selected(self, event):
@@ -594,13 +645,17 @@ class CategoriesScreen(SplitScreen):
 
   @on(Button.Pressed, "#cat-categorize")
   def action_categorize(self, event=None):
-    """The job selected (an array: the whole array) in a category"""
-    jid = self.selected_job()
-    if jid is None:
+    """The marked jobs, else the one selected (an array: the whole array), in a category"""
+    jids = self.targets()
+    if not jids:
       return
-    jobs = self.jobs_of(jid)
-    whole = len(jobs) > 1 or bool(jobs) and "_" in jobs[0].jid and "_" not in jid
-    self.app.categorize_jobs([jid], {jid} if whole else (), after=lambda: self.changed())
+    def whole(jid):
+      jobs = self.jobs_of(jid)
+      return len(jobs) > 1 or bool(jobs) and "_" in jobs[0].jid and "_" not in jid
+    def after():
+      self.marked.clear()
+      self.changed()
+    self.app.categorize_jobs(jids, {jid for jid in jids if whole(jid)}, after=after)
 
   @on(Button.Pressed, "#cat-new")
   def action_new(self, event=None):
@@ -644,10 +699,14 @@ class CategoriesScreen(SplitScreen):
 
   @on(Button.Pressed, "#cat-take-out")
   def action_take_out(self, event=None):
-    jid = self.selected_job()
-    if jid is None or self.path == NONE:
+    """The marked jobs, else the one selected, out of their category"""
+    jids = self.targets()
+    if not jids or self.path == NONE:
       return
-    change_categories(self.app, self.cluster, ["unassign", [jid]], lambda st, r: self.changed(), "taking a job out")
+    def done(store, result):
+      self.marked.clear()
+      self.changed()
+    change_categories(self.app, self.cluster, ["unassign", jids], done, "taking jobs out")
 
   @on(Button.Pressed, "#cat-list")
   def action_in_list(self, event=None):
