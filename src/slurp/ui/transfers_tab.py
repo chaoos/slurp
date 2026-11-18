@@ -15,6 +15,7 @@ from ..transfer.manager import Manager, client_side
 from . import icons
 
 TRANSFERS_MODE = "transfers"
+ENDPOINTS_MODE = "transfer-endpoints"
 # actions of the app that act on the cluster of a tab: not while the Transfers tab is shown (from the menu: the cluster
 # tab shown before is shown first)
 CLUSTER_ACTIONS = ("reload", "job_list", "cluster_shell", "login_dir", "cluster_drive", "interactive_job", "cluster_info",
@@ -38,18 +39,40 @@ class TransfersTab:
 
   # ---- the tab
   def is_transfers_mode(self, mode):
-    return mode == TRANSFERS_MODE or any(v.mode == mode for v in self.transfer_views)
+    return mode in (TRANSFERS_MODE, ENDPOINTS_MODE) or any(v.mode == mode for v in self.transfer_views)
 
   def ensure_transfers_mode(self):
     if TRANSFERS_MODE not in self._modes:
-      from .screens.transfers import TransfersScreen
+      from .screens.transfers import EndpointsScreen, TransfersScreen
       self.add_mode(TRANSFERS_MODE, TransfersScreen)
+      self.add_mode(ENDPOINTS_MODE, EndpointsScreen)
+
+  def transfers_tab_wanted(self):
+    """The Transfers tab is there while transfers or defined endpoints exist (or its endpoints are shown)"""
+    return bool(self.transfers.transfers or self.transfers.endpoint_store.defs or
+                (self.in_transfers and self.transfers_current == ENDPOINTS_MODE))
+
+  def show_endpoints(self):
+    """The Endpoints subtab of the Transfers tab (Menu → Endpoints…)"""
+    self.ensure_transfers_mode()
+    self.in_transfers = True
+    self.transfers_current = ENDPOINTS_MODE
+    if self.current_mode != ENDPOINTS_MODE:
+      self.switch_mode(ENDPOINTS_MODE)
+    self.call_after_refresh(self.refresh_status)
+    self.call_after_refresh(self.save_tabs)
+
+  def action_endpoints(self):
+    self.show_endpoints()
 
   def show_transfers(self, view=None):
     """Show the Transfers tab: its list, or a transfer's subtab (view), or what it showed last"""
     self.ensure_transfers_mode()
     if view is None and not self.in_transfers and any(v.mode == self.transfers_current for v in self.transfer_views):
       view = next(v for v in self.transfer_views if v.mode == self.transfers_current)
+    if view is None and not self.in_transfers and self.transfers_current == ENDPOINTS_MODE:
+      self.show_endpoints()
+      return
     mode = view.mode if view is not None else TRANSFERS_MODE
     self.in_transfers = True
     self.transfers_current = mode
@@ -82,7 +105,7 @@ class TransfersTab:
     """The tab's button in a window's tab bar: there while transfers exist"""
     from textual.widgets import Button
     found = tabs.query("#transfers-tab")
-    wanted = bool(self.transfers.transfers)
+    wanted = self.transfers_tab_wanted()
     if not found:
       if not wanted:
         return
@@ -112,11 +135,16 @@ class TransfersTab:
     if not bar.query("#view-transfers"):
       bar.mount(Button(icons.label("jobs", "All transfers"), id="view-transfers", classes="view-tab", compact=True,
                        tooltip="the list of transfers: the first subtab of the Transfers tab"))
+    if not bar.query("#view-endpoints"):
+      bar.mount(Button(icons.label("connect", "Endpoints"), id="view-endpoints", classes="view-tab", compact=True,
+                       tooltip="the endpoints: this machine, the cluster tabs, S3, Globus, …"), after=bar.query_one("#view-transfers"))
     for b in bar.query("#view-transfers"):
       b.variant = "primary" if self.current_mode == TRANSFERS_MODE else "default"
+    for b in bar.query("#view-endpoints"):
+      b.variant = "primary" if self.current_mode == ENDPOINTS_MODE else "default"
     wanted = {str(v.id) for v in self.transfer_views}
     for b in bar.query("Button.view-tab, Button.view-close"):
-      if b.id == "view-transfers" or b.id in ("view-overview", "view-jobs", "view-close-jobs"):
+      if b.id in ("view-transfers", "view-endpoints") or b.id in ("view-overview", "view-jobs", "view-close-jobs"):
         continue
       vid = b.id.rsplit("-", 1)[1]
       if not b.id.startswith("xfer-") or vid not in wanted:
@@ -176,6 +204,9 @@ class TransfersTab:
     if button_id == "view-transfers":
       self.show_transfers_list()
       return
+    if button_id == "view-endpoints":
+      self.show_endpoints()
+      return
     vid = int(button_id.rsplit("-", 1)[1])
     view = next((v for v in self.transfer_views if v.id == vid), None)
     if view is None:
@@ -186,11 +217,37 @@ class TransfersTab:
       self.close_transfer_view(view)
 
   def show_transfers_list(self):
+    self.ensure_transfers_mode()
     self.transfers_current = TRANSFERS_MODE
     self.show_transfers(None) if self.in_transfers else None
     if self.in_transfers and self.current_mode != TRANSFERS_MODE:
       self.switch_mode(TRANSFERS_MODE)
     self.call_after_refresh(self.refresh_status)
+
+  # ---- endpoints (the kinds besides tabs come with their phases: S3, SMB, WebDAV, Globus)
+  def endpoint_kinds(self):
+    """The kinds of endpoints that can be made here"""
+    return ("ssh",)
+
+  def edit_endpoint(self, endpoint, kind):
+    self.notify(f"endpoints of the kind {kind} are not there yet", title="Endpoints", severity="warning")
+
+  def connect_endpoint(self, endpoint):
+    self.notify(f"{endpoint.name}: endpoints of the kind {endpoint.kind} are not there yet", title="Endpoints", severity="warning")
+
+  def test_endpoint(self, endpoint):
+    self.connect_endpoint(endpoint)
+
+  def delete_endpoint(self, endpoint):
+    from ..transfer import endpoints as E
+    store = self.transfers.endpoint_store
+    try:
+      store.remove(endpoint.id, self.transfers.transfers)
+    except E.InUse as e:
+      self.notify(f"{endpoint.name} cannot be deleted: {e}", title="Endpoints", severity="warning", timeout=10)
+      return
+    self.transfers.endpoint_status.pop(endpoint.id, None)
+    self.transfers.changed(None)
 
   # ---- the wizard, editing, deleting
   def action_transfer_data(self):
@@ -234,7 +291,7 @@ class TransfersTab:
     except ValueError as e:
       self.notify(str(e), title=t.name, severity="warning")
       return
-    if not self.transfers.transfers and self.in_transfers: # (no transfers: no tab)
+    if not self.transfers_tab_wanted() and self.in_transfers: # (no transfers, no endpoints: no tab)
       self.leave_transfers()
     self.refresh_status()
 
@@ -310,12 +367,13 @@ class TransfersTab:
   # ---- kept for the next start
   def transfers_state(self):
     return {"open": [v.key.split(" ", 1)[1] for v in self.transfer_views], "shown": self.in_transfers,
+            "endpoints": self.transfers_current == ENDPOINTS_MODE,
             "current": next((v.key.split(" ", 1)[1] for v in self.transfer_views if v.mode == self.transfers_current), "")}
 
   def restore_transfers(self):
     """The subtabs of the Transfers tab of the last run (they need no connection: open at once); shown if it was"""
     kept = load_config().get("transfers_tab") or {}
-    if not isinstance(kept, dict) or self.fresh_start or not self.transfers.transfers:
+    if not isinstance(kept, dict) or self.fresh_start or not (self.transfers.transfers or self.transfers.endpoint_store.defs):
       return
     from .screens.transfers import TransferScreen
     current = None
@@ -331,6 +389,9 @@ class TransfersTab:
         current = view
     if current is not None:
       self.transfers_current = current.mode
+    elif kept.get("endpoints"):
+      self.ensure_transfers_mode()
+      self.transfers_current = ENDPOINTS_MODE
     if kept.get("shown"):
       self.call_after_refresh(lambda: self.show_transfers(current))
 

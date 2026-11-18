@@ -2186,3 +2186,209 @@ def rates(history):
     if t1 > t0:
       out.append((t1, max(b1 - b0, 0) / (t1 - t0)))
   return out
+
+# ---- the endpoints: the second fixed subtab of the Transfers tab
+STATE_MARKS = {"connected": ("●", "green"), "connecting": ("◌", "yellow"), "needs you": ("◌", "bold yellow"),
+               "not connected": ("○", "dim"), "not set up": ("○", "yellow"), "failed": ("✗", "red"), "expired": ("◌", "yellow"),
+               "tab not open": ("✕", "red")}
+
+def endpoint_state_text(e):
+  mark, style = STATE_MARKS.get(e.state, ("○", "dim"))
+  words = e.state if not e.words or e.words == e.state else f"{e.state} · {e.words}"
+  return Text.assemble((mark, style), " ", (words, style if e.state != "connected" else ""))
+
+ENDPOINT_COLUMNS = [("name", "Name"), ("kind", "Kind"), ("where", "Where"), ("state", "Status"), ("used", "Used by")]
+
+class NewEndpointScreen(ModalScreen):
+  """Which kind of endpoint: dismissed with the kind, or None"""
+  DEFAULT_CSS = """
+  NewEndpointScreen { align: center middle; }
+  #ne-dialog { width: 70; max-width: 95%; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+  #ne-title { text-style: bold; margin-bottom: 1; }
+  #ne-kinds { height: auto; }
+  #ne-note { color: $text-muted; height: auto; margin-top: 1; }
+  #ne-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel")]
+  KINDS = [("ssh", "SSH: a cluster (it opens as a tab)"), ("s3", "S3 or S3-compatible storage"), ("globus", "Globus collection"),
+           ("smb", "SMB share"), ("webdav", "WebDAV")]
+
+  def __init__(self, available=("ssh",)):
+    super().__init__()
+    self.available = set(available)
+
+  def compose(self) -> ComposeResult:
+    with Vertical(id="ne-dialog"):
+      yield Static("New endpoint", id="ne-title")
+      with RadioSet(id="ne-kinds"):
+        for kind, words in self.KINDS:
+          b = RadioButton(words + ("" if kind in self.available else "  (not here yet)"), value=kind == "ssh",
+                          disabled=kind not in self.available, classes=f"ne-{kind}")
+          b.kind = kind
+          yield b
+      yield Static("This machine and the cluster tabs are endpoints already.", id="ne-note")
+      with Horizontal(id="ne-buttons"):
+        yield Button("Cancel", id="ne-cancel", compact=True)
+        yield Button("Next", id="ne-next", variant="primary", compact=True)
+
+  @on(Button.Pressed, "#ne-next")
+  def next_pressed(self, event):
+    event.stop()
+    kind = next((b.kind for b in self.query(RadioButton).results(RadioButton) if b.value), None)
+    self.dismiss(kind)
+
+  @on(Button.Pressed, "#ne-cancel")
+  def cancel_pressed(self, event):
+    event.stop()
+    self.dismiss(None)
+
+  def action_cancel(self):
+    self.dismiss(None)
+
+class EndpointsScreen(TransfersBase):
+  """The endpoints: this machine, the cluster tabs (as their logins are), the endpoints defined (S3, Globus, …), how
+  many transfers use each"""
+  DEFAULT_CSS = """
+  #ep-toolbar { height: auto; padding: 0 1; }
+  #ep-toolbar Button { margin-right: 1; }
+  #ep-list { height: 1fr; }
+  #ep-note { height: auto; max-height: 4; padding: 0 1; background: $panel; }
+  """
+  BINDINGS = [Binding("n", "new", "New endpoint"), Binding("c", "connect", "Connect"), Binding("t", "test", "Test"),
+              Binding("e", "edit", "Edit"), Binding("delete", "delete", "Delete")]
+  icon_name = "transfer"
+
+  def compose_left(self):
+    with Horizontal(id="ep-toolbar"):
+      yield Button(icons.label("new_script", "New endpoint…"), id="ep-new", variant="primary", compact=True, tooltip="(n)")
+      yield Button(icons.label("connect", "Connect"), id="ep-connect", compact=True, tooltip="log in to it (c)")
+      yield Button(icons.label("disconnect", "Disconnect"), id="ep-disconnect", compact=True)
+      yield Button(icons.label("check", "Test"), id="ep-test", compact=True, tooltip="does it answer? (t)")
+      yield Button(icons.label("edit", "Edit…"), id="ep-edit", compact=True, tooltip="(e)")
+      yield Button(icons.label("cancel_job", "Delete"), id="ep-delete", variant="error", compact=True, tooltip="(Del)")
+    yield ClickTable(id="ep-list", cursor_type="row", zebra_stripes=True)
+    yield Static(id="ep-note")
+
+  def on_mount(self):
+    table = self.query_one("#ep-list", ClickTable)
+    for key, label in ENDPOINT_COLUMNS:
+      table.add_column(label, key=key)
+    super().on_mount()
+    table.focus()
+
+  def endpoints(self):
+    m = self.manager
+    return E.listing(self.app, m.endpoint_store, m.endpoint_status)
+
+  def used_by(self, eid):
+    return [t for t in self.manager.transfers if eid in (E.ref_id(t.source), E.ref_id(t.dest))]
+
+  def refresh_view(self):
+    if not self.is_mounted:
+      return
+    rows = []
+    for e in self.endpoints():
+      n = len(self.used_by(e.id))
+      rows.append((e.id, [Text(e.name, style="bold"), E.KINDS.get(e.kind, e.kind), e.where, endpoint_state_text(e),
+                          f"{n} transfer{'s' if n != 1 else ''}" if n else ""]))
+    fill_table(self.query_one("#ep-list", ClickTable), rows)
+    self.show_note()
+
+  def current(self):
+    table = self.query_one("#ep-list", ClickTable)
+    if not table.row_count:
+      return None
+    try:
+      eid = table.coordinate_to_cell_key((table.cursor_row, 0)).row_key.value
+    except Exception:
+      return None
+    return next((e for e in self.endpoints() if e.id == eid), None)
+
+  def show_note(self):
+    e = self.current()
+    note = self.query_one("#ep-note", Static)
+    if e is None:
+      note.update("")
+      return
+    text = Text.assemble((e.name, "bold"), f" · {E.KINDS.get(e.kind, e.kind)}", (f" · {e.where}" if e.where else ""), " · ",
+                         endpoint_state_text(e))
+    users = self.used_by(e.id)
+    if users:
+      text.append("\nused by: " + ", ".join(t.name for t in users[:8]) + (" …" if len(users) > 8 else ""), style="dim")
+    note.update(text)
+    q = self.query_one
+    q("#ep-connect", Button).disabled = e.connected or e.kind == "local"
+    q("#ep-disconnect", Button).disabled = not e.connected or e.kind == "local"
+    q("#ep-delete", Button).disabled = e.is_tab
+
+  @on(ClickTable.RowHighlighted, "#ep-list")
+  def highlighted(self, event):
+    self.show_note()
+
+  @on(Button.Pressed, "#ep-toolbar Button")
+  def pressed(self, event):
+    event.stop()
+    {"ep-new": self.action_new, "ep-connect": self.action_connect, "ep-disconnect": self.action_disconnect,
+     "ep-test": self.action_test, "ep-edit": self.action_edit, "ep-delete": self.action_delete}[event.button.id]()
+
+  def action_new(self):
+    def chosen(kind):
+      if kind == "ssh": # (an SSH endpoint is a tab: the + dialog)
+        from .dialogs import AddClusterScreen
+        self.app.push_screen(AddClusterScreen(), self.app.add_cluster)
+      elif kind:
+        self.app.edit_endpoint(None, kind)
+    self.app.push_screen(NewEndpointScreen(self.app.endpoint_kinds()), chosen)
+
+  def action_connect(self):
+    e = self.current()
+    if e is None or e.connected:
+      return
+    if e.is_tab:
+      if e.cluster is not None:
+        self.app.connect_cluster(e.cluster) # (its tab, with its login)
+      return
+    self.app.connect_endpoint(e)
+
+  def action_disconnect(self):
+    e = self.current()
+    if e is None or not e.connected or e.kind == "local":
+      return
+    if e.is_tab:
+      self.app.disconnect(e.cluster)
+    else:
+      self.manager.endpoint_status[e.id] = ("not connected", "")
+    self.refresh_view()
+
+  def action_test(self):
+    e = self.current()
+    if e is None:
+      return
+    if e.is_tab:
+      self.app.notify(f"{e.name}: {e.state}" + (f" ({e.words})" if e.words else ""), title="Endpoints", timeout=5)
+      return
+    self.app.test_endpoint(e)
+
+  def action_edit(self):
+    e = self.current()
+    if e is None:
+      return
+    if e.is_tab and e.kind == "tab":
+      self.app.edit_endpoint(e, "tab") # (a tab: its link to a Globus collection)
+    elif not e.is_tab:
+      self.app.edit_endpoint(e, e.kind)
+
+  def action_delete(self):
+    e = self.current()
+    if e is None:
+      return
+    if e.is_tab:
+      self.app.notify("this machine and the cluster tabs are endpoints as long as they are open: close a tab to remove it",
+                      title="Endpoints", severity="warning")
+      return
+    users = self.used_by(e.id)
+    if users:
+      self.app.notify(f"{e.name} cannot be deleted: {E.InUse([t.name for t in users])}", title="Endpoints", severity="warning", timeout=10)
+      return
+    self.app.push_screen(ConfirmScreen("Delete the endpoint?", f"{e.name}: its settings and its secrets in the keyring go away.",
+                                       "Delete"), lambda ok: self.app.delete_endpoint(e) if ok else None)

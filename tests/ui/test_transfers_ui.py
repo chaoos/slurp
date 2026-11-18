@@ -656,3 +656,50 @@ def test_pick_destination_folder(check, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_endpoints_subtab(check, tmp_path):
+  """Menu → Endpoints…: the Endpoints subtab of the Transfers tab: this machine, the tabs (with their state), how many
+  transfers use each; a tab cannot be deleted there; New endpoint… (SSH: the + dialog)"""
+  from slurp.transfer import model as M
+  from slurp.ui.screens.transfers import EndpointsScreen, NewEndpointScreen
+  from slurp.ui.screens.dialogs import AddClusterScreen
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      from slurp.ui.screens.menu import ITEMS
+      check("the menu has Endpoints…", any(i and i[0] == "endpoints" for i in ITEMS))
+      await app.run_action("endpoints"); await pilot.pause(0.6)
+      check("Endpoints…: the subtab, in the Transfers tab (there, though no transfer exists)",
+            isinstance(app.screen, EndpointsScreen) and app.in_transfers and app.screen.query("#transfers-tab"))
+      table = app.screen.query_one("#ep-list")
+      first = [str(c) for c in table.get_row_at(0)]
+      check("this machine: Local, always connected", first[0] == "Local" and first[1] == "this machine" and "connected" in first[3], first)
+      ref = M.tab_ref(app.clusters[0])
+      app.transfers.add(M.Transfer(M.new_id(), "uses it", {"endpoint": "local", "tab": ref, "paths": ["/x"]},
+                                   {"endpoint": "local", "tab": ref, "path": "/y"}))
+      await pilot.pause(1.3)
+      check("how many transfers use it", str(table.get_row_at(0)[4]) == "1 transfer", [str(c) for c in table.get_row_at(0)])
+      app.screen.action_delete(); await pilot.pause(0.3)
+      check("this machine cannot be deleted: said", any("as long as they are open" in str(n.message) for n in app._notifications))
+      bar = app.screen.query_one("#view-tabs")
+      check("the subtabs: All transfers and Endpoints", bar.query("#view-transfers") and bar.query_one("#view-endpoints").variant == "primary")
+      app.screen.query_one("#ep-new").press(); await pilot.pause(0.3)
+      check("New endpoint…: which kind", isinstance(app.screen, NewEndpointScreen))
+      app.screen.query_one("#ne-next").press(); await pilot.pause(0.4)
+      check("SSH: the + dialog (a tab)", isinstance(app.screen, AddClusterScreen))
+      app.screen.dismiss(None); await pilot.pause(0.2)
+      app.save_tabs()
+      await pilot.press("q")
+
+  async def again():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      check("a new start: the Endpoints subtab shown as before", await until(pilot, lambda: isinstance(app.screen, EndpointsScreen)),
+            type(app.screen).__name__)
+      await pilot.press("q")
+
+  asyncio.run(main())
+  asyncio.run(again())

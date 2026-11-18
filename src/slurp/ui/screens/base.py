@@ -32,7 +32,7 @@ class SplitScreen(Screen):
                    tooltip="a web link ends soon: when it takes no more logins, or its relay ends (click: the link)")
       yield Button("?", id="view-help", compact=True, tooltip="about this window: what it shows, what it can do, its keys (?)")
     with Horizontal(id="cluster-tabs"):
-      if self.app.transfers.transfers: # (the Transfers tab: there while transfers exist)
+      if self.app.transfers_tab_wanted(): # (the Transfers tab: there while transfers or endpoints exist)
         yield Button(self.app.transfers_tab_label(), id="transfers-tab", classes="transfers-tab", compact=True,
                      variant="primary" if self.app.in_transfers else "default", tooltip="the transfers of data between the tabs")
       for index, cluster in enumerate(self.app.clusters):
@@ -71,7 +71,7 @@ class SplitScreen(Screen):
       event.stop()
       self.app.show_transfers()
       return
-    if event.button.id == "view-transfers" or (event.button.id or "").startswith(("xfer-tab-", "xfer-close-")):
+    if event.button.id in ("view-transfers", "view-endpoints") or (event.button.id or "").startswith(("xfer-tab-", "xfer-close-")):
       event.stop()
       self.app.transfer_subtab_pressed(event.button.id)
       return
