@@ -17,7 +17,9 @@ class App:
     return False
 
 
-def test_listing(check, tmp_path):
+def test_listing(check, tmp_path, monkeypatch):
+  from slurp.transfer import rclone as RC
+  monkeypatch.setattr(RC, "installed", lambda: True) # (rclone here: the keyring decides; without it, below)
   store = E.EndpointStore(str(tmp_path / "e.json"))
   store.add(E.EndpointDef("b1", "my-bucket", "s3", {"region": "eu", "bucket": "b", "prefix": "runs/"}, ["access_key", "secret_key"]))
   app = App([tab("Local"), tab("alps", "daint", "ready", ready=True, latency=0.038), tab("jedi", "jedi", "new"),
@@ -33,6 +35,9 @@ def test_listing(check, tmp_path):
   check("a tab logging in: connecting", by["tab:eiger"].state == "connecting")
   check("a defined one: where it points; without its keys in the keyring: not set up", by["b1"].where == "eu · b/runs"
         and by["b1"].state == "not set up" and "keyring" in by["b1"].words, (by["b1"].where, by["b1"].state, by["b1"].words))
+  monkeypatch.setattr(RC, "installed", lambda: False)
+  check("…without rclone on this machine: not set up, needs rclone", E.default_state(store.get("b1")) == ("not set up", "needs rclone on this machine (rclone.org/install)"),
+        E.default_state(store.get("b1")))
   import json
   saved = json.load(open(store.path))["endpoints"][0]
   check("stored with the names of its secrets, not their values", saved["secrets"] == ["access_key", "secret_key"]
