@@ -202,35 +202,37 @@ The transfers of data between the tabs (clusters, or this machine): the first su
 there while transfers exist (also finished ones). Each row: its name, from where and to where (each tab with a dot for
 its connection, and its path, a long one shortened in the middle: /very/long/…/in/its/path; several sources: the first
 and +n), its route and where it runs, its state, how far it is, its rate and the time left, and when it runs next
-(or when it ran last). The lines below say more of the highlighted one (why it waits, how it failed, its schedule,
-its full paths).
+(or when it ran last). The lines below say more of the highlighted one (why it waits, how it failed,
+its full paths). **Endpoints** (Menu → Endpoints…) lists where data can come from and go to.
 Enter or a click opens its subtab with everything about it.
 
 **New transfer** (`n`, or Menu → Transfer data…, `T`) sets one up in a wizard. `p` pauses (a transfer job is
 cancelled for it: slurp asks first), `c` continues (rsync goes on where it stopped: what is there is not copied again),
-`s` runs it now (besides its schedule), `e` changes its settings (in the wizard), `Del` deletes it (its settings and
+`s` runs it now, `e` changes its settings (in the wizard), `Del` deletes it (its settings and
 history; the files stay). Keys that act on a cluster do nothing here: its tab first.
 """),
   "TransferScreen": ("A transfer", """
-One transfer: its state at the top, in big (RUNNING with how far and how long, PAUSED mid-run or its schedule,
-WAITING and for what, SCHEDULED and when, QUEUED, DONE, FAILED and why, …), whether both sides are in sync (● in sync, ● not in sync with what is left, ○ not known:
+One transfer: its state at the top, in big (RUNNING with how far and how long, PAUSED,
+WAITING and for what, QUEUED, DONE, FAILED and why, …), the source and the destination as cards (the endpoint, its
+state, e.g. ● connected or ○ needs login, its paths, and a button for what it needs: Connect, Open its tab), whether both sides are in sync (● in sync, ● not in sync with what is left, ○ not known:
 from the newer of the last check and the last run that ended well, and when), how the data flows (a picture: the tabs as boxes with their connections, slurp between them
 for the relay; on the arrow push, pull, relay or the same filesystem; under each box what runs there; while it runs a
-dot moves along the arrows), the sources and the destination (links: a click opens one in the tab of its cluster, a
+dot moves along the arrows), the paths on the cards (links: a click opens one in the tab of its cluster, a
 folder as a directory view, a file in its view, a file that cannot be shown or a pattern such as `*.log` as its folder
 searched for it, a destination not there yet as the nearest folder that is), how far it is (bytes, rate, time left, files; for the relay also the rate through slurp), the file it
 copies now, its rate over time, what happens if slurp closes (in slurp: it stops as paused and Continue goes on;
-detached on the cluster or as a transfer job: it goes on without slurp), its schedule, the errors rsync reported for
+detached on the cluster or as a transfer job: it goes on without slurp), the errors rsync reported for
 single files, **Runs** (how many times it ran, how they ended, the last one; a click: the list of its runs), what the
 check found (**Check again** checks it anew as it is set up: what remains, both sides, the routes; not while a run
 goes on), and its log.
 
 **Pause** (`p`) stops the run; rsync keeps the half-copied file in `.slurp-partial` and the next run goes on from it.
-**Continue** is there only for a paused transfer: paused mid-run it goes on where it stopped; paused between runs (its
-schedule) it is **Resume schedule** (no run now). A transfer that ended runs anew with **Run now**.
+**Continue** is there only for a transfer paused mid-run: it goes on where it stopped. A transfer runs when you click
+**Run now**, which waits until every endpoint it needs is connected (its tooltip names what is missing).
 A transfer job is cancelled for it (it loses its place in the queue): slurp asks first, and **Continue** (`c`) submits a
-new one. **Run now** (`s`), **Edit…** (`e`), **Its job** (the job window of its transfer job), **Connect …** (the tab
-it waits for), **Delete**. A transfer is idempotent: running it again copies only what is missing or changed, and
+new one. **Run now** (`s`), **Edit…** (`e`), **Its job** (the job window of its transfer job), **Copy as a command**
+(the rsync line of a run, or its `sbatch --wrap`, to put into scrontab or cron yourself: slurp has no schedules),
+**Delete**. A transfer is idempotent: running it again copies only what is missing or changed, and
 nothing is ever deleted on the destination.
 """),
   "TransferRunsScreen": ("Runs of a transfer", """
@@ -247,28 +249,25 @@ errors rsync reported for single files, and the events of the run. **Its job**: 
 `Esc` (or ←) goes back to the list of runs.
 """),
   "TransferWizard": ("Transfer data", """
-Sets up a transfer in six steps; **Next** waits until a step is complete (its tooltip says what is missing). The
+Sets up a transfer in five steps; **Next** waits until a step is complete (its tooltip says what is missing). The
 steps at the top can be clicked: any step whose steps before it are complete. Editing a transfer (**Edit…**), every
-step is a click away and the buttons are **Cancel** and **Save**: Save keeps the changes (its schedule goes on, nothing
-starts now) once every step is complete; its tooltip says what is missing (a changed source or destination: the
-check again, in Route, unless the transfer is manual).
+step is a click away and the buttons are **Cancel** and **Save**: Save keeps the changes (nothing
+starts now) once every step is complete; its tooltip says what is missing.
 
-1. **Source**: a tab and one or more files or folders there (Browse…: Space marks several; or type a path), or
+1. **Source**: an endpoint (this machine, or a tab, with its state; **Connect** or **Log in in its tab** when it
+   needs it) and one or more files or folders there (Browse…: Space marks several; or type a path), or
    patterns such as `/path/to/dir/*.h5` (typed, or in Browse… the pattern field, which shows its matches, and **Choose
    the pattern**): each match is copied. Each is copied into the destination folder under its own name. Each shows what it holds, counted on its tab in the
    background (its size, files, folders, links), and in all.
-2. **Destination**: a tab and a folder there (created if it is not there), with its home, scratch, project, …
+2. **Destination**: an endpoint and a folder there (created if it is not there), with its home, scratch, project, …
 3. **Options**: how rsync copies, the same at every run: checksums (they read every file on both sides at every run,
    also when nothing changed: the estimate counts it), compression (used only on the relay), a speed limit in MB/s.
-4. **When**: manual (the default: only when you click **Run now**), now, once at a time, every so long,
-   daily at a time, or after a job ends; whether slurp logs in to the tabs by itself then, and what a missed run does.
-5. **Route**: slurp checks both sides and changes nothing: rsync on both, the paths, what remains to copy (an rsync
+4. **Route**: slurp checks both sides and changes nothing: rsync on both, the paths, what remains to copy (an rsync
    dry run), the room there (free space, quota, a scratch that is purged). Each route is a choice that shows what its
    check found, as it comes: ✓ passed (its speed, an estimate; the recommended one is chosen), ! only with the
    temporary key, ✗ failed (why; it cannot be chosen): the same filesystem (a marker file, removed at once), direct
-   (one cluster logs in to the other by itself), the relay through slurp (always possible). **Next** as soon as the
-   chosen route passed; for a *manual* transfer any route will do (also one that failed, or is not checked yet:
-   **Run now** checks first and runs only if it passes). For large transfers it suggests Globus or a similar service, where both sites offer it. A
+   (one cluster logs in to the other by itself), the relay through slurp (always possible). Any route will do (also
+   one that failed, or is not checked yet: **Run now** checks first and runs only if it passes). For large transfers it suggests Globus or a similar service, where both sites offer it. A
    picture shows how the data flows (push, pull, relay through slurp, the same filesystem, where rsync runs), the
    bandwidth measured under its arrows and the estimate below it (with checksums: their time too). A direct route
    as a transfer job is checked from a node of its partition too (srun): refused there, Next refuses. As a transfer
@@ -277,8 +276,15 @@ check again, in Route, unless the transfer is manual).
    error (then Next refuses). Below: where it runs (in slurp; detached on the cluster's login node; as a transfer job
    where the site has a transfer partition, e.g. xfer), and for a direct route that cannot log in by itself the
    **temporary key** (opt-in, with its warning).
-6. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes; **Go** (or **Save without
-   starting**); for *manual* the button is **Add**: the transfer is added and waits for **Run now**.
+5. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes; **Add**: the transfer is
+   added and runs each time you click **Run now**.
+"""),
+  "EndpointsScreen": ("Endpoints", """
+Where transfers take data from and put it: this machine, and every tab (a cluster tab is an endpoint by itself, as
+long as it is open). Each row: its name, its kind, where it is, its state (● connected, ○ needs login, connecting,
+needs you, tab not open) and how many transfers use it. **Connect** logs in (a tab: in its tab), **Disconnect**,
+**Test**, **Edit…**, **Delete** (refused while transfers use it; a tab goes away when it is closed). More kinds (S3,
+SMB, WebDAV, Globus) come with later versions; their secrets are kept only in the system keyring.
 """),
   "PickPathsScreen": ("Choose paths", """
 A folder of a tab: Enter or a click goes into a folder (`Backspace` or **Up**: the one above), the path at the top can
@@ -293,7 +299,7 @@ subtabs are closed; **Overview** at the left of the subtabs shows it any time. I
 the cluster (its site, the Slurm version, its nodes and partitions), its health (healthy, degraded or unhealthy, and
 why), the SSH session, and the ways on: **Jobs** (`j`, with how many run and wait; *No Slurm available* where there
 is none), **Quota** (`Q`) and **Health** (`C`, everything about the nodes and partitions); a line about the
-transfers from or to the tab while they run, wait or are scheduled (a click: the Transfers tab). Below them the site's
+transfers from or to the tab while they run or wait (a click: the Transfers tab). Below them the site's
 status page and documentation (a click opens them). Not connected: **Connect**, and what happened to the connection (slurp does not log in at the start; a tab added
 with `+` logs in right away); connected: **Disconnect**. While it connects or reconnects (its session does not answer
 yet) it is not shown as connected: no Jobs and no health, what ssh printed last (a host key that changed: said

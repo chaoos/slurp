@@ -12,8 +12,8 @@ version may need the helper of the same version).
   **Abort** instead of **Disconnect**.
 - **Transfers**: data from one tab to another (cluster to cluster, or this
   machine), with rsync over the tabs' own SSH sessions: Menu → Transfer
-  data… (`T`) sets one up in a wizard (source, destination, the route with its
-  check, when, summary: Go); sources may be patterns (`/path/to/dir/*.h5`:
+  data… (`T`) sets one up in a wizard (source, destination, options, the
+  route with its check, summary: Add); sources may be patterns (`/path/to/dir/*.h5`:
   each match). The check (it changes nothing) says what remains to
   copy, the room on the destination (free space, quota, a purged scratch),
   and which routes work, each with its measured speed and an estimate: the
@@ -22,15 +22,21 @@ version may need the helper of the same version).
   through slurp (always possible: the clusters need not reach each other).
   Large transfers are pointed to Globus where sites offer it. A transfer
   runs in slurp, detached on the cluster, or as a transfer job (a site's
-  transfer partition, e.g. `xfer` on Alps; its progress in `progress.json`);
-  now, at a time, repeatedly, daily, after a job, or manual: only on Run
-  now (the wizard's Go then reads Add; such a transfer can be added even when
-  its route did not pass the check: Run now checks first). It is idempotent: a run
+  transfer partition, e.g. `xfer` on Alps; its progress in `progress.json`),
+  each time you click Run now (a transfer can be added even when its route
+  did not pass the check: Run now checks first). There are no schedules:
+  **Copy as a command** gives the rsync (or `sbatch --wrap`) line of a run
+  for scrontab or cron. It is idempotent: a run
   copies only what is missing or changed, goes on from half-copied files,
   and never deletes. The tab **Transfers** (there while transfers exist)
   lists them; each has a subtab with its progress (rate, time left, files),
   what happens if slurp closes, its runs and its log; Pause (a transfer job:
   cancelled, after a warning), Continue (a new run or job), Run now, Edit.
+  Its source and destination are **endpoints**, shown as cards with their
+  state (connected, needs login, tab not open) and a button for what they
+  need; Run now waits until every endpoint is connected. This machine and
+  every open tab are endpoints; Menu → Endpoints… lists them with their
+  state and how many transfers use each (deleting one in use is refused).
 - Rule packs: `transfer_partition`, `transfer_hosts`, `globus`,
   `login_node_limits` (transfers).
 - Progress: only lines like the progress count (the structure of the
