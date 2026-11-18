@@ -239,7 +239,8 @@ a changed source or destination needs the check again first).
    or a similar service, where both sites offer it.
 4. **How**: the route (the recommended one first; a picture shows how the data flows: push, pull, relay through slurp,
    the same filesystem, and where rsync runs), where it runs (in slurp; detached on the cluster's login node; as
-   a transfer job where the site has a transfer partition, e.g. xfer), checksums, compression (the relay), a speed
+   a transfer job where the site has a transfer partition, e.g. xfer), checksums (they read every file on both sides
+   at every run, also when nothing changed: the estimate counts it), compression (the relay), a speed
    limit, and for a direct route that cannot log in by itself the **temporary key** (opt-in, with its warning).
 5. **When**: now, once at a time, every so long, daily at a time, after a job ends, or never by itself (only when you
    click **Run now**); whether slurp logs in to the tabs by itself then, and what a missed run does.

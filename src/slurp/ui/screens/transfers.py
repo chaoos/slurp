@@ -472,7 +472,9 @@ class TransferWizard(ModalScreen):
               yield Input(id="tw-account", placeholder="(default)", compact=True)
             yield Checkbox("submit the next job when the time limit ends", value=True, id="tw-resubmit", compact=True)
           with Horizontal(classes="tw-row"):
-            yield Checkbox("checksums (slower; finds changes with the same size and time)", id="tw-checksum", compact=True)
+            yield Checkbox("checksums: compare the contents (every file is read on both sides, at every run, also when "
+                           "nothing changed: much slower)", id="tw-checksum", compact=True)
+          yield Static(id="tw-checksum-note", classes="tw-warn")
           with Horizontal(classes="tw-row"):
             yield Checkbox("compress (helps on the relay over slow links)", id="tw-compress", compact=True)
           with Horizontal(classes="tw-row"):
@@ -948,6 +950,7 @@ class TransferWizard(ModalScreen):
 
   def runs_changed(self):
     self.show_flow()
+    self.checksum_note()
     job = self.chosen_runs_on() == "job"
     self.query_one("#tw-job", Vertical).display = job
     route = self.chosen_route()
@@ -957,6 +960,22 @@ class TransferWizard(ModalScreen):
       part.value = str(site_of(client).get("transfer_partition") or "")
     self.query_one("#tw-compress", Checkbox).display = route == "relay"
     self.update_next()
+
+  @on(Checkbox.Changed, "#tw-checksum")
+  def checksum_toggled(self, event):
+    event.stop()
+    self.checksum_note()
+
+  def checksum_note(self):
+    note = self.query_one("#tw-checksum-note", Static)
+    total = self.plan.get("total_bytes")
+    if not self.query_one("#tw-checksum", Checkbox).value:
+      note.update("")
+      return
+    rate = self.plan.get("routes", {}).get(self.chosen_route() or "", {}).get("rate")
+    seconds = P.checksum_seconds(total, rate)
+    note.update(f"Each run reads all {human(total)} on both sides to compare them" + (f" (about {P.duration(seconds)})" if seconds else "")
+                + ", even when nothing changed; rsync shows no progress meanwhile. Size and time find almost every change.")
 
   @on(Checkbox.Changed, "#tw-key")
   def key_toggled(self, event):
@@ -1109,7 +1128,11 @@ class TransferWizard(ModalScreen):
       runs += (f" ({t.options.get('partition') or 'the default partition'}, {t.options.get('time')}"
                + (", then the next one" if t.options.get("resubmit") else "") + ")")
     row("Route", f"{M.ROUTES[t.route]}, {runs}")
-    row("Estimate", (f"{P.duration(est[0])} – {P.duration(est[1])}" if est else "?") + (" (plus the time it waits in the queue)" if t.runs_on == "job" else ""))
+    if t.options.get("checksum"):
+      est = P.estimate(t.route, self.plan.get("remaining_bytes"), self.plan.get("remaining_files"), info.get("rate"),
+                       self.plan.get("total_bytes"), checksum=True)
+    row("Estimate", (f"{P.duration(est[0])} – {P.duration(est[1])}" if est else "?") + (" (plus the time it waits in the queue)" if t.runs_on == "job" else "")
+        + (" (with checksums: all of it is read on both sides)" if t.options.get("checksum") else ""))
     row("When", S.describe(t.schedule))
     opts = [w for k, w in (("checksum", "checksums"), ("compress", "compressed"), ("temp_key", "temporary key")) if t.options.get(k)]
     if t.options.get("bwlimit"):
@@ -1257,7 +1280,9 @@ class TransfersScreen(TransfersBase):
       when = (S.when_text(t.next_run) if t.next_run else
               (f"{S.when_text(last['ended'])} {M.STATES.get(last['result'], last['result'])}" if last else ""))
       table.add_row(Text(t.name, style="bold"), Text.assemble(dot(src), f" {t.source_name} → {t.dest_name} ", dot(dst)),
-                    route_text(t), state_text(t), bar(shown) if shown is not None else "",
+                    route_text(t), state_text(t),
+                    Text(f"{self.app.spinner()} comparing", style="yellow") if t.state == "running" and p.get("phase") == "comparing"
+                    else bar(shown) if shown is not None else "",
                     rate_text(p.get("rate")) if t.state == "running" else "",
                     P.duration(p.get("eta")) if t.state == "running" and p.get("eta") else "", when, key=t.id)
     if transfers:
@@ -1450,7 +1475,17 @@ class TransferScreen(TransfersBase):
     elif t.plan.get("remaining_bytes") is not None:
       lines.append(f"To copy: {human(t.plan['remaining_bytes'])} in {t.plan.get('remaining_files', '?')} files (at the check)", style="dim")
     q("#xd-progress", Static).update(lines)
-    q("#xd-current", Static).update(Text(f"now: {p['current']}", style="dim") if t.state == "running" and p.get("current") else "")
+    if t.state == "running" and p.get("phase") == "comparing":
+      started = t.run.get("started") or time.time()
+      words = "rsync compares the files of both sides" + (
+        f" by their contents (checksums): it reads all {human(t.plan.get('total_bytes'))} on both sides, also when "
+        "nothing changed" if t.options.get("checksum") else "")
+      seconds = P.checksum_seconds(t.plan.get("total_bytes"), (t.plan.get("routes", {}).get(t.route) or {}).get("rate")) if t.options.get("checksum") else None
+      q("#xd-current", Static).update(Text(f"{self.app.spinner()} {words}; for {P.duration(time.time() - started)}"
+                                           + (f" (about {P.duration(seconds)} expected)" if seconds else "")
+                                           + ". Progress comes with the files it copies.", style="yellow"))
+    else:
+      q("#xd-current", Static).update(Text(f"now: {p['current']}", style="dim") if t.state == "running" and p.get("current") else "")
     q("#xd-rate", TimePlot).set_data(rates(p.get("history") or []))
     client = dst if client_side(t.route) == "dest" else src
     q("#xd-closes", Static).update(if_slurp_closes(t, client.name if client else "", t.run.get("host", ""), site_of(client)))

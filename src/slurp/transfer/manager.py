@@ -193,6 +193,9 @@ class Manager:
     with relay.lock:
       p, out = dict(relay.output.progress), relay.output
       current, errors, error_count, files = out.current, list(out.errors), out.error_count, out.files
+    t.progress["phase"] = "copying" if p or current else "comparing"
+    if not p and not current:
+      self.changed(t, save=False)
     self.progress(t, p, current=current, files=files, errors=errors, error_count=error_count, transport=relay.rate)
 
   def relay_ended(self, t, relay, code):
@@ -306,6 +309,8 @@ class Manager:
     out.close()
     p = RN.progress_of(status.get("progress"))
     if p:
+      # (before its first progress line rsync compares the files: with checksums that reads all of them)
+      t.progress["phase"] = "comparing" if p.get("phase") == "scanning" else "copying"
       if p.get("phase") in ("copying", "ended", "scanning") and t.state in ("queued", "starting", "waiting"):
         t.state = "running"
         t.message = f"on {status['lock'].split()[1]}" if len(status.get("lock", "").split()) > 1 else ""

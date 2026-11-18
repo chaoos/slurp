@@ -43,8 +43,12 @@ the step to change; after another source or destination, the steps after the che
     ```
 
     A direct route says **push** (rsync on the source logs in to the destination) or **pull** (the other way); under
-    each box what runs there (on the login node, in a transfer job). The options: checksums (slower; finds
-   changes that keep size and time), compression (the relay only: it helps on slow links), a limit in MB/s.
+    each box what runs there (on the login node, in a transfer job). The options:
+
+    - **checksums**: rsync compares the contents, not size and time. It reads every file on both sides at every
+      run, also when nothing changed, and shows no progress meanwhile: the estimate counts that time, and a run says
+      it is comparing. Size and time find almost every change; checksums are for when they cannot be trusted.
+    - compression (the relay only: it helps on slow links), a limit in MB/s.
 5. **When**: now, once at a time (`14:00`, `2026-11-20 14:00`, `+2h`), every so long (`6h`, `1d`, `30m`), daily at a
    time, after a job ends, or never by itself: only when you click **Run now** (`s`). For a schedule: whether slurp logs in to the tabs by itself then (a login that needs
    you waits, and says so), and whether a missed run runs once as soon as it can or is skipped.

@@ -219,3 +219,32 @@ def test_flow_diagram(check):
   check("the data flows left to right", all("▶" in d and "◀" not in d for d in (relay, push, pull)))
   moving = flow_diagram("relay", "slurp", alps, jedi, "alps", "jedi", moving=2).plain
   check("while it runs: a dot on the arrows", "●" in moving)
+
+
+def test_comparing_shown(check, tmp_path):
+  """A run that compares the files (checksums): the details say so, the list too"""
+  import time
+  from slurp.transfer import model as M
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      ref = M.tab_ref(app.clusters[0])
+      t = M.Transfer(M.new_id(), "sums", {"tab": ref, "paths": ["/x"]}, {"tab": ref, "path": "/y"}, route="same-fs",
+                     runs_on="detached", options={"checksum": True},
+                     plan={"total_bytes": 10 << 30, "routes": {"same-fs": {"ok": True, "rate": 100 << 20}}})
+      t.state, t.run, t.progress = "running", {"kind": "detached", "folder": "/x", "started": time.time() - 30}, {"phase": "comparing"}
+      app.transfers.store.transfers.append(t)
+      app.open_transfer(t); await pilot.pause(1.2)
+      text = str(app.screen.query_one("#xd-current").render())
+      check("the details: comparing by contents, how much, how long", "checksums" in text and "10.0 GiB" in text
+            and "for 3" in text and "about 1 min expected" in text, text)
+      await pilot.click("#view-transfers"); await pilot.pause(1.2)
+      table = app.screen.query_one("#xfer-list")
+      cell = str(table.get_row_at(0)[4])
+      check("the list: comparing", "comparing" in cell, cell)
+      app.transfers.store.transfers.remove(t)
+      await pilot.press("q")
+
+  asyncio.run(main())

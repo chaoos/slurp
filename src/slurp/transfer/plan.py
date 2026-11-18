@@ -128,12 +128,19 @@ def duration(seconds):
     return f"{hours} h {minutes:02d} min"
   return f"{hours // 24} d {hours % 24} h"
 
-def estimate(route, remaining_bytes, remaining_files, rate):
-  """[low, high] seconds for what remains at the measured rate (None without a rate)"""
+def estimate(route, remaining_bytes, remaining_files, rate, total_bytes=None, checksum=False):
+  """[low, high] seconds for what remains at the measured rate (None without a rate). With checksums rsync first reads
+  every file on both sides (total_bytes), also when nothing changed"""
   if not rate or remaining_bytes is None:
     return None
   t = remaining_bytes / rate + (remaining_files or 0) * PER_FILE.get(route, 0.003)
+  if checksum:
+    t += checksum_seconds(total_bytes, rate) or 0
   return [t * 0.8, t * 1.6]
+
+def checksum_seconds(total_bytes, rate):
+  """About how long checksums take: every file read on both sides (at the measured rate, the sides in parallel)"""
+  return total_bytes / rate if rate and total_bytes else None
 
 # ---- the other side as the cluster that runs rsync sees it (direct routes)
 def target_of(cluster):

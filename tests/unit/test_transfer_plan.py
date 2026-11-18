@@ -69,3 +69,11 @@ def test_known_hosts(check, tmp_path):
   kh.write_text("[127.0.0.1]:2222 ssh-ed25519 AAAAkey\nother ssh-ed25519 BBBB\n")
   check("the lines of the host, with its port", P.known_hosts("127.0.0.1", 2222, [str(kh)]).strip() == "[127.0.0.1]:2222 ssh-ed25519 AAAAkey")
   check("none: empty", P.known_hosts("nohost", 22, [str(kh)]) == "")
+
+
+def test_checksum_estimate(check):
+  plain = P.estimate("same-fs", 0, 0, 100 << 20, total_bytes=10 << 30)
+  summed = P.estimate("same-fs", 0, 0, 100 << 20, total_bytes=10 << 30, checksum=True)
+  check("nothing to copy: next to no time", plain[1] < 1, plain)
+  check("with checksums: all of it is read (10 GiB at 100 MiB/s: about 100 s)", 80 < summed[0] < 85 and 160 < summed[1] < 170, summed)
+  check("the time of checksums", P.checksum_seconds(10 << 30, 100 << 20) == 102.4 and P.checksum_seconds(None, 1) is None)

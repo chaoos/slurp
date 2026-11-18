@@ -185,3 +185,17 @@ def test_never(check, tmp_path):
   check("…not by itself either", t.state == "new" and not t.runs)
   mg.start(t)
   check("Run now: it runs", until(app, mg, lambda: t.state == "done"), (t.state, t.message))
+
+
+def test_comparing(check, tmp_path):
+  """Before rsync's first progress line it compares the files (with checksums it reads all of them): said so"""
+  app = App()
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app, runs_on="detached", route="same-fs", checksum=True)
+  mg.add(t)
+  t.state, t.run = "running", {"kind": "detached", "folder": "/x", "started": time.time()}
+  mg.polled(t, {"progress": {"phase": "scanning", "updated": 1}, "result": None, "alive": True, "lock": "1 host", "job": "", "log": ""})
+  check("scanning: comparing", t.progress.get("phase") == "comparing" and t.state == "running", t.progress)
+  mg.polled(t, {"progress": {"phase": "copying", "bytes": 10, "percent": 1, "rate": "1.00MB/s", "eta": "0:00:09"},
+                "result": None, "alive": True, "lock": "1 host", "job": "", "log": ""})
+  check("its first progress line: copying", t.progress.get("phase") == "copying" and t.progress.get("bytes") == 10, t.progress)
