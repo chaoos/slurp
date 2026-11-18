@@ -24,7 +24,7 @@ from ...transfer.manager import client_side, site_of
 from .. import icons
 from ..widgets import ClickTable, TimePlot
 from .base import SplitScreen
-from .dialogs import ConfirmScreen
+from .dialogs import ConfirmScreen, copy_text
 from .files import expand_path, home_of, with_places
 
 STATE_STYLES = {"running": "bold green", "starting": "green", "queued": "cyan", "waiting": "yellow", "pausing": "yellow",
@@ -1690,6 +1690,9 @@ class TransferScreen(TransfersBase):
   #xd-actions Button { margin-right: 1; }
   #xd-rate { height: 6; margin-top: 1; }
   #xd-closes { color: $text-muted; }
+  #xd-ends { height: auto; margin-top: 1; }
+  .xd-card { width: 1fr; height: auto; border: round $panel; padding: 0 1; margin-right: 1; }
+  .xd-card Button { margin-top: 0; }
   #xd-sync { margin-top: 1; padding: 0 1; border: round $panel; }
   #xd-status { padding: 0 1; border: round $panel; text-style: bold; }
   #xd-check-bar { height: auto; margin-bottom: 1; }
@@ -1710,8 +1713,14 @@ class TransferScreen(TransfersBase):
     with VerticalScroll(id="xd-body"):
       yield Static(id="xd-status")
       yield Static(id="xd-head")
+      with Horizontal(id="xd-ends"):
+        with Vertical(id="xd-src-card", classes="xd-card"):
+          yield Static(id="xd-src-end")
+          yield Button(icons.label("connect", "Connect"), id="xd-src-connect", compact=True)
+        with Vertical(id="xd-dst-card", classes="xd-card"):
+          yield Static(id="xd-dst-end")
+          yield Button(icons.label("connect", "Connect"), id="xd-dst-connect", compact=True)
       yield Static(id="xd-route")
-      yield Static(id="xd-paths")
       yield Static(id="xd-sync")
       with Horizontal(id="xd-actions"):
         yield Button(icons.label("suspended", "Pause"), id="xd-pause", variant="warning", compact=True, tooltip="stop the run; Continue goes on (p)")
@@ -1719,7 +1728,8 @@ class TransferScreen(TransfersBase):
         yield Button(icons.label("reload", "Run now"), id="xd-run", compact=True, tooltip="a run now (s): when its endpoints are connected")
         yield Button(icons.label("edit", "Edit…"), id="xd-edit", compact=True, tooltip="its settings, in the wizard (e)")
         yield Button(icons.label("jobs", "Its job"), id="xd-job", compact=True, tooltip="the job window of its transfer job")
-        yield Button(icons.label("connect", "Connect"), id="xd-connect", compact=True, tooltip="log in to the tab it waits for")
+        yield Button(icons.label("copy", "Copy as a command"), id="xd-copy", compact=True,
+                     tooltip="the command of a run, to put into scrontab or cron by hand")
         yield Button(icons.label("cancel_job", "Delete"), id="xd-delete", variant="error", compact=True, tooltip="its settings and history (not the files)")
       yield Static(id="xd-progress")
       yield Static(id="xd-current")
@@ -1771,16 +1781,16 @@ class TransferScreen(TransfersBase):
     if t.run.get("job"):
       route.append(f", job {t.run['job']}", style="dim")
     q("#xd-route", Static).update(route)
-    q("#xd-paths", Static).update(self.paths_text(t))
+    for side in ("src", "dst"):
+      self.show_end(t, side)
     q("#xd-pause", Button).display = t.active or t.state == "waiting"
     q("#xd-resume", Button).display = self.can_continue(t)
-    q("#xd-run", Button).display = not t.active and t.state != "waiting"
+    run = q("#xd-run", Button)
+    run.display = not t.active and t.state != "waiting"
+    waits_for = [e.name for e in (self.end(t, "src"), self.end(t, "dst")) if not e.connected]
+    run.disabled = bool(waits_for) # (Run now: when every endpoint is connected)
+    run.tooltip = ("first connect " + " and ".join(waits_for)) if waits_for else "a run now (s)"
     q("#xd-job", Button).display = bool(t.run.get("job") or (t.runs and t.runs[-1].get("job")))
-    missing = [c for c in self.manager.not_ready(t) if c is not None]
-    connect = q("#xd-connect", Button)
-    connect.display = bool(missing)
-    if missing and str(connect.label) != icons.label("connect", f"Connect {missing[0].name}"):
-      connect.label = icons.label("connect", f"Connect {missing[0].name}")
     p = t.progress
     lines = Text()
     if p.get("percent") is not None or p.get("bytes"):
@@ -1836,17 +1846,42 @@ class TransferScreen(TransfersBase):
     q("#xd-check", Static).update(check)
     q("#xd-log", Static).update(Text("\n".join(f"{datetime.fromtimestamp(ts).strftime('%m-%d %H:%M:%S')}  {text}" for ts, text in t.log[-25:]), style="dim"))
 
-  def paths_text(self, t):
-    """The sources and the destination, each a link: a click opens it in its tab (a folder, a file, a pattern)"""
-    text = Text()
-    rows = [("from", t.source_name, p, i) for i, p in enumerate(t.source.get("paths", []))]
-    rows.append(("into", t.dest_name, t.dest.get("path", ""), -1))
-    for word, name, path, i in rows:
-      text.append(f"{word} {name}: ", style="dim")
+  def end(self, t, side):
+    """The endpoint of a side ("src", "dst") as it is now"""
+    m = self.manager
+    return E.resolve(self.app, m.endpoint_store, t.source if side == "src" else t.dest, m.endpoint_status)
+
+  def show_end(self, t, side):
+    """The card of an endpoint: what it is, its state, its paths (links: a click opens one in its tab), and the
+    button that fits its state (Connect, Log in in its tab, Open its tab)"""
+    e = self.end(t, side)
+    text = Text.assemble(("Source" if side == "src" else "Destination", "bold"), "  ", endpoint_state_text(e), "\n",
+                         (e.name, "bold"), f" ({E.KINDS.get(e.kind, e.kind)})", (f" · {e.where}" if e.where and e.kind != "local" else "", "dim"), "\n")
+    rows = [(p, i) for i, p in enumerate(t.source.get("paths", []))] if side == "src" else [(t.dest.get("path", ""), -1)]
+    for path, i in rows:
       text.append(path, style=Style(underline=True) + Style.from_meta({"@click": f"screen.open_end({i})"}))
       text.append("\n")
-    text.append("(a click opens it in its tab)", style="dim italic")
-    return text
+    self.query_one(f"#xd-{side}-end", Static).update(text)
+    button = self.query_one(f"#xd-{side}-connect", Button)
+    label = {"not connected": "Connect", "needs you": "Log in in its tab", "tab not open": "Open its tab",
+             "not set up": "Edit…", "failed": "Connect", "expired": "Log in"}.get(e.state)
+    button.display = label is not None and e.kind != "local"
+    if label and str(button.label) != icons.label("connect", label):
+      button.label = icons.label("connect", label)
+
+  def connect_end(self, t, side):
+    """The button of an endpoint card: log in (a tab: in its tab), or open its tab again"""
+    e = self.end(t, side)
+    ref = t.source if side == "src" else t.dest
+    if e.state == "tab not open":
+      tab = ref.get("tab") or {}
+      self.app.add_cluster({"ssh": tab["ssh"], "pre_login": tab.get("pre_login", "")} if tab.get("ssh")
+                           else {"destination": tab.get("destination") or "", "pre_login": tab.get("pre_login", "")})
+      return
+    if e.is_tab and e.cluster is not None:
+      self.app.connect_cluster(e.cluster)
+    elif not e.is_tab:
+      self.app.connect_endpoint(e)
 
   def action_open_end(self, index):
     """A source (index) or the destination (-1), opened in the tab of its cluster"""
@@ -1883,10 +1918,11 @@ class TransferScreen(TransfersBase):
       self.edit(t)
     elif bid == "xd-delete":
       self.delete(t)
-    elif bid == "xd-connect":
-      missing = [c for c in self.manager.not_ready(t) if c is not None]
-      if missing:
-        self.app.connect_cluster(missing[0])
+    elif bid in ("xd-src-connect", "xd-dst-connect"):
+      self.connect_end(t, bid.split("-")[1])
+    elif bid == "xd-copy":
+      in_background(self, lambda: self.manager.command_text(t), lambda text: text and copy_text(self.app, text, "the command"),
+                    group="xd-copy", name="the command of the transfer", connection=None)
     elif bid == "xd-job":
       self.app.open_transfer_job(t)
     elif bid == "xd-recheck":

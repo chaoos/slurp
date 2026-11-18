@@ -573,6 +573,72 @@ class Manager:
     self.relays.clear()
     self.store.save()
 
+  # ---- Copy as a command
+  def command_text(self, t):
+    """The command of a run, to put into scrontab or cron by hand (in a worker: it asks ssh -G for a direct route).
+    Patterns are left for the shell to expand; secrets would be placeholders, never in clear."""
+    import shlex
+    src, dst = self.ends(t)
+    def arg(p):
+      if R.is_pattern(p):
+        folder, name = p.rsplit("/", 1) if "/" in p else ("", p)
+        return (shlex.quote(folder) + "/" if folder else "") + name.replace(" ", "\\ ")
+      return shlex.quote(p)
+    opts = [o for o in R.options(t.options, (3, 2, 0)) if not o.startswith(("--info", "--outbuf"))] + ["--info=progress2"]
+    paths = " ".join(arg(p) for p in t.source.get("paths", []))
+    dest = shlex.quote(t.dest.get("path", "").rstrip("/") + "/")
+    head = [f"# slurp transfer {t.name!r}: {M.ROUTES.get(t.route, t.route)}", "# (as slurp runs it; it copies only what is missing or changed, and deletes nothing)"]
+    def ssh_of(cluster):
+      target = P.target_of(cluster) or {}
+      if target.get("error") or not target.get("host"):
+        return None, f"# ({cluster.name if cluster else '?'}: {target.get('error') or 'cannot be reached from a cluster'})"
+      return target, ""
+    if t.route in ("same-fs", "local"):
+      body = [f"# on {t.source_name}:", f"rsync {shlex.join(opts)} -- {paths} {dest}"]
+    elif t.route in ("direct-push", "direct-pull"):
+      push = t.route == "direct-push"
+      target, why = ssh_of(dst if push else src)
+      if target is None:
+        body = [why]
+      else:
+        rsh = shlex.join(["ssh", "-o", "BatchMode=yes", *(["-p", str(target["port"])] if str(target.get("port", "22")) != "22" else []),
+                          *(["-l", target["user"]] if target.get("user") else []), *(["-J", target["jump"]] if target.get("jump") else [])])
+        host = target["host"]
+        if push:
+          body = [f"# on {t.source_name} (it logs in to {t.dest_name} by itself):",
+                  f"rsync {shlex.join(opts)} --rsh={shlex.quote(rsh)} -- {paths} {host}:{dest}"]
+        else:
+          remote = " ".join(f"{host}:{arg(p)}" for p in t.source.get("paths", []))
+          body = [f"# on {t.dest_name} (it logs in to {t.source_name} by itself):",
+                  f"rsync {shlex.join(opts)} --rsh={shlex.quote(rsh)} -- {remote} {dest}"]
+    else: # (the relay)
+      local_src, local_dst = src is not None and not src.destination, dst is not None and not dst.destination
+      if local_src or local_dst:
+        other = dst if local_src else src
+        target, why = ssh_of(other)
+        if target is None:
+          body = [why]
+        else:
+          rsh = shlex.join(["ssh", *(["-p", str(target["port"])] if str(target.get("port", "22")) != "22" else []),
+                            *(["-l", target["user"]] if target.get("user") else []), *(["-J", target["jump"]] if target.get("jump") else [])])
+          host = target["host"]
+          if local_src:
+            body = ["# on this machine:", f"rsync {shlex.join(opts)} --rsh={shlex.quote(rsh)} -- {paths} {host}:{dest}"]
+          else:
+            remote = " ".join(f"{host}:{arg(p)}" for p in t.source.get("paths", []))
+            body = ["# on this machine:", f"rsync {shlex.join(opts)} --rsh={shlex.quote(rsh)} -- {remote} {dest}"]
+      else:
+        target, why = ssh_of(dst)
+        body = ["# The relay passes the data through slurp: as a command it is no single line.",
+                f"# The nearest: on {t.source_name}, if it can log in to {t.dest_name} by itself (a direct route):"]
+        body += [why] if target is None else [f"rsync {shlex.join(opts)} -- {paths} {target['host']}:{dest}"]
+    if t.runs_on == "job" and t.route != "relay" and body and not body[-1].startswith("#"):
+      o = t.options
+      sbatch = ["sbatch", f"--job-name=slurp-xfer-{t.id}", f"--time={o.get('time') or '24:00:00'}", "--ntasks=1",
+                *([f"--partition={o['partition']}"] if o.get("partition") else []), *([f"--account={o['account']}"] if o.get("account") else [])]
+      body = [body[0].replace("# on ", "# a transfer job on "), f"{shlex.join(sbatch)} --wrap={shlex.quote(body[-1])}"]
+    return "\n".join(head + body) + "\n"
+
   # ---- for the overview and the footer
   def active(self):
     return [t for t in self.transfers if t.state in ("running", "starting", "queued", "pausing", "waiting")]

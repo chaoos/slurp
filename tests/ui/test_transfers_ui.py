@@ -310,8 +310,10 @@ def test_paths_open(check, tmp_path):
       t = M.Transfer(M.new_id(), "paths", {"tab": ref, "paths": sources}, {"tab": ref, "path": str(dest / "new" / "deeper")})
       app.transfers.add(t)
       app.open_transfer(t); await pilot.pause(0.6)
-      text = app.screen.query_one("#xd-paths").render()
-      clicks = [span.style.meta.get("@click") for span in getattr(text, "spans", []) if hasattr(span.style, "meta") and span.style.meta.get("@click")]
+      clicks = []
+      for card in ("#xd-src-end", "#xd-dst-end"):
+        text = app.screen.query_one(card).render()
+        clicks += [span.style.meta.get("@click") for span in getattr(text, "spans", []) if hasattr(span.style, "meta") and span.style.meta.get("@click")]
       check("each path a link", clicks == ["screen.open_end(0)", "screen.open_end(1)", "screen.open_end(2)", "screen.open_end(3)", "screen.open_end(-1)"], clicks)
       async def opened(index):
         app.show_transfers(app.transfer_view(t)); await pilot.pause(0.3)
@@ -332,6 +334,39 @@ def test_paths_open(check, tmp_path):
             and s.query_one("#dfilter").value == "*.log", (type(s).__name__, getattr(s, "path", "")))
       s = await opened(-1)
       check("a destination not there yet: the nearest folder that is", isinstance(s, DirScreen) and s.path == str(dest), getattr(s, "path", ""))
+      await pilot.press("q")
+
+  asyncio.run(main())
+
+
+def test_endpoint_cards(check, tmp_path):
+  """The details show the source and the destination as cards with their state; Run now waits for every endpoint
+  (its tooltip names the missing one); Copy as a command gives the rsync line"""
+  from slurp.transfer import model as M
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      ref = M.tab_ref(app.clusters[0])
+      gone = {"endpoint": "tab:jedi", "name": "jedi", "tab": {"destination": "jedi", "name": "jedi"}, "path": "/scratch/in"}
+      t = M.Transfer(M.new_id(), "to jedi", {"endpoint": "local", "tab": ref, "paths": [str(tmp_path)]}, gone)
+      app.transfers.add(t)
+      app.open_transfer(t); await pilot.pause(0.6)
+      dst = str(app.screen.query_one("#xd-dst-end").render())
+      check("the destination card: its name and state", "jedi" in dst and "tab not open" in dst, dst)
+      button = app.screen.query_one("#xd-dst-connect")
+      check("its button opens the tab", button.display and "Open its tab" in str(button.label), str(button.label))
+      check("the source card has no button (this machine)", not app.screen.query_one("#xd-src-connect").display)
+      run = app.screen.query_one("#xd-run")
+      check("Run now waits for jedi", run.disabled and "jedi" in str(run.tooltip), (run.disabled, run.tooltip))
+      local = M.Transfer(M.new_id(), "here", {"endpoint": "local", "tab": ref, "paths": [str(tmp_path / "a b")]},
+                         {"endpoint": "local", "tab": ref, "path": str(tmp_path / "out")}, route="local")
+      text = app.transfers.command_text(local)
+      check("the command: rsync with the quoted paths", "rsync " in text and f"'{tmp_path}/a b'" in text and f"{tmp_path}/out/" in text, text)
+      app.transfers.add(local)
+      app.open_transfer(local); await pilot.pause(0.6)
+      check("Run now: ready", not app.screen.query_one("#xd-run").disabled)
       await pilot.press("q")
 
   asyncio.run(main())
