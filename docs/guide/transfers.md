@@ -210,7 +210,7 @@ second run of the same transfer does not start.
 While transfers exist (also finished ones), the tab **Transfers** is at the left of the tabs of the clusters, with
 how many run. Its first subtab is the list: each transfer with its name, from where and to where (each tab with a dot
 for its connection and its path; a long path is shortened in the middle, `/very/long/…/in/its/path`, and the full
-paths are below the list for the transfer highlighted), its route and where it runs, its state, how far it is, its rate, the time left, and when it ran
+paths are below the list for the transfer highlighted), what moves the data, its route and where it runs (`rsync · relay · in slurp`, `rclone · on the cluster · transfer job`), its state, how far it is, its rate, the time left, and when it ran
 last; the line below says why it waits or how it failed. A click on a column's header sorts the list by it (▲;
 again: the other way, ▼; by State the running ones first), and the order is kept for the next start. The list, a
 transfer's subtab and the Endpoints subtab reload as the other views do (counted down in the title bar; a click there

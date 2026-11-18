@@ -201,7 +201,7 @@ about slurp, and quit (`q`). Enter or a click does the item; `Esc` or a click el
 The transfers of data between the tabs (clusters, or this machine): the first subtab of the **Transfers** tab, which is
 there while transfers exist (also finished ones). Each row: its name, from where and to where (each tab with a dot for
 its connection, and its path, a long one shortened in the middle: /very/long/…/in/its/path; several sources: the first
-and +n), its route and where it runs, its state, how far it is, its rate and the time left, and when it runs next
+and +n), what moves the data (rsync, rclone, Globus), its route and where it runs, its state, how far it is, its rate and the time left, and when it runs next
 (or when it ran last). The lines below say more of the highlighted one (why it waits, how it failed,
 its full paths). **Endpoints** (Menu → Endpoints…) lists where data can come from and go to.
 Enter or a click opens its subtab with everything about it. A click on a column's header sorts the list by it (▲),

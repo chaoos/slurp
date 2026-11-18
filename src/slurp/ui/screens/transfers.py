@@ -34,8 +34,9 @@ STATE_STYLES = {"running": "bold green", "starting": "green", "queued": "cyan", 
 STATE_ICONS = {"running": "running", "starting": "running", "queued": "pending", "waiting": "pending", "pausing": "suspended",
                "paused": "suspended", "done": "completed", "done-errors": "completed",
                "failed": "failed", "new": "pending", "checking": "pending"}
-ROUTE_SHORT = {"same-fs": "same filesystem", "direct-push": "direct", "direct-pull": "direct (pull)", "relay": "relay", "globus": "Globus",
-               "rclone-here": "rclone here", "rclone-cluster": "rclone on the cluster"}
+ROUTE_SHORT = {"local": "on this machine", "same-fs": "same filesystem", "direct-push": "direct", "direct-pull": "direct (pull)",
+               "relay": "relay", "globus": "", "rclone-here": "here", "rclone-cluster": "on the cluster"}
+TOOLS = {"globus": "Globus", "rclone-here": "rclone", "rclone-cluster": "rclone"} # (what moves the data; the others: rsync)
 RUNS_SHORT = {"slurp": "in slurp", "detached": "login node", "job": "transfer job", "globus": "at Globus"}
 
 def when_text(epoch):
@@ -80,7 +81,11 @@ def rate_text(rate):
   return f"{human(rate)}/s" if rate else ""
 
 def route_text(t):
-  return f"{ROUTE_SHORT.get(t.route, t.route)} · {RUNS_SHORT.get(t.runs_on, t.runs_on)}"
+  return how_text(t.route, t.runs_on)
+
+def how_text(route, runs_on):
+  """The tool, the route and where it runs, short: rsync · relay · in slurp, rclone · on the cluster · transfer job"""
+  return " · ".join(w for w in (TOOLS.get(route, "rsync"), ROUTE_SHORT.get(route, route), RUNS_SHORT.get(runs_on, runs_on)) if w)
 
 def dot(cluster):
   """● connected, ◌ connecting, ○ not connected (this machine: ⌂; a closed tab: ✕)"""
@@ -2702,7 +2707,7 @@ class TransferRunsScreen(TransfersBase):
       rows.append((str(r["started"]), [str(r.get("number") or first + i), stamp(r["started"]), stamp(r["ended"]), took(r),
                                        Text(M.STATES.get(r["result"], r["result"]), style=STATE_STYLES.get(r["result"], "")),
                                        human(r.get("bytes")), str(r.get("files") or 0), rate_text(r.get("rate")),
-                                       f"{ROUTE_SHORT.get(r.get('route'), r.get('route', ''))} · {RUNS_SHORT.get(r.get('runs_on'), '')}",
+                                       how_text(r.get("route", ""), r.get("runs_on", "")),
                                        where, (r.get("message") or "")[:80]]))
     fill_table(table, rows)
 

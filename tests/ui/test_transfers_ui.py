@@ -503,6 +503,15 @@ def test_direct_job_checked_on_a_node(check, tmp_path, monkeypatch):
   asyncio.run(main())
 
 
+def test_route_says_the_tool(check):
+  """The route in the list (and in the runs): what moves the data first, then the route, then where it runs"""
+  from slurp.ui.screens.transfers import how_text
+  for route, runs_on, want in (("relay", "slurp", "rsync · relay · in slurp"), ("direct-push", "job", "rsync · direct · transfer job"),
+                               ("same-fs", "detached", "rsync · same filesystem · login node"), ("rclone-here", "slurp", "rclone · here · in slurp"),
+                               ("rclone-cluster", "job", "rclone · on the cluster · transfer job"), ("globus", "globus", "Globus · at Globus")):
+    check(f"{route}: {want}", how_text(route, runs_on) == want, how_text(route, runs_on))
+
+
 def test_short_path(check):
   from slurp.ui.screens.transfers import short_path
   long = "/very/long/directory/path/with/many/subdirs/and/more/stuff/going/on/in/its/path"
