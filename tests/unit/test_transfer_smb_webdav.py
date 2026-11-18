@@ -54,6 +54,14 @@ def smb(tmp_path):
   share.mkdir()
   proc = subprocess.Popen([sys.executable, "-c", SMB_SERVER, str(port), str(share)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
   assert wait_port(port), "the SMB server did not start"
+  # (newer rclone (1.76) gets no answer from impacket's server at all: then there is nothing to test against)
+  d = E.EndpointDef("probe", "probe", "smb", {"host": "127.0.0.1", "port": str(port), "share": "DATA", "user": "user"}, ["password"])
+  e = RC.Endpoint(d, {"password": "pw123"})
+  try:
+    RC.check(RC.run(["lsjson", e.path("/")], e.env, timeout=15))
+  except RC.RcloneError as err:
+    proc.kill()
+    pytest.skip(f"this rclone ({'.'.join(map(str, RC.version() or ()))}) cannot use impacket's SMB server: {err}")
   yield port, share
   proc.kill()
 
