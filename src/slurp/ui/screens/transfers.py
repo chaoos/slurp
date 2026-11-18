@@ -868,6 +868,9 @@ class TransferWizard(ModalScreen):
     self.show_step()
     self.refresh_sources()
     self.refresh_dest()
+    # (in on_mount it is not mounted yet: shown once it is (the sources, the preview of what goes where, Next); a
+    # source that is not counted here (S3, SMB, WebDAV, Globus) is not shown again by its count)
+    self.call_after_refresh(lambda: (self.show_sources(), self.refresh_preview(), self.update_next()))
     self.set_interval(0.5, self.tick)
 
   def prefill(self, t):

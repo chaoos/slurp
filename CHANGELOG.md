@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: editing a transfer from S3, SMB, WebDAV or Globus shows its
+  sources in step 1 (and what goes where in step 2); the list stayed empty.
 - Transfers: rclone on this machine reaching a cluster over slurp's SSH runs
   the cluster's sftp-server behind a marker, so login scripts that print
   text (a chatty `.bashrc`) no longer break it ("packet too long"); copies

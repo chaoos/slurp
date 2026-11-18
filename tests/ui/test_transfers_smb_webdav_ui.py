@@ -220,3 +220,32 @@ def test_endpoint_window(check, webdav):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_edit_shows_the_sources(check, tmp_path):
+  """Editing a transfer from an endpoint that is no tab (WebDAV, not reachable): step 1 shows its sources (a file, a
+  pattern), not counted here"""
+  from slurp.transfer import endpoints as E, model as M
+  from slurp.ui.screens.transfers import TransferWizard
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      store = app.transfers.endpoint_store
+      store.add(E.EndpointDef("w7", "dav", "webdav", {"url": "http://127.0.0.1:9", "user": "dav"}, ["password"]))
+      S.put(S.user("w7", "password"), "x")
+      t = M.Transfer(M.new_id(), "e", {"endpoint": "w7", "name": "dav", "paths": ["/dav.txt", "/runs/*.h5"]},
+                     {"endpoint": "local", "tab": M.tab_ref(app.clusters[0]), "path": str(tmp_path)}, route="rclone-here", runs_on="slurp")
+      app.transfers.add(t)
+      app.edit_transfer(t); await pilot.pause(1.0)
+      w = app.screen
+      shown = str(w.query_one("#tw-src-paths").render())
+      check("editing: the wizard", isinstance(w, TransferWizard))
+      check("step 1 shows its sources", "/dav.txt" in shown and "/runs/*.h5" in shown and "counted at the check" in shown, shown)
+      preview = str(w.query_one("#tw-dst-preview").render())
+      check("…and what goes where", "dav.txt" in preview, preview)
+      await pilot.press("escape"); await pilot.pause(0.2)
+      await pilot.press("q")
+
+  asyncio.run(main())
