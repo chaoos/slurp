@@ -1,0 +1,165 @@
+"""Transfers: the manager with both ends on this machine (an app that only has what the manager needs): a relay run
+in slurp with its progress and end, a pause and Continue (idempotent: what is there is not copied again), a detached
+run followed in its folder, a schedule, a run that waits for its tab, the lines for the overview and the footer"""
+import os
+import queue
+import shutil
+import time
+import types
+
+import pytest
+
+from slurp.transfer import manager as MG, model as M
+
+pytestmark = pytest.mark.skipif(not shutil.which("rsync"), reason="needs rsync")
+
+
+class App:
+  def __init__(self):
+    self.here = types.SimpleNamespace(name="Local", destination=None, connection=None, ssh=None, pre_login="")
+    self.clusters = [self.here]
+    self.calls = queue.Queue()
+    self.notes = []
+    self.logins = []
+
+  def call_from_thread(self, fn, *args):
+    self.calls.put((fn, args))
+
+  def notify(self, message, title="", severity="information", timeout=None):
+    self.notes.append((title, message, severity))
+
+  def login(self, cluster, show=False):
+    self.logins.append(cluster.name)
+
+  def needs_login(self, cluster):
+    return bool(cluster.destination)
+
+  def pump(self):
+    while True:
+      try:
+        fn, args = self.calls.get_nowait()
+      except queue.Empty:
+        return
+      fn(*args)
+
+
+def until(app, manager, cond, seconds=60):
+  end = time.time() + seconds
+  while time.time() < end:
+    app.pump()
+    manager.tick()
+    if cond():
+      return True
+    time.sleep(0.1)
+  app.pump()
+  return cond()
+
+
+def make(tmp_path, app, runs_on="slurp", route="relay", big=0, **options):
+  src, dst = tmp_path / "src", tmp_path / "dst"
+  (src / "sub").mkdir(parents=True, exist_ok=True)
+  (src / "a.txt").write_text("alpha")
+  (src / "sub" / "b.bin").write_bytes(os.urandom(300_000))
+  if big:
+    (src / "big.bin").write_bytes(os.urandom(big))
+  dst.mkdir(exist_ok=True)
+  ref = M.tab_ref(app.here)
+  return M.Transfer(M.new_id(), "t", {"tab": ref, "paths": [str(src)]}, {"tab": ref, "path": str(dst)}, route=route,
+                    runs_on=runs_on, options=options, plan={"remaining_bytes": 300_005 + big, "remaining_files": 3})
+
+
+def test_relay_run(check, tmp_path):
+  app = App()
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app)
+  mg.add(t)
+  mg.go(t)
+  check("done", until(app, mg, lambda: t.state == "done"), (t.state, t.message))
+  check("the files are there", (tmp_path / "dst" / "src" / "sub" / "b.bin").read_bytes() == (tmp_path / "src" / "sub" / "b.bin").read_bytes())
+  check("its progress: all of it", t.progress.get("percent") == 100.0 and t.progress.get("bytes") == 300_005, t.progress)
+  check("in the history", t.runs[-1]["result"] == "done" and t.runs[-1]["route"] == "relay", t.runs)
+  check("a notification", any(n[0] == "t" and n[1] == "done" for n in app.notes), app.notes)
+  check("kept in the store", M.Store(mg.store.path).get(t.id).state == "done")
+
+
+def test_pause_and_continue(check, tmp_path):
+  app = App()
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app, big=30_000_000, bwlimit=8)
+  mg.add(t)
+  mg.go(t)
+  until(app, mg, lambda: t.progress.get("bytes", 0) > 3_000_000, 30)
+  mg.pause(t)
+  check("paused", until(app, mg, lambda: t.state == "paused"), (t.state, t.message))
+  first = t.progress.get("bytes", 0)
+  check("the half-copied file is kept", list((tmp_path / "dst" / "src").rglob(".slurp-partial/*")))
+  t.options["bwlimit"] = 0
+  mg.resume(t)
+  check("continued: done", until(app, mg, lambda: t.state == "done"), (t.state, t.message))
+  check("whole", (tmp_path / "dst" / "src" / "big.bin").read_bytes() == (tmp_path / "src" / "big.bin").read_bytes())
+  check("the second run had the rest to do", t.progress.get("total") and t.progress["total"] < 30_300_005, (first, t.progress.get("total")))
+  check("two runs in the history", [r["result"] for r in t.runs] == ["paused", "done"], t.runs)
+
+
+def test_detached(check, tmp_path):
+  app = App()
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app, runs_on="detached", route="same-fs")
+  mg.add(t)
+  mg.shown.add(t.id)
+  mg.go(t)
+  check("done", until(app, mg, lambda: t.state == "done", 60), (t.state, t.message, t.log[-3:]))
+  check("its folder on the 'cluster'", t.runs[-1]["runs_on"] == "detached" and (tmp_path / "dst" / "src" / "a.txt").exists())
+  again = MG.Manager(app, M.Store(mg.store.path))
+  check("a new slurp follows no run that ended", not again.followed)
+
+
+def test_waits_for_its_tab(check, tmp_path, monkeypatch):
+  class Here(MG.Endpoint): # (the remote tab's end runs on this machine once it is "connected")
+    def __init__(self, cluster):
+      super().__init__(cluster)
+      self.local, self.connection = True, None
+  monkeypatch.setattr(MG, "Endpoint", Here)
+  app = App()
+  remote = types.SimpleNamespace(name="far", destination="far", connection=None, ssh=None, pre_login="")
+  app.clusters.append(remote)
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app)
+  t.dest["tab"] = M.tab_ref(remote)
+  t.schedule = {"kind": "every", "every": "6h", "login": True}
+  mg.add(t)
+  mg.go(t)
+  check("waits: not connected", t.state == "waiting" and "far" in t.message, (t.state, t.message))
+  check("the next run is planned", t.next_run and t.next_run > time.time() + 5 * 3600)
+  mg.start(t, scheduled=True)
+  check("a scheduled run logs in by itself", app.logins == ["far"], app.logins)
+  remote.connection = types.SimpleNamespace(ready=True) # (as if it logged in)
+  check("connected: it starts and ends", until(app, mg, lambda: t.runs and t.runs[-1]["result"] == "done"), (t.state, t.message))
+  check("repeated: scheduled again", t.state == "scheduled" and "next run" in t.message, (t.state, t.message))
+
+
+def test_schedule_tick(check, tmp_path):
+  app = App()
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app)
+  t.schedule = {"kind": "at", "at": time.time() + 1}
+  mg.add(t)
+  mg.go(t)
+  check("scheduled", t.state == "scheduled" and t.next_run, (t.state, t.next_run))
+  check("at its time: it runs, once", until(app, mg, lambda: t.state == "done", 30) and t.next_run is None, (t.state, t.next_run))
+  mg.pause(t)
+  check("pause of an ended one: nothing", t.state == "done")
+
+
+def test_texts(check, tmp_path):
+  app = App()
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app)
+  t.state, t.progress = "running", {"percent": 45.0, "eta": 720, "rate": 3 * 1024 ** 2}
+  mg.store.transfers.append(t)
+  line = mg.summary_for(app.here)
+  check("the overview: running, how far, how long", line.startswith("Transfers: t: running to Local (45 %, 12 min left)"), line)
+  check("the footer", mg.footer() == "⇅ 1 · 45 % · 3.0 MiB/s", mg.footer())
+  t.state = "done"
+  check("nothing under way: none", mg.summary_for(app.here) == "" and mg.footer() == "")
+  check("the average rate", MG.average_rate([[0, 0], [10, 1000], [20, 3000]]) == 150.0)
