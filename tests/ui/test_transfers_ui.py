@@ -46,7 +46,8 @@ def test_wizard_and_tab(check, tmp_path):
       w = app.screen
       check("T: the wizard", isinstance(w, TransferWizard))
       check("step 1: Next waits for a source", w.query_one("#tw-next").disabled)
-      check("a new transfer: the steps ahead cannot be jumped to", all(w.query_one(f"#tw-goto-{i}").disabled for i in range(1, 6)))
+      check("five steps", [str(b.label) for b in w.query("#tw-steps Button")] == ["1 Source", "2 Destination", "3 Route", "4 When", "5 Summary"])
+      check("a new transfer: the steps ahead cannot be jumped to", all(w.query_one(f"#tw-goto-{i}").disabled for i in range(1, 5)))
       w.query_one("#tw-src-path").value = str(src)
       await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
       check("a path typed: added", w.paths == [str(src)] and not w.query_one("#tw-next").disabled, w.paths)
@@ -55,16 +56,32 @@ def test_wizard_and_tab(check, tmp_path):
       w.query_one("#tw-dst-path").value = str(dst); await pilot.pause(0.2)
       preview = str(w.query_one("#tw-dst-preview").render())
       check("what goes where", f"run42  →  Local:{dst}/run42" in preview, preview)
-      await pilot.click("#tw-next")
-      check("step 3: the check, until it is done", await until(pilot, lambda: w.plan.get("done"), 30), w.plan)
+      await pilot.click("#tw-next"); await pilot.pause(0.1)
+      check("step 3: the route", w.step == 2)
+      check("…the check, until it is done", await until(pilot, lambda: w.plan.get("done"), 30), w.plan)
+      await pilot.pause(0.6)
       steps = str(w.query_one("#tw-check-steps").render())
       check("it says what remains", "500.0 KiB in 2 files to copy" in steps or "488.3 KiB in 2 files" in steps, steps)
-      routes = str(w.query_one("#tw-routes").render())
-      check("the routes, the same filesystem recommended", "same filesystem" in routes and "(recommended)" in routes, routes)
+      label = lambda route: str(w.query_one(f".tw-r-{route}").label)
+      check("the routes as choices, with what the check found: the same filesystem passed, recommended",
+            label("same-fs").startswith("✓ same filesystem") and "(recommended)" in label("same-fs") and label("relay").startswith("✓ relay"),
+            [label(r) for r in ("same-fs", "direct-push", "direct-pull", "relay")])
+      check("a route that failed cannot be chosen, and says why", label("direct-push").startswith("✗") and w.query_one(".tw-r-direct-push").disabled,
+            label("direct-push"))
+      check("the chosen route passed: Next", not w.query_one("#tw-next").disabled)
+      passed = dict(w.plan["routes"]["same-fs"])
+      w.plan["routes"]["same-fs"] = {"ok": False, "why": "it did not pass"}
+      w.show_plan(); await pilot.pause(0.2)
+      check("a chosen route that does not pass: no longer chosen, Next waits and says why",
+            w.chosen_route() is None and w.query_one("#tw-next").disabled and w.query_one("#tw-next").tooltip == "choose a route",
+            (w.chosen_route(), w.query_one("#tw-next").tooltip))
+      w.plan["routes"]["same-fs"] = passed
+      w.show_plan(); await pilot.pause(0.3)
+      check("…passed again: chosen again (the recommended one)", w.chosen_route() == "same-fs" and not w.query_one("#tw-next").disabled)
       w.plan["routes"]["same-fs"]["runs_on"] = ["detached", "job"] # (as where the site has a transfer partition)
-      await pilot.click("#tw-next"); await pilot.pause(0.4)
-      check("step 4: the recommended route, where it runs (a transfer job, where there is one)",
-            w.chosen_route() == "same-fs" and w.chosen_runs_on() == "job", (w.chosen_route(), w.chosen_runs_on()))
+      await w.route_changed(); await pilot.pause(0.3)
+      check("the recommended route, where it runs (and a transfer job offered, where there is one)",
+            w.chosen_route() == "same-fs" and w.chosen_runs_on() == "detached" and w.query(".tw-o-job"), (w.chosen_route(), w.chosen_runs_on()))
       def pressed(sel):
         return [(b.kind if sel == "#tw-runs-on" else b.route) for b in w.query(f"{sel} RadioButton").results(RadioButton) if b.value]
       await pilot.click(w.query_one(".tw-o-detached")); await pilot.pause(0.3)
@@ -84,14 +101,14 @@ def test_wizard_and_tab(check, tmp_path):
       check("how the data flows: the two tabs as boxes, the same filesystem on the arrow, rsync on the login node",
             flow.count("┌") == 2 and "same filesystem" in flow and "▶" in flow and "(on the login node)" in flow, flow)
       await pilot.click("#tw-next"); await pilot.pause(0.2)
-      check("step 5: now", w.when_kind() == "now")
+      check("step 4: now", w.when_kind() == "now")
       w.query_one("#tw-when-every").value = True
       w.query_one("#tw-every").value = "1m"; await pilot.pause(0.2)
       check("every 1m: too short, Next waits", w.query_one("#tw-next").disabled)
       w.query_one("#tw-when-now").value = True; await pilot.pause(0.2)
       await pilot.click("#tw-next"); await pilot.pause(0.2)
       summary = str(w.query_one("#tw-summary").render())
-      check("step 6: the summary, what happens if slurp closes", "If slurp closes" in summary and "Nothing is deleted" in summary, summary)
+      check("step 5: the summary, what happens if slurp closes", "If slurp closes" in summary and "Nothing is deleted" in summary, summary)
       check("a name", w.query_one("#tw-name").value == "run42 Local → Local")
       check("the summary shows the flow", "┌" in str(w.query_one("#tw-summary-flow").render()))
       w.query_one("#tw-name").value = "my run"
@@ -156,8 +173,7 @@ def test_never(check, tmp_path):
       w.query_one("#tw-next").press(); await pilot.pause(0.2)
       w.query_one("#tw-dst-path").value = str(dst); await pilot.pause(0.2)
       w.query_one("#tw-next").press()
-      await until(pilot, lambda: w.plan.get("done"), 30)
-      w.query_one("#tw-next").press(); await pilot.pause(0.4)
+      await until(pilot, lambda: w.plan.get("done"), 30); await pilot.pause(0.6)
       w.query_one("#tw-next").press(); await pilot.pause(0.2)
       w.query_one("#tw-when-never").value = True; await pilot.pause(0.2)
       note = str(w.query_one("#tw-when-note").render())
@@ -180,20 +196,20 @@ def test_never(check, tmp_path):
       e = app.screen
       check("edited: never is chosen", e.query_one("#tw-when-never").value)
       await pilot.pause(0.3)
-      check("editing: every step can be gone to", all(not e.query_one(f"#tw-goto-{i}").disabled for i in range(6)),
-            [e.query_one(f"#tw-goto-{i}").disabled for i in range(6)])
-      await pilot.click("#tw-goto-5"); await pilot.pause(0.3)
-      check("a click on Summary: that step", e.step == 5 and "only on Run now" in str(e.query_one("#tw-summary").render()))
-      await pilot.click("#tw-goto-3"); await pilot.pause(0.4)
-      check("a click on How: its choices as they were", e.step == 3 and e.chosen_route() == t.route and e.chosen_runs_on() == t.runs_on,
+      check("editing: every step can be gone to", all(not e.query_one(f"#tw-goto-{i}").disabled for i in range(5)),
+            [e.query_one(f"#tw-goto-{i}").disabled for i in range(5)])
+      await pilot.click("#tw-goto-4"); await pilot.pause(0.3)
+      check("a click on Summary: that step", e.step == 4 and "only on Run now" in str(e.query_one("#tw-summary").render()))
+      await pilot.click("#tw-goto-2"); await pilot.pause(0.4)
+      check("a click on Route: its choices as they were", e.step == 2 and e.chosen_route() == t.route and e.chosen_runs_on() == t.runs_on,
             (e.step, e.chosen_route(), e.chosen_runs_on()))
       await pilot.click("#tw-goto-0"); await pilot.pause(0.3)
       e.query_one("#tw-src-path").value = str(src / "sub")
       await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.3)
       check("another source: the steps after the check wait for a new check", e.step == 0 and not e.query_one("#tw-goto-2").disabled
-            and all(e.query_one(f"#tw-goto-{i}").disabled for i in (3, 4, 5)), [e.query_one(f"#tw-goto-{i}").disabled for i in range(6)])
+            and all(e.query_one(f"#tw-goto-{i}").disabled for i in (3, 4)), [e.query_one(f"#tw-goto-{i}").disabled for i in range(5)])
       await pilot.click("#tw-goto-2")
-      check("the check: its steps can be gone to again after it", await until(pilot, lambda: e.plan.get("done") and not e.query_one("#tw-goto-5").disabled, 30))
+      check("the check: the steps after it can be gone to again", await until(pilot, lambda: e.plan.get("done") and not e.query_one("#tw-goto-4").disabled, 30))
       e.dismiss(None); await pilot.pause(0.2)
       await pilot.press("q")
 

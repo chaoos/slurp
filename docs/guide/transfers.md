@@ -8,7 +8,7 @@ destination.
 
 ## Setting one up
 
-**Menu → Transfer data…** (`T`), or **New transfer** in the list of transfers, opens a wizard of six steps. **Next**
+**Menu → Transfer data…** (`T`), or **New transfer** in the list of transfers, opens a wizard of five steps. **Next**
 waits until a step is complete (its tooltip says what is missing); **Back** goes back. The steps at the top can be
 clicked: any step whose steps before it are complete. So **Edit…** of a transfer (all its steps are) goes straight to
 the step to change; after another source or destination, the steps after the check wait for a new check.
@@ -18,7 +18,8 @@ the step to change; after another source or destination, the steps after the che
    folder under its own name. Both tabs must be connected.
 2. **Destination**: a tab and a folder there (created if it is not there), with buttons for its home, scratch,
    project, … The wizard shows what goes where.
-3. **Check**: slurp looks at both sides and changes nothing (except a marker file it removes at once):
+3. **Route**: slurp checks both sides and changes nothing (except a marker file it removes at once), and you choose
+   the route from what it found:
     - rsync on both sides, and its version;
     - the sources (there, readable) and the destination (a folder, writable, or the folder it is created in);
     - whether both see the same filesystem (a marker written on the destination is there on the source too);
@@ -26,13 +27,16 @@ the step to change; after another source or destination, the steps after the che
     - the room on the destination: its free space, the quota of its filesystem (space and files), a scratch
       filesystem that is purged (from the [rule pack](checks.md) of the site);
     - many small files: bundling them first (tar) is suggested;
-    - the routes (below), each with its speed, measured with a sample of the data (a few seconds), and an estimate.
+    - the routes (below), each a choice that shows its check as it comes: ✓ passed, with its speed (measured with a
+      sample of the data, a few seconds) and an estimate; ! only with the temporary key; ✗ failed, and why (it
+      cannot be chosen). When the check is done the recommended route is chosen; **Next** comes as soon as the
+      chosen route passed (the other routes may still be checked).
 
     For a large transfer (about a terabyte, or hours) slurp suggests Globus or a similar service, where both sites
     offer it: parallel streams, retries, and it runs without slurp. A rule pack can name a site's Globus collection
     (`globus = "…"`); with both sites' it is named.
-4. **How**: the route (the recommended one is chosen), where it runs, and the options. A picture shows how the data
-   flows, here and in the summary and the transfer's subtab:
+    Below the routes: where it runs, and the options. A picture shows how the data flows, here and in the summary and
+    the transfer's subtab:
 
     ```
      ┌────────┐    relay     ┌─────────┐     relay    ┌────────┐
@@ -49,10 +53,10 @@ the step to change; after another source or destination, the steps after the che
       run, also when nothing changed, and shows no progress meanwhile: the estimate counts that time, and a run says
       it is comparing. Size and time find almost every change; checksums are for when they cannot be trusted.
     - compression (the relay only: it helps on slow links), a limit in MB/s.
-5. **When**: now, once at a time (`14:00`, `2026-11-20 14:00`, `+2h`), every so long (`6h`, `1d`, `30m`), daily at a
+4. **When**: now, once at a time (`14:00`, `2026-11-20 14:00`, `+2h`), every so long (`6h`, `1d`, `30m`), daily at a
    time, after a job ends, or never by itself: only when you click **Run now** (`s`). For a schedule: whether slurp logs in to the tabs by itself then (a login that needs
    you waits, and says so), and whether a missed run runs once as soon as it can or is skipped.
-6. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes. **Go** starts it (or schedules
+5. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes. **Go** starts it (or schedules
    it); **Save without starting** keeps it for later. With *never by itself* the button reads **Add**: the transfer
    is added and runs each time you click **Run now**.
 

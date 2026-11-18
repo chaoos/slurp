@@ -303,13 +303,16 @@ class PickPathsScreen(ModalScreen):
     self.dismiss(None)
 
 def select(radio_set, button):
-  """Press one button of a radio set from code: the others off, and the set knows which one is pressed. (Setting its
-  value alone is not enough while a RadioSet.Changed is handled: the set then hears nothing of it, keeps the button it
-  had, and two stay pressed.)"""
-  for b in radio_set.query(RadioButton).results(RadioButton):
-    if b is not button and b.value:
-      b.value = False
-  button.value = True
+  """Press one button of a radio set from code (None: none): the others off, and the set knows which one is pressed.
+  The set is told directly, its buttons' messages held back: while a RadioSet.Changed is handled it would hear nothing
+  of them (two stayed pressed), and a button turned off it turns on again (a radio set never has none). The caller
+  does what follows from the choice."""
+  with radio_set.prevent(RadioButton.Changed):
+    for b in radio_set.query(RadioButton).results(RadioButton):
+      if b is not button and b.value:
+        b.value = False
+    if button is not None:
+      button.value = True
   radio_set._pressed_button = button
 
 STEP_STATE = {"running": ("…", "yellow"), "ok": ("✓", "green"), "bad": ("✗", "red"), "warn": ("!", "yellow"), "info": ("ⓘ", "dim")}
@@ -359,9 +362,11 @@ def globus_text(plan):
   return Text("ⓘ " + g["text"], style="bold cyan" if g.get("strong") else "cyan")
 
 class TransferWizard(ModalScreen):
-  """Set up a transfer: 1 source, 2 destination, 3 check, 4 how, 5 when, 6 summary. Dismissed with
+  """Set up a transfer: 1 source, 2 destination, 3 route (the check, and the choice of what it found), 4 when,
+  5 summary. Dismissed with
   {"transfer": Transfer, "go": bool} or None. editing: a transfer whose settings it changes (its id stays)"""
-  STEPS = ["Source", "Destination", "Check", "How", "When", "Summary"]
+  STEPS = ["Source", "Destination", "Route", "When", "Summary"]
+  ROUTE_ORDER = ("same-fs", "direct-push", "direct-pull", "relay")
   DEFAULT_CSS = """
   TransferWizard { align: center middle; }
   #tw-dialog { width: 120; max-width: 98%; height: 94%; border: thick $accent; background: $surface; padding: 0 2; }
@@ -379,8 +384,8 @@ class TransferWizard(ModalScreen):
   #tw-src-tab, #tw-dst-tab { width: 40; }
   #tw-src-paths { height: auto; max-height: 12; border: round $panel; padding: 0 1; }
   #tw-src-path, #tw-dst-path { width: 1fr; }
-  #tw-check-steps, #tw-routes, #tw-globus { height: auto; }
-  #tw-routes, #tw-globus { margin-top: 1; }
+  #tw-check-steps, #tw-globus { height: auto; }
+  #tw-globus { margin-top: 1; }
   #tw-route, #tw-runs-on, #tw-when { height: auto; width: 1fr; }
   #tw-job { height: auto; border: round $panel; padding: 0 1; margin-top: 1; }
   #tw-partition, #tw-time, #tw-account { width: 24; margin-right: 2; }
@@ -447,16 +452,16 @@ class TransferWizard(ModalScreen):
           yield Horizontal(id="tw-dst-places", classes="tw-row")
           yield Static(id="tw-dst-preview", classes="tw-note")
         with VerticalScroll(id="tw-step-2"):
-          yield Static("slurp looks at both sides (it changes nothing): what remains to copy, the room on the destination, "
-                       "which routes work and how fast.", classes="tw-note")
+          yield Static("slurp checks both sides (it changes nothing): what remains to copy, the room on the destination, "
+                       "and each route, how fast it is. Choose one that passed.", classes="tw-note")
           yield Static(id="tw-check-steps")
-          yield Static(id="tw-routes")
-          yield Static(id="tw-globus")
-          with Horizontal(classes="tw-row"):
-            yield Button(icons.label("reload", "Check again"), id="tw-recheck", compact=True)
-        with VerticalScroll(id="tw-step-3"):
           yield Label("Route")
-          yield RadioSet(id="tw-route")
+          with RadioSet(id="tw-route"):
+            for route in self.ROUTE_ORDER:
+              b = RadioButton(f"… {M.ROUTES[route]}", classes=f"tw-r-{route}", disabled=True)
+              b.route = route
+              yield b
+          yield Static(id="tw-globus")
           yield Static(id="tw-flow")
           yield Static(id="tw-route-note", classes="tw-note")
           yield Label("Runs")
@@ -483,7 +488,9 @@ class TransferWizard(ModalScreen):
           with Horizontal(classes="tw-row"):
             yield Checkbox("Install a temporary key", id="tw-key", compact=True)
           yield Static(id="tw-key-warning")
-        with VerticalScroll(id="tw-step-4"):
+          with Horizontal(classes="tw-row"):
+            yield Button(icons.label("reload", "Check again"), id="tw-recheck", compact=True)
+        with VerticalScroll(id="tw-step-3"):
           with RadioSet(id="tw-when"):
             yield RadioButton("now", value=True, id="tw-when-now")
             yield RadioButton("once, at a time", id="tw-when-at")
@@ -509,7 +516,7 @@ class TransferWizard(ModalScreen):
           yield Static("A repeated transfer copies only what changed since the run before: it keeps the destination in "
                        "step with the source (nothing is deleted there).", classes="tw-note")
           yield Static(id="tw-when-note", classes="tw-warn")
-        with VerticalScroll(id="tw-step-5"):
+        with VerticalScroll(id="tw-step-4"):
           with Horizontal(classes="tw-row"):
             yield Label("Name")
             yield Input(id="tw-name")
@@ -533,7 +540,7 @@ class TransferWizard(ModalScreen):
       self.prefill(self.editing)
       if self.plan.get("done"): # (its check is for its sources and destination: the steps after it can be gone to)
         self.checked_for = (id(self.src), tuple(self.paths), id(self.dst), self.dest_path)
-        self.call_later(self.fill_how)
+        self.refresh_routes()
     self.show_step()
     self.refresh_sources()
     self.refresh_dest()
@@ -586,10 +593,8 @@ class TransferWizard(ModalScreen):
     if self.step == 2:
       self.start_check()
     if self.step == 3:
-      self.call_later(self.fill_how)
-    if self.step == 4:
       self.when_changed()
-    if self.step == 5:
+    if self.step == 4:
       self.fill_summary()
     self.update_next()
 
@@ -612,8 +617,6 @@ class TransferWizard(ModalScreen):
     step = int(event.button.id.rsplit("-", 1)[1])
     if step == self.step or not self.reachable(step):
       return
-    if step > 3 and not self.query("#tw-route RadioButton"): # (its choices are needed by the steps after it)
-      await self.fill_how()
     self.step = step
     self.show_step()
 
@@ -625,7 +628,7 @@ class TransferWizard(ModalScreen):
     nxt = self.query_one("#tw-next", Button)
     nxt.disabled = not ok
     nxt.tooltip = why or None
-    self.query_one("#tw-go", Button).disabled = self.step == 5 and not (self.how_ok()[0] and self.when_ok()[0])
+    self.query_one("#tw-go", Button).disabled = self.step == len(self.STEPS) - 1 and not (self.how_ok()[0] and self.when_ok()[0])
 
   def plan_current(self):
     """Is the plan of the check for the sources and the destination chosen now?"""
@@ -644,18 +647,25 @@ class TransferWizard(ModalScreen):
         return False, f"connect {self.dst.name if self.dst else 'the tab'} first"
       return bool(self.dest_path.strip()), "" if self.dest_path.strip() else "the destination folder"
     if step == 2:
-      plan = self.plan
-      if not plan.get("done"):
-        return False, "the check is not done"
-      if step != self.step and not self.plan_current():
+      # (the check of both sides, and of the route chosen: Next as soon as these passed, the other routes may go on)
+      plan, steps = self.plan, self.plan.get("steps", {})
+      if not plan.get("done") and (self.checking is None or step != self.step):
+        return False, "check first"
+      if not self.plan_current():
         return False, "check again (the source or the destination changed)"
-      if plan.get("steps", {}).get("paths", {}).get("state") == "bad" or plan.get("steps", {}).get("facts", {}).get("state") == "bad":
+      if steps.get("paths", {}).get("state") == "bad" or steps.get("facts", {}).get("state") == "bad":
         return False, "fix that first (Back)"
-      usable = [r for r, i in plan.get("routes", {}).items() if i.get("ok") or i.get("keyable")]
-      return bool(usable), "" if usable else "no route works"
-    if step == 3:
+      if any(steps.get(name, {}).get("state", "running") == "running" for name in ("facts", "paths", "remaining")) and not plan.get("done"):
+        return False, "the check of both sides is not done"
+      route = self.chosen_route()
+      if route is None:
+        usable = [r for r, i in plan.get("routes", {}).items() if i.get("ok") or i.get("keyable")]
+        return False, "choose a route" if usable or not plan.get("done") else "no route works"
+      info = plan.get("routes", {}).get(route)
+      if info is None:
+        return False, f"{M.ROUTES[route]}: its check is not done"
       return self.how_ok()
-    if step == 4:
+    if step == 3:
       return self.when_ok()
     return True, ""
 
@@ -830,53 +840,59 @@ class TransferWizard(ModalScreen):
     if not self.is_mounted:
       return
     spinner = self.app.spinner() if self.checking is not None else ""
-    steps = plan_text(self.plan, spinner)
+    general = dict(self.plan, steps={k: v for k, v in self.plan.get("steps", {}).items() if k in ("facts", "paths", "remaining")})
+    steps = plan_text(general, spinner) # (the routes: on their choices)
     if self.checking is not None and not self.plan.get("steps"):
       steps = Text(f" {spinner} starting the check …", style="yellow")
-    self.query_one("#tw-check-steps", Static).update(steps)
-    routes = routes_text(self.plan) if self.plan.get("done") else Text("")
     if self.plan.get("done") and self.plan.get("remaining_bytes") == 0:
-      routes.append("\n Nothing to copy: the destination has all of it already (a run would only check).", style="green")
-    self.query_one("#tw-routes", Static).update(routes)
+      steps.append(" Nothing to copy: the destination has all of it already (a run would only compare).\n", style="green")
+    self.query_one("#tw-check-steps", Static).update(steps)
     self.query_one("#tw-globus", Static).update(globus_text(self.plan))
+    self.refresh_routes()
     self.update_next()
+
+  def refresh_routes(self):
+    """The choices of the route as the check found them: passed (its speed, its estimate), the temporary key could,
+    failed (why), not checked yet; the recommended one chosen when the check is done and none is"""
+    plan = self.plan
+    routes, checking, spinner = plan.get("routes", {}), self.checking is not None, self.app.spinner()
+    rs = self.query_one("#tw-route", RadioSet)
+    buttons = {b.route: b for b in rs.query(RadioButton).results(RadioButton)}
+    for route, b in buttons.items():
+      info = routes.get(route)
+      name = M.ROUTES[route]
+      if info is None:
+        words, usable = (f"{spinner} {name}: checking …" if checking else f"· {name}: not checked"), False
+      elif info.get("ok"):
+        est = info.get("estimate")
+        words = f"✓ {name}" + (f"  {rate_text(info.get('rate'))}" if info.get("rate") else "") + (
+          f"  {P.duration(est[0])} – {P.duration(est[1])}" if est else "") + ("  (recommended)" if route == plan.get("recommended") else "")
+        usable = True
+      elif info.get("keyable"):
+        words, usable = f"! {name}: logs in only with the temporary key (below) · {info.get('why', '')[:60]}", True
+      else:
+        words, usable = f"✗ {name}: {info.get('why', '')[:80]}", False
+      if str(b.label) != words:
+        b.label = words
+      b.disabled = not usable
+      b.usable = usable
+    chosen = self.chosen_route()
+    if chosen is not None and not buttons[chosen].usable and (routes.get(chosen) is not None or not checking):
+      select(rs, None) # (it did not pass: no longer chosen)
+      chosen = None
+    if chosen is None:
+      wanted = (self.editing.route if self.editing else None) if not plan.get("done") else (
+        self.editing.route if self.editing and buttons.get(self.editing.route) and buttons[self.editing.route].usable else plan.get("recommended"))
+      if wanted in buttons and buttons[wanted].usable:
+        select(rs, buttons[wanted])
+        self.call_later(self.route_changed)
 
   @on(Button.Pressed, "#tw-recheck")
   def recheck(self, event):
     event.stop()
     self.start_check(force=True)
 
-  # ---- 4: how
-  async def fill_how(self):
-    async with self.rebuilding:
-      await self.fill_routes()
-    await self.route_changed()
-
-  async def fill_routes(self):
-    routes = self.plan.get("routes", {})
-    current = self.chosen_route() or (self.editing.route if self.editing else None) or self.plan.get("recommended")
-    rs = self.query_one("#tw-route", RadioSet)
-    await rs.remove_children()
-    buttons = []
-    for route in ("same-fs", "direct-push", "direct-pull", "relay"):
-      info = routes.get(route)
-      if info is None:
-        continue
-      usable = bool(info.get("ok") or info.get("keyable"))
-      est = info.get("estimate")
-      words = M.ROUTES[route] + (f"  ({P.duration(est[0])} – {P.duration(est[1])})" if est else "")
-      if not info.get("ok") and info.get("keyable"):
-        words += "  (with the temporary key)"
-      if not usable:
-        words += f"  ✗ {info.get('why', '')[:60]}"
-      b = RadioButton(words, classes=f"tw-r-{route}", disabled=not usable)
-      b.route, b.usable = route, usable
-      buttons.append(b)
-    await rs.mount(*buttons)
-    chosen = next((b for b in buttons if b.route == current and b.usable), next((b for b in buttons if b.usable), None))
-    if chosen is not None:
-      select(rs, chosen)
-
+  # ---- 3: the route (and how it runs)
   def chosen_route(self):
     for b in self.query("#tw-route RadioButton").results(RadioButton):
       if b.value:
@@ -897,7 +913,9 @@ class TransferWizard(ModalScreen):
   async def fill_runs(self):
     route = self.chosen_route()
     info = self.plan.get("routes", {}).get(route or "", {})
-    runs = info.get("runs_on") or (["slurp"] if route == "relay" else ["detached"])
+    client = self.dst if route == "direct-pull" else self.src
+    runs = ["slurp"] if route == "relay" else ["detached"] + (["job"] if P.partition_of(client, site_of) else [])
+    runs = info.get("runs_on") or runs
     current = self.chosen_runs_on() or (self.editing.runs_on if self.editing else None)
     if current not in runs:
       current = "job" if "job" in runs else runs[0]
@@ -1017,7 +1035,7 @@ class TransferWizard(ModalScreen):
         return False, "the limit: a number of MB/s"
     return True, ""
 
-  # ---- 5: when
+  # ---- 4: when
   @on(RadioSet.Changed, "#tw-when")
   def when_set(self, event):
     event.stop()

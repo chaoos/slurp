@@ -225,26 +225,27 @@ it waits for), **Delete**. A transfer is idempotent: running it again copies onl
 nothing is ever deleted on the destination.
 """),
   "TransferWizard": ("Transfer data", """
-Sets up a transfer in six steps; **Next** waits until a step is complete (its tooltip says what is missing). The
+Sets up a transfer in five steps; **Next** waits until a step is complete (its tooltip says what is missing). The
 steps at the top can be clicked: any step whose steps before it are complete (editing a transfer: all of them at once;
 a changed source or destination needs the check again first).
 
 1. **Source**: a tab and one or more files or folders there (Browse…: Space marks several; or type a path). Each is
    copied into the destination folder under its own name.
 2. **Destination**: a tab and a folder there (created if it is not there), with its home, scratch, project, …
-3. **Check**: slurp looks at both sides and changes nothing: rsync on both, the paths, the same filesystem (a marker
-   file, removed at once), what remains to copy (an rsync dry run), the room there (free space, quota, a scratch that
-   is purged), and the routes with their speed: the same filesystem, direct (one cluster logs in to the other by
-   itself), the relay through slurp (always possible); an estimate for each. For large transfers it suggests Globus
-   or a similar service, where both sites offer it.
-4. **How**: the route (the recommended one first; a picture shows how the data flows: push, pull, relay through slurp,
-   the same filesystem, and where rsync runs), where it runs (in slurp; detached on the cluster's login node; as
+3. **Route**: slurp checks both sides and changes nothing: rsync on both, the paths, what remains to copy (an rsync
+   dry run), the room there (free space, quota, a scratch that is purged). Each route is a choice that shows what its
+   check found, as it comes: ✓ passed (its speed, an estimate; the recommended one is chosen), ! only with the
+   temporary key, ✗ failed (why; it cannot be chosen): the same filesystem (a marker file, removed at once), direct
+   (one cluster logs in to the other by itself), the relay through slurp (always possible). **Next** as soon as the
+   chosen route passed. For large transfers it suggests Globus or a similar service, where both sites offer it. A
+   picture shows how the data flows (push, pull, relay through slurp, the same filesystem, where rsync runs). Below:
+   where it runs (in slurp; detached on the cluster's login node; as
    a transfer job where the site has a transfer partition, e.g. xfer), checksums (they read every file on both sides
    at every run, also when nothing changed: the estimate counts it), compression (the relay), a speed
    limit, and for a direct route that cannot log in by itself the **temporary key** (opt-in, with its warning).
-5. **When**: now, once at a time, every so long, daily at a time, after a job ends, or never by itself (only when you
+4. **When**: now, once at a time, every so long, daily at a time, after a job ends, or never by itself (only when you
    click **Run now**); whether slurp logs in to the tabs by itself then, and what a missed run does.
-6. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes; **Go** (or **Save without
+5. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes; **Go** (or **Save without
    starting**); for *never by itself* the button is **Add**: the transfer is added and waits for **Run now**.
 """),
   "PickPathsScreen": ("Choose paths", """
