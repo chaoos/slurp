@@ -73,7 +73,19 @@ def alive(pid):
     return stat[0] != "Z"
   except (OSError, ValueError, IndexError):
     return False
-if prog == "squeue" and opt("-j") in xfer_jobs():
+def xfer_rows():
+  """The transfer jobs as jobs (listed only when asked for by their id: the job lists of the scenarios stay as they are)"""
+  rows = []
+  for xid, pid in xfer_jobs().items():
+    running = alive(pid)
+    rows.append(dict(JobID=xid, JobIDRaw=xid, JobName=f"slurp-xfer-{xid}", User=user, Account="acct1", Partition="normal",
+                     State="RUNNING" if running else "COMPLETED", ExitCode="0:0", NNodes="1", NTasks="1", NodeList="nid000099",
+                     Submit=(now - timedelta(minutes=2)).isoformat(), Start=(now - timedelta(minutes=1)).isoformat(),
+                     End="Unknown" if running else now.isoformat(), Elapsed="00:01:00", Timelimit="01:00:00", WorkDir=S,
+                     StdOut="/dev/null", StdErr="/dev/null", MaxRSS="", AveRSS="", TRESUsageInMax="", AllocCPUS="1",
+                     AllocTRES="billing=1,cpu=1,node=1", SubmitLine="sbatch job.sh", Reason="None"))
+  return rows
+if prog == "squeue" and opt("-o") and opt("-j") in xfer_jobs(): # (how slurp follows a transfer job)
   if alive(xfer_jobs()[opt("-j")]):
     print((opt("-o") or "%T").replace("%T", "RUNNING").replace("%r", "None"))
 elif prog == "squeue":
@@ -81,7 +93,7 @@ elif prog == "squeue":
   codes = {"%i": "JobID", "%j": "JobName", "%u": "User", "%a": "Account", "%P": "Partition", "%T": "State", "%r": "Reason",
            "%D": "NNodes", "%M": "Elapsed", "%l": "Timelimit", "%S": "Start", "%V": "Submit", "%Z": "WorkDir", "%N": "NodeList"}
   ids = opt("-j").split(",") if opt("-j") else None
-  for j in jobs:
+  for j in jobs + (xfer_rows() if ids else []):
     if j["State"] in ("RUNNING", "PENDING") and (ids is None or j["JobID"] in ids or j["JobID"].split("_")[0] in ids):
       print("|".join(j[codes[c]] for c in fmt.split("|")))
       found = True
@@ -99,7 +111,7 @@ elif prog == "sacct" and "--batch-script" in args:
 elif prog == "sacct":
   fields = next(a for a in args if a.startswith("--format=")).split("=", 1)[1].split(",")
   ids = opt("-j").split(",") if opt("-j") else None
-  for j in jobs:
+  for j in jobs + (xfer_rows() if ids else []):
     if ids is not None and j["JobID"] not in ids and j["JobID"].split("_")[0] not in ids: # an array id: all its tasks
       continue
     print("|".join(j.get(f, "") for f in fields))

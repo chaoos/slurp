@@ -427,13 +427,28 @@ class TransfersTab:
     src, dst = self.transfers.ends(t)
     cluster = dst if client_side(t.route) == "dest" else src
     if not jid or cluster is None:
+      if cluster is None:
+        self.notify(f"job {jid}: its tab is not open", title=t.name, severity="warning")
+      return
+    if cluster.destination and not (cluster.connection and cluster.connection.ready):
+      self.notify(f"job {jid}: connect {cluster.name} first", title=t.name, severity="warning")
       return
     self.in_transfers = False
     self.activate_cluster(self.clusters.index(cluster), connect=False)
-    if cluster.loaded:
-      self.action_open_job(jid)
-    else:
-      self.notify(f"job {jid}: in the job list once it is loaded", title=cluster.name)
+    job = cluster.jobs.get(jid) if cluster.loaded else None
+    if job is not None:
+      self.open_job_subtab(job)
+      return
+    # (not in the job list as it was loaded: just submitted, or the list is not loaded yet: the job asked for itself)
+    from ..cluster.jobs import annotate, load_jobs
+    from ..cluster.remote import in_background
+    def loaded(jobs):
+      found = next((j for j in jobs or [] if j.jid == jid), None)
+      if found is None:
+        self.notify(f"job {jid} is not known to Slurm on {cluster.name} (any more)", title=t.name, severity="warning")
+      elif self.cluster is cluster:
+        self.open_job_subtab(found)
+    in_background(self, lambda: annotate(load_jobs(None, jids=[jid])), loaded, group="transfer-job", name=f"job {jid}")
 
   def open_transfer_path(self, cluster, path, crumbs):
     """A path of a transfer in the tab of its cluster: a folder in a directory view, a file in its view (one that

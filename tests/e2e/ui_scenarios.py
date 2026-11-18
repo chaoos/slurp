@@ -3644,7 +3644,7 @@ async def t_transfer_job(app, pilot):
   lab = next(c for c in app.clusters if c.destination)
   ref = M.tab_ref(lab)
   t = M.Transfer(M.new_id(), "job run", {"tab": ref, "paths": [src]}, {"tab": ref, "path": dst}, route="same-fs", runs_on="job",
-                 options={"partition": "normal", "time": "01:00:00", "bwlimit": "4"}, plan={"remaining_bytes": 30_400_005})
+                 options={"partition": "normal", "time": "01:00:00", "bwlimit": "1"}, plan={"remaining_bytes": 30_400_005})
   app.transfers.add(t)
   tested = []
   app.transfers.test_job(t, "same-fs", tested.append)
@@ -3660,6 +3660,18 @@ async def t_transfer_job(app, pilot):
   first = t.run["job"]
   screen = app.screen
   check("the details", isinstance(screen, TransferScreen))
+  # Its job, while it runs (just submitted: not in the job list as it was loaded): its job window, in the lab's tab
+  check("…not in the job list loaded before", first not in lab.jobs, list(lab.jobs)[:5])
+  await pilot.click("#xd-job")
+  from slurp.ui.screens.job import JobScreen
+  check("Its job: the job window of its transfer job", await until(
+    pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.job.jid == first and not app.in_transfers, 20),
+    (type(app.screen).__name__, getattr(getattr(app.screen, "job", None), "jid", None)))
+  app.open_transfer(t); await pilot.pause(0.5)
+  screen = app.screen
+  check("back in its details", isinstance(screen, TransferScreen) and t.state == "running", (type(screen).__name__, t.state))
+  await until(pilot, lambda: screen.query_one("#xd-pause").display and screen.query_one("#xd-pause").region.width > 0, 10)
+  await pilot.pause(0.3) # (laid out: the click lands on Pause)
   await pilot.click("#xd-pause"); await pilot.pause(0.4)
   check("Pause: it warns (the job is cancelled)", isinstance(app.screen, ConfirmScreen) and "cancels Slurm job" in str(app.screen.dialog_message))
   await pilot.click("#confirm-yes")
