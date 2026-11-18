@@ -89,9 +89,9 @@ class Transfer:
   def run_count(self): return max(self.runs_total, len(self.runs))
 
   @property
-  def source_name(self): return tab_name(self.source.get("tab"))
+  def source_name(self): return self.source.get("name") or tab_name(self.source.get("tab"))
   @property
-  def dest_name(self): return tab_name(self.dest.get("tab"))
+  def dest_name(self): return self.dest.get("name") or tab_name(self.dest.get("tab"))
   @property
   def active(self): return self.state in ACTIVE
 

@@ -9,7 +9,7 @@ import threading
 import time
 
 from ..state import log
-from . import model as M, plan as P, relay as RL, rsync as R, runner as RN, schedule as S
+from . import endpoints as E, model as M, plan as P, relay as RL, rsync as R, runner as RN, schedule as S
 from .host import Host, NotConnected
 
 POLL_SHOWN = 3      # seconds between looks at a run on a cluster while its transfer is shown
@@ -61,9 +61,17 @@ class Manager:
     return self.store.get(tid)
 
   def ends(self, t):
-    """(source tab, destination tab), None for one that is not open"""
-    clusters = self.app.clusters
-    return M.find_tab(clusters, t.source.get("tab")), M.find_tab(clusters, t.dest.get("tab"))
+    """(source tab, destination tab): the tabs (this machine: the local tab, or its stand-in) of its endpoints; None
+    for a tab that is not open, or an endpoint that is no tab"""
+    return self.end_cluster(t.source), self.end_cluster(t.dest)
+
+  def end_cluster(self, ref):
+    eid = E.ref_id(ref)
+    if eid == E.LOCAL:
+      return E.this_machine(self.app.clusters)
+    if eid.startswith("tab:"):
+      return M.find_tab(self.app.clusters, ref.get("tab") or {"destination": eid[4:]})
+    return None
 
   def endpoints(self, t):
     src, dst = self.ends(t)
