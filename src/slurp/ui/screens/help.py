@@ -207,7 +207,7 @@ its full paths). **Endpoints** (Menu → Endpoints…) lists where data can come
 Enter or a click opens its subtab with everything about it. A click on a column's header sorts the list by it (▲),
 another click the other way (▼); by State the running ones come first; the order is kept for the next start.
 **Reload** (`r`) asks again now (also automatically, counted down in the title bar as in the other views; a click
-there turns it off and on): the runs on the clusters and at Globus, and the S3 and Globus endpoints.
+there turns it off and on): the runs on the clusters and at Globus, and the S3, SMB, WebDAV and Globus endpoints.
 
 **New transfer** (`n`, or Menu → Transfer data…, `T`) sets one up in a wizard. `p` pauses (a transfer job is
 cancelled for it: slurp asks first), `c` continues (rsync goes on where it stopped: what is there is not copied again),
@@ -287,19 +287,21 @@ runs can be changed, and the check is not run again (what the last one found sta
 """),
   "EndpointsScreen": ("Endpoints", """
 Where transfers take data from and put it: this machine, every tab (a cluster tab is an endpoint by itself, as long
-as it is open), S3 buckets and Globus collections. Each row: its name, its kind, where it is (a tab linked to a Globus collection:
+as it is open), S3 buckets, SMB shares, WebDAV folders and Globus collections. Each row: its name, its kind, where it is (a tab linked to a Globus collection:
 which), its state (● connected, ○ needs login, connecting, needs you, tab not open; Globus: not set up until you log
 in, expired or needs consent: log in again) and how many transfers use it. **Connect** logs in (a tab: in its tab;
 Globus: the Globus login if there is none, then a test), **Disconnect**, **Test**, **Edit…** (a Globus endpoint: its
 collection; a tab: its link to a Globus collection; S3: its settings and keys), **Delete** (refused while transfers
 use it; its keys leave the keyring too; a tab goes away when it is closed). An S3 endpoint is "not set up" while the
-keyring lacks one of its keys. SMB and WebDAV come with later versions; secrets are kept only in the system keyring.
+keyring lacks one of its keys. S3, SMB and WebDAV: rclone moves the data; secrets are kept only in the system keyring.
 """),
-  "S3EndpointScreen": ("An S3 endpoint", """
-A bucket of AWS S3 or of an S3-compatible store (Ceph, MinIO, a site's object store): its name, the provider, the
-endpoint URL (empty: AWS), the region, the bucket, its folder (where Browse… starts), and its keys (access key, secret
-key; a session token for temporary keys). The keys go to the keyring of this machine only: editing, an empty key field
-keeps the one there. **Test** lists the folder; with **as a destination** it also writes a marker object
+  "RcloneEndpointScreen": ("An S3, SMB or WebDAV endpoint", """
+An endpoint rclone moves data to and from. **S3** (AWS or S3-compatible: Ceph, MinIO, a site's object store): the
+provider, the endpoint URL (empty: AWS), the region, the bucket, and its keys (access key, secret key; a session token
+for temporary keys). **SMB** (a Windows or Samba share): the server, the share, your user, the domain, the port, and
+the password. **WebDAV** (Nextcloud, ownCloud, SharePoint, …): the URL, the vendor, your user, and a password or a
+token. Each has a name and its folder (where Browse… starts). The secrets go to the keyring of this machine only:
+editing, an empty field keeps the one there. **Test** lists the folder; with **as a destination** it also writes a marker object
 (`.slurp-test-…`) and deletes it, and says when it cannot (no right to write). rclone moves the data (it must be
 installed on this machine, and for a tab's files on that cluster).
 """),

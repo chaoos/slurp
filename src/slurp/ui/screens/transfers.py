@@ -510,7 +510,7 @@ class TransferWizard(ModalScreen):
     self.offline = []       # (editing: the ends not connected, so not checked again)
     manager = app.transfers
     # (the endpoints it offers: this machine, the cluster tabs, Globus collections; the others come with their movers)
-    self.endpoints = [e for e in E.listing(app, manager.endpoint_store, manager.endpoint_status) if e.is_tab or e.kind in ("globus", "s3")]
+    self.endpoints = [e for e in E.listing(app, manager.endpoint_store, manager.endpoint_status) if e.is_tab or e.kind in ("globus", *E.RCLONE_KINDS)]
     self.tested = set() # (Globus endpoints tested in the wizard: once)
     by_id = {e.id: e for e in self.endpoints}
     draft = draft or {}
@@ -608,7 +608,7 @@ class TransferWizard(ModalScreen):
             yield Checkbox("Install a temporary key", id="tw-key", compact=True)
           yield Static(id="tw-key-warning")
           with Horizontal(classes="tw-row"):
-            yield Checkbox("Send the keys of the S3 endpoint to the cluster for each run", id="tw-secrets", compact=True)
+            yield Checkbox("Send the secrets of the endpoint to the cluster for each run", id="tw-secrets", compact=True)
           yield Static(id="tw-secrets-warning", classes="tw-warn")
           with Horizontal(classes="tw-row"):
             yield Button(icons.label("reload", "Check again"), id="tw-recheck", compact=True)
@@ -667,7 +667,7 @@ class TransferWizard(ModalScreen):
     return E.globus_only(store, {"endpoint": self.src_id}, {"endpoint": self.dst_id})
 
   def rclone_pair(self):
-    """An end is an S3 endpoint: rclone moves the data"""
+    """An end is an S3, SMB or WebDAV endpoint: rclone moves the data"""
     store = self.app.transfers.endpoint_store
     return E.rclone_pair(store, {"endpoint": self.src_id}, {"endpoint": self.dst_id})
 
@@ -711,7 +711,7 @@ class TransferWizard(ModalScreen):
     e, cluster = self.side(side), (self.src if side == "src" else self.dst)
     if e is None:
       return False, "choose an endpoint"
-    if e.kind in ("globus", "s3"):
+    if e.kind in ("globus", *E.RCLONE_KINDS):
       state, words = self.live_state(side)
       return (True, "") if state == "connected" else (False, f"{e.name}: {words or state}" + (" (Connect)" if state == "not connected" else ""))
     if self.globus_only():
@@ -731,7 +731,7 @@ class TransferWizard(ModalScreen):
     value = value.strip()
     if self.side(side) is not None and self.side(side).kind == "globus":
       return "/~/" + value[2:] if value.startswith("~/") else "/~/" if value == "~" else value
-    if self.side(side) is not None and self.side(side).kind == "s3": # (keys of the bucket, as paths: / is its root)
+    if self.side(side) is not None and self.side(side).kind in E.RCLONE_KINDS: # (paths there: / is its root)
       return "/" + value.lstrip("/")
     return expand_path(value, (home_of(cluster) if cluster is not None else "") or "/")
 
@@ -926,7 +926,7 @@ class TransferWizard(ModalScreen):
       if e is None:
         continue
       state, words = self.live_state(side)
-      if e.kind in ("globus", "s3") and state == "not connected" and e.id not in self.tested: # (tested at once)
+      if e.kind in ("globus", *E.RCLONE_KINDS) and state == "not connected" and e.id not in self.tested: # (tested at once)
         self.tested.add(e.id)
         self.app.transfers.test_globus(e) if e.kind == "globus" else self.app.transfers.test_s3(e)
       mark, style = STATE_MARKS.get(state, ("○", "dim"))
@@ -937,9 +937,9 @@ class TransferWizard(ModalScreen):
                     style="cyan" if cid else "yellow")
       self.query_one(f"#tw-{side}-state", Static).update(text)
       connect = self.query_one(f"#tw-{side}-connect", Button)
-      if e.kind in ("globus", "s3"):
+      if e.kind in ("globus", *E.RCLONE_KINDS):
         connect.display = state not in ("connected", "connecting")
-        label = ("Edit…" if e.kind == "s3" and state == "not set up" else
+        label = ("Edit…" if e.kind in E.RCLONE_KINDS and state == "not set up" else
                  "Log in" if state in ("not set up", "expired", "needs consent") else "Connect")
         if str(connect.label) != icons.label("connect", label):
           connect.label = icons.label("connect", label)
@@ -960,7 +960,7 @@ class TransferWizard(ModalScreen):
   def connect_side(self, side):
     """Connect: the tab's login; one that needs input shows itself in the tab (Log in in its tab)"""
     e = self.side(side)
-    if e is not None and e.kind in ("globus", "s3"):
+    if e is not None and e.kind in ("globus", *E.RCLONE_KINDS):
       self.tested.add(e.id)
       self.app.connect_endpoint(self.app.endpoint_named(e.id))
       return
@@ -1095,10 +1095,10 @@ class TransferWizard(ModalScreen):
   def globus_picker(self, side, multi):
     """Browse… of a Globus endpoint: its collection listed through Globus (None: not one)"""
     e = self.side(side)
-    if e is None or e.kind not in ("globus", "s3") or e.definition is None:
+    if e is None or e.kind not in ("globus", *E.RCLONE_KINDS) or e.definition is None:
       return None
     start = (self.paths[-1].rsplit("/", 1)[0] if side == "src" and self.paths else self.dest_path if side == "dst" else "")
-    if e.kind == "s3": # (S3: its bucket listed with rclone)
+    if e.kind in E.RCLONE_KINDS: # (S3, SMB, WebDAV: listed with rclone)
       from ...transfer import rclone as RC
       s3 = RC.Endpoint(e.definition)
       return PickPathsScreen(None, start or e.definition.settings.get("path") or "/", multi=multi,
@@ -1539,7 +1539,7 @@ class TransferWizard(ModalScreen):
     self.key_changed()
 
   def show_secrets(self):
-    """rclone on a cluster needs the keys of the S3 endpoint there: asked, with what it means"""
+    """rclone on a cluster needs the secrets of the endpoint (keys, a password, a token) there: asked, with what it means"""
     route = self.chosen_route()
     box, warning = self.query_one("#tw-secrets", Checkbox), self.query_one("#tw-secrets-warning", Static)
     needed = route == "rclone-cluster"
@@ -1548,8 +1548,8 @@ class TransferWizard(ModalScreen):
       tab_side = "src" if self.src is not None and self.side("src").is_tab else "dst"
       s3_side = "dst" if tab_side == "src" else "src"
       tab, s3 = self.side_name(tab_side), self.side_name(s3_side)
-      box.label = f"Send the keys of {s3} to {tab} for each run"
-      warning.update(f"⚠ rclone on {tab} needs the keys of {s3}. For each run they are written to the run's folder there "
+      box.label = f"Send the secrets of {s3} to {tab} for each run"
+      warning.update(f"⚠ rclone on {tab} needs the secrets of {s3} (its keys, password or token). For each run they are written to the run's folder there "
                      "(~/.cache/slurp/transfers/…, readable only by you), read when the run starts and deleted at once "
                      f"(and when it ends, in any case). Root and the administrators of {tab} could read them meanwhile. "
                      "Without it: choose a route through this machine, where one is possible.")
@@ -1585,7 +1585,7 @@ class TransferWizard(ModalScreen):
     if strict and not info.get("ok") and not (info.get("keyable") and self.query_one("#tw-key", Checkbox).value):
       return False, "this route needs the temporary key" if info.get("keyable") else "this route did not pass the check"
     if route == "rclone-cluster" and not self.query_one("#tw-secrets", Checkbox).value:
-      return False, "agree to send the keys of the S3 endpoint to the cluster (or choose another route)"
+      return False, "agree to send the secrets of the endpoint to the cluster (or choose another route)"
     if self.chosen_runs_on() is None:
       return False, "where it runs"
     if self.chosen_runs_on() == "job" and not self.query_one("#tw-time", Input).value.strip():
@@ -1710,7 +1710,7 @@ class TransferWizard(ModalScreen):
         + (" (with checksums: all of it is read on both sides)" if t.options.get("checksum") else ""))
     row("Runs", "when you click Run now (Copy as a command gives the command for scrontab or cron)")
     if t.secrets_to:
-      row("Keys", f"the keys of the S3 endpoint go to {next(iter(t.secrets_to))} for each run (deleted when it starts)", "yellow")
+      row("Secrets", f"the secrets of the endpoint go to {next(iter(t.secrets_to))} for each run (deleted when it starts)", "yellow")
     opts = [w for k, w in (("checksum", "checksums"), ("compress", "compressed"), ("temp_key", "temporary key"),
                             ("no_verify", "no checksum verification")) if t.options.get(k)]
     if t.options.get("transfers"):
@@ -2161,7 +2161,7 @@ class TransferScreen(TransfersBase):
       route.append(" · not through this machine", style="dim")
     if t.secrets_to:
       tab = next(iter(t.secrets_to))
-      route.append(f"\nthe keys of the S3 endpoint go to {tab} for each run (read and deleted when it starts)", style="yellow")
+      route.append(f"\nthe secrets of the endpoint go to {tab} for each run (read and deleted when it starts)", style="yellow")
     q("#xd-route", Static).update(route)
     for side in ("src", "dst"):
       self.show_end(t, side)
@@ -2242,13 +2242,13 @@ class TransferScreen(TransfersBase):
     if t.route in ("rclone-here", "rclone-cluster"):
       out = []
       for e in ends:
-        if e.kind == "s3" and not e.connected:
+        if e.kind in E.RCLONE_KINDS and not e.connected:
           self.manager.ensure_tested(e)
           out.append(f"{e.name}: {e.words} (Edit…)" if e.state == "not set up" else f"connect {e.name}")
         elif e.kind == "tab" and t.route == "rclone-cluster" and not e.connected:
           out.append(f"connect {e.name}")
       if t.route == "rclone-cluster" and not self.manager.secrets_agreed(t):
-        out.append("agree to send the keys of the S3 endpoint to the cluster (Edit…, Route)")
+        out.append("agree to send the secrets of the endpoint to the cluster (Edit…, Route)")
       return out
     if t.route == "globus":
       from ...transfer import globus as G
@@ -2310,8 +2310,9 @@ class TransferScreen(TransfersBase):
       cluster, path = src, paths[index]
     ref = t.dest if index < 0 else t.source
     d = self.manager.endpoint_store.get(E.ref_id(ref))
-    if d is not None and d.kind == "s3": # (a bucket: its address, to copy)
-      copy_text(self.app, f"s3://{d.settings.get('bucket', '')}/{path.lstrip('/')}", "its S3 address")
+    if d is not None and d.kind in E.RCLONE_KINDS: # (S3, SMB, WebDAV: its address, to copy)
+      from ...transfer import rclone as RC
+      copy_text(self.app, RC.address(d, path), "its address")
       return
     if E.is_globus(self.manager.endpoint_store, ref): # (a Globus collection: its folder in Globus's web app)
       from urllib.parse import quote
@@ -2681,7 +2682,7 @@ class NewEndpointScreen(ModalScreen):
   """
   BINDINGS = [Binding("escape", "cancel", "Cancel")]
   KINDS = [("ssh", "SSH: a cluster (it opens as a tab)"), ("s3", "S3 or S3-compatible storage"), ("globus", "Globus collection"),
-           ("smb", "SMB share"), ("webdav", "WebDAV")]
+           ("smb", "SMB share (Windows, Samba)"), ("webdav", "WebDAV (Nextcloud, ownCloud, SharePoint, …)")]
 
   def __init__(self, available=None):
     super().__init__()

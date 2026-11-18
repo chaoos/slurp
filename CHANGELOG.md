@@ -62,6 +62,9 @@ version may need the helper of the same version).
   the keys there for each run: read and deleted when the run starts), with
   its progress, Pause, Continue, Verify (`rclone check`) and Copy as a
   command (the keys as placeholders).
+  **SMB shares** and **WebDAV folders** (Nextcloud, ownCloud, SharePoint,
+  …) work the same way through rclone: their password or token only in
+  the keyring, obscured for rclone.
 - Rule packs: `transfer_partition`, `transfer_hosts`, `globus`,
   `login_node_limits` (transfers).
 - Progress: only lines like the progress count (the structure of the

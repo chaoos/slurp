@@ -40,7 +40,7 @@ async def until(pilot, cond, seconds=15):
 
 
 def test_s3_endpoint_and_transfer(check, s3, tmp_path):
-  from slurp.ui.screens.s3 import S3EndpointScreen
+  from slurp.ui.screens.rclone_form import RcloneEndpointScreen
   from slurp.ui.screens.transfers import NewEndpointScreen, TransferScreen, TransferWizard
   url, client = s3
   src = tmp_path / "run1"
@@ -58,15 +58,15 @@ def test_s3_endpoint_and_transfer(check, s3, tmp_path):
       app.screen.query_one(".ne-s3").value = True; await pilot.pause(0.1)
       app.screen.query_one("#ne-next").press(); await pilot.pause(0.4)
       form = app.screen
-      check("the S3 form", isinstance(form, S3EndpointScreen))
+      check("the S3 form", isinstance(form, RcloneEndpointScreen))
       for wid, value in (("name", "my bucket"), ("endpoint", url), ("region", "us-east-1"), ("bucket", "data"),
                          ("access_key", "AK"), ("secret_key", "SK")):
-        form.query_one(f"#s3-{wid}").value = value
-      form.query_one("#s3-write").value = True
-      form.query_one("#s3-test").press()
-      check("Test as a destination: listed and written", await until(pilot, lambda: "can be written" in str(form.query_one("#s3-result").render())),
-            str(form.query_one("#s3-result").render()))
-      form.query_one("#s3-save").press(); await pilot.pause(0.4)
+        form.query_one(f"#rc-{wid}").value = value
+      form.query_one("#rc-write").value = True
+      form.query_one("#rc-test").press()
+      check("Test as a destination: listed and written", await until(pilot, lambda: "can be written" in str(form.query_one("#rc-result").render())),
+            str(form.query_one("#rc-result").render()))
+      form.query_one("#rc-save").press(); await pilot.pause(0.4)
       store = app.transfers.endpoint_store
       d = next((d for d in store.defs if d.kind == "s3"), None)
       check("saved", d is not None and d.settings["bucket"] == "data" and d.secrets == ["access_key", "secret_key"], d)

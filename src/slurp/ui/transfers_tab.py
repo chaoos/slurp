@@ -230,15 +230,16 @@ class TransfersTab:
     from ..transfer import globus as G, rclone as RC
     ok, why = G.available()
     s3, s3_why = RC.available()
-    return {"ssh": "", "globus": "" if ok else why, "s3": "" if s3 else s3_why}
+    rclone = "" if s3 else s3_why
+    return {"ssh": "", "globus": "" if ok else why, "s3": rclone, "smb": rclone, "webdav": rclone}
 
   def edit_endpoint(self, endpoint, kind):
     """New (endpoint None) or Edit… of an endpoint; for a tab ("tab"): its link to a Globus collection"""
     from .screens.globus import GlobusEndpointScreen
     from ..transfer.manager import site_of
     store = self.transfers.endpoint_store
-    if kind == "s3":
-      from .screens.s3 import S3EndpointScreen
+    if kind in ("s3", "smb", "webdav"):
+      from .screens.rclone_form import RcloneEndpointScreen
       from ..transfer import secrets as S
       def saved_s3(result):
         if not result:
@@ -254,7 +255,7 @@ class TransfersTab:
         self.transfers.endpoint_status.pop(d.id, None)
         self.transfers.changed(None)
         self.connect_endpoint(self.endpoint_named(d.id))
-      self.push_screen(S3EndpointScreen(store, endpoint=endpoint), saved_s3)
+      self.push_screen(RcloneEndpointScreen(store, kind, endpoint=endpoint), saved_s3)
     elif kind == "globus":
       def saved(result):
         if not result:
@@ -311,9 +312,9 @@ class TransfersTab:
     from ..transfer import globus as G
     if endpoint is None:
       return
-    if endpoint.kind == "s3":
+    if endpoint.kind in ("s3", "smb", "webdav"):
       if endpoint.state == "not set up":
-        self.edit_endpoint(endpoint, "s3") # (its keys: in the form, to the keyring)
+        self.edit_endpoint(endpoint, endpoint.kind) # (its secrets: in the form, to the keyring)
         return
       def tested_s3(state, words):
         if not quiet or state != "connected":

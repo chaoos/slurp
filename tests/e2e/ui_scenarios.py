@@ -3572,6 +3572,52 @@ async def t_transfer_s3(app, pilot):
     server.stop()
 
 
+async def t_transfer_webdav(app, pilot):
+  """WebDAV with the lab's tab: rclone on the cluster (the lab: this machine), the password sent for the run (obscured
+  in the keys file, deleted when the run starts): detached up into the WebDAV folder; no password left"""
+  import glob
+  import socket
+  import subprocess
+  from slurp.transfer import endpoints as E, model as M, secrets as S
+  with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+  root = os.path.join(HERE, "davroot")
+  os.makedirs(root, exist_ok=True)
+  server = subprocess.Popen(["rclone", "--config", "", "serve", "webdav", root, "--addr", f"127.0.0.1:{port}", "--user", "dav",
+                             "--pass", "pw789"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+  try:
+    def listening():
+      try:
+        socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+        return True
+      except OSError:
+        return False
+    await until(pilot, listening, 10)
+    store = app.transfers.endpoint_store
+    store.add(E.EndpointDef("davlab", "lab dav", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"]))
+    S.put(S.user("davlab", "password"), "pw789")
+    lab = next(c for c in app.clusters if c.destination)
+    ref = M.tab_ref(lab)
+    src, _ = xfer_tree("dav")
+    t = M.Transfer(M.new_id(), "up to WebDAV", {"endpoint": E.tab_id(lab), "tab": ref, "paths": [src]},
+                   {"endpoint": "davlab", "name": "lab dav", "path": "/up"}, route="rclone-cluster", runs_on="detached",
+                   secrets_to={lab.destination: ["davlab"]})
+    app.transfers.add(t)
+    plan = app.transfers.rclone_check(t, lambda p: None)
+    check("WebDAV: the check passed (the folder made at the run)", plan["routes"]["rclone-cluster"]["ok"] and "is made at the run" in plan["steps"]["rclone"]["text"], plan)
+    t.plan = plan
+    app.transfers.run_now(t)
+    check("WebDAV: detached on the cluster: done", await until(pilot, lambda: t.state == "done", 90), (t.state, t.message, t.log[-4:]))
+    check("WebDAV: the files there", same_tree(src, os.path.join(root, "up", "src")))
+    folder = t.runs[-1]["folder"]
+    check("WebDAV: no password left in the run's folder", not os.path.exists(os.path.join(folder, "keys"))
+          and not any("pw789" in open(f, errors="replace").read() for f in glob.glob(os.path.join(folder, "*")) if os.path.isfile(f)))
+    app.transfers.delete(t)
+  finally:
+    server.kill()
+
+
 def xfer_tree(name, big=0):
   """A source tree in the lab (the cluster) and an empty destination folder -> (source, destination)"""
   src, dst = os.path.join(HERE, "xfer", name, "src"), os.path.join(HERE, "xfer", name, "dst")

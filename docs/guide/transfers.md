@@ -80,10 +80,20 @@ itself while it is open; closed, a transfer's endpoint shows *tab not open*, wit
 **Menu → Endpoints…** shows them in a subtab of the Transfers tab: each with its kind, where it is, its state (●
 connected with its latency, ○ needs login, connecting, needs you, tab not open) and how many transfers use it, with
 **Connect**, **Disconnect**, **Test**, **Edit…** and **Delete** (refused while transfers use it, which it names).
-SMB and WebDAV come later; secrets are kept only in the system keyring (Secret Service, Keychain, Windows
+Secrets are kept only in the system keyring (Secret Service, Keychain, Windows
 Credential Manager), never in a file of slurp: where there is no keyring, the kinds that need one say so.
 
-## S3
+## S3, SMB and WebDAV
+
+Three kinds of endpoints that rclone moves data to and from, set up and used alike:
+
+- **SMB** (New endpoint… → SMB share): a share of a Windows or Samba file server: the server, the share, your user,
+  the domain and port where needed, and the password; paths are in the share (`/` its root).
+- **WebDAV** (New endpoint… → WebDAV): Nextcloud, ownCloud, SharePoint or another WebDAV service: its URL (for
+  Nextcloud `https://…/remote.php/dav/files/<you>`), the vendor, your user, and a password or a token; paths are under
+  the URL.
+- **S3**, below; what follows for S3 holds for SMB and WebDAV too: rclone gets their password obscured in its
+  environment, a run on a cluster asks before their secrets go there, Copy as a command has them as placeholders.
 
 **New endpoint… → S3** makes an S3 endpoint: a bucket of AWS S3 or an S3-compatible store (Ceph, MinIO, a site's
 object store) with its provider, endpoint URL, region, a folder where Browse… starts, and its keys (access key,
@@ -192,7 +202,7 @@ paths are below the list for the transfer highlighted), its route and where it r
 last; the line below says why it waits or how it failed. A click on a column's header sorts the list by it (▲;
 again: the other way, ▼; by State the running ones first), and the order is kept for the next start. The list, a
 transfer's subtab and the Endpoints subtab reload as the other views do (counted down in the title bar; a click there
-turns it off and on), and **Reload** (`r`) asks again now: the runs on the clusters and at Globus, the S3 and Globus
+turns it off and on), and **Reload** (`r`) asks again now: the runs on the clusters and at Globus, the S3, SMB, WebDAV and Globus
 endpoints. `Enter` or a
 click opens a transfer in a
 subtab of its own:
