@@ -117,7 +117,9 @@ its environment, the keys too, never on a command line. Which rclone runs:
   on the login node or as a transfer job, as rsync's runs do, and goes on without slurp. For it the keys must go to the
   cluster: the Route step asks, with what it means. For each run they are written to the run's folder there (readable
   only by you), read when the run starts and deleted at once, and removed when it ends in any case; the transfer's
-  subtab says that its keys go there.
+  subtab says that its keys go there. Where the login nodes have no rclone but the site has a transfer partition (on
+  Daint, its xfer nodes may have it), the route passes as a **transfer job** only: before Next the wizard looks for
+  rclone on a node of the partition (`srun --immediate`; no node free: not checked, with a note).
 - **rclone on this machine, the cluster over slurp's SSH**: a tab and a bucket, where the cluster has no rclone. rclone
   runs here and reaches the cluster's files over the tab's own SSH session (sftp through its control socket: no new
   login, no question); the data passes this machine, and the keys stay here. It needs rclone 1.64 or newer on this

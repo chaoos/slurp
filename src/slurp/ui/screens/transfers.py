@@ -1626,7 +1626,7 @@ class TransferWizard(ModalScreen):
   def node_check_key(self):
     route = self.chosen_route()
     info = self.plan.get("routes", {}).get(route or "", {})
-    if route not in ("direct-push", "direct-pull") or self.chosen_runs_on() != "job" or not info.get("ok"):
+    if route not in ("direct-push", "direct-pull", "rclone-cluster") or self.chosen_runs_on() != "job" or not info.get("ok"):
       return None
     return route, self.query_one("#tw-partition", Input).value.strip(), self.query_one("#tw-account", Input).value.strip()
 
@@ -1634,12 +1634,17 @@ class TransferWizard(ModalScreen):
     key = self.node_check_key()
     if key is not None and key[1] and key not in self.node_checks:
       route, partition, account = key
-      self.node_checks[key] = ("running", f"checking the login from a node of {partition} (srun) …")
+      self.node_checks[key] = ("running", f"checking {'rclone on' if route == 'rclone-cluster' else 'the login from'} a node of {partition} (srun) …")
       def done(result):
         self.node_checks[key] = result
         self.show_node_check()
         self.update_next()
-      self.app.transfers.probe_node(self.draft(), route, partition, account, done)
+      if route == "rclone-cluster":
+        t = self.draft()
+        t.route = route
+        self.app.transfers.probe_rclone_node(t, partition, account, done)
+      else:
+        self.app.transfers.probe_node(self.draft(), route, partition, account, done)
     self.show_node_check()
 
   def show_node_check(self):
@@ -1648,7 +1653,7 @@ class TransferWizard(ModalScreen):
     key = self.node_check_key()
     state, words = self.node_checks.get(key, (None, "")) if key else (None, "")
     if key is not None and not key[1]:
-      state, words = None, "no partition: the login is not checked from a node of it"
+      state, words = None, f"no partition: {'rclone' if key[0] == 'rclone-cluster' else 'the login'} is not checked on a node of it"
     mark, style = {"running": (self.app.spinner(), "yellow"), True: ("✓", "green"), False: ("✗", "red"), None: ("ⓘ", "dim")}[state]
     self.query_one("#tw-node-check", Static).update(Text(f"{mark} {words}", style=style) if words else "")
 
@@ -1751,7 +1756,7 @@ class TransferWizard(ModalScreen):
     if key is not None and key[1] and strict:
       state, words = self.node_checks.get(key, ("running", ""))
       if state == "running":
-        return False, f"checking the login from a node of {key[1]}"
+        return False, f"checking {'rclone on' if key[0] == 'rclone-cluster' else 'the login from'} a node of {key[1]}"
       if state is False:
         return False, words
     return True, ""

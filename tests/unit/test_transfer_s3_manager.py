@@ -150,3 +150,47 @@ def test_make_folder(check, s3, tmp_path):
   note = RC.make_folder(RC.Endpoint(d), "/new")
   check("made: the note of S3's empty folders", "no empty folders" in note, note)
   check("no marker left", keys(client) == [], keys(client))
+
+
+def test_rclone_only_on_the_transfer_nodes(check, s3, tmp_path, monkeypatch):
+  """A tab whose login nodes have no rclone, with a transfer partition: rclone on the cluster passes as a transfer job
+  only (its nodes may have rclone: checked there with srun); without a partition: not; rclone here over SSH too"""
+  import subprocess
+  from slurp.transfer import plan as P
+  url, client = s3
+  store, src = setup(tmp_path, url)
+  app = App()
+  m = MG.Manager(app, M.Store(str(tmp_path / "transfers.json")), store)
+  cluster = types.SimpleNamespace(name="daint", destination="daint", connection=types.SimpleNamespace(ready=True, control_path="/x", destination="daint"))
+  monkeypatch.setattr(m, "end_cluster", lambda ref: cluster if E.ref_id(ref).startswith("tab:") else None)
+  class Host:
+    def __init__(self, c):
+      self.name = c.name
+    def sh(self, script, *args, **kw):
+      return subprocess.CompletedProcess([], 0, "", "") # (the login node: no rclone)
+  monkeypatch.setattr(MG, "Host", Host)
+  monkeypatch.setattr(MG.RC, "version", lambda: (1, 60, 1))
+  t = M.Transfer(M.new_id(), "up", {"endpoint": "tab:daint", "tab": {"destination": "daint", "name": "daint"}, "paths": ["/scratch/run1"]},
+                 {"endpoint": "s1", "path": "/in"}, route="rclone-cluster", runs_on="job")
+  monkeypatch.setattr(MG.P, "partition_of", lambda c, site: "xfer")
+  plan = m.rclone_check(t, lambda p: None)
+  info = plan["routes"]["rclone-cluster"]
+  check("with a transfer partition: passes, as a transfer job only", info["ok"] and info["runs_on"] == ["job"] and plan["recommended"] == "rclone-cluster", plan)
+  check("…said", "not on the login node of daint" in plan["steps"]["rclone"]["text"] and "xfer" in plan["steps"]["rclone"]["text"], plan["steps"])
+  monkeypatch.setattr(MG.P, "partition_of", lambda c, site: "")
+  plan = m.rclone_check(t, lambda p: None)
+  check("without one: not", not plan["routes"]["rclone-cluster"]["ok"] and "not installed on daint" in plan["routes"]["rclone-cluster"]["why"], plan["routes"])
+
+  calls = []
+  class Node:
+    def __init__(self, out):
+      self.out = out
+    def sh(self, script, *args, **kw):
+      calls.append(args)
+      return subprocess.CompletedProcess([], 0, self.out, "")
+  check("rclone on a node of the partition", P.rclone_on(Node("rclone v1.68.2\n"), "xfer", "g34") == (True, "rclone 1.68.2 on a node of xfer")
+        and "--partition=xfer" in calls[-1] and "--account=g34" in calls[-1], calls[-1:])
+  ok, words = P.rclone_on(Node("sh: rclone: command not found\n"), "xfer")
+  check("none there: said", ok is False and "no rclone on a node of xfer" in words, words)
+  ok, words = P.rclone_on(Node("srun: error: Unable to allocate resources: Immediate execution impossible\n"), "xfer")
+  check("no node free: not checked", ok is None and "not checked" in words, words)

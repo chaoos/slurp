@@ -251,6 +251,23 @@ def login_works_on(client, target, folder, partition, account="", seconds=60):
     return None, f"no node of {partition} within {seconds} s: not checked there ({said[-1][:120] if said else ''})"
   return False, f"a node of {partition} cannot log in to {target['host']} by itself: {said[-1][:160] if said else 'refused'}"
 
+def rclone_on(client, partition, account="", seconds=60):
+  """Is rclone on a node of a partition (a transfer job runs it there; the login nodes may have none)? srun
+  --immediate: no node free within seconds: not checked. -> (True | False | None, words)"""
+  srun = ["srun", f"--partition={partition}", "--ntasks=1", "--time=00:05:00", f"--immediate={int(seconds)}", "--job-name=slurp-check"]
+  if account:
+    srun.append(f"--account={account}")
+  result = client.sh('"$@" sh -c \'rclone version 2>&1 | head -n 1 || true\' 2>&1 | tail -n 8', *srun, timeout=seconds + 120, retry=False)
+  out = result.stdout or ""
+  from . import rclone as RC
+  found = RC.version_of(out)
+  if found:
+    return True, f"rclone {'.'.join(map(str, found))} on a node of {partition}"
+  said = [l.strip() for l in out.splitlines() if l.strip()]
+  if any(n in out for n in NO_NODE):
+    return None, f"no node of {partition} within {seconds} s: not checked there ({said[-1][:120] if said else ''})"
+  return False, f"no rclone on a node of {partition} either" + (f" ({said[-1][:120]})" if said else "")
+
 TIMED_SCRIPT = ('t0=$(date +%s%N); sh -c "$1" >/dev/null 2>&1; r=$?; t1=$(date +%s%N); '
                 'printf "%s %s\\n" "$r" "$(( (t1 - t0) / 1000000 ))"')
 

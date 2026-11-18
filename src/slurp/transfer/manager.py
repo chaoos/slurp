@@ -543,9 +543,10 @@ class Manager:
       client = Host(cluster)
       local_side = "source" if tab is t.source else "dest"
       s3 = self.s3_of(t.dest if local_side == "source" else t.source)
-      have = client.sh("command -v rclone >/dev/null 2>&1 && rclone version 2>/dev/null | head -n 1", retry=False)
-      if have.returncode:
-        raise OSError(f"rclone is not installed on {client.name}")
+      if t.runs_on != "job": # (a transfer job runs it on a node of its partition: rclone may be there only)
+        have = client.sh("command -v rclone >/dev/null 2>&1 && rclone version 2>/dev/null | head -n 1", retry=False)
+        if have.returncode:
+          raise OSError(f"rclone is not installed on the login node of {client.name}: run it as a transfer job (Edit…, Route)")
       if local_side == "source":
         local, remote = self.rclone_sources(t, None, cluster), []
       else:
@@ -637,10 +638,16 @@ class Manager:
             raise RC.RcloneError(f"connect {M.tab_name((tab.get('tab') or {}))} first")
         if route == "rclone-cluster":
           found = RC.version_of(Host(cluster).sh("rclone version 2>/dev/null | head -n 1").stdout or "")
-          if not found:
+          partition = P.partition_of(cluster, site_of)
+          if found:
+            words.append(f"rclone {'.'.join(map(str, found))} on {cluster.name}")
+            runs[route] = ["detached"] + (["job"] if partition else [])
+          elif partition: # (the login nodes have none: a transfer job may find it on a node of the partition)
+            words.append(f"rclone is not on the login node of {cluster.name}: it runs as a transfer job on a node of "
+                         f"{partition} (rclone there is checked before Next)")
+            runs[route] = ["job"]
+          else:
             raise RC.RcloneError(f"rclone is not installed on {cluster.name} (it runs there)")
-          words.append(f"rclone {'.'.join(map(str, found))} on {cluster.name}")
-          runs[route] = ["detached"] + (["job"] if P.partition_of(cluster, site_of) else [])
         else:
           here = RC.version()
           if not here:
@@ -1013,13 +1020,28 @@ class Manager:
       self.from_thread(done, result)
     threading.Thread(target=work, daemon=True, name=f"node check {t.name}").start()
 
+  def probe_rclone_node(self, t, partition, account, done):
+    """rclone on a node of a partition, as a transfer job of rclone on the cluster would find it (srun, in a thread):
+    done((True | False | None, words)) on the UI thread"""
+    def work():
+      try:
+        result = P.rclone_on(self.client(t), partition, account)
+      except Exception as e:
+        result = (None, f"not checked: {e}")
+      self.from_thread(done, result)
+    threading.Thread(target=work, daemon=True, name=f"node check {t.name}").start()
+
   def test_job(self, t, route, done):
     """sbatch --test-only of the transfer job t would submit (its options), on the cluster that runs rsync (in a
     thread): done((True | False, words)) on the UI thread"""
     def work():
       try:
-        source, dest = self.hosts(t)
-        client = dest if client_side(route) == "dest" else source
+        if route == "rclone-cluster": # (the tab's cluster: the other end is no tab)
+          t.route = route
+          client = self.client(t)
+        else:
+          source, dest = self.hosts(t)
+          client = dest if client_side(route) == "dest" else source
         folder = RN.folder_of(client, t)
         client.sh('mkdir -p "$1" && chmod 700 "$1"', folder, retry=False)
         result = RN.test_job(client, t, folder)
