@@ -856,11 +856,12 @@ def test_done_is_100(check):
       check("done: 100 %", shown_percent(t) == 100.0)
       app.show_transfers(); await pilot.pause(0.6)
       table = app.screen.query_one("#xfer-list")
-      cell = str(table.get_row_at(0)[[c.value for c in table.columns].index("progress")])
-      check("in the list", "100%" in cell, cell)
+      cell = table.get_row_at(0)[[c.value for c in table.columns].index("progress")]
+      from rich.progress_bar import ProgressBar as RichProgressBar
+      check("in the list: the job list's bar, full", isinstance(cell, RichProgressBar) and cell.completed == 100 and cell.width == 8, cell)
       app.open_transfer(t); await pilot.pause(0.6)
-      shown = str(app.screen.query_one("#xd-progress").render())
-      check("in its details", "100%" in shown, shown)
+      details_bar = app.screen.query_one("#xd-bar")
+      check("in its details: the job window's bar, full", details_bar.display and details_bar.percentage == 1.0, details_bar.percentage)
       t.state = "paused"
       check("paused: as far as it got", shown_percent(t) == 37.0)
       await pilot.press("q")

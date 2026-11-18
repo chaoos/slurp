@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 
 import humanize
+from rich.progress_bar import ProgressBar as RichProgressBar
 from rich.style import Style
 from rich.text import Text
 from textual import on
@@ -14,7 +15,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, ContentSwitcher, DataTable, Input, Label, RadioButton, RadioSet, Select, Static
+from textual.widgets import Button, Checkbox, ContentSwitcher, DataTable, Input, Label, ProgressBar, RadioButton, RadioSet, Select, Static
 
 from ...cluster.listing import listing
 from ...cluster.remote import HEALTH_STYLES, connection_health, in_background
@@ -60,12 +61,17 @@ def shown_percent(t):
   p = t.progress.get("percent")
   return p if p is not None and t.state in ("running", "pausing", "paused", "done-errors", "failed", "waiting") else None
 
-def bar(percent, width=12):
-  """A bar of text: ███████░░░  70%"""
+class ListBar(RichProgressBar):
+  """The bar of the list: as the job list's (Rich's, 8 wide); its text is its percent, so that the list, refreshed in
+  place, updates the cell only when it changed"""
+  def __str__(self):
+    return f"{self.completed:.0f}%"
+
+def bar(percent, width=8):
+  """How far it is, as in the job list ("" when not known)"""
   if percent is None:
-    return Text("")
-  filled = int(round(width * max(0.0, min(100.0, percent)) / 100))
-  return Text.assemble(("█" * filled, "green"), ("░" * (width - filled), "dim"), f" {percent:3.0f}%")
+    return ""
+  return ListBar(total=100, completed=max(0.0, min(100.0, percent)), width=width)
 
 def human(n):
   return humanize.naturalsize(n or 0, binary=True)
@@ -2057,6 +2063,9 @@ class TransferScreen(TransfersBase):
   #xd-actions Button { margin-right: 1; }
   #xd-rate { height: 6; margin-top: 1; }
   #xd-closes { color: $text-muted; }
+  #xd-progress-row { height: auto; }
+  #xd-bar { width: 40; margin-right: 2; }
+  #xd-progress { width: 1fr; }
   #xd-ends { height: auto; margin-top: 1; }
   .xd-card { width: 1fr; height: auto; border: round $panel; padding: 0 1; margin-right: 1; }
   .xd-card Button { margin-top: 0; }
@@ -2106,7 +2115,9 @@ class TransferScreen(TransfersBase):
         yield Button(icons.label("copy", "Copy as a command"), id="xd-copy", compact=True,
                      tooltip="the command of a run, to put into scrontab or cron by hand")
         yield Button(icons.label("cancel_job", "Delete"), id="xd-delete", variant="error", compact=True, tooltip="its settings and history (not the files)")
-      yield Static(id="xd-progress")
+      with Horizontal(id="xd-progress-row"): # (as the job window's progress: its bar, then the words)
+        yield ProgressBar(total=100, show_eta=False, id="xd-bar")
+        yield Static(id="xd-progress")
       yield Static(id="xd-current")
       yield Static("Rate", classes="section")
       yield TimePlot(color="green", fmt=lambda v: human(v) + "/s", id="xd-rate")
@@ -2178,10 +2189,14 @@ class TransferScreen(TransfersBase):
     verify.disabled = t.active or t.id in self.verifying or bool(waits_for)
     p = t.progress
     lines = Text()
+    progress_bar = q("#xd-bar", ProgressBar)
+    percent = shown_percent(t) if t.state == "done" else p.get("percent")
+    progress_bar.display = percent is not None
+    if percent is not None:
+      progress_bar.update(total=100, progress=max(0.0, min(100.0, percent)))
     if p.get("percent") is not None or p.get("bytes") or t.state == "done":
-      lines.append_text(bar(shown_percent(t) if t.state == "done" else p.get("percent"), 40))
       total = p.get("total")
-      lines.append(f"   {human(p.get('bytes'))}" + (f" of {human(total)}" if total else ""))
+      lines.append(f"{human(p.get('bytes'))}" + (f" of {human(total)}" if total else ""))
       if t.state == "running":
         if p.get("rate"):
           lines.append(f" · {rate_text(p['rate'])}")
