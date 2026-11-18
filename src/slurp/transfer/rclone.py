@@ -280,15 +280,23 @@ def cluster_command(transfer, local_side, s3, s3_paths, local_paths, dest):
   or "dest"; s3: the Endpoint (its remote's environment comes from the file `keys`)"""
   lines = ["#!/bin/sh", f"# the rclone command of slurp transfer {transfer.id}",
            'd=$(dirname "$0")', 'if [ -f "$d/keys" ]; then set -a; . "$d/keys"; set +a; rm -f "$d/keys"; fi',
-           "command -v rclone >/dev/null 2>&1 || { echo 'slurp: rclone is not installed here' >&2; exit 127; }", "rc=0"]
+           "command -v rclone >/dev/null 2>&1 || { echo 'slurp: rclone is not installed here' >&2; exit 127; }",
+           # (Pause: TERM to this script, passed on to rclone; the pipeline runs in the background, so that the trap
+           # runs at once, not after it)
+           "stop=0; rc=0",
+           """trap 'stop=1; kill -TERM "$(cat "$d/rclone.pid" 2>/dev/null)" 2>/dev/null' TERM INT HUP"""]
   sources = local_paths if local_side == "source" else s3_paths
   for folder, rules, _names in groups(sources):
     src = folder if local_side == "source" else s3.path(folder)
     dst = s3.path(dest) if local_side == "source" else dest
     argv = ["rclone", "--config", "", *copy_argv(src, dst, rules, transfer.options)]
-    lines.append(f"{{ {shlex.join(argv)} 2>&1 >/dev/null; echo $? > \"$d/rclone.rc\"; }} | awk '{PROGRESS_AWK}'")
-    lines.append('r=$(cat "$d/rclone.rc" 2>/dev/null || echo 1); [ "$r" -ne 0 ] && rc=$r')
-  lines.append("exit $rc")
+    lines += ['if [ $stop = 0 ]; then',
+              f"  ( {{ {shlex.join(argv)} 2>&1 >/dev/null & echo $! > \"$d/rclone.pid\"; wait $!; echo $? > \"$d/rclone.rc\"; }}"
+              f" | awk '{PROGRESS_AWK}' ) &",
+              "  p=$!; wait $p; while kill -0 $p 2>/dev/null; do wait $p; done",
+              '  r=$(cat "$d/rclone.rc" 2>/dev/null || echo 1); [ "$r" -ne 0 ] && rc=$r',
+              "fi"]
+  lines += ['rm -f "$d/rclone.pid" "$d/rclone.rc"', "[ $stop = 1 ] && exit 143", "exit $rc"]
   return "\n".join(lines) + "\n"
 
 def keys_file(env):

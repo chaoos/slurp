@@ -83,6 +83,7 @@ wait $apid
 rm -f pipe
 printf '{"exit": %s, "ended": %s, "host": "%s", "job": "%s"}\n' "$rc" "$(awk "$srand_now")" "$(hostname)" "${SLURM_JOB_ID:-}" > result.json
 echo "== ended with $rc" >> log
+rm -f keys rclone.rc # (the keys of an rclone run: never left behind)
 kill $beat 2>/dev/null
 rm -rf lock
 exit $rc

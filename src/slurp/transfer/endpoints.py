@@ -193,6 +193,15 @@ def listing(app, store, statuses=None):
 
 def default_state(definition):
   """(state, words) of a defined endpoint not connected yet in this session"""
+  if definition.kind == "s3":
+    from . import rclone as RC, secrets as S
+    ok, why = RC.available()
+    if not ok:
+      return "not set up", why
+    missing = [n for n in S.missing(definition) if n not in OPTIONAL_SECRETS]
+    if missing:
+      return "not set up", f"the keyring has no {' and no '.join(m.replace('_', ' ') for m in missing)}: Edit…"
+    return "not connected", ""
   if definition.kind == "globus":
     from . import globus as G
     ok, why = G.available()
@@ -223,6 +232,23 @@ def is_globus(store, ref):
 def globus_possible(store, source, dest):
   """Can Globus move the data between the ends (both have a collection)?"""
   return collection_of(store, source)[0] is not None and collection_of(store, dest)[0] is not None
+
+def is_s3(store, ref):
+  d = store.get(ref_id(ref))
+  return d is not None and d.kind == "s3"
+
+def rclone_pair(store, source, dest):
+  """rclone moves it: an end is an S3 endpoint"""
+  return is_s3(store, source) or is_s3(store, dest)
+
+def rclone_routes(store, source, dest):
+  """The rclone routes of a pair: rclone here (this machine and S3, or S3 and S3), or on the cluster of a tab"""
+  if not rclone_pair(store, source, dest):
+    return []
+  tab = next((ref for ref in (source, dest) if ref_id(ref).startswith("tab:")), None)
+  if tab is not None and not (is_s3(store, source) and is_s3(store, dest)):
+    return ["rclone-cluster"]
+  return ["rclone-here"]
 
 def globus_only(store, source, dest):
   """Only Globus can move it (an end is a Globus endpoint)"""

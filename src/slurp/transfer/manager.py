@@ -6,11 +6,14 @@ It needs of the app: clusters (the tabs), notify(message, title=, severity=, tim
 login(cluster, show=False), needs_login(cluster) and login_visible(cluster). Everything that waits for a cluster runs in threads of its own;
 tick() (every second, on the UI thread) only looks at the state."""
 
+import os
+import re
+import subprocess
 import threading
 import time
 
 from ..state import log
-from . import endpoints as E, globus as G, model as M, plan as P, relay as RL, rsync as R, runner as RN
+from . import endpoints as E, globus as G, model as M, plan as P, rclone as RC, relay as RL, rsync as R, runner as RN
 from .host import Host, NotConnected
 
 POLL_SHOWN = 3      # seconds between looks at a run on a cluster while its transfer is shown
@@ -39,6 +42,8 @@ class Manager:
     self.endpoint_store = endpoints or E.EndpointStore()
     self.endpoint_status = {} # id of a defined endpoint -> (state, words) of this session
     self.relays = {}        # id -> Relay (runs in slurp)
+    self.rclones = {}       # id -> the rclone process of a run on this machine
+    self.stopping = set()   # ids of runs on this machine being paused
     self.followed = {}      # id -> next time to look at its run on the cluster
     self.polling = set()    # ids being looked at now
     self.shown = set()      # ids whose details (or the list) are shown: looked at more often
@@ -78,9 +83,13 @@ class Manager:
     return Host(src), Host(dst)
 
   def not_ready(self, t):
-    """The ends that are not connected: [cluster or None (not open)] (a Globus transfer needs no tab)"""
-    if t.route == "globus":
+    """The ends that are not connected: [cluster or None (not open)] (a Globus transfer and rclone on this machine
+    need no tab; rclone on a cluster needs that tab only)"""
+    if t.route in ("globus", "rclone-here"):
       return []
+    if t.route == "rclone-cluster":
+      c = self.end_cluster(self.tab_end(t))
+      return [c] if c is None or (c.destination and not (c.connection and c.connection.ready)) else []
     src, dst = self.ends(t)
     return [c for c in (src, dst) if c is None or (c.destination and not (c.connection and c.connection.ready))]
 
@@ -121,6 +130,12 @@ class Manager:
     if t.route == "globus":
       self.start_globus(t)
       return
+    if t.route == "rclone-cluster" and not self.secrets_agreed(t):
+      t.state, t.message = "failed", ("its run sends the keys of the S3 endpoint to the cluster: agree to it first "
+                                      "(Edit…, Route), or run it through this machine")
+      t.event(t.message)
+      self.changed(t)
+      return
     missing = self.not_ready(t)
     if missing:
       names = ", ".join(c.name if c else "a closed tab" for c in missing)
@@ -138,7 +153,8 @@ class Manager:
     t.run = {"kind": t.runs_on, "started": time.time(), "route": t.route}
     t.event(f"run started ({M.ROUTES.get(t.route, t.route)}, {M.RUNS_ON.get(t.runs_on, t.runs_on)})")
     self.changed(t)
-    target = self.run_relay if t.runs_on == "slurp" else self.run_on_cluster
+    target = (self.run_rclone_here if t.route == "rclone-here" else self.run_rclone_cluster if t.route == "rclone-cluster"
+              else self.run_relay if t.runs_on == "slurp" else self.run_on_cluster)
     threading.Thread(target=target, args=(t,), daemon=True, name=f"transfer {t.name}").start()
 
   # ---- Globus: a task that Globus runs (slurp submits it and follows it)
@@ -356,7 +372,242 @@ class Manager:
     self.ended(t, code, message, stats=relay.output.stats, stopped=relay.stopped)
 
   # ---- runs on a cluster (detached, transfer job)
+  # ---- rclone (S3): on this machine, or on the cluster of a tab
+  def tab_end(self, t):
+    """The end of an rclone transfer that is a tab (or this machine)"""
+    return t.source if E.is_tab(E.ref_id(t.source)) else t.dest
+
+  def s3_of(self, ref, keys=None):
+    """The S3 endpoint of an end for rclone (None: not one); keys None: from the keyring"""
+    d = self.endpoint_store.get(E.ref_id(ref))
+    return RC.Endpoint(d, keys) if d is not None and d.kind == "s3" else None
+
+  def secrets_agreed(self, t):
+    """Did the user agree to send the keys of its S3 endpoint to the cluster that runs rclone?"""
+    tab = self.tab_end(t)
+    s3 = t.dest if tab is t.source else t.source
+    where = (tab.get("tab") or {}).get("destination") or ""
+    return E.ref_id(s3) in (t.secrets_to or {}).get(where, [])
+
+  def rclone_sources(self, t, s3_src, src_cluster=None):
+    """[(path, is a folder)] of the sources (a pattern: not a folder): on S3, here, or on a tab"""
+    out = []
+    for p in t.source.get("paths", []):
+      if R.is_pattern(p):
+        out.append((p, False))
+      elif s3_src is not None:
+        out.append((p, RC.kind(s3_src.env, s3_src.path(p)) == "dir"))
+      elif src_cluster is not None and src_cluster.destination:
+        found = Host(src_cluster).sh('[ -d "$1" ]', p)
+        out.append((p, found.returncode == 0))
+      else:
+        out.append((p, os.path.isdir(p)))
+    return out
+
+  def rclone_steps(self, t, keys=None):
+    """The rclone runs of a run on this machine: [(argv, env)] (keys: placeholders, for Copy as a command)"""
+    src_s3, dst_s3 = self.s3_of(t.source, keys and keys(t.source)), self.s3_of(t.dest, keys and keys(t.dest))
+    env = {**(src_s3.env if src_s3 else {}), **(dst_s3.env if dst_s3 else {})}
+    dest = dst_s3.path(t.dest.get("path", "/")) if dst_s3 else t.dest.get("path", "")
+    sources = self.rclone_sources(t, src_s3) if keys is None else [(p, None) for p in t.source.get("paths", [])]
+    steps = []
+    for folder, rules, _ in RC.groups([(p, bool(d)) for p, d in sources]):
+      if keys is not None: # (Copy as a command: a folder or a file is not known: both rules)
+        rules = [r for p, _ in sources if p.rsplit("/", 1)[0] == folder or (folder == "/" and p.count("/") == 1)
+                 for r in ([f"+ /{p.rsplit('/', 1)[1]}"] + ([] if R.is_pattern(p) else [f"+ /{p.rsplit('/', 1)[1]}/**"]))] + ["- **"]
+      src = src_s3.path(folder) if src_s3 else folder
+      steps.append((RC.copy_argv(src, dest, rules, t.options), env))
+    return steps
+
+  def run_rclone_here(self, t):
+    """rclone on this machine (this machine and S3, S3 and S3): its statistics as the progress; Pause ends it"""
+    try:
+      steps = self.rclone_steps(t)
+    except Exception as e:
+      self.from_thread(self.ended, t, None, f"the run did not start: {e}")
+      return
+    self.from_thread(self.set_state, t, "running", "rclone on this machine")
+    done_bytes, done_files, errors, code = 0, 0, [], 0
+    for argv, env in steps:
+      if t.id in self.stopping:
+        break
+      try:
+        proc = subprocess.Popen(["rclone", "--config", "", *argv], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE, text=True, env={**os.environ, **env}, start_new_session=True)
+      except OSError as e:
+        self.from_thread(self.ended, t, None, f"rclone did not start: {e}")
+        return
+      self.rclones[t.id] = proc
+      last = None
+      for line in proc.stderr:
+        s = RC.stats_of(line)
+        if s is not None:
+          last = s
+          self.from_thread(self.progress, t, {"bytes": done_bytes + s["bytes"], "rate": s["rate"], "eta": s["eta"]},
+                           s["current"], done_files + s["files"], list(errors), len(errors))
+        else:
+          err = RC.error_of(line)
+          if err and not err.startswith("There was nothing to transfer"):
+            errors.append(err)
+      rc = proc.wait()
+      if last:
+        done_bytes, done_files = done_bytes + last["bytes"], done_files + last["files"]
+      if rc and not code:
+        code = rc
+    self.rclones.pop(t.id, None)
+    stopped = t.id in self.stopping
+    self.stopping.discard(t.id)
+    def end():
+      t.errors = errors[-200:]
+      self.ended(t, code, "; ".join(errors[-2:]) if code and not stopped else "", stopped=stopped)
+    self.from_thread(end)
+
+  def run_rclone_cluster(self, t):
+    """rclone on the cluster of the tab (detached, or as a transfer job), through the runner; the keys of the S3
+    endpoint in the run's folder (the user agreed): read and deleted at the start"""
+    try:
+      tab = self.tab_end(t)
+      cluster = self.end_cluster(tab)
+      if cluster is None:
+        raise NotConnected("its tab is not open")
+      client = Host(cluster)
+      local_side = "source" if tab is t.source else "dest"
+      s3 = self.s3_of(t.dest if local_side == "source" else t.source)
+      have = client.sh("command -v rclone >/dev/null 2>&1 && rclone version 2>/dev/null | head -n 1", retry=False)
+      if have.returncode:
+        raise OSError(f"rclone is not installed on {client.name}")
+      if local_side == "source":
+        local, remote = self.rclone_sources(t, None, cluster), []
+      else:
+        local, remote = [], self.rclone_sources(t, s3)
+      folder = RN.folder_of(client, t)
+      text = RC.cluster_command(t, local_side, s3, remote, local, t.dest.get("path", ""))
+      folder = RN.prepare(client, t, text, job=t.runs_on == "job")
+      client.write(f"{folder}/keys", RC.keys_file(s3.env), 0o600)
+      run = {"folder": folder, "client": local_side, "target": ""}
+      if t.runs_on == "job":
+        run["job"] = RN.submit(client, folder)
+        state, message = "queued", f"transfer job {run['job']}"
+      else:
+        run["host"] = RN.start_detached(client, folder)
+        state, message = "running", f"rclone on {run['host'] or client.name}"
+      t.event(f"the keys of {s3.definition.name} sent to {client.name} for this run (deleted when it starts)")
+    except Exception as e:
+      log.debug(f"transfer {t.name}: {e!r}")
+      self.from_thread(self.ended, t, None, f"the run did not start: {e}")
+      return
+    def started():
+      t.run.update(run)
+      t.event(message)
+      self.set_state(t, state, message)
+      self.followed[t.id] = time.monotonic() + 2
+    self.from_thread(started)
+
+  def remove_keys(self, t):
+    """After a run on a cluster with keys: the keys file removed (the run removes it; in case it did not start)"""
+    folder = (t.runs[-1] if t.runs else {}).get("folder") or t.run.get("folder")
+    if t.route != "rclone-cluster" or not folder:
+      return
+    def work():
+      try:
+        cluster = self.end_cluster(self.tab_end(t))
+        if cluster is not None and Host(cluster).ready:
+          Host(cluster).sh('rm -f "$1/keys"', folder, retry=False)
+      except Exception as e:
+        log.debug(f"removing the keys of {t.name}: {e!r}")
+    threading.Thread(target=work, daemon=True).start()
+
+  def verify(self, t, done):
+    """Verify (rclone check --one-way: is everything of the sources on the destination, the same?) on this machine,
+    in a thread: done((ok, words)) on the UI thread"""
+    def work():
+      try:
+        if t.route != "rclone-here":
+          raise OSError("Verify runs on this machine: for rclone on a cluster, Check again says what remains")
+        differ, missing, words = 0, 0, []
+        for argv, env in self.rclone_steps(t):
+          src, dst = argv[-2], argv[-1]
+          rules = [a for i, a in enumerate(argv) if i and argv[i - 1] == "--filter"]
+          result = RC.run(["check", "--one-way", *[a for r in rules for a in ("--filter", r)], src, dst], env, timeout=3600)
+          text = result.stderr or ""
+          m = re.search(r"(\d+) differences found", text)
+          differ += int(m.group(1)) if m else 0
+          m = re.search(r"(\d+) files missing", text)
+          missing += int(m.group(1)) if m else 0
+          if result.returncode and not m:
+            words.append(RC.said(result))
+        if words:
+          result = (False, "; ".join(words))
+        elif differ or missing:
+          result = (False, f"{differ} difference{'s' if differ != 1 else ''}" + (f" ({missing} missing on the destination)" if missing else ""))
+        else:
+          result = (True, "everything of the sources is on the destination, the same")
+      except Exception as e:
+        result = (False, f"not verified: {e}")
+      self.from_thread(done, result)
+    threading.Thread(target=work, daemon=True, name=f"verify {t.name}").start()
+
+  def rclone_check(self, t, report):
+    """The check of an rclone transfer (in a thread): rclone where it runs, the keys, the sources and what they hold,
+    the destination (S3: listed, and written: a marker written and deleted)"""
+    plan = {"steps": {}, "routes": {}, "mover": "rclone"}
+    route = (E.rclone_routes(self.endpoint_store, t.source, t.dest) or ["rclone-here"])[0]
+    def step(state, text):
+      plan["steps"]["rclone"] = {"state": state, "text": text}
+      report(_copy(plan))
+    try:
+      step("running", "checking with rclone …")
+      src_s3, dst_s3 = self.s3_of(t.source), self.s3_of(t.dest)
+      words = []
+      if route == "rclone-cluster":
+        cluster = self.end_cluster(self.tab_end(t))
+        if cluster is None or (cluster.destination and not (cluster.connection and cluster.connection.ready)):
+          raise RC.RcloneError(f"connect {M.tab_name((self.tab_end(t).get('tab') or {}))} first")
+        have = Host(cluster).sh("rclone version 2>/dev/null | head -n 1")
+        found = RC.version_of(have.stdout or "")
+        if not found:
+          raise RC.RcloneError(f"rclone is not installed on {cluster.name} (it runs there)")
+        words.append(f"rclone {'.'.join(map(str, found))} on {cluster.name}")
+        plan["runs_on"] = ["detached"] + (["job"] if P.partition_of(cluster, site_of) else [])
+      else:
+        here = RC.version()
+        if not here:
+          raise RC.RcloneError("rclone is not installed on this machine")
+        words.append(f"rclone {'.'.join(map(str, here))} on this machine")
+        plan["runs_on"] = ["slurp"]
+      if src_s3 is not None:
+        sources = self.rclone_sources(t, src_s3)
+        sized = [src_s3.path(p) for p, _ in sources if not R.is_pattern(p)]
+        if sized:
+          found = RC.size(src_s3.env, sized)
+          plan["total_bytes"], plan["total_files"] = found["bytes"], found["files"]
+          words.append(f"the sources hold {P.human(found['bytes'])} in {found['files']} files")
+      elif route == "rclone-here":
+        sized = [p for p in t.source.get("paths", []) if not R.is_pattern(p)]
+        missing = [p for p in sized if not os.path.exists(p)]
+        if missing:
+          raise RC.RcloneError(f"{missing[0]} is not there")
+        if sized:
+          found = RC.size({}, sized)
+          plan["total_bytes"], plan["total_files"] = found["bytes"], found["files"]
+          words.append(f"the sources hold {P.human(found['bytes'])} in {found['files']} files")
+      if dst_s3 is not None:
+        words.append("the destination: " + RC.test(dst_s3.env, dst_s3.path(t.dest.get("path", "/")), write=True))
+      plan["routes"][route] = {"ok": True, "runs_on": plan["runs_on"]}
+      plan["recommended"] = route
+      step("ok", "; ".join(words))
+    except (RC.RcloneError, OSError, NotConnected) as e:
+      plan["routes"][route] = {"ok": False, "why": str(e), "runs_on": plan.get("runs_on") or (["slurp"] if route == "rclone-here" else ["detached"])}
+      step("bad", f"rclone: {e}")
+    plan["done"] = True
+    return plan
+
   def client(self, t):
+    if t.route == "rclone-cluster":
+      cluster = self.end_cluster(self.tab_end(t))
+      if cluster is None:
+        raise NotConnected("its tab is not open")
+      return Host(cluster)
     source, dest = self.hosts(t)
     return source if client_side(t.route) == "source" else dest
 
@@ -453,8 +704,12 @@ class Manager:
     if not t.run:
       return
     out = R.Output()
-    out.feed(status.get("log", "").rpartition("== run ")[2]) # (the log has all runs: this one's part)
+    this_run = status.get("log", "").rpartition("== run ")[2] # (the log has all runs: this one's part)
+    out.feed(this_run)
     out.close()
+    if t.route == "rclone-cluster": # (its errors: the lines rclone's command wrote, one per file)
+      out.errors = [l.strip() for l in this_run.splitlines()[1:] if l.strip() and not l.startswith(("==", "slurp:"))][-200:]
+      out.error_count, out.stats = len(out.errors), None
     p = RN.progress_of(status.get("progress"))
     if p:
       # (before its first progress line rsync compares the files: with checksums that reads all of them)
@@ -544,7 +799,8 @@ class Manager:
 
   # ---- the end of a run
   def ended(self, t, code, message="", stats=None, stopped=False):
-    state, words = R.outcome(code, stopped) if code is not None else ("paused" if stopped else "failed", message or "")
+    outcome = RC.outcome if t.route in ("rclone-here", "rclone-cluster") else R.outcome
+    state, words = outcome(code, stopped) if code is not None else ("paused" if stopped else "failed", message or "")
     if message and state not in ("paused",):
       words = f"{words}; {message}" if words and message not in words else message
     if stats:
@@ -554,6 +810,7 @@ class Manager:
     t.state, t.message = state, words
     t.event(f"run ended: {M.STATES.get(state, state)}" + (f" ({words})" if words else ""))
     self.remove_key(t)
+    self.remove_keys(t)
     if state in ("done", "done-errors") and t.progress.get("total"):
       t.progress["percent"] = 100.0
     self.changed(t)
@@ -575,6 +832,12 @@ class Manager:
     prev, t.state = t.state, "pausing"
     t.message = "pausing …"
     self.changed(t)
+    proc = self.rclones.get(t.id)
+    if proc is not None or (t.route == "rclone-here" and prev == "starting"):
+      self.stopping.add(t.id)
+      if proc is not None:
+        proc.terminate()
+      return
     relay = self.relays.get(t.id)
     if relay is not None:
       threading.Thread(target=relay.stop, daemon=True).start()
@@ -725,6 +988,9 @@ class Manager:
         if E.globus_only(self.endpoint_store, t.source, t.dest):
           self.from_thread(done, _copy(self.globus_check(t, lambda p: self.from_thread(report, p))))
           return
+        if E.rclone_pair(self.endpoint_store, t.source, t.dest):
+          self.from_thread(done, _copy(self.rclone_check(t, lambda p: self.from_thread(report, p))))
+          return
         source, dest = self.hosts(t)
         src, dst = self.ends(t)
         plan = P.check(source, dest, t, src, dst, report=lambda p: self.from_thread(report, _copy(p)), stop=stop.is_set,
@@ -756,6 +1022,18 @@ class Manager:
         M.record_run(t, "paused", "slurp ended")
         t.state, t.message = "paused", "paused (slurp ended)"
     self.relays.clear()
+    for tid, proc in list(self.rclones.items()): # (rclone on this machine: paused; what it copied stays, a half file starts over)
+      self.stopping.add(tid)
+      proc.terminate()
+      try:
+        proc.wait(5)
+      except subprocess.TimeoutExpired:
+        proc.kill()
+      t = self.get(tid)
+      if t is not None and t.state in M.ACTIVE:
+        M.record_run(t, "paused", "slurp ended")
+        t.state, t.message = "paused", "paused (slurp ended)"
+    self.rclones.clear()
     self.store.save()
 
   # ---- Copy as a command
@@ -765,6 +1043,8 @@ class Manager:
     import shlex
     if t.route == "globus":
       return self.globus_command(t)
+    if t.route in ("rclone-here", "rclone-cluster"):
+      return self.rclone_command(t)
     src, dst = self.ends(t)
     def arg(p):
       if R.is_pattern(p):
@@ -825,6 +1105,23 @@ class Manager:
                 *([f"--partition={o['partition']}"] if o.get("partition") else []), *([f"--account={o['account']}"] if o.get("account") else [])]
       body = [body[0].replace("# on ", "# a transfer job on "), f"{shlex.join(sbatch)} --wrap={shlex.quote(body[-1])}"]
     return "\n".join(head + body) + "\n"
+
+  def rclone_command(self, t):
+    """The rclone commands of a run, the keys as placeholders ($AWS_…: export them first)"""
+    import shlex
+    def keys(ref):
+      d = self.endpoint_store.get(E.ref_id(ref))
+      return RC.placeholders(d) if d is not None else {}
+    lines = [f"# slurp transfer {t.name!r}: {M.ROUTES.get(t.route, t.route)} (rclone copy: it copies only what is missing "
+             "or changed, and deletes nothing)", "# the keys: export AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY first"]
+    if t.route == "rclone-cluster":
+      lines.append(f"# on {M.tab_name((self.tab_end(t).get('tab') or {}))}:")
+    for argv, env in self.rclone_steps(t, keys=keys):
+      for k, v in env.items():
+        lines.append(f"export {k}={v if v.startswith('$') else shlex.quote(v)}".replace("'$", "$").replace("$'", "$"))
+      argv = [a for a in argv if a not in ("--use-json-log",)]
+      lines.append(shlex.join(["rclone", "--config", "", *argv]))
+    return "\n".join(dict.fromkeys(lines)) + "\n"
 
   def globus_command(self, t):
     """The Globus CLI command of a run (globus transfer --batch: each item; a folder with --recursive)"""

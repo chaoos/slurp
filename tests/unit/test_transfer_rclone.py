@@ -132,3 +132,35 @@ def test_cluster_command(check, s3, tmp_path):
   keys = sorted(o["Key"] for o in client.list_objects_v2(Bucket="data").get("Contents", []))
   check("copied", keys == ["up/run1/b.txt", "up/run1/sub/a.bin"], keys)
   check("no key in the command", "SK" not in (folder / "command").read_text().replace("SKIP", ""))
+
+
+def test_cluster_command_pause(check, s3, tmp_path):
+  """Pause of a run on a cluster: TERM to its command reaches rclone at once; it ends with 143, the next groups do not run"""
+  import signal
+  import time
+  from slurp.transfer import model as M
+  url, client = s3
+  e = endpoint(url)
+  big = tmp_path / "big"
+  big.mkdir()
+  (big / "f.bin").write_bytes(os.urandom(6_000_000))
+  (tmp_path / "later").mkdir()
+  (tmp_path / "later" / "other.bin").write_bytes(b"x") # (another folder: another rclone, after the first)
+  folder = tmp_path / "run"
+  folder.mkdir()
+  t = M.Transfer("t2", "slow", {"paths": []}, {"path": "/slow"}, options={"bwlimit": "0.5"})
+  (folder / "keys").write_text(RC.keys_file(e.env))
+  (folder / "command").write_text(RC.cluster_command(t, "source", e, [], [(str(big), True), (str(tmp_path / "later" / "other.bin"), False)], "/slow"))
+  proc = subprocess.Popen(["sh", str(folder / "command")], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+  time.sleep(3)
+  started = time.time()
+  proc.send_signal(signal.SIGTERM)
+  out, err = proc.communicate(timeout=30)
+  check("paused at once: 143", proc.returncode == 143 and time.time() - started < 10, (proc.returncode, err[-300:]))
+  keys = [o["Key"] for o in client.list_objects_v2(Bucket="data").get("Contents", [])]
+  check("the next group did not run", "slow/other.bin" not in keys, keys)
+  for _ in range(50): # (rclone ends once it has cleaned up)
+    if subprocess.run(["pgrep", "-f", f"rclone --config  copy .*{big}"], capture_output=True).returncode:
+      break
+    time.sleep(0.1)
+  check("no rclone left", subprocess.run(["pgrep", "-f", f"rclone --config  copy .*{big}"], capture_output=True).returncode != 0)

@@ -34,6 +34,8 @@ ROUTES = {
   "direct-pull": "direct (destination pulls)",
   "relay":       "relay through slurp",
   "globus":      "Globus transfer",
+  "rclone-here": "rclone on this machine",
+  "rclone-cluster": "rclone on the cluster",
 }
 RUNS_ON = {
   "slurp":    "in slurp",
@@ -86,6 +88,7 @@ class Transfer:
   log: list = field(default_factory=list)      # events: [epoch, text]
   pending: dict | None = None        # a run that waits for its tabs: {resume: after a broken connection}
   runs_total: int = 0                # runs so far (the history keeps the last HISTORY of them)
+  secrets_to: dict = field(default_factory=dict) # the keys the user agreed to send for its runs: {tab destination: [endpoint id]}
 
   @property
   def run_count(self): return max(self.runs_total, len(self.runs))

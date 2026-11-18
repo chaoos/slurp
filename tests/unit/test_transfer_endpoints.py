@@ -31,7 +31,8 @@ def test_listing(check, tmp_path):
   check("a tab logged in: connected, its round trip", by["tab:daint"].connected and by["tab:daint"].words == "38 ms", by["tab:daint"])
   check("a tab not logged in: needs login", by["tab:jedi"].state == "not connected" and by["tab:jedi"].words == "needs login")
   check("a tab logging in: connecting", by["tab:eiger"].state == "connecting")
-  check("a defined one: where it points", by["b1"].where == "eu · b/runs" and by["b1"].state == "not connected", by["b1"].where)
+  check("a defined one: where it points; without its keys in the keyring: not set up", by["b1"].where == "eu · b/runs"
+        and by["b1"].state == "not set up" and "keyring" in by["b1"].words, (by["b1"].where, by["b1"].state, by["b1"].words))
   import json
   saved = json.load(open(store.path))["endpoints"][0]
   check("stored with the names of its secrets, not their values", saved["secrets"] == ["access_key", "secret_key"]
