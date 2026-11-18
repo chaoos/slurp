@@ -163,3 +163,11 @@ def test_texts(check, tmp_path):
   t.state = "done"
   check("nothing under way: none", mg.summary_for(app.here) == "" and mg.footer() == "")
   check("the average rate", MG.average_rate([[0, 0], [10, 1000], [20, 3000]]) == 150.0)
+
+
+def test_job_gone(check):
+  check("running, pending: not gone", not MG.job_gone(0, "RUNNING\n") and not MG.job_gone(0, "PENDING None"))
+  check("not listed: gone", MG.job_gone(0, ""))
+  check("listed as ended for a while: gone", MG.job_gone(0, "COMPLETED") and MG.job_gone(0, "TIMEOUT") and MG.job_gone(0, "CANCELLED by 1"))
+  check("no longer known: gone", MG.job_gone(1, "", "slurm_load_jobs error: Invalid job id specified"))
+  check("squeue failed otherwise: not gone (asked again)", not MG.job_gone(1, "", "Socket timed out"))

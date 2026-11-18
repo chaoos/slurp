@@ -18,6 +18,17 @@ LOGIN_WAIT = 120    # seconds a scheduled run waits for the logins it started be
 RATE_POINTS = 120   # points of the rate kept for the sparkline
 JOB_WATCH = 30      # seconds between looks at the job a transfer waits for
 
+QUEUED_STATES = ("PENDING", "RUNNING", "CONFIGURING", "COMPLETING", "SUSPENDED", "REQUEUED", "REQUEUE_HOLD",
+                 "REQUEUE_FED", "RESIZING", "SIGNALING", "STAGE_OUT", "STOPPED", "PREEMPTED")
+
+def job_gone(code, out, err=""):
+  """Has a job ended, by squeue -h -j ID -o %T? Not listed, listed as ended (COMPLETED, TIMEOUT, … for a while
+  after its end), or no longer known (squeue: Invalid job id)"""
+  state = (out or "").strip().split()[0] if (out or "").strip() else ""
+  if code == 0:
+    return state not in QUEUED_STATES
+  return "Invalid job id" in (err or "")
+
 def client_side(route):
   """Which end runs rsync: "source" or "dest" """
   return "dest" if route == "direct-pull" else "source"
@@ -298,6 +309,8 @@ class Manager:
                         "eta": p.get("rsync_eta"), **({"left": p["left"], "checked": p["checked"]} if "left" in p else {})},
                     current=p.get("current", ""), files=p.get("files", 0), errors=out.errors, error_count=out.error_count)
     job = status.get("job", "")
+    if job and job_gone(0, job): # (listed as ended for a while after its end: gone)
+      job = ""
     if job and t.state == "queued":
       t.message = f"transfer job {t.run.get('job')}: {job.lower()}"
     result = status.get("result")
@@ -472,7 +485,7 @@ class Manager:
     if not end.ready:
       return
     result = end.run(["squeue", "-h", "-j", str(s.get("job")), "-o", "%T"], timeout=60)
-    if result.returncode == 0 and not (result.stdout or "").strip():
+    if job_gone(result.returncode, result.stdout, result.stderr):
       def run():
         if t.state != "scheduled":
           return
