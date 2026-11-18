@@ -46,7 +46,7 @@ def test_wizard_and_tab(check, tmp_path):
       w = app.screen
       check("T: the wizard", isinstance(w, TransferWizard))
       check("step 1: Next waits for a source", w.query_one("#tw-next").disabled)
-      check("six steps", [str(b.label) for b in w.query("#tw-steps Button")] == ["1 Source", "2 Destination", "3 Route", "4 Options", "5 When", "6 Summary"])
+      check("six steps", [str(b.label) for b in w.query("#tw-steps Button")] == ["1 Source", "2 Destination", "3 Options", "4 When", "5 Route", "6 Summary"])
       check("a new transfer: the steps ahead cannot be jumped to", all(w.query_one(f"#tw-goto-{i}").disabled for i in range(1, 6)))
       w.query_one("#tw-src-path").value = str(src)
       await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
@@ -65,8 +65,22 @@ def test_wizard_and_tab(check, tmp_path):
       w.query_one("#tw-dst-path").value = str(dst); await pilot.pause(0.2)
       preview = str(w.query_one("#tw-dst-preview").render())
       check("what goes where", f"run42  →  Local:{dst}/run42" in preview, preview)
+      await pilot.click("#tw-next"); await pilot.pause(0.3)
+      check("step 3: the options", w.step == 2 and w.query_one("#tw-step-2").query("#tw-checksum")
+            and w.query_one("#tw-step-2").query("#tw-bwlimit"))
+      check("…compression said to count only on the relay", "only on the relay" in str(w.query_one("#tw-compress-note").render()))
+      w.query_one("#tw-bwlimit").value = "fast"; await pilot.pause(0.2)
+      check("a speed limit that is not a number: Next waits", w.query_one("#tw-next").disabled and "speed limit" in str(w.query_one("#tw-next").tooltip))
+      w.query_one("#tw-bwlimit").value = ""; await pilot.pause(0.2)
+      await pilot.click("#tw-next"); await pilot.pause(0.2)
+      check("step 4: when; manual is the first choice, and chosen", w.step == 3 and w.when_kind() == "manual"
+            and [b.id for b in w.query("#tw-when RadioButton")][0] == "tw-when-manual")
+      w.query_one("#tw-when-every").value = True
+      w.query_one("#tw-every").value = "1m"; await pilot.pause(0.2)
+      check("every 1m: too short, Next waits", w.query_one("#tw-next").disabled)
+      w.query_one("#tw-when-now").value = True; await pilot.pause(0.2)
       await pilot.click("#tw-next"); await pilot.pause(0.1)
-      check("step 3: the route", w.step == 2)
+      check("step 5: the route", w.step == 4)
       check("…the check, until it is done", await until(pilot, lambda: w.plan.get("done"), 30), w.plan)
       await pilot.pause(0.6)
       steps = str(w.query_one("#tw-check-steps").render())
@@ -75,7 +89,7 @@ def test_wizard_and_tab(check, tmp_path):
       check("the routes as choices, with what the check found: the same filesystem passed, recommended",
             label("same-fs").startswith("✓ same filesystem") and "(recommended)" in label("same-fs") and label("relay").startswith("✓ relay"),
             [label(r) for r in ("same-fs", "direct-push", "direct-pull", "relay")])
-      check("a route that failed cannot be chosen, and says why", label("direct-push").startswith("✗") and w.query_one(".tw-r-direct-push").disabled,
+      check("now: a route that failed cannot be chosen, and says why", label("direct-push").startswith("✗") and w.query_one(".tw-r-direct-push").disabled,
             label("direct-push"))
       check("the chosen route passed: Next", not w.query_one("#tw-next").disabled)
       passed = dict(w.plan["routes"]["same-fs"])
@@ -87,6 +101,15 @@ def test_wizard_and_tab(check, tmp_path):
       w.plan["routes"]["same-fs"] = passed
       w.show_plan(); await pilot.pause(0.3)
       check("…passed again: chosen again (the recommended one)", w.chosen_route() == "same-fs" and not w.query_one("#tw-next").disabled)
+      w.query_one("#tw-when-manual").value = True; await pilot.pause(0.3)
+      check("manual: a route that failed can be chosen too", not w.query_one(".tw-r-direct-push").disabled)
+      await pilot.click(w.query_one(".tw-r-direct-push")); await pilot.pause(0.4)
+      check("…and Next (Run now checks first)", w.chosen_route() == "direct-push" and not w.query_one("#tw-next").disabled,
+            (w.chosen_route(), w.query_one("#tw-next").tooltip))
+      w.query_one("#tw-when-now").value = True; await pilot.pause(0.4)
+      check("now again: that route no longer, the recommended one chosen", w.chosen_route() == "same-fs" and w.query_one(".tw-r-direct-push").disabled,
+            w.chosen_route())
+      await w.route_changed(); await pilot.pause(0.2)
       w.plan["routes"]["same-fs"]["runs_on"] = ["detached", "job"] # (as where the site has a transfer partition)
       await w.route_changed(); await pilot.pause(0.3)
       check("the recommended route, where it runs (and a transfer job offered, where there is one)",
@@ -116,24 +139,10 @@ def test_wizard_and_tab(check, tmp_path):
       check("checksums: the estimate says so", "with checksums" in flow, flow)
       w.query_one("#tw-checksum").value = False; await pilot.pause(0.2)
       check("the route step has no options (they have their own step)", not any(
-        w.query_one("#tw-step-2").query(sel) for sel in ("#tw-checksum", "#tw-compress", "#tw-bwlimit")))
-      await pilot.click("#tw-next"); await pilot.pause(0.3)
-      check("step 4: the options", w.step == 3 and w.query_one("#tw-step-3").query("#tw-checksum")
-            and w.query_one("#tw-step-3").query("#tw-bwlimit"))
-      check("…compression only for the relay", w.query_one("#tw-compress").disabled)
-      w.query_one("#tw-bwlimit").value = "fast"; await pilot.pause(0.2)
-      check("a speed limit that is not a number: Next waits", w.query_one("#tw-next").disabled and "speed limit" in str(w.query_one("#tw-next").tooltip))
-      w.query_one("#tw-bwlimit").value = ""; await pilot.pause(0.2)
-      await pilot.click("#tw-next"); await pilot.pause(0.2)
-      check("step 5: never by itself is the first choice, and chosen", w.when_kind() == "never"
-            and [b.id for b in w.query("#tw-when RadioButton")][0] == "tw-when-never")
-      w.query_one("#tw-when-every").value = True
-      w.query_one("#tw-every").value = "1m"; await pilot.pause(0.2)
-      check("every 1m: too short, Next waits", w.query_one("#tw-next").disabled)
-      w.query_one("#tw-when-now").value = True; await pilot.pause(0.2)
+        w.query_one("#tw-step-4").query(sel) for sel in ("#tw-checksum", "#tw-compress", "#tw-bwlimit")))
       await pilot.click("#tw-next"); await pilot.pause(0.2)
       summary = str(w.query_one("#tw-summary").render())
-      check("step 5: the summary, what happens if slurp closes", "If slurp closes" in summary and "Nothing is deleted" in summary, summary)
+      check("step 6: the summary, what happens if slurp closes", "If slurp closes" in summary and "Nothing is deleted" in summary, summary)
       check("a name", w.query_one("#tw-name").value == "run42 Local → Local")
       check("the summary shows the flow", "┌" in str(w.query_one("#tw-summary-flow").render()))
       w.query_one("#tw-name").value = "my run"
@@ -188,8 +197,8 @@ def test_wizard_and_tab(check, tmp_path):
   asyncio.run(again())
 
 
-def test_never(check, tmp_path):
-  """When: never by itself: Go reads Add, no Save without starting; Add adds it, and it runs only on Run now"""
+def test_manual(check, tmp_path):
+  """When: manual: Go reads Add, no Save without starting; Add adds it, and it runs only on Run now"""
   src, dst = files(tmp_path)
 
   async def main():
@@ -202,14 +211,14 @@ def test_never(check, tmp_path):
       await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
       w.query_one("#tw-next").press(); await pilot.pause(0.2)
       w.query_one("#tw-dst-path").value = str(dst); await pilot.pause(0.2)
-      w.query_one("#tw-next").press()
-      await until(pilot, lambda: w.plan.get("done"), 30); await pilot.pause(0.6)
-      w.query_one("#tw-next").press(); await pilot.pause(0.2)
-      w.query_one("#tw-next").press(); await pilot.pause(0.2)
-      w.query_one("#tw-when-never").value = True; await pilot.pause(0.2)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2) # (the options)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2) # (when)
+      w.query_one("#tw-when-manual").value = True; await pilot.pause(0.2)
       note = str(w.query_one("#tw-when-note").render())
-      check("never: it says when it runs", "only when you click Run now" in note, note)
+      check("manual: it says when it runs", "only when you click Run now" in note, note)
       check("no login, no missed runs for it", not w.query_one("#tw-login").display and not w.query_one("#tw-missed").display)
+      w.query_one("#tw-next").press() # (the route)
+      await until(pilot, lambda: w.plan.get("done"), 30); await pilot.pause(0.6)
       w.query_one("#tw-next").press(); await pilot.pause(0.2)
       go = w.query_one("#tw-go")
       check("the last step: Add instead of Go, no Save without starting", str(go.label) == "Add" and go.display
@@ -225,7 +234,7 @@ def test_never(check, tmp_path):
       check("Run now: it runs", await until(pilot, lambda: t.state == "done", 30), (t.state, t.message))
       app.edit_transfer(t); await pilot.pause(0.4)
       e = app.screen
-      check("edited: never is chosen", e.query_one("#tw-when-never").value)
+      check("edited: manual is chosen", e.query_one("#tw-when-manual").value)
       await pilot.pause(0.3)
       buttons = [str(b.label) for b in e.query("#tw-buttons Button") if b.display]
       check("editing: the buttons are Cancel and Save", buttons == ["Cancel", "Save"], buttons)
@@ -234,21 +243,22 @@ def test_never(check, tmp_path):
       await pilot.click("#tw-goto-5"); await pilot.pause(0.3)
       check("a click on Summary: that step", e.step == 5 and "only on Run now" in str(e.query_one("#tw-summary").render()))
       check("…Cancel and Save there too", [str(b.label) for b in e.query("#tw-buttons Button") if b.display] == ["Cancel", "Save"])
-      await pilot.click("#tw-goto-2"); await pilot.pause(0.4)
-      check("a click on Route: its choices as they were", e.step == 2 and e.chosen_route() == t.route and e.chosen_runs_on() == t.runs_on,
+      await pilot.click("#tw-goto-4"); await pilot.pause(0.4)
+      check("a click on Route: its choices as they were", e.step == 4 and e.chosen_route() == t.route and e.chosen_runs_on() == t.runs_on,
             (e.step, e.chosen_route(), e.chosen_runs_on()))
       check("nothing changed: Save", not e.query_one("#tw-store").disabled)
       await pilot.click("#tw-goto-0"); await pilot.pause(0.3)
       e.query_one("#tw-src-path").value = str(src / "sub")
       await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.3)
       store = e.query_one("#tw-store")
-      check("another source: every step still a click away, Save waits for a new check and says so",
-            all(not e.query_one(f"#tw-goto-{i}").disabled for i in range(6)) and store.disabled and "3 Route" in str(store.tooltip),
+      check("another source, manual: Save at once (Run now checks first)", all(not e.query_one(f"#tw-goto-{i}").disabled for i in range(6))
+            and not store.disabled, (store.disabled, store.tooltip))
+      await pilot.click("#tw-goto-3"); await pilot.pause(0.2)
+      e.query_one("#tw-when-daily").value = True; await pilot.pause(0.3)
+      check("…daily instead: Save waits for the route to pass a new check, and says so", store.disabled and "5 Route" in str(store.tooltip),
             (store.disabled, store.tooltip))
-      await pilot.click("#tw-goto-2")
+      await pilot.click("#tw-goto-4")
       check("checked again: Save", await until(pilot, lambda: e.plan.get("done") and not e.query_one("#tw-store").disabled, 30))
-      await pilot.click("#tw-goto-4"); await pilot.pause(0.2)
-      e.query_one("#tw-when-daily").value = True; await pilot.pause(0.2)
       e.query_one("#tw-store").press(); await pilot.pause(0.5)
       check("Save: the changes kept, its schedule armed, nothing started", t.source["paths"] == [str(src), str(src / "sub")]
             and t.schedule["kind"] == "daily" and t.state == "scheduled" and t.next_run and len(t.runs) == 1, (t.state, t.schedule, t.next_run, len(t.runs)))
@@ -462,6 +472,9 @@ def test_direct_job_checked_on_a_node(check, tmp_path, monkeypatch):
       await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
       w.query_one("#tw-next").press(); await pilot.pause(0.2)
       w.query_one("#tw-dst-path").value = str(dst); await pilot.pause(0.2)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2) # (the options)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2) # (when: now, so the route must pass)
+      w.query_one("#tw-when-now").value = True; await pilot.pause(0.2)
       w.query_one("#tw-next").press()
       await until(pilot, lambda: w.plan.get("done"), 30); await pilot.pause(0.5)
       # (as on two clusters: the direct route passed from the login node, the site has a transfer partition)
@@ -556,6 +569,9 @@ def test_job_tested(check, tmp_path, monkeypatch):
       await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
       w.query_one("#tw-next").press(); await pilot.pause(0.2)
       w.query_one("#tw-dst-path").value = str(dst); await pilot.pause(0.2)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2) # (the options)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2) # (when: now, so the route must pass)
+      w.query_one("#tw-when-now").value = True; await pilot.pause(0.2)
       w.query_one("#tw-next").press()
       await until(pilot, lambda: w.plan.get("done"), 30); await pilot.pause(0.5)
       w.plan["routes"]["same-fs"]["runs_on"] = ["detached", "job"]

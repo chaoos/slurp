@@ -1,7 +1,7 @@
 """When a transfer runs: now, once at a time, repeatedly (every so long, or daily at a time), after a job ended, or
-never by itself (only when the user clicks Run now).
+manual (only when the user clicks Run now).
 
-A schedule is a dict: {"kind": "now" | "at" | "every" | "daily" | "after_job" | "never", "at": epoch, "every": "6h",
+A schedule is a dict: {"kind": "now" | "at" | "every" | "daily" | "after_job" | "manual", "at": epoch, "every": "6h",
 "daily": "02:00", "job": job id, "login": log in to the tabs by itself (default yes), "missed": "run" (once, as soon as
 it can: the default) or "skip" (to the next time)}. Repeated runs copy only what changed: a repeated transfer keeps
 the destination in step with the source."""
@@ -114,8 +114,8 @@ def describe(schedule, next_run=None):
     return f"daily at {s.get('daily')}{when}"
   if kind == "after_job":
     return f"after job {s.get('job')} ends"
-  if kind == "never":
-    return "never by itself: only on Run now"
+  if kind == "manual":
+    return "manual: only on Run now"
   return "now"
 
 def when_text(epoch):

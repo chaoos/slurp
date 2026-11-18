@@ -406,10 +406,10 @@ def globus_text(plan):
   return Text("ⓘ " + g["text"], style="bold cyan" if g.get("strong") else "cyan")
 
 class TransferWizard(ModalScreen):
-  """Set up a transfer: 1 source, 2 destination, 3 route (the check, the choice of what it found, where it runs),
-  4 options (checksums, compression, a speed limit), 5 when, 6 summary. Dismissed with
+  """Set up a transfer: 1 source, 2 destination, 3 options (checksums, compression, a speed limit), 4 when, 5 route
+  (the check, the choice of what it found, where it runs: it must pass unless the transfer is manual), 6 summary. Dismissed with
   {"transfer": Transfer, "go": bool} or None. editing: a transfer whose settings it changes (its id stays)"""
-  STEPS = ["Source", "Destination", "Route", "Options", "When", "Summary"]
+  STEPS = ["Source", "Destination", "Options", "When", "Route", "Summary"]
   ROUTE_ORDER = ("same-fs", "direct-push", "direct-pull", "relay")
   DEFAULT_CSS = """
   TransferWizard { align: center middle; }
@@ -500,7 +500,7 @@ class TransferWizard(ModalScreen):
             yield Button("Browse…", id="tw-dst-browse", compact=True)
           yield Horizontal(id="tw-dst-places", classes="tw-row")
           yield Static(id="tw-dst-preview", classes="tw-note")
-        with VerticalScroll(id="tw-step-2"):
+        with VerticalScroll(id="tw-step-4"):
           yield Static("slurp checks both sides (it changes nothing): what remains to copy, the room on the destination, "
                        "and each route, how fast it is. Choose one that passed.", classes="tw-note")
           yield Static(id="tw-check-steps")
@@ -533,7 +533,7 @@ class TransferWizard(ModalScreen):
           yield Static(id="tw-key-warning")
           with Horizontal(classes="tw-row"):
             yield Button(icons.label("reload", "Check again"), id="tw-recheck", compact=True)
-        with VerticalScroll(id="tw-step-3"):
+        with VerticalScroll(id="tw-step-2"):
           yield Static("How rsync copies: the same at every run.", classes="tw-note")
           with Horizontal(classes="tw-row"):
             yield Checkbox("checksums: compare the contents (every file is read on both sides, at every run, also when "
@@ -547,9 +547,9 @@ class TransferWizard(ModalScreen):
             yield Input(placeholder="MB/s (none)", id="tw-bwlimit", compact=True)
             yield Label("MB/s (empty: no limit)")
           yield Static(id="tw-options-flow", classes="tw-note")
-        with VerticalScroll(id="tw-step-4"):
+        with VerticalScroll(id="tw-step-3"):
           with RadioSet(id="tw-when"):
-            yield RadioButton("never by itself: only when I click Run now", value=True, id="tw-when-never") # (the default)
+            yield RadioButton("manual: only when I click Run now", value=True, id="tw-when-manual") # (the default)
             yield RadioButton("now", id="tw-when-now")
             yield RadioButton("once, at a time", id="tw-when-at")
             yield RadioButton("repeatedly, every …", id="tw-when-every")
@@ -617,7 +617,7 @@ class TransferWizard(ModalScreen):
     q("#tw-account", Input).value = o.get("account", "")
     q("#tw-resubmit", Checkbox).value = o.get("resubmit", True)
     s = t.schedule or {}
-    which = {"now": "now", "at": "at", "every": "every", "daily": "daily", "after_job": "after", "never": "never"}.get(s.get("kind", "now"), "now")
+    which = {"now": "now", "at": "at", "every": "every", "daily": "daily", "after_job": "after", "manual": "manual"}.get(s.get("kind", "now"), "now")
     q(f"#tw-when-{which}", RadioButton).value = True
     if s.get("at"):
       q("#tw-at", Input).value = datetime.fromtimestamp(s["at"]).strftime("%Y-%m-%d %H:%M")
@@ -628,11 +628,11 @@ class TransferWizard(ModalScreen):
     q("#tw-missed", Select).value = s.get("missed", "run")
 
   def tick(self):
-    if self.step == 2 and self.checking is not None:
+    if self.step == 4 and self.checking is not None:
       self.show_plan()
-    if self.step == 2 and any(v[0] == "running" for v in self.node_checks.values()):
+    if self.step == 4 and any(v[0] == "running" for v in self.node_checks.values()):
       self.show_node_check()
-    if self.step == 2 and any(v[0] == "running" for v in self.job_tests.values()):
+    if self.step == 4 and any(v[0] == "running" for v in self.job_tests.values()):
       self.show_job_test()
     if self.step in (0, 1):
       self.refresh_states()
@@ -649,7 +649,7 @@ class TransferWizard(ModalScreen):
     q("#tw-back", Button).display = self.step > 0 and not editing
     q("#tw-next", Button).display = self.step < len(self.STEPS) - 1 and not editing
     last = self.step == len(self.STEPS) - 1
-    never = self.when_kind() == "never"
+    never = self.when_kind() == "manual"
     q("#tw-go", Button).display = last and not editing
     q("#tw-save", Button).display = last and not never and not editing # (Add saves it already)
     q("#tw-store", Button).display = editing
@@ -659,11 +659,12 @@ class TransferWizard(ModalScreen):
     q("#tw-go", Button).tooltip = ("add it to the transfers; it runs when you click Run now" if never else
                                    "start it now, or by its schedule")
     if self.step == 2:
-      self.start_check()
-    if self.step == 3:
       self.show_options()
-    if self.step == 4:
+    if self.step == 3:
       self.when_changed()
+    if self.step == 4:
+      self.start_check()
+      self.refresh_routes()
     if self.step == 5:
       self.fill_summary()
     self.update_next()
@@ -730,6 +731,13 @@ class TransferWizard(ModalScreen):
         return False, f"connect {self.dst.name if self.dst else 'the tab'} first"
       return bool(self.dest_path.strip()), "" if self.dest_path.strip() else "the destination folder"
     if step == 2:
+      return self.options_ok()
+    if step == 3:
+      return self.when_ok()
+    if step == 4 and self.manual():
+      # (manual: it runs only when the user clicks Run now, which checks first: a route that did not pass will do)
+      return (self.how_ok() if self.chosen_route() else (False, "choose a route (manual: also one that did not pass)"))
+    if step == 4:
       # (the check of both sides, and of the route chosen: Next as soon as these passed, the other routes may go on)
       plan, steps = self.plan, self.plan.get("steps", {})
       if not plan.get("done") and (self.checking is None or step != self.step):
@@ -748,11 +756,11 @@ class TransferWizard(ModalScreen):
       if info is None:
         return False, f"{M.ROUTES[route]}: its check is not done"
       return self.how_ok()
-    if step == 3:
-      return self.options_ok()
-    if step == 4:
-      return self.when_ok()
     return True, ""
+
+  def manual(self):
+    """Manual (it runs only on Run now, which checks first): the route need not pass the check now"""
+    return self.when_kind() == "manual"
 
   @staticmethod
   def ready(cluster):
@@ -989,7 +997,7 @@ class TransferWizard(ModalScreen):
     self.query_one("#tw-check-steps", Static).update(steps)
     self.query_one("#tw-globus", Static).update(globus_text(self.plan))
     self.refresh_routes()
-    if self.step == 2:
+    if self.step == 4:
       self.show_flow() # (the bandwidth and the estimate, as the check measures them)
     self.update_next()
 
@@ -1016,6 +1024,7 @@ class TransferWizard(ModalScreen):
         words, usable = f"✗ {name}: {info.get('why', '')[:80]}", False
       if str(b.label) != words:
         b.label = words
+      usable = usable or self.manual() # (manual: also a route that did not pass, or is not checked yet)
       b.disabled = not usable
       b.usable = usable
     chosen = self.chosen_route()
@@ -1246,7 +1255,7 @@ class TransferWizard(ModalScreen):
     event.stop()
     self.checksum_note()
     self.show_flow()
-    if self.step == 3:
+    if self.step == 2:
       self.show_options()
 
   def checksum_note(self):
@@ -1286,8 +1295,9 @@ class TransferWizard(ModalScreen):
     if route is None:
       return False, "choose a route"
     info = self.plan.get("routes", {}).get(route, {})
-    if not info.get("ok") and not (info.get("keyable") and self.query_one("#tw-key", Checkbox).value):
-      return False, "this route needs the temporary key"
+    strict = not self.manual()
+    if strict and not info.get("ok") and not (info.get("keyable") and self.query_one("#tw-key", Checkbox).value):
+      return False, "this route needs the temporary key" if info.get("keyable") else "this route did not pass the check"
     if self.chosen_runs_on() is None:
       return False, "where it runs"
     if self.chosen_runs_on() == "job" and not self.query_one("#tw-time", Input).value.strip():
@@ -1297,14 +1307,14 @@ class TransferWizard(ModalScreen):
       client = self.dst if test[0] == "direct-pull" else self.src
       if client is not None and client.accounts: # (the user has accounts there: the job is charged to one of them)
         return False, f"the account of the job (one of yours on {client.name})"
-    if test is not None:
+    if test is not None and strict:
       state, words = self.job_tests.get(test, ("running", ""))
       if state == "running":
         return False, "testing the job script (sbatch --test-only)"
       if state is False:
         return False, f"sbatch --test-only: {words}"
     key = self.node_check_key()
-    if key is not None and key[1]:
+    if key is not None and key[1] and strict:
       state, words = self.node_checks.get(key, ("running", ""))
       if state == "running":
         return False, f"checking the login from a node of {key[1]}"
@@ -1326,12 +1336,8 @@ class TransferWizard(ModalScreen):
   def show_options(self):
     """The options as they suit the route chosen (compression only for the relay), and the estimate with them"""
     route = self.chosen_route()
-    relay = route == "relay"
-    compress = self.query_one("#tw-compress", Checkbox)
-    compress.disabled = not relay
-    if not relay and compress.value:
-      compress.value = False
-    self.query_one("#tw-compress-note", Static).update("" if relay else "(compression only on the relay: elsewhere it would slow rsync down)")
+    self.query_one("#tw-compress-note", Static).update(
+      "(used only on the relay through slurp; on the other routes it would slow rsync down: there it is left out)")
     self.checksum_note()
     words = self.estimate_words(route) if route else ""
     self.query_one("#tw-options-flow", Static).update(f"⏱ {words}" if words else "")
@@ -1353,7 +1359,7 @@ class TransferWizard(ModalScreen):
     self.when_changed()
 
   def when_kind(self):
-    for kind, sel in (("now", "now"), ("at", "at"), ("every", "every"), ("daily", "daily"), ("after_job", "after"), ("never", "never")):
+    for kind, sel in (("now", "now"), ("at", "at"), ("every", "every"), ("daily", "daily"), ("after_job", "after"), ("manual", "manual")):
       if self.query_one(f"#tw-when-{sel}", RadioButton).value:
         return kind
     return "now"
@@ -1362,7 +1368,7 @@ class TransferWizard(ModalScreen):
     q = self.query_one
     kind = self.when_kind()
     s = {"kind": kind}
-    if kind not in ("now", "never"):
+    if kind not in ("now", "manual"):
       s.update(login=q("#tw-login", Checkbox).value, missed=q("#tw-missed", Select).value or "run")
     if kind == "at":
       s["at"] = S.parse_at(q("#tw-at", Input).value)
@@ -1397,16 +1403,17 @@ class TransferWizard(ModalScreen):
     q = self.query_one
     for sel, k in (("#tw-at", "at"), ("#tw-every", "every"), ("#tw-daily", "daily"), ("#tw-job-id", "after_job")):
       q(sel, Input).disabled = kind != k
-    q("#tw-login", Checkbox).display = q("#tw-missed", Select).display = kind not in ("now", "never")
+    q("#tw-login", Checkbox).display = q("#tw-missed", Select).display = kind not in ("now", "manual")
     ok, why = self.when_ok()
     note = why if not ok else ""
-    if ok and kind == "never":
+    if ok and kind == "manual":
       note = "It is added to the transfers and runs only when you click Run now (in its subtab or the list: s)."
     elif ok and kind != "now" and self.chosen_runs_on() == "slurp":
       note = "It runs through slurp: slurp must be running then (it may run in its session holder, without a terminal)."
     if ok and kind == "at" and self.chosen_runs_on() == "job":
       note = "The transfer job is submitted when you press Go, to start at that time (slurp need not run then)."
     q("#tw-when-note", Static).update(note)
+    self.refresh_routes() # (manual or not: which routes can be chosen)
     self.update_next()
 
   # ---- 6: the summary
@@ -1467,6 +1474,10 @@ class TransferWizard(ModalScreen):
     text.append(if_slurp_closes(t, client.name if client else "", "", site_of(client)) + "\n")
     for w in self.plan.get("warnings", []):
       text.append(f"⚠ {w}\n", style="yellow")
+    if not info.get("ok") and not (info.get("keyable") and t.options.get("temp_key")):
+      why = info.get("why") or ("its check is not done" if info == {} else "")
+      text.append(f"⚠ {M.ROUTES.get(t.route, t.route)} did not pass the check" + (f" ({why})" if why else "")
+                  + ": Run now checks again first, and runs only if it passes.\n", style="bold yellow")
     text.append("\nNothing is deleted on the destination; running it again copies only what is missing or changed.\n", style="dim")
     g = globus_text(self.plan)
     if g.plain:
@@ -1551,7 +1562,7 @@ class TransfersBase(SplitScreen):
 
   def run_now(self, t):
     if not t.active and t.state != "waiting":
-      self.manager.start(t)
+      self.manager.run_now(t)
 
   def edit(self, t):
     if t.active:
@@ -1660,7 +1671,7 @@ class TransfersScreen(TransfersBase):
     text = Text.assemble((t.name, "bold"), ": ", state_text(t))
     if t.message:
       text.append(f" · {t.message}")
-    if t.schedule and t.schedule.get("kind", "now") not in ("now", "never"):
+    if t.schedule and t.schedule.get("kind", "now") not in ("now", "manual"):
       text.append(f" · {S.describe(t.schedule, t.next_run)}", style="cyan")
     text.append(f"\n{t.source_name}:{', '.join(t.source.get('paths', []))}  →  {t.dest_name}:{t.dest.get('path', '')}", style="dim")
     note.update(text)
@@ -1863,7 +1874,7 @@ class TransferScreen(TransfersBase):
     client = dst if client_side(t.route) == "dest" else src
     q("#xd-closes", Static).update(if_slurp_closes(t, client.name if client else "", t.run.get("host", ""), site_of(client)))
     sched = S.describe(t.schedule, t.next_run)
-    if t.schedule and t.schedule.get("kind", "now") not in ("now", "never"):
+    if t.schedule and t.schedule.get("kind", "now") not in ("now", "manual"):
       sched += ("; logs in by itself" if t.schedule.get("login", True) else "; does not log in by itself")
       sched += "; a missed run " + ("is skipped" if t.schedule.get("missed") == "skip" else "runs once")
     q("#xd-schedule", Static).update(sched)
@@ -2015,7 +2026,7 @@ def status_text(t, manager, spinner=""):
   elif t.state in ("done", "done-errors", "failed"):
     more = (f"{S.when_text(last['ended'])}" if last else "") + (f": {t.message}" if t.message else "")
   elif t.state == "new":
-    more = t.message or ("runs when you click Run now" if (t.schedule or {}).get("kind") == "never" else "Run now starts it")
+    more = t.message or ("runs when you click Run now" if (t.schedule or {}).get("kind") == "manual" else "Run now starts it")
   else: # (queued, waiting)
     more = t.message
   return Text.assemble((f"{mark} {word}", STATE_STYLES.get(t.state, "bold")), ("  " + more if more else "", ""))

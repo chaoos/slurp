@@ -173,11 +173,11 @@ def test_job_gone(check):
   check("squeue failed otherwise: not gone (asked again)", not MG.job_gone(1, "", "Socket timed out"))
 
 
-def test_never(check, tmp_path):
+def test_manual(check, tmp_path):
   app = App()
   mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
   t = make(tmp_path, app)
-  t.schedule = {"kind": "never"}
+  t.schedule = {"kind": "manual"}
   mg.add(t)
   mg.go(t)
   check("Add: it is there, it does not run", t.state == "new" and not t.run and t.next_run is None and "Run now" in t.message, (t.state, t.message))
@@ -209,7 +209,7 @@ def test_reschedule(check, tmp_path):
   mg.add(t)
   for schedule, state in (({"kind": "daily", "daily": "02:00"}, "scheduled"), ({"kind": "every", "every": "6h"}, "scheduled"),
                           ({"kind": "at", "at": time.time() + 3600}, "scheduled"), ({"kind": "after_job", "job": "9"}, "scheduled"),
-                          ({"kind": "never"}, "new")):
+                          ({"kind": "manual"}, "new")):
     t.state, t.schedule, t.next_run = "new", schedule, None
     mg.reschedule(t)
     later = schedule["kind"] in ("daily", "every", "at")
@@ -251,3 +251,21 @@ def test_continue_only_paused(check, tmp_path):
   t.state = "paused"
   t.runs.append({"started": 3.0, "ended": 4.0, "result": "paused"})
   check("paused mid-run", mg.paused_mid_run(t))
+
+
+def test_run_now_checks_first(check, tmp_path):
+  """Run now of a transfer whose route did not pass its check (added as manual): the check first; passed: the run;
+  not: failed, and why (no run)"""
+  app = App()
+  mg = MG.Manager(app, M.Store(str(tmp_path / "s.json")))
+  t = make(tmp_path, app, route="same-fs", runs_on="detached")
+  t.schedule, t.plan = {"kind": "manual"}, {"routes": {"same-fs": {"ok": False, "why": "not checked"}}}
+  mg.add(t)
+  mg.run_now(t)
+  check("checked first, then it ran (here both ends share their filesystem)", until(app, mg, lambda: t.runs and t.runs[-1]["result"] == "done", 60)
+        and t.plan["routes"]["same-fs"]["ok"], (t.state, t.message, t.log[-3:]))
+  t.route, t.runs_on, t.state = "direct-push", "detached", "new"
+  runs = len(t.runs)
+  mg.run_now(t)
+  check("a route that does not pass: failed, why, no run", until(app, mg, lambda: t.state == "failed", 60)
+        and "did not pass the check before the run" in t.message and len(t.runs) == runs, (t.state, t.message))

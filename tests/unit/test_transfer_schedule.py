@@ -52,6 +52,6 @@ def test_words(check):
   check("repeated", S.repeated({"kind": "daily"}) and not S.repeated({"kind": "at"}))
 
 
-def test_never(check):
-  check("never: in words", S.describe({"kind": "never"}) == "never by itself: only on Run now")
-  check("never: no time", S.first_time({"kind": "never"}) is None and S.after_run({"kind": "never"}, 1.0) is None and not S.repeated({"kind": "never"}))
+def test_manual(check):
+  check("manual: in words", S.describe({"kind": "manual"}) == "manual: only on Run now")
+  check("manual: no time", S.first_time({"kind": "manual"}) is None and S.after_run({"kind": "manual"}, 1.0) is None and not S.repeated({"kind": "manual"}))

@@ -110,7 +110,7 @@ class Manager:
   def go(self, t):
     """The wizard's Go (and Continue, Run now): now, or by its schedule"""
     kind = (t.schedule or {}).get("kind", "now")
-    if kind == "never": # (only added: it runs when the user clicks Run now)
+    if kind == "manual": # (only added: it runs when the user clicks Run now)
       t.state, t.message, t.next_run = "new", "runs when you click Run now", None
       self.changed(t)
       return
@@ -133,7 +133,7 @@ class Manager:
     self.start(t)
 
   def reschedule(self, t):
-    """Its schedule anew, after its settings changed: the next time it runs, without running now (never by itself:
+    """Its schedule anew, after its settings changed: the next time it runs, without running now (manual:
     when the user clicks Run now; now: as it was)"""
     kind = (t.schedule or {}).get("kind", "now")
     now = time.time()
@@ -148,7 +148,7 @@ class Manager:
     elif kind == "after_job":
       t.state, t.message = "scheduled", S.describe(t.schedule)
       self.job_watch[t.id] = 0
-    elif kind == "never":
+    elif kind == "manual":
       t.message = "runs when you click Run now"
     self.changed(t)
 
@@ -590,9 +590,37 @@ class Manager:
       self.from_thread(done, result)
     threading.Thread(target=work, daemon=True, name=f"job test {t.name}").start()
 
-  def recheck(self, t):
+  @staticmethod
+  def route_passed(t):
+    """Did its route pass its last check (a route that logs in only with the temporary key: with it chosen)?"""
+    info = (t.plan.get("routes") or {}).get(t.route) or {}
+    return bool(info.get("ok") or (info.get("keyable") and t.options.get("temp_key")))
+
+  def run_now(self, t):
+    """Run now (the user's): a route that did not pass its last check (a manual transfer may be added so) is checked
+    first, and the run starts only if it passes"""
+    if t.active:
+      return
+    if self.route_passed(t):
+      self.start(t)
+      return
+    def then():
+      if self.route_passed(t):
+        self.start(t)
+        return
+      info = (t.plan.get("routes") or {}).get(t.route) or {}
+      t.state = "failed"
+      t.message = (f"{M.ROUTES.get(t.route, t.route)} did not pass the check before the run"
+                   + (f" ({info.get('why')})" if info.get("why") else "") + ": choose another route (Edit…), or Check again later")
+      t.event(t.message)
+      self.changed(t)
+      self.say(t, t.message, "error", 12)
+    if self.recheck(t, then=then):
+      t.event("Run now: the route is checked first")
+
+  def recheck(self, t, then=None):
     """Check a transfer again as it is set up (its paths, its options): its plan as the check goes (what remains, the
-    routes); False if it cannot be now (a run under way, a tab not connected)"""
+    routes), then() after it (on the UI thread); False if it cannot be now (a run under way, a tab not connected)"""
     if t.id in self.checking or t.active:
       return False
     missing = self.not_ready(t)
@@ -613,6 +641,8 @@ class Manager:
                               if remaining is not None
                               else plan.get("error") or "what remains is not known"))
       self.changed(t)
+      if then is not None: # (Run now: the run, if the route passed)
+        then()
     self.check(t, report, done)
     return True
 
