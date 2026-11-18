@@ -10,7 +10,7 @@ import threading
 import time
 
 from ..state import log
-from . import endpoints as E, model as M, plan as P, relay as RL, rsync as R, runner as RN
+from . import endpoints as E, globus as G, model as M, plan as P, relay as RL, rsync as R, runner as RN
 from .host import Host, NotConnected
 
 POLL_SHOWN = 3      # seconds between looks at a run on a cluster while its transfer is shown
@@ -46,7 +46,7 @@ class Manager:
     self.checking = set()   # ids being checked again (their details: Check again)
     self.lock = threading.RLock()
     for t in self.store.transfers: # (runs that went on without slurp: followed again)
-      if t.run and t.runs_on in ("detached", "job"):
+      if t.run and t.runs_on in ("detached", "job", "globus"):
         self.followed[t.id] = 0
 
   # ---- the transfers
@@ -78,7 +78,9 @@ class Manager:
     return Host(src), Host(dst)
 
   def not_ready(self, t):
-    """The ends that are not connected: [cluster or None (not open)]"""
+    """The ends that are not connected: [cluster or None (not open)] (a Globus transfer needs no tab)"""
+    if t.route == "globus":
+      return []
     src, dst = self.ends(t)
     return [c for c in (src, dst) if c is None or (c.destination and not (c.connection and c.connection.ready))]
 
@@ -116,6 +118,9 @@ class Manager:
     """A run now. Ends that are not connected: it waits for them (they log in in their tabs)"""
     if t.active:
       return
+    if t.route == "globus":
+      self.start_globus(t)
+      return
     missing = self.not_ready(t)
     if missing:
       names = ", ".join(c.name if c else "a closed tab" for c in missing)
@@ -135,6 +140,165 @@ class Manager:
     self.changed(t)
     target = self.run_relay if t.runs_on == "slurp" else self.run_on_cluster
     threading.Thread(target=target, args=(t,), daemon=True, name=f"transfer {t.name}").start()
+
+  # ---- Globus: a task that Globus runs (slurp submits it and follows it)
+  def globus_ends(self, t):
+    """(source collection, its paths there, destination collection, the destination there): GlobusError if an end
+    has no collection, or a path is outside the folder of a linked tab"""
+    src_cid, src_map = E.collection_of(self.endpoint_store, t.source)
+    dst_cid, dst_map = E.collection_of(self.endpoint_store, t.dest)
+    for cid, ref in ((src_cid, t.source), (dst_cid, t.dest)):
+      if cid is None:
+        raise G.GlobusError("failed", f"{ref.get('name') or E.ref_id(ref)} has no Globus collection (a tab: link it, Endpoints → Edit…)")
+    paths = []
+    for p in t.source.get("paths", []):
+      mapped = src_map(p)
+      if mapped is None:
+        raise G.GlobusError("failed", f"{p} is outside the folder linked to the collection")
+      paths.append(mapped)
+    dest = dst_map(t.dest.get("path", ""))
+    if dest is None:
+      raise G.GlobusError("failed", f"{t.dest.get('path')} is outside the folder linked to the collection")
+    return src_cid, paths, dst_cid, dest
+
+  def start_globus(self, t):
+    t.pending = None
+    t.state, t.message, t.errors = "starting", "submitting to Globus …", []
+    t.progress = {"total": t.plan.get("remaining_bytes") if not t.runs else None, "history": []}
+    t.run = {"kind": "globus", "started": time.time(), "route": "globus"}
+    t.event("run started (a Globus transfer)")
+    self.changed(t)
+    def work():
+      try:
+        src_cid, paths, dst_cid, dest = self.globus_ends(t)
+        task_id = G.submit(G.client(), t, src_cid, dst_cid, paths, dest)
+      except Exception as e:
+        self.from_thread(self.ended, t, None, f"the transfer was not submitted to Globus: {getattr(e, 'words', None) or e}")
+        return
+      self.from_thread(self.globus_submitted, t, task_id)
+    threading.Thread(target=work, daemon=True, name=f"globus {t.name}").start()
+
+  def globus_submitted(self, t, task_id):
+    t.run["task"] = task_id
+    t.event(f"submitted to Globus: task {task_id}")
+    self.followed[t.id] = 0
+    if t.state == "pausing": # (paused while it was submitted)
+      self.pause_globus(t, "starting")
+      return
+    t.state, t.message = "queued", "submitted to Globus"
+    self.changed(t)
+
+  def poll_globus(self, t):
+    try:
+      doc = G.task(G.client(), t.run["task"])
+      errors = G.task_errors(G.client(), t.run["task"]) if doc.get("status") == "SUCCEEDED" and doc.get("subtasks_skipped_errors") else []
+    except G.GlobusError as e:
+      self.from_thread(self.unreachable, t, f"Globus: {e.words}")
+      return
+    except Exception as e:
+      self.from_thread(self.unreachable, t, f"Globus: {e}")
+      return
+    finally:
+      self.polling.discard(t.id)
+    self.from_thread(self.polled_globus, t, doc, errors)
+
+  def polled_globus(self, t, doc, errors=()):
+    if not t.run:
+      return
+    state, words = G.state_of(doc)
+    p = G.progress_of(doc)
+    if p["files_total"]:
+      t.progress["files_total"] = p["files_total"]
+    if p["bytes"] or p["files"]:
+      self.progress(t, {"bytes": p["bytes"], "rate": p["rate"], "percent": p["percent"]}, files=p["files"],
+                    errors=list(errors) or t.errors, error_count=p["skipped"])
+    t.progress["phase"] = "copying"
+    if state in ("queued", "running", "waiting"):
+      if t.state != "pausing":
+        t.state, t.message = state, words
+      self.changed(t, save=False)
+      return
+    self.followed.pop(t.id, None)
+    if errors:
+      t.errors = list(errors)
+    if state == "canceled":
+      self.ended(t, None, "" if t.state == "pausing" else f"canceled at Globus ({words})", stopped=True)
+    elif state in ("done", "done-errors"):
+      self.ended(t, 0 if state == "done" else 23, words if state == "done-errors" else "")
+    else:
+      self.ended(t, None, f"Globus: {words}")
+
+  def pause_globus(self, t, prev):
+    def work():
+      try:
+        G.cancel(G.client(), t.run["task"])
+      except Exception as e:
+        self.from_thread(self.say, t, f"pausing did not work: {getattr(e, 'words', None) or e}", "error")
+        self.from_thread(self.set_state, t, prev)
+        return
+      self.followed[t.id] = 0
+    threading.Thread(target=work, daemon=True).start()
+
+  def test_globus(self, endpoint, done=None):
+    """Connect/Test of a Globus endpoint (or of the link of a tab): the login, the collection, its folder listed (in a
+    thread); its status of this session, then done(state, words) on the UI thread"""
+    d = endpoint.definition
+    if d is not None:
+      cid, base = d.settings.get("collection"), d.settings.get("path") or "/~/"
+    else:
+      link = self.endpoint_store.links.get(endpoint.id) or {}
+      cid, base = link.get("collection"), link.get("collection_path") or "/~/"
+    key = endpoint.id if d is not None else f"link:{endpoint.id}"
+    self.endpoint_status[key] = ("connecting", "asking Globus")
+    self.changed(None, save=False)
+    def work():
+      try:
+        if not cid:
+          raise G.GlobusError("not set up", "no collection chosen: Edit…")
+        tc = G.client()
+        info = G.collection(tc, cid)
+        G.ls(tc, cid, base)
+        result = ("connected", info["name"])
+      except G.GlobusError as e:
+        result = (e.state, e.words)
+      except Exception as e:
+        result = ("failed", str(e))
+      def finish():
+        self.endpoint_status[key] = result
+        self.changed(None, save=False)
+        if done is not None:
+          done(*result)
+      self.from_thread(finish)
+    threading.Thread(target=work, daemon=True, name=f"globus test {endpoint.name}").start()
+
+  def globus_check(self, t, report):
+    """The check of a Globus transfer (in a thread): the login, both collections, the sources (each match of a
+    pattern) and the destination; what remains is not known before (Globus compares at the run)"""
+    plan = {"steps": {}, "routes": {}, "mover": "globus"}
+    def step(state, text):
+      plan["steps"]["globus"] = {"state": state, "text": text}
+      report(_copy(plan))
+    try:
+      step("running", "asking Globus …")
+      src_cid, paths, dst_cid, dest = self.globus_ends(t)
+      tc = G.client()
+      src, dst = G.collection(tc, src_cid), G.collection(tc, dst_cid)
+      found = G.items(tc, src_cid, paths, dest)
+      kind = G.kind_of(tc, dst_cid, dest)
+      if kind == "file":
+        raise G.GlobusError("failed", f"{dest} is a file in {dst['name']}, not a folder")
+      words = f"Globus: {src['name']} → {dst['name']}: {len(found)} item{'s' if len(found) != 1 else ''}" + (
+        "" if kind else " (the destination folder is created)")
+      plan["globus_items"] = [list(i) for i in found]
+      plan["collections"] = {"source": src, "dest": dst}
+      plan["routes"]["globus"] = {"ok": True, "runs_on": ["globus"]}
+      plan["recommended"] = "globus"
+      step("ok", words)
+    except G.GlobusError as e:
+      plan["routes"]["globus"] = {"ok": False, "why": e.words, "runs_on": ["globus"], "state": e.state}
+      step("bad", f"Globus: {e.words}")
+    plan["done"] = True
+    return plan
 
   # ---- the relay (in slurp)
   def run_relay(self, t):
@@ -255,7 +419,10 @@ class Manager:
     threading.Thread(target=work, daemon=True).start()
 
   def poll(self, t):
-    """Look at a run on a cluster (in a thread)"""
+    """Look at a run on a cluster, or a Globus task (in a thread)"""
+    if t.runs_on == "globus":
+      self.poll_globus(t)
+      return
     try:
       client = self.client(t)
       if not client.ready:
@@ -409,6 +576,9 @@ class Manager:
       return
     if prev == "starting":
       return # (it starts and is stopped once it has its handles)
+    if t.runs_on == "globus" and t.run.get("task"):
+      self.pause_globus(t, prev)
+      return
     def work():
       try:
         client = self.client(t)
@@ -547,6 +717,9 @@ class Manager:
     stop = threading.Event()
     def work():
       try:
+        if E.globus_only(self.endpoint_store, t.source, t.dest):
+          self.from_thread(done, _copy(self.globus_check(t, lambda p: self.from_thread(report, p))))
+          return
         source, dest = self.hosts(t)
         src, dst = self.ends(t)
         plan = P.check(source, dest, t, src, dst, report=lambda p: self.from_thread(report, _copy(p)), stop=stop.is_set,
@@ -554,6 +727,13 @@ class Manager:
       except Exception as e:
         log.debug(f"check of {t.name}: {e!r}")
         plan = {"done": True, "error": str(e), "steps": {}, "routes": {}}
+      if E.globus_possible(self.endpoint_store, t.source, t.dest) and not stop.is_set(): # (two linked tabs: Globus too)
+        extra = self.globus_check(t, lambda p: None)
+        plan["routes"]["globus"] = extra["routes"]["globus"]
+        for key in ("globus_items", "collections"):
+          if key in extra:
+            plan[key] = extra[key]
+        plan.setdefault("steps", {})["globus"] = extra["steps"]["globus"]
       self.from_thread(done, _copy(plan))
     threading.Thread(target=work, daemon=True, name=f"check {t.name}").start()
     return stop
@@ -578,6 +758,8 @@ class Manager:
     """The command of a run, to put into scrontab or cron by hand (in a worker: it asks ssh -G for a direct route).
     Patterns are left for the shell to expand; secrets would be placeholders, never in clear."""
     import shlex
+    if t.route == "globus":
+      return self.globus_command(t)
     src, dst = self.ends(t)
     def arg(p):
       if R.is_pattern(p):
@@ -638,6 +820,26 @@ class Manager:
                 *([f"--partition={o['partition']}"] if o.get("partition") else []), *([f"--account={o['account']}"] if o.get("account") else [])]
       body = [body[0].replace("# on ", "# a transfer job on "), f"{shlex.join(sbatch)} --wrap={shlex.quote(body[-1])}"]
     return "\n".join(head + body) + "\n"
+
+  def globus_command(self, t):
+    """The Globus CLI command of a run (globus transfer --batch: each item; a folder with --recursive)"""
+    import shlex
+    try:
+      src_cid, paths, dst_cid, dest = self.globus_ends(t)
+    except G.GlobusError as e:
+      return f"# slurp transfer {t.name!r}: {e.words}\n"
+    found = t.plan.get("globus_items") or [[p, dest.rstrip("/") + "/" + p.rstrip("/").rsplit("/", 1)[-1], None] for p in paths]
+    lines = [f"# slurp transfer {t.name!r}: a Globus transfer (the Globus CLI: pip install globus-cli; globus login first)",
+             "# (as slurp submits it; it copies only what is missing or changed, and deletes nothing)",
+             f"globus transfer --sync-level {'checksum' if t.options.get('checksum') else 'mtime'}"
+             + ("" if t.options.get("no_verify") else " --verify-checksum") + " --preserve-timestamp"
+             + f" --label {shlex.quote(('slurp ' + t.name)[:120])} --batch - {src_cid} {dst_cid} <<'EOF'"]
+    if any(r is None for _, _, r in found):
+      lines.insert(2, "# (Check again in slurp to know which sources are folders: a folder needs --recursive before it)")
+    for src, dst, recursive in found:
+      lines.append(("--recursive " if recursive else "") + f"{shlex.quote(src)} {shlex.quote(dst)}")
+    lines.append("EOF")
+    return "\n".join(lines) + "\n"
 
   # ---- for the overview and the footer
   def active(self):

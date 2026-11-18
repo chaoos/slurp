@@ -184,10 +184,49 @@ def listing(app, store, statuses=None):
     if c.destination:
       state, words = tab_state(c, app)
       out.append(Endpoint(tab_id(c), c.name, "tab", c.destination, state, words, cluster=c))
+    if c.destination and store.links.get(tab_id(c), {}).get("collection"):
+      out[-1].where += f" · Globus: {store.links[tab_id(c)].get('collection_name') or store.links[tab_id(c)]['collection']}"
   for d in sorted(store.defs, key=lambda d: d.name.lower()):
-    state, words = statuses.get(d.id, ("not connected", ""))
+    state, words = statuses.get(d.id) or default_state(d)
     out.append(Endpoint(d.id, d.name, d.kind, d.where(), state, words, definition=d))
   return out
+
+def default_state(definition):
+  """(state, words) of a defined endpoint not connected yet in this session"""
+  if definition.kind == "globus":
+    from . import globus as G
+    ok, why = G.available()
+    if not ok:
+      return "not set up", why
+    return ("not connected", "") if G.logged_in() else ("not set up", "log in to Globus")
+  return "not connected", ""
+
+# ---- Globus: the collections of a transfer's ends
+def collection_of(store, ref):
+  """(collection id, a function: a path of the end -> its path in the collection) of a transfer's end: a Globus
+  endpoint, or a tab linked to a collection; (None, None) for an end without one"""
+  from . import globus as G
+  eid = ref_id(ref)
+  d = store.get(eid)
+  if d is not None and d.kind == "globus":
+    return d.settings.get("collection") or None, lambda p: p
+  link = store.links.get(eid) or {}
+  if link.get("collection"):
+    return link["collection"], lambda p: G.to_collection(link, p)
+  return None, None
+
+def is_globus(store, ref):
+  """Is the end a Globus endpoint (only Globus can move its data)?"""
+  d = store.get(ref_id(ref))
+  return d is not None and d.kind == "globus"
+
+def globus_possible(store, source, dest):
+  """Can Globus move the data between the ends (both have a collection)?"""
+  return collection_of(store, source)[0] is not None and collection_of(store, dest)[0] is not None
+
+def globus_only(store, source, dest):
+  """Only Globus can move it (an end is a Globus endpoint)"""
+  return is_globus(store, source) or is_globus(store, dest)
 
 def resolve(app, store, ref, statuses=None):
   """The endpoint of a transfer's end; a tab that is not open: one in the state "tab not open" (with its name)"""
@@ -203,7 +242,7 @@ def resolve(app, store, ref, statuses=None):
   d = store.get(eid)
   if d is None:
     return Endpoint(eid, "(deleted)", "?", "", "failed", "this endpoint was deleted")
-  state, words = (statuses or {}).get(eid, ("not connected", ""))
+  state, words = (statuses or {}).get(eid) or default_state(d)
   return Endpoint(d.id, d.name, d.kind, d.where(), state, words, definition=d)
 
 def ref_of(endpoint, **more):

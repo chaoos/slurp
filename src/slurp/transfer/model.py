@@ -33,11 +33,13 @@ ROUTES = {
   "direct-push": "direct (source pushes)",
   "direct-pull": "direct (destination pulls)",
   "relay":       "relay through slurp",
+  "globus":      "Globus transfer",
 }
 RUNS_ON = {
   "slurp":    "in slurp",
   "detached": "detached on the cluster",
   "job":      "as a transfer job",
+  "globus":   "at Globus",
 }
 HISTORY = 50 # runs kept per transfer
 
@@ -119,7 +121,7 @@ class Transfer:
     if isinstance(t.pending, dict):
       t.pending.pop("scheduled", None)
       t.pending.pop("begin", None)
-    if t.state in ACTIVE and (t.runs_on == "slurp" or not t.run.get("folder")):
+    if t.state in ACTIVE and (t.runs_on == "slurp" or not (t.run.get("folder") or t.run.get("task"))):
       # (it ran in slurp, which ended, or it was still starting: paused, Continue goes on)
       if t.run:
         record_run(t, "paused", "slurp ended")
