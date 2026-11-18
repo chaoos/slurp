@@ -212,8 +212,9 @@ history; the files stay). Keys that act on a cluster do nothing here: its tab fi
   "TransferScreen": ("A transfer", """
 One transfer: its state, how the data flows (a picture: the tabs as boxes with their connections, slurp between them
 for the relay; on the arrow push, pull, relay or the same filesystem; under each box what runs there; while it runs a
-dot moves along the arrows), the sources and the
-destination, how far it is (bytes, rate, time left, files; for the relay also the rate through slurp), the file it
+dot moves along the arrows), the sources and the destination (links: a click opens one in the tab of its cluster, a
+folder as a directory view, a file in its view, a file that cannot be shown or a pattern such as `*.log` as its folder
+searched for it, a destination not there yet as the nearest folder that is), how far it is (bytes, rate, time left, files; for the relay also the rate through slurp), the file it
 copies now, its rate over time, what happens if slurp closes (in slurp: it stops as paused and Continue goes on;
 detached on the cluster or as a transfer job: it goes on without slurp), its schedule, the errors rsync reported for
 single files, its runs, what the check found, and its log.

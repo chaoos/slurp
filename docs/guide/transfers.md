@@ -106,7 +106,9 @@ ran last); the line below says why it waits, how it failed, its schedule. `Enter
 subtab of its own:
 
 - its state, the route (the tabs with their connections, and slurp in between for the relay), the sources and the
-  destination;
+  destination: each a link that opens it in the tab of its cluster: a folder as a directory view, a file in its view
+  (one that cannot be shown: its folder, searched for it), a pattern such as `/path/to/*.log` as its folder searched
+  for it, a destination that is not there yet as the nearest folder that is;
 - its progress: a bar, bytes of the total, the rate (for the relay also through slurp), the time left, files, the
   errors; the file it copies now; the rate over time;
 - what happens if slurp closes; its schedule; the errors rsync reported for single files; its runs (when, how it

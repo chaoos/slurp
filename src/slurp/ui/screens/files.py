@@ -464,9 +464,10 @@ class DirScreen(SplitScreen):
     Binding("full_stop", "hidden", "Hidden files"),
   ]
 
-  def __init__(self, crumbs, path, bases=(), env=None):
+  def __init__(self, crumbs, path, bases=(), env=None, search=""):
     super().__init__()
     self.path = os.path.normpath(path)
+    self.initial_search = search # (shown with its search open on these names: a part of them, or a pattern, *.log)
     self.base_crumbs = list(crumbs)
     self.crumbs = [*crumbs, self.path.rstrip("/") + "/"]
     self.bases, self.env = list(bases), env # passed on to the files opened from here (e.g. the job's WorkDir)
@@ -498,6 +499,9 @@ class DirScreen(SplitScreen):
     for key, label in DIR_COLUMNS:
       table.add_column(label, key=key)
     self.timer = self.set_interval(2.0, self.action_reload, pause=True)
+    if self.initial_search:
+      self.query_one("#dsearch").add_class("visible")
+      self.query_one("#dfilter", Input).value = self.initial_search
     self.query_one("#dstatus", Static).update("listing …")
     self.action_reload()
     table.focus()

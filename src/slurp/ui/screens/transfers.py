@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 
 import humanize
+from rich.style import Style
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
@@ -1461,8 +1462,7 @@ class TransferScreen(TransfersBase):
     if t.run.get("job"):
       route.append(f", job {t.run['job']}", style="dim")
     q("#xd-route", Static).update(route)
-    q("#xd-paths", Static).update(Text("\n".join([f"from {t.source_name}: {p}" for p in t.source.get("paths", [])]
-                                                 + [f"into {t.dest_name}: {t.dest.get('path', '')}"]), style="dim"))
+    q("#xd-paths", Static).update(self.paths_text(t))
     q("#xd-pause", Button).display = t.active or t.state in ("scheduled", "waiting")
     q("#xd-resume", Button).display = self.can_continue(t)
     q("#xd-run", Button).display = not t.active and t.state != "waiting"
@@ -1527,6 +1527,36 @@ class TransferScreen(TransfersBase):
       check.append_text(routes_text(t.plan))
     q("#xd-check", Static).update(check)
     q("#xd-log", Static).update(Text("\n".join(f"{datetime.fromtimestamp(ts).strftime('%m-%d %H:%M:%S')}  {text}" for ts, text in t.log[-25:]), style="dim"))
+
+  def paths_text(self, t):
+    """The sources and the destination, each a link: a click opens it in its tab (a folder, a file, a pattern)"""
+    text = Text()
+    rows = [("from", t.source_name, p, i) for i, p in enumerate(t.source.get("paths", []))]
+    rows.append(("into", t.dest_name, t.dest.get("path", ""), -1))
+    for word, name, path, i in rows:
+      text.append(f"{word} {name}: ", style="dim")
+      text.append(path, style=Style(underline=True) + Style.from_meta({"@click": f"screen.open_end({i})"}))
+      text.append("\n")
+    text.append("(a click opens it in its tab)", style="dim italic")
+    return text
+
+  def action_open_end(self, index):
+    """A source (index) or the destination (-1), opened in the tab of its cluster"""
+    t = self.transfer
+    if t is None:
+      return
+    src, dst = self.manager.ends(t)
+    if index < 0:
+      cluster, path = dst, t.dest.get("path", "")
+    else:
+      paths = t.source.get("paths", [])
+      if index >= len(paths):
+        return
+      cluster, path = src, paths[index]
+    if cluster is None:
+      self.app.notify(f"the tab {t.dest_name if index < 0 else t.source_name} is not open", title=t.name, severity="warning")
+      return
+    self.app.open_transfer_path(cluster, path, [t.name])
 
   @on(Button.Pressed)
   def pressed(self, event):

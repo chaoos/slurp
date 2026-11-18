@@ -4,6 +4,9 @@ connection of its own: what acts on a cluster (the job list, a shell, …) goes 
 
 Transfers are set up with Menu → Transfer data… (T), or New transfer in the list: the wizard, then Go."""
 
+import os
+import re
+
 from rich.text import Text
 
 from ..config import load_config
@@ -251,6 +254,52 @@ class TransfersTab:
       self.action_open_job(jid)
     else:
       self.notify(f"job {jid}: in the job list once it is loaded", title=cluster.name)
+
+  def open_transfer_path(self, cluster, path, crumbs):
+    """A path of a transfer in the tab of its cluster: a folder in a directory view, a file in its view (one that
+    cannot be shown: its folder, searched for it), a pattern (*.log) as its folder searched for it, a path that is not
+    there (yet: a destination) as the nearest folder that is"""
+    if cluster not in self.clusters:
+      self.notify("its tab is not open", severity="warning")
+      return
+    if cluster.destination and not (cluster.connection and cluster.connection.ready):
+      self.notify(f"connect {cluster.name} first", title=cluster.name, severity="warning")
+      self.connect_cluster(cluster)
+      return
+    from ..cluster.paths import is_binary
+    from ..cluster.remote import fs_isdir, fs_isfile, in_background
+    from .screens.files import DirScreen, FILE_VIEWS, open_path
+    def work():
+      folder, name = os.path.dirname(path.rstrip("/")) or "/", os.path.basename(path.rstrip("/"))
+      if re.search(r"[*?\[]", name):
+        return "dir", folder, name
+      if fs_isdir(path):
+        return "path", path, ""
+      if fs_isfile(path):
+        if any(view.matches(path) for view in FILE_VIEWS) or not is_binary(path):
+          return "path", path, ""
+        return "dir", folder, name # (it cannot be shown: its folder, searched for it)
+      while folder not in ("/", "") and not fs_isdir(folder):
+        folder = os.path.dirname(folder)
+      return "dir", folder or "/", ""
+    def found(result):
+      if result is None:
+        return
+      kind, where, search = result
+      if cluster not in self.clusters:
+        return
+      self.in_transfers = False
+      self.activate_cluster(self.clusters.index(cluster), connect=False)
+      if kind == "path":
+        open_path(self, crumbs, where)
+        return
+      if search or where != os.path.normpath(path):
+        self.notify(f"{path}: " + (f"its folder, searched for {search}" if search else f"not there (yet): {where}"),
+                    title=cluster.name, timeout=5)
+      self.in_new_subtab(lambda: self.open_window(DirScreen(crumbs, where, search=search)),
+                         key=f"path {os.path.normpath(where)}" + (f" {search}" if search else ""))
+    in_background(self, work, found, group="open", name=f"opening {path}",
+                  connection=cluster.connection if cluster.destination else None)
 
   # ---- kept for the next start
   def transfers_state(self):

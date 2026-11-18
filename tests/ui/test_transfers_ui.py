@@ -264,3 +264,53 @@ def test_comparing_shown(check, tmp_path):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_paths_open(check, tmp_path):
+  """The paths of a transfer's details are links: a folder opens as a directory view, a text file in its view, a
+  binary file as its folder searched for it, a pattern as its folder searched for it, a destination that is not
+  there yet as the nearest folder that is; in the tab of the cluster, the Transfers tab left"""
+  from slurp.transfer import model as M
+  from slurp.ui.screens.files import DirScreen, FileScreen
+  data = tmp_path / "data"
+  (data / "logs").mkdir(parents=True)
+  (data / "logs" / "a.log").write_text("x")
+  (data / "notes.txt").write_text("hello\n")
+  (data / "blob.bin").write_bytes(bytes(range(256)) * 10)
+  dest = tmp_path / "dest"
+  dest.mkdir()
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      ref = M.tab_ref(app.clusters[0])
+      sources = [str(data / "logs"), str(data / "notes.txt"), str(data / "blob.bin"), str(data / "logs" / "*.log")]
+      t = M.Transfer(M.new_id(), "paths", {"tab": ref, "paths": sources}, {"tab": ref, "path": str(dest / "new" / "deeper")})
+      app.transfers.add(t)
+      app.open_transfer(t); await pilot.pause(0.6)
+      text = app.screen.query_one("#xd-paths").render()
+      clicks = [span.style.meta.get("@click") for span in getattr(text, "spans", []) if hasattr(span.style, "meta") and span.style.meta.get("@click")]
+      check("each path a link", clicks == ["screen.open_end(0)", "screen.open_end(1)", "screen.open_end(2)", "screen.open_end(3)", "screen.open_end(-1)"], clicks)
+      async def opened(index):
+        app.show_transfers(app.transfer_view(t)); await pilot.pause(0.3)
+        app.screen.action_open_end(index)
+        await until(pilot, lambda: not app.in_transfers and isinstance(app.screen, (DirScreen, FileScreen)), 10)
+        await pilot.pause(0.3)
+        return app.screen
+      s = await opened(0)
+      check("a folder: its directory view, in the cluster's tab", isinstance(s, DirScreen) and s.path == str(data / "logs") and not app.in_transfers,
+            type(s).__name__)
+      s = await opened(1)
+      check("a text file: its view", isinstance(s, FileScreen) and s.path == str(data / "notes.txt"), type(s).__name__)
+      s = await opened(2)
+      check("a binary file: its folder, searched for it", isinstance(s, DirScreen) and s.path == str(data)
+            and s.query_one("#dfilter").value == "blob.bin" and s.query_one("#dsearch").has_class("visible"), (type(s).__name__, getattr(s, "path", "")))
+      s = await opened(3)
+      check("a pattern: its folder, searched for it", isinstance(s, DirScreen) and s.path == str(data / "logs")
+            and s.query_one("#dfilter").value == "*.log", (type(s).__name__, getattr(s, "path", "")))
+      s = await opened(-1)
+      check("a destination not there yet: the nearest folder that is", isinstance(s, DirScreen) and s.path == str(dest), getattr(s, "path", ""))
+      await pilot.press("q")
+
+  asyncio.run(main())

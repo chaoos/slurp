@@ -3590,3 +3590,9 @@ async def t_transfer_detached(app, pilot):
   check("the files", same_tree(src, os.path.join(dst, "src")))
   ov_line = app.transfers.summary_for(lab)
   check("nothing under way: no line in the overview", ov_line == "", ov_line)
+  app.open_transfer(t); await pilot.pause(0.5)
+  app.screen.action_open_end(0)
+  check("its source, a click: the folder on the cluster, in the cluster's tab", await until(
+    pilot, lambda: isinstance(app.screen, DirScreen) and app.screen.path == src and app.cluster is lab and not app.in_transfers, 20),
+    (type(app.screen).__name__, getattr(app.screen, "path", "")))
+  app.leave_transfers(); await pilot.pause(0.2)
