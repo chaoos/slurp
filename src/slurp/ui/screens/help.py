@@ -199,9 +199,11 @@ about slurp, and quit (`q`). Enter or a click does the item; `Esc` or a click el
 """),
   "TransfersScreen": ("Transfers", """
 The transfers of data between the tabs (clusters, or this machine): the first subtab of the **Transfers** tab, which is
-there while transfers exist (also finished ones). Each row: its name, from where to where (a dot for each tab's
-connection), its route and where it runs, its state, how far it is, its rate and the time left, and when it runs next
-(or when it ran last). The line below says more of the highlighted one (why it waits, how it failed, its schedule).
+there while transfers exist (also finished ones). Each row: its name, from where and to where (each tab with a dot for
+its connection, and its path, a long one shortened in the middle: /very/long/…/in/its/path; several sources: the first
+and +n), its route and where it runs, its state, how far it is, its rate and the time left, and when it runs next
+(or when it ran last). The lines below say more of the highlighted one (why it waits, how it failed, its schedule,
+its full paths).
 Enter or a click opens its subtab with everything about it.
 
 **New transfer** (`n`, or Menu → Transfer data…, `T`) sets one up in a wizard. `p` pauses (a transfer job is

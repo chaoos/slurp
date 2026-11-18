@@ -1356,7 +1356,35 @@ class TransfersBase(SplitScreen):
                                        "on both sides stay as they are.", "Delete"),
                          lambda ok: self.app.delete_transfer(t) if ok else None)
 
-COLUMNS = [("name", "Name"), ("ends", "From → To"), ("how", "Route"), ("state", "State"), ("progress", "Progress"),
+def short_path(path, width=34):
+  """A long path shortened in its middle, at its slashes: /very/long/…/in/its/path (its start and its end stay)"""
+  from rich.cells import cell_len
+  if cell_len(path) <= width:
+    return path
+  parts = path.split("/")
+  tail, head = [], []
+  room = width - 2 # (the "/…" between)
+  for part in reversed(parts[1:]): # (the end first: the name says most; then as much of the start as fits)
+    if cell_len("/".join([part, *tail])) > room * 0.6 and tail:
+      break
+    tail.insert(0, part)
+  rest = room - cell_len("/".join(tail))
+  for part in parts[:len(parts) - len(tail)]:
+    if cell_len("/".join([*head, part])) > rest:
+      break
+    head.append(part)
+  out = "/".join(head) + "/…/" + "/".join(tail) if head and head != [""] else "…/" + "/".join(tail)
+  if cell_len(out) > width: # (one long name: its end)
+    out = "…" + path[-(width - 1):]
+  return out
+
+def end_text(cluster, name, paths, width=34):
+  """A tab with its path (the first of several: +n) for the list"""
+  first = paths[0] if paths else ""
+  more = f" +{len(paths) - 1}" if len(paths) > 1 else ""
+  return Text.assemble(dot(cluster), f" {name}:", (short_path(first, width - len(more)), "cyan"), (more, "dim"))
+
+COLUMNS = [("name", "Name"), ("from", "From"), ("to", "To"), ("how", "Route"), ("state", "State"), ("progress", "Progress"),
            ("rate", "Rate"), ("left", "Left"), ("when", "Next / last run")]
 
 class TransfersScreen(TransfersBase):
@@ -1401,7 +1429,8 @@ class TransfersScreen(TransfersBase):
       last = t.runs[-1] if t.runs else None
       when = (S.when_text(t.next_run) if t.next_run else
               (f"{S.when_text(last['ended'])} {M.STATES.get(last['result'], last['result'])}" if last else ""))
-      table.add_row(Text(t.name, style="bold"), Text.assemble(dot(src), f" {t.source_name} → {t.dest_name} ", dot(dst)),
+      table.add_row(Text(t.name, style="bold"), end_text(src, t.source_name, t.source.get("paths", [])),
+                    end_text(dst, t.dest_name, [t.dest.get("path", "")]),
                     route_text(t), state_text(t),
                     Text(f"{self.app.spinner()} comparing", style="yellow") if t.state == "running" and p.get("phase") == "comparing"
                     else bar(shown) if shown is not None else "",
@@ -1427,6 +1456,7 @@ class TransfersScreen(TransfersBase):
       text.append(f" · {t.message}")
     if t.schedule and t.schedule.get("kind", "now") not in ("now", "never"):
       text.append(f" · {S.describe(t.schedule, t.next_run)}", style="cyan")
+    text.append(f"\n{t.source_name}:{', '.join(t.source.get('paths', []))}  →  {t.dest_name}:{t.dest.get('path', '')}", style="dim")
     note.update(text)
 
   def current(self):

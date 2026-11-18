@@ -137,6 +137,11 @@ def test_wizard_and_tab(check, tmp_path):
       check("a cluster's key does nothing here (t: a shell)", isinstance(app.screen, TransferScreen) and app.shell is None)
       await pilot.click("#view-transfers"); await pilot.pause(0.3)
       check("the list", isinstance(app.screen, TransfersScreen) and app.screen.query_one("#xfer-list").row_count == 1)
+      row = [str(c) for c in app.screen.query_one("#xfer-list").get_row_at(0)]
+      check("…with the source and the destination, each with its tab and path", row[1].endswith(f"Local:{src}") and row[2].endswith(f"Local:{dst}")
+            or "/…/" in row[1], row[:3])
+      note = str(app.screen.query_one("#xfer-note").render())
+      check("…the full paths below", f"Local:{src}  →  Local:{dst}" in note, note)
       await pilot.press("ctrl+w"); await pilot.pause(0.3)
       check("Ctrl-W on the list: it stays", isinstance(app.screen, TransfersScreen))
       await pilot.click("#cluster-tab-0"); await pilot.pause(0.3)
@@ -274,7 +279,7 @@ def test_comparing_shown(check, tmp_path):
             and "for 3" in text and "about 1 min expected" in text, text)
       await pilot.click("#view-transfers"); await pilot.pause(1.2)
       table = app.screen.query_one("#xfer-list")
-      cell = str(table.get_row_at(0)[4])
+      cell = str(table.get_row_at(0)[5])
       check("the list: comparing", "comparing" in cell, cell)
       app.transfers.store.transfers.remove(t)
       await pilot.press("q")
@@ -456,3 +461,14 @@ def test_direct_job_checked_on_a_node(check, tmp_path, monkeypatch):
       await pilot.press("q")
 
   asyncio.run(main())
+
+
+def test_short_path(check):
+  from slurp.ui.screens.transfers import short_path
+  long = "/very/long/directory/path/with/many/subdirs/and/more/stuff/going/on/in/its/path"
+  short = short_path(long, 30)
+  check("a long path: its start and its end, … between, at slashes", short.startswith("/very/long/") and short.endswith("/in/its/path")
+        and "/…/" in short and len(short) <= 30, short)
+  check("a short one: as it is", short_path("/scratch/run42", 30) == "/scratch/run42")
+  name = "/s/" + "x" * 60 + ".h5"
+  check("one long name: its end", short_path(name, 30) == "…" + name[-29:] and len(short_path(name, 30)) == 30, short_path(name, 30))

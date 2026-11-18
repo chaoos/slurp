@@ -110,8 +110,9 @@ second run of the same transfer does not start.
 ## The Transfers tab
 
 While transfers exist (also finished ones), the tab **Transfers** is at the left of the tabs of the clusters, with
-how many run. Its first subtab is the list: each transfer with its name, from where to where (a dot for each tab's
-connection), its route and where it runs, its state, how far it is, its rate, the time left, and when it runs next (or
+how many run. Its first subtab is the list: each transfer with its name, from where and to where (each tab with a dot
+for its connection and its path; a long path is shortened in the middle, `/very/long/…/in/its/path`, and the full
+paths are below the list for the transfer highlighted), its route and where it runs, its state, how far it is, its rate, the time left, and when it runs next (or
 ran last); the line below says why it waits, how it failed, its schedule. `Enter` or a click opens a transfer in a
 subtab of its own:
 
