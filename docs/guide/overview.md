@@ -11,6 +11,8 @@ middle, a few lines about the cluster and the ways on.
 - **Its health**: healthy (green), degraded (yellow) or unhealthy (red), and why: nodes down, drained or in
   maintenance, a maintenance soon.
 - **The SSH session**, as the status at the bottom right shows it: who you are logged in as and the round trip.
+- **Transfers** from or to the tab that run, wait or are scheduled, how far they are (a click: the
+  [Transfers](transfers.md) tab).
 - **Jobs** opens the [job list](job-list.md) as a subtab (`j`); its label says how many of your jobs run and wait.
   Where there is no Slurm, *No Slurm available* stands there instead.
 - **Quota** (`Q`) and **Health** (`C`: health with the reasons, reservations, occupancy, partitions, node

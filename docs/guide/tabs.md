@@ -9,7 +9,9 @@ browser, the guides, the rule catalogue, options, about). Under the header
 are the tabs, then the subtabs. The toolbar of the job list has **Reload**,
 the time window of finished jobs, whose jobs are listed and **group arrays**.
 
-Every tab is a cluster (or this machine). Under the tabs, each tab has its
+Every tab is a cluster (or this machine). While there are transfers, the tab **Transfers** is at their left: its
+subtabs are the list of transfers and a subtab for each transfer opened from it; it has no connection of its own (see
+[Transfers](transfers.md)). Under the tabs, each tab has its
 subtabs, each with a `✕`: **Jobs** (the job list), and one for each job
 window, each file or directory, each shell (on the cluster, on the node of a
 job, GDB). Quota and Health are windows over it.
