@@ -24,7 +24,7 @@ def options(opts=None, version=(3, 2, 0), dry_run=False):
   if dry_run:
     out += ["-n", "--stats"]
   elif version is None or tuple(version) >= MIN_PROGRESS:
-    out += ["--info=progress2,stats2,name1", "--outbuf=L"]
+    out += ["--info=progress2,stats2,name1", "--outbuf=N"]
   else:
     out += ["--stats", "-v"]
   if opts.get("checksum"):
