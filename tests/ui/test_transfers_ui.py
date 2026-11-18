@@ -7,6 +7,7 @@ import os
 import shutil
 
 import pytest
+from textual.widgets import RadioButton
 
 from slurp.ui.app import Slurp
 from slurp.ui.screens.transfers import TransferScreen, TransfersScreen, TransferWizard
@@ -59,8 +60,24 @@ def test_wizard_and_tab(check, tmp_path):
       check("it says what remains", "500.0 KiB in 2 files to copy" in steps or "488.3 KiB in 2 files" in steps, steps)
       routes = str(w.query_one("#tw-routes").render())
       check("the routes, the same filesystem recommended", "same filesystem" in routes and "(recommended)" in routes, routes)
+      w.plan["routes"]["same-fs"]["runs_on"] = ["detached", "job"] # (as where the site has a transfer partition)
       await pilot.click("#tw-next"); await pilot.pause(0.4)
-      check("step 4: the recommended route, where it runs", w.chosen_route() == "same-fs" and w.chosen_runs_on() == "detached")
+      check("step 4: the recommended route, where it runs (a transfer job, where there is one)",
+            w.chosen_route() == "same-fs" and w.chosen_runs_on() == "job", (w.chosen_route(), w.chosen_runs_on()))
+      def pressed(sel):
+        return [(b.kind if sel == "#tw-runs-on" else b.route) for b in w.query(f"{sel} RadioButton").results(RadioButton) if b.value]
+      await pilot.click(w.query_one(".tw-o-detached")); await pilot.pause(0.3)
+      check("a click on another choice: only that one is pressed", pressed("#tw-runs-on") == ["detached"], pressed("#tw-runs-on"))
+      await pilot.click(w.query_one(".tw-o-job")); await pilot.pause(0.3)
+      check("…and back", pressed("#tw-runs-on") == ["job"], pressed("#tw-runs-on"))
+      await pilot.click(w.query_one(".tw-r-relay")); await pilot.pause(0.4)
+      check("another route: only it, and its choices (in slurp)", pressed("#tw-route") == ["relay"] and pressed("#tw-runs-on") == ["slurp"],
+            (pressed("#tw-route"), pressed("#tw-runs-on")))
+      await pilot.click(w.query_one(".tw-r-same-fs")); await pilot.pause(0.4)
+      check("the route back: one choice pressed", pressed("#tw-route") == ["same-fs"] and len(pressed("#tw-runs-on")) == 1,
+            (pressed("#tw-route"), pressed("#tw-runs-on")))
+      await pilot.click(w.query_one(".tw-o-detached")); await pilot.pause(0.3)
+      check("and it can still be changed", pressed("#tw-runs-on") == ["detached"] and w.chosen_runs_on() == "detached", pressed("#tw-runs-on"))
       check("no temporary key for it", not w.query_one("#tw-key").display)
       await pilot.click("#tw-next"); await pilot.pause(0.2)
       check("step 5: now", w.when_kind() == "now")

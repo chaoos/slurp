@@ -1,6 +1,7 @@
 """Transfers: the top-level tab Transfers (its list, a subtab for each transfer shown), the wizard that sets one up
 (source, destination, check, how, when, summary: Go), and a window that picks paths on any tab"""
 
+import asyncio
 import os
 import time
 from datetime import datetime
@@ -236,6 +237,16 @@ class PickPathsScreen(ModalScreen):
   def action_cancel(self):
     self.dismiss(None)
 
+def select(radio_set, button):
+  """Press one button of a radio set from code: the others off, and the set knows which one is pressed. (Setting its
+  value alone is not enough while a RadioSet.Changed is handled: the set then hears nothing of it, keeps the button it
+  had, and two stay pressed.)"""
+  for b in radio_set.query(RadioButton).results(RadioButton):
+    if b is not button and b.value:
+      b.value = False
+  button.value = True
+  radio_set._pressed_button = button
+
 STEP_STATE = {"running": ("…", "yellow"), "ok": ("✓", "green"), "bad": ("✗", "red"), "warn": ("!", "yellow"), "info": ("ⓘ", "dim")}
 STEP_ORDER = ["facts", "paths", "same-fs", "remaining", "relay", "direct-push", "direct-pull"]
 
@@ -334,6 +345,7 @@ class TransferWizard(ModalScreen):
       self.dst = next((c for c in clusters if c is not self.src), self.src)
       self.paths, self.dest_path = [], ""
     self.tid = editing.id if editing else M.new_id()
+    self.rebuilding = asyncio.Lock() # (the choices of step 4 are rebuilt one at a time)
 
   # ---- the window
   def compose(self) -> ComposeResult:
@@ -724,6 +736,11 @@ class TransferWizard(ModalScreen):
 
   # ---- 4: how
   async def fill_how(self):
+    async with self.rebuilding:
+      await self.fill_routes()
+    await self.route_changed()
+
+  async def fill_routes(self):
     routes = self.plan.get("routes", {})
     current = self.chosen_route() or (self.editing.route if self.editing else None) or self.plan.get("recommended")
     rs = self.query_one("#tw-route", RadioSet)
@@ -746,8 +763,7 @@ class TransferWizard(ModalScreen):
     await rs.mount(*buttons)
     chosen = next((b for b in buttons if b.route == current and b.usable), next((b for b in buttons if b.usable), None))
     if chosen is not None:
-      chosen.value = True # (after mounting: the set knows which one is pressed, choosing another one unpresses it)
-    await self.route_changed()
+      select(rs, chosen)
 
   def chosen_route(self):
     for b in self.query("#tw-route RadioButton").results(RadioButton):
@@ -761,6 +777,12 @@ class TransferWizard(ModalScreen):
     await self.route_changed()
 
   async def route_changed(self):
+    async with self.rebuilding:
+      await self.fill_runs()
+    self.runs_changed()
+    self.key_changed()
+
+  async def fill_runs(self):
     route = self.chosen_route()
     info = self.plan.get("routes", {}).get(route or "", {})
     runs = info.get("runs_on") or (["slurp"] if route == "relay" else ["detached"])
@@ -780,7 +802,7 @@ class TransferWizard(ModalScreen):
     await rs.mount(*buttons)
     for b in buttons:
       if b.kind == current:
-        b.value = True
+        select(rs, b)
     note = ""
     if route == "relay":
       note = ("The bytes pass through this machine (slurp's): its connections to both clusters set the speed."
@@ -796,8 +818,6 @@ class TransferWizard(ModalScreen):
     key.display = route in ("direct-push", "direct-pull")
     if route in ("direct-push", "direct-pull") and not info.get("ok") and info.get("keyable"):
       key.value = True
-    self.runs_changed()
-    self.key_changed()
 
   def chosen_runs_on(self):
     for b in self.query("#tw-runs-on RadioButton").results(RadioButton):
