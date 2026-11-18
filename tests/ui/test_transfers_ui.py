@@ -738,3 +738,45 @@ def test_endpoints_subtab(check, tmp_path):
 
   asyncio.run(main())
   asyncio.run(again())
+
+
+def test_edit_offline(check, tmp_path):
+  """Editing a transfer whose endpoint is not connected: its sources and destination stay as they are (their fields
+  wait for the login), the options, the route and where it runs can be changed, the check is not run again (what the
+  last one found stays), Save keeps it"""
+  from slurp.state import ClusterSession
+  from slurp.transfer import model as M
+  from slurp.ui.screens.transfers import TransferWizard
+
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(160, 45)) as pilot:
+      await pilot.pause(0.5)
+      jedi = ClusterSession("jedi", "jedi")
+      app.clusters.append(jedi)
+      ref = M.tab_ref(app.clusters[0])
+      plan = {"done": True, "steps": {}, "routes": {"direct-push": {"ok": True, "rate": 1e6}}, "recommended": "direct-push",
+              "remaining_bytes": 1000, "remaining_files": 2}
+      t = M.Transfer(M.new_id(), "to jedi", {"endpoint": "local", "tab": ref, "paths": [str(tmp_path)]},
+                     {"endpoint": "tab:jedi", "name": "jedi", "tab": M.tab_ref(jedi), "path": "/scratch/in"},
+                     route="direct-push", runs_on="job", options={"partition": "xfer", "time": "2:00:00"}, plan=plan)
+      app.transfers.add(t)
+      app.edit_transfer(t); await pilot.pause(0.6)
+      w = app.screen
+      check("the wizard, editing", isinstance(w, TransferWizard) and w.editing is t)
+      check("the destination as it was: fine though jedi is not connected", w.step_ok(1)[0], w.step_ok(1))
+      check("its path cannot be changed now", w.query_one("#tw-dst-path").disabled and w.query_one("#tw-dst-browse").disabled)
+      w.query_one("#tw-goto-2").press(); await pilot.pause(0.3)
+      w.query_one("#tw-checksum").value = True; await pilot.pause(0.2)
+      w.query_one("#tw-goto-3").press(); await pilot.pause(0.6)
+      check("the route as it was", w.chosen_route() == "direct-push" and w.chosen_runs_on() == "job", (w.chosen_route(), w.chosen_runs_on()))
+      check("not checked again: said", "Not checked again" in str(w.query_one("#tw-check-steps").render()) and w.checking is None,
+            str(w.query_one("#tw-check-steps").render()))
+      save = w.query_one("#tw-store")
+      check("Save can", await until(pilot, lambda: not save.disabled, 5), save.tooltip)
+      save.press(); await pilot.pause(0.5)
+      check("saved: the option changed, the route, the plan kept", t.options.get("checksum") and t.route == "direct-push"
+            and t.runs_on == "job" and t.plan.get("remaining_bytes") == 1000, (t.options, t.route, t.runs_on, t.plan))
+      await pilot.press("q")
+
+  asyncio.run(main())

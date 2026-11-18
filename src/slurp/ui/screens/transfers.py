@@ -490,6 +490,7 @@ class TransferWizard(ModalScreen):
     self.plan = dict(editing.plan) if editing else {}
     self.checking = None # (the stop event of a check under way)
     self.checked_for = None # (what the plan was made for: source, paths, destination)
+    self.offline = []       # (editing: the ends not connected, so not checked again)
     manager = app.transfers
     # (the endpoints it offers: this machine, the cluster tabs, Globus collections; the others come with their movers)
     self.endpoints = [e for e in E.listing(app, manager.endpoint_store, manager.endpoint_status) if e.is_tab or e.kind == "globus"]
@@ -655,8 +656,24 @@ class TransferWizard(ModalScreen):
     r = E.resolve(self.app, m.endpoint_store, {"endpoint": e.id}, m.endpoint_status)
     return r.state, r.words
 
+  def unchanged(self, side):
+    """Editing: is the end as the transfer has it (its endpoint, its paths)?"""
+    t = self.editing
+    if t is None:
+      return False
+    if side == "src":
+      return self.src_id == E.ref_id(t.source) and list(self.paths) == list(t.source.get("paths", []))
+    return self.dst_id == E.ref_id(t.dest) and self.dest_path == t.dest.get("path", "")
+
   def side_ok(self, side):
-    """(ok, why) of an end: connected (a Globus endpoint: tested), or, a tab for Globus, linked to a collection"""
+    """(ok, why) of an end: connected (a Globus endpoint: tested), or, a tab for Globus, linked to a collection.
+    Editing, an end as it was is fine though not connected: the other steps can be changed meanwhile"""
+    ok, why = self.side_ready(side)
+    if not ok and self.unchanged(side):
+      return True, ""
+    return ok, why
+
+  def side_ready(self, side):
     e, cluster = self.side(side), (self.src if side == "src" else self.dst)
     if e is None:
       return False, "choose an endpoint"
@@ -890,6 +907,15 @@ class TransferWizard(ModalScreen):
       else:
         connect.display = state in ("not connected",) and cluster is not None
       self.query_one(f"#tw-{side}-login", Button).display = state == "needs you"
+      # (its paths change only while it is there: typed paths need its home, Browse… its listing)
+      offline = not self.side_ready(side)[0]
+      ids = ("#tw-src-path", "#tw-src-browse", "#tw-src-remove") if side == "src" else ("#tw-dst-path", "#tw-dst-browse")
+      for wid in ids:
+        self.query_one(wid).disabled = offline
+      if offline and self.editing is not None:
+        text.append(f"\n  the {'sources' if side == 'src' else 'destination'} can be changed once it is connected; "
+                    "the other steps can be changed now", style="dim")
+        self.query_one(f"#tw-{side}-state", Static).update(text)
     self.update_next()
 
   def connect_side(self, side):
@@ -1121,7 +1147,10 @@ class TransferWizard(ModalScreen):
 
   def start_check(self, force=False):
     key = (self.src_id, tuple(self.paths), self.dst_id, self.dest_path)
-    if self.checking is not None or (key == self.checked_for and self.plan.get("done") and not force):
+    missing = [self.side_name(s) for s in ("src", "dst") if not self.side_ready(s)[0]]
+    self.offline = missing if self.editing is not None else []
+    if self.checking is not None or (key == self.checked_for and self.plan.get("done") and not force) or self.offline:
+      # (editing with an end not connected: not checked again; what the last check found stays, Run now checks first)
       self.show_plan()
       return
     self.checked_for = key
@@ -1143,6 +1172,9 @@ class TransferWizard(ModalScreen):
     steps = plan_text(general, spinner) # (the routes: on their choices)
     if self.checking is not None and not self.plan.get("steps"):
       steps = Text(f" {spinner} starting the check …", style="yellow")
+    if self.offline and self.checking is None:
+      steps.append(f" ⓘ Not checked again: {' and '.join(self.offline)} {'is' if len(self.offline) == 1 else 'are'} not connected. "
+                   "This is what the last check found; Run now checks first.\n", style="yellow")
     if self.plan.get("done") and self.plan.get("remaining_bytes") == 0:
       steps.append(" Nothing to copy: the destination has all of it already (a run would only compare).\n", style="green")
     self.query_one("#tw-check-steps", Static).update(steps)
@@ -1223,6 +1255,8 @@ class TransferWizard(ModalScreen):
     runs = (["slurp"] if route == "relay" else ["globus"] if route == "globus" else
             ["detached"] + (["job"] if P.partition_of(client, site_of) else []))
     runs = info.get("runs_on") or runs
+    if self.editing is not None and route == self.editing.route and self.editing.runs_on not in runs:
+      runs = [*runs, self.editing.runs_on] # (its tab is not there to say whether its site has a transfer partition)
     current = self.chosen_runs_on() or (self.editing.runs_on if self.editing else None)
     if current not in runs:
       current = "job" if "job" in runs else runs[0]

@@ -252,7 +252,9 @@ errors rsync reported for single files, and the events of the run. **Its job**: 
 Sets up a transfer in five steps; **Next** waits until a step is complete (its tooltip says what is missing). The
 steps at the top can be clicked: any step whose steps before it are complete. Editing a transfer (**Edit…**), every
 step is a click away and the buttons are **Cancel** and **Save**: Save keeps the changes (nothing
-starts now) once every step is complete; its tooltip says what is missing.
+starts now) once every step is complete; its tooltip says what is missing. An endpoint that is not connected does not
+hold it up: its paths stay as they are (they can be changed once it is connected), the options, the route and where it
+runs can be changed, and the check is not run again (what the last one found stays; Run now checks first).
 
 1. **Source**: an endpoint (this machine, or a tab, with its state; **Connect** or **Log in in its tab** when it
    needs it) and one or more files or folders there (Browse…: Space marks several; or type a path), or

@@ -132,6 +132,7 @@ def test_globus_wizard_and_run(check, monkeypatch, tmp_path):
       w.query_one("#tw-src-tab").value = "g1"
       check("chosen: tested at once, connected", await until(pilot, lambda: w.live_state("src")[0] == "connected"), w.live_state("src"))
       field = w.query_one("#tw-src-path")
+      check("its paths can be typed once it is connected", await until(pilot, lambda: not field.disabled))
       field.value = "/data/run1"
       field.focus(); await pilot.press("enter"); await pilot.pause(0.2)
       check("a path of the collection", w.paths == ["/data/run1"], w.paths)
@@ -139,7 +140,7 @@ def test_globus_wizard_and_run(check, monkeypatch, tmp_path):
       await until(pilot, lambda: not w.query_one("#tw-next").disabled)
       w.query_one("#tw-next").press(); await pilot.pause(0.3)
       w.query_one("#tw-dst-tab").value = "g2"
-      await until(pilot, lambda: w.live_state("dst")[0] == "connected")
+      await until(pilot, lambda: w.live_state("dst")[0] == "connected" and not w.query_one("#tw-dst-path").disabled)
       w.query_one("#tw-dst-path").value = "/in"; await pilot.pause(0.2)
       check("the destination step complete", w.step_ok(1)[0], w.step_ok(1))
       await until(pilot, lambda: not w.query_one("#tw-next").disabled)

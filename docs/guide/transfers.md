@@ -13,7 +13,9 @@ Globus endpoints see [Globus](#globus)). **Next**
 waits until a step is complete (its tooltip says what is missing); **Back** goes back. The steps at the top can be
 clicked: any step whose steps before it are complete. **Edit…** of a transfer opens the same wizard with every step a
 click away and two buttons, **Cancel** and **Save**: Save keeps the changes once every step is complete (its tooltip
-says what is missing); nothing starts then.
+says what is missing); nothing starts then. An endpoint that is not connected does not hold it up: its paths stay
+as they are (they can be changed once it is connected), the other steps can be changed, and the check is not run again
+(what the last one found stays; **Run now** checks first).
 
 1. **Source**: an endpoint (below) and one or more files or folders there: **Browse…** (`Space` marks several, **Choose the
    marked**; **Choose this folder** takes the folder shown; a pattern such as `*.h5` in its field shows the matches,
