@@ -21,6 +21,7 @@ ITEMS = [
   ("cluster_shell", "Shell on the cluster", "t", "shell"),
   ("login_dir", "Open a directory…", "d", "folder"),
   ("cluster_drive", "Map a directory…", "F", "drive"),
+  ("transfer_data", "Transfer data…", "T", "transfer"),
   ("interactive_job", "Interactive job", "i", "interactive"),
   ("new_script", "New job script", "n", "new_script"),
   None,

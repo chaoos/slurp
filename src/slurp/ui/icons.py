@@ -47,6 +47,7 @@ ICONS = {
   "about": ("?", 0xF02FD, "information_outline"),
   "quit": ("⎋", 0xF0206, "exit_to_app"),
   "array": ("⊞", 0xF0136, "checkbox_multiple_blank"),
+  "transfer": ("⇅", 0xF048A, "send"), # (the glyph of submit: in the font already)
   # actions
   "connect": ("⇄", 0xF0318, "lan_connect"),
   "reconnect": ("⇄", 0xF031A, "lan_pending"),
