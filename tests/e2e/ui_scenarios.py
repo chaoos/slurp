@@ -3558,7 +3558,8 @@ async def t_transfer_s3(app, pilot):
     lab = next(c for c in app.clusters if c.destination)
     ref = M.tab_ref(lab)
     src, dst = xfer_tree("s3")
-    check("a tab and S3: rclone on the cluster", E.rclone_routes(store, {"endpoint": E.tab_id(lab)}, {"endpoint": "s3lab"}) == ["rclone-cluster"])
+    check("a tab and S3: rclone on the cluster, or here over slurp's SSH",
+          E.rclone_routes(store, {"endpoint": E.tab_id(lab)}, {"endpoint": "s3lab"}) == ["rclone-cluster", "rclone-here"])
     up = M.Transfer(M.new_id(), "up to S3", {"endpoint": E.tab_id(lab), "tab": ref, "paths": [src]},
                     {"endpoint": "s3lab", "name": "lab bucket", "path": "/up"}, route="rclone-cluster", runs_on="detached")
     app.transfers.add(up)
@@ -3589,7 +3590,27 @@ async def t_transfer_s3(app, pilot):
     check("…its keys gone too", not os.path.exists(os.path.join(down.runs[-1]["folder"], "keys")))
     app.transfers.run_now(down)
     check("a run again: done", await until(pilot, lambda: down.state == "done" and len(down.runs) == 2, 120), (down.state, down.message))
-    for t in (up, down):
+    # rclone here, the lab reached over slurp's SSH session (sftp): for a cluster without rclone
+    from slurp.transfer import rclone as RC
+    relay = M.Transfer(M.new_id(), "up over SSH", {"endpoint": E.tab_id(lab), "tab": ref, "paths": [src]},
+                       {"endpoint": "s3lab", "name": "lab bucket", "path": "/relay"}, route="rclone-here", runs_on="slurp")
+    app.transfers.add(relay)
+    plan = app.transfers.rclone_check(relay, lambda p: None)
+    ready, why = RC.relay_ready()
+    if not ready: # (rclone here older than 1.64: no --sftp-ssh)
+      info = plan["routes"]["rclone-here"]
+      check("rclone here over SSH: needs rclone 1.64, said; the cluster route still there", not info["ok"] and "1.64" in info["why"]
+            and plan["routes"]["rclone-cluster"]["ok"] and plan["recommended"] == "rclone-cluster", plan)
+    else:
+      check("rclone here over SSH: checked", plan["routes"]["rclone-here"]["ok"] and "over slurp's SSH" in plan["steps"]["rclone"]["text"], plan)
+      relay.plan = plan
+      app.transfers.run_now(relay)
+      check("over SSH: done", await until(pilot, lambda: relay.state == "done", 90), (relay.state, relay.message, relay.log[-4:]))
+      found = sorted(o["Key"] for o in client.list_objects_v2(Bucket="lab").get("Contents", []) if o["Key"].startswith("relay/"))
+      check("…in the bucket", found == ["relay/src/b.txt", "relay/src/sub/a.bin"], found)
+      text = app.transfers.command_text(relay)
+      check("Copy as a command: plain ssh, no control socket", "ssh lab" in text.replace("'", "") or lab.destination in text, text)
+    for t in (up, down, relay):
       app.transfers.delete(t)
   finally:
     server.stop()

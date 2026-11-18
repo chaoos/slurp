@@ -114,9 +114,11 @@ def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=No
     boxes = [("collection", src_name, "a Globus collection"), (None, "Globus", "moves the data (not through this machine)"),
              ("collection", dst_name, "a Globus collection")]
     arrows = ["Globus", "Globus"]
-  elif route == "rclone-here": # (an end that is no tab: S3, an SMB share, WebDAV)
-    boxes = [(src if src is not None else "collection", src_name, src_store if src is None else "this machine"),
-             (None, "rclone", "on this machine: the data passes it"), (dst if dst is not None else "collection", dst_name, dst_store if dst is None else "this machine")]
+  elif route == "rclone-here": # (an end that is no tab: S3, an SMB share, WebDAV; a cluster: over slurp's SSH)
+    def here(c, store):
+      return store if c is None else "sftp over slurp's SSH" if c.destination else "this machine"
+    boxes = [(src if src is not None else "collection", src_name, here(src, src_store)),
+             (None, "rclone", "on this machine: the data passes it"), (dst if dst is not None else "collection", dst_name, here(dst, dst_store))]
     arrows = ["rclone", "rclone"]
   elif route == "rclone-cluster":
     boxes = [(src if src is not None else "collection", src_name, f"rclone{' (' + where + ')' if where else ''}" if src is not None else src_store),
@@ -1476,8 +1478,14 @@ class TransferWizard(ModalScreen):
       note = (f"Globus moves the data from {self.side_name('src')} to {self.side_name('dst')} itself: not through this "
               "machine. What is there already is skipped (by time and size; with checksums: by content).")
     elif route == "rclone-here":
+      tab = next((self.side(side) for side in ("src", "dst") if getattr(self.side(side), "is_tab", False)
+                  and getattr(getattr(self.side(side), "cluster", None), "destination", None)), None)
       note = ("rclone copies on this machine: the data passes it (its connection sets the speed). What is there already "
               "is skipped (size and time; with checksums: the hash); nothing is deleted on the destination.")
+      if tab is not None:
+        note = (f"rclone copies on this machine and reaches {tab.name} over slurp's SSH session (sftp, no new login): "
+                f"for a cluster without rclone. The data passes this machine (its connections set the speed). What is "
+                "there already is skipped (size and time); nothing is deleted on the destination.")
     elif route == "rclone-cluster":
       tab = self.side_name("src") if self.src is not None and self.side("src").is_tab else self.side_name("dst")
       note = f"rclone copies on {tab}, between its files and the bucket: not through this machine."
@@ -2395,7 +2403,7 @@ class TransferScreen(TransfersBase):
         if e.kind in E.RCLONE_KINDS and not e.connected:
           self.manager.ensure_tested(e)
           out.append(f"{e.name}: {e.words} (Edit…)" if e.state == "not set up" else f"connect {e.name}")
-        elif e.kind == "tab" and t.route == "rclone-cluster" and not e.connected:
+        elif e.kind == "tab" and not e.connected: # (rclone here reaches a tab over its SSH session: it too)
           out.append(f"connect {e.name}")
       if t.route == "rclone-cluster" and not self.manager.secrets_agreed(t):
         out.append("agree to send the secrets of the endpoint to the cluster (Edit…, Route)")

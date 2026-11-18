@@ -118,6 +118,11 @@ its environment, the keys too, never on a command line. Which rclone runs:
   cluster: the Route step asks, with what it means. For each run they are written to the run's folder there (readable
   only by you), read when the run starts and deleted at once, and removed when it ends in any case; the transfer's
   subtab says that its keys go there.
+- **rclone on this machine, the cluster over slurp's SSH**: a tab and a bucket, where the cluster has no rclone. rclone
+  runs here and reaches the cluster's files over the tab's own SSH session (sftp through its control socket: no new
+  login, no question); the data passes this machine, and the keys stay here. It needs rclone 1.64 or newer on this
+  machine (the check says so). The wizard offers both routes for a tab; the check recommends rclone on the cluster
+  where it is installed there.
 
 The check asks rclone where it runs, counts what the sources hold, and tests the destination bucket for writing.
 **Options**: checksums, files at a time, a speed limit. The subtab of such a transfer has **Verify** (`rclone check`,

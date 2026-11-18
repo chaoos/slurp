@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: between a tab and S3, SMB or WebDAV, rclone can also run on
+  this machine and reach the cluster over the tab's SSH session (sftp, no new
+  login): for clusters without rclone. Needs rclone 1.64 or newer here; the
+  check recommends rclone on the cluster where it is there.
 - Transfers: the flow picture names an SMB share and WebDAV as such (both
   were labelled S3).
 - Transfers: **New folder…** checks the new folder can be written (a test

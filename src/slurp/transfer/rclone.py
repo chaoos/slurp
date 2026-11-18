@@ -149,6 +149,55 @@ class Endpoint:
     """"dir", "file" or None of a path of the endpoint"""
     return kind(self.env, self.path(p), 0 if self.kind == "webdav" else 1)
 
+# ---- a cluster tab, reached over slurp's SSH session (rclone on this machine: the tab's files as an sftp remote)
+SFTP_SSH = (1, 64, 0) # (rclone's --sftp-ssh: an ssh command of ours for the sftp remote)
+
+def ssh_value(argv):
+  """An ssh command line as rclone's option takes it (words split at spaces; a word with a space or a quote: quoted)"""
+  return " ".join('"' + a.replace('"', '""') + '"' if any(c in a for c in ' "') else a for a in argv)
+
+class TabEnd:
+  """A cluster tab as an rclone remote (sftp): rclone runs ssh on the tab's own session (its control socket: no new
+  login), the sftp subsystem of the cluster's sshd. placeholder: plain `ssh <destination>`, for Copy as a command"""
+  kind = "tab"
+
+  def __init__(self, cluster, placeholder=False):
+    self.cluster, self.name = cluster, remote_name("tab" + (cluster.destination or ""))
+    c = cluster.connection
+    if placeholder or c is None:
+      ssh = ["ssh", cluster.destination]
+    else:
+      ssh = ["ssh", "-S", c.control_path, "-o", "ControlMaster=no", "-o", "BatchMode=yes", c.destination]
+    p = f"RCLONE_CONFIG_{self.name}_"
+    self.env = {p + "TYPE": "sftp", p + "SSH": ssh_value(ssh), p + "SHELL_TYPE": "unix"}
+
+  def path(self, p):
+    return f"{self.name}:{p or '/'}"
+
+  def kind_of(self, p):
+    """"dir", "file" or None of a path on the cluster"""
+    p = posixpath.normpath(p or "/")
+    if p == "/":
+      return "dir"
+    try:
+      entries = lsjson(self.env, self.path(posixpath.dirname(p)))
+    except RcloneError as e:
+      if "not found" in str(e).lower() or "no such file" in str(e).lower():
+        return None
+      raise
+    entry = next((e for e in entries if e["name"] == posixpath.basename(p)), None)
+    return None if entry is None else "dir" if entry["dir"] else "file"
+
+def relay_ready():
+  """(True, "") if rclone here can reach a cluster over slurp's SSH session; else (False, why)"""
+  have = version()
+  if not have:
+    return False, "rclone is not installed on this machine"
+  if have < SFTP_SSH:
+    return False, (f"rclone {'.'.join(map(str, SFTP_SSH[:2]))} or newer is needed on this machine to reach a cluster over "
+                   f"slurp's SSH (here {'.'.join(map(str, have))}: rclone.org/install)")
+  return True, ""
+
 def run(args, env, timeout=120):
   """rclone args with the remotes of env (no config file) -> CompletedProcess"""
   if not installed():

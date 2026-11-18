@@ -12,6 +12,7 @@ import re
 import subprocess
 import threading
 import time
+import types
 
 from ..state import log
 from . import endpoints as E, globus as G, model as M, plan as P, rclone as RC, relay as RL, rsync as R, runner as RN
@@ -86,8 +87,12 @@ class Manager:
   def not_ready(self, t):
     """The ends that are not connected: [cluster or None (not open)] (a Globus transfer and rclone on this machine
     need no tab; rclone on a cluster needs that tab only)"""
-    if t.route in ("globus", "rclone-here"):
+    if t.route == "globus":
       return []
+    if t.route == "rclone-here": # (a tab it reaches over slurp's SSH: that one)
+      tabs = [ref for ref in (t.source, t.dest) if E.is_tab(E.ref_id(ref))]
+      clusters = [self.end_cluster(ref) for ref in tabs]
+      return [c for c in clusters if c is None or (c.destination and not (c.connection and c.connection.ready))]
     if t.route == "rclone-cluster":
       c = self.end_cluster(self.tab_end(t))
       return [c] if c is None or (c.destination and not (c.connection and c.connection.ready)) else []
@@ -424,6 +429,23 @@ class Manager:
     d = self.endpoint_store.get(E.ref_id(ref))
     return RC.Endpoint(d, keys, placeholder=keys is not None) if d is not None and d.kind in E.RCLONE_KINDS else None
 
+  def rc_end(self, ref, keys=None, placeholder=False):
+    """The rclone remote of an end: an S3, SMB or WebDAV endpoint; a cluster tab, reached over slurp's SSH (the
+    route rclone here); None: this machine (its paths as they are). placeholder: for Copy as a command"""
+    found = self.s3_of(ref, keys if placeholder else None)
+    if found is not None or not E.is_tab(E.ref_id(ref)):
+      return found
+    cluster = self.end_cluster(ref)
+    if cluster is None:
+      if not placeholder:
+        raise NotConnected(f"the tab {M.tab_name(ref.get('tab'))} is not open")
+      cluster = types.SimpleNamespace(destination=(ref.get("tab") or {}).get("destination") or E.ref_id(ref)[4:], connection=None)
+    if not cluster.destination: # (this machine)
+      return None
+    if not placeholder and not (cluster.connection and cluster.connection.ready):
+      raise NotConnected(f"connect {cluster.name} first")
+    return RC.TabEnd(cluster, placeholder=placeholder)
+
   def secrets_agreed(self, t):
     """Did the user agree to send the secrets of its endpoint (S3, SMB, WebDAV) to the cluster that runs rclone?"""
     tab = self.tab_end(t)
@@ -447,8 +469,13 @@ class Manager:
     return out
 
   def rclone_steps(self, t, keys=None):
-    """The rclone runs of a run on this machine: [(argv, env)] (keys: placeholders, for Copy as a command)"""
-    src_s3, dst_s3 = self.s3_of(t.source, keys and keys(t.source)), self.s3_of(t.dest, keys and keys(t.dest))
+    """The rclone runs of a run on this machine: [(argv, env)] (keys: placeholders, for Copy as a command). A tab is
+    reached over slurp's SSH session"""
+    placeholder = keys is not None
+    def end(ref): # (a tab: a remote only for rclone here; on its cluster its paths are the cluster's own)
+      k = keys and keys(ref)
+      return self.rc_end(ref, k, placeholder) if t.route == "rclone-here" else self.s3_of(ref, k)
+    src_s3, dst_s3 = end(t.source), end(t.dest)
     env = {**(src_s3.env if src_s3 else {}), **(dst_s3.env if dst_s3 else {})}
     dest = dst_s3.path(t.dest.get("path", "/")) if dst_s3 else t.dest.get("path", "")
     sources = self.rclone_sources(t, src_s3) if keys is None else [(p, None) for p in R.sources(t)]
@@ -468,7 +495,8 @@ class Manager:
     except Exception as e:
       self.from_thread(self.ended, t, None, f"the run did not start: {e}")
       return
-    self.from_thread(self.set_state, t, "running", "rclone on this machine")
+    over = [c.name for c in (self.end_cluster(ref) for ref in (t.source, t.dest) if E.ref_id(ref).startswith("tab:")) if c is not None]
+    self.from_thread(self.set_state, t, "running", "rclone on this machine" + (f", {over[0]} over slurp's SSH" if over else ""))
     done_bytes, done_files, errors, code = 0, 0, [], 0
     for argv, env in steps:
       if t.id in self.stopping:
@@ -590,33 +618,57 @@ class Manager:
     threading.Thread(target=work, daemon=True, name=f"verify {t.name}").start()
 
   def rclone_check(self, t, report):
-    """The check of an rclone transfer (in a thread): rclone where it runs, the keys, the sources and what they hold,
-    the destination (S3: listed, and written: a marker written and deleted)"""
+    """The check of an rclone transfer (in a thread): rclone where it runs (with a tab: on its cluster, or here
+    reaching it over slurp's SSH: each route offered, the first that can recommended), the keys, the sources and what
+    they hold, the destination (S3: listed, and written: a marker written and deleted)"""
     plan = {"steps": {}, "routes": {}, "mover": "rclone"}
-    route = (E.rclone_routes(self.endpoint_store, t.source, t.dest) or ["rclone-here"])[0]
+    routes = E.rclone_routes(self.endpoint_store, t.source, t.dest) or ["rclone-here"]
     def step(state, text):
       plan["steps"]["rclone"] = {"state": state, "text": text}
       report(_copy(plan))
+    step("running", "checking with rclone …")
+    words, why, runs = [], {}, {}
+    tab = self.tab_end(t) if "rclone-cluster" in routes else None
+    cluster = self.end_cluster(tab) if tab is not None else None
+    for route in routes: # (where rclone runs: there, and new enough)
+      try:
+        if route == "rclone-cluster" or (tab is not None and cluster is not None and cluster.destination):
+          if cluster is None or (cluster.destination and not (cluster.connection and cluster.connection.ready)):
+            raise RC.RcloneError(f"connect {M.tab_name((tab.get('tab') or {}))} first")
+        if route == "rclone-cluster":
+          found = RC.version_of(Host(cluster).sh("rclone version 2>/dev/null | head -n 1").stdout or "")
+          if not found:
+            raise RC.RcloneError(f"rclone is not installed on {cluster.name} (it runs there)")
+          words.append(f"rclone {'.'.join(map(str, found))} on {cluster.name}")
+          runs[route] = ["detached"] + (["job"] if P.partition_of(cluster, site_of) else [])
+        else:
+          here = RC.version()
+          if not here:
+            raise RC.RcloneError("rclone is not installed on this machine")
+          if tab is not None and cluster is not None and cluster.destination:
+            ok, words_ = RC.relay_ready()
+            if not ok:
+              raise RC.RcloneError(words_)
+            words.append(f"rclone {'.'.join(map(str, here))} on this machine, {cluster.name} over slurp's SSH")
+          else:
+            words.append(f"rclone {'.'.join(map(str, here))} on this machine")
+          runs[route] = ["slurp"]
+      except (RC.RcloneError, OSError, NotConnected) as e:
+        why[route] = str(e)
+    usable = [r for r in routes if r in runs]
+    def failed(text):
+      for route in routes:
+        plan["routes"][route] = {"ok": False, "why": why.get(route) or text,
+                                 "runs_on": runs.get(route) or (["slurp"] if route == "rclone-here" else ["detached"])}
+      step("bad", "rclone: " + "; ".join(dict.fromkeys(why.get(r) or text for r in routes)))
+      plan["done"] = True
+      return plan
+    if not usable:
+      return failed("")
+    first = usable[0]
+    plan["runs_on"] = runs[first]
     try:
-      step("running", "checking with rclone …")
       src_s3, dst_s3 = self.s3_of(t.source), self.s3_of(t.dest)
-      words = []
-      if route == "rclone-cluster":
-        cluster = self.end_cluster(self.tab_end(t))
-        if cluster is None or (cluster.destination and not (cluster.connection and cluster.connection.ready)):
-          raise RC.RcloneError(f"connect {M.tab_name((self.tab_end(t).get('tab') or {}))} first")
-        have = Host(cluster).sh("rclone version 2>/dev/null | head -n 1")
-        found = RC.version_of(have.stdout or "")
-        if not found:
-          raise RC.RcloneError(f"rclone is not installed on {cluster.name} (it runs there)")
-        words.append(f"rclone {'.'.join(map(str, found))} on {cluster.name}")
-        plan["runs_on"] = ["detached"] + (["job"] if P.partition_of(cluster, site_of) else [])
-      else:
-        here = RC.version()
-        if not here:
-          raise RC.RcloneError("rclone is not installed on this machine")
-        words.append(f"rclone {'.'.join(map(str, here))} on this machine")
-        plan["runs_on"] = ["slurp"]
       if src_s3 is not None:
         sources = self.rclone_sources(t, src_s3)
         sized = [src_s3.path(p) for p, _ in sources if not R.is_pattern(p)]
@@ -624,13 +676,14 @@ class Manager:
           found = RC.size(src_s3.env, sized)
           plan["total_bytes"], plan["total_files"] = found["bytes"], found["files"]
           words.append(f"the sources hold {P.human(found['bytes'])} in {found['files']} files")
-      elif route == "rclone-here":
+      elif first == "rclone-here":
+        src_end = self.rc_end(t.source)
         sized = [p for p in R.sources(t) if not R.is_pattern(p)]
-        missing = [p for p in sized if not os.path.exists(p)]
+        missing = [p for p in sized if (src_end.kind_of(p) if src_end is not None else (p if os.path.exists(p) else None)) is None]
         if missing:
           raise RC.RcloneError(f"{missing[0]} is not there")
         if sized:
-          found = RC.size({}, sized)
+          found = RC.size(src_end.env if src_end else {}, [src_end.path(p) for p in sized] if src_end else sized)
           plan["total_bytes"], plan["total_files"] = found["bytes"], found["files"]
           words.append(f"the sources hold {P.human(found['bytes'])} in {found['files']} files")
       if dst_s3 is not None: # (a folder not there yet is made by the run: the nearest one there is tested)
@@ -640,12 +693,13 @@ class Manager:
           probe = posixpath.dirname(probe.rstrip("/")) or "/"
         words.append("the destination: " + RC.test(dst_s3.env, dst_s3.path(probe), write=True)
                      + ("" if probe == target else f" (in {probe}: {target} is made at the run)"))
-      plan["routes"][route] = {"ok": True, "runs_on": plan["runs_on"]}
-      plan["recommended"] = route
-      step("ok", "; ".join(words))
     except (RC.RcloneError, OSError, NotConnected) as e:
-      plan["routes"][route] = {"ok": False, "why": str(e), "runs_on": plan.get("runs_on") or (["slurp"] if route == "rclone-here" else ["detached"])}
-      step("bad", f"rclone: {e}")
+      return failed(str(e))
+    for route in routes:
+      plan["routes"][route] = ({"ok": True, "runs_on": runs[route]} if route in runs else
+                               {"ok": False, "why": why[route], "runs_on": ["slurp"] if route == "rclone-here" else ["detached"]})
+    plan["recommended"] = first
+    step("ok", "; ".join(words) + "".join(f"; not {M.ROUTES[r]}: {why[r]}" for r in routes if r in why))
     plan["done"] = True
     return plan
 

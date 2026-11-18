@@ -85,7 +85,8 @@ def test_up_pause_continue_verify(check, s3, tmp_path):
   app = App()
   m = MG.Manager(app, M.Store(str(tmp_path / "transfers.json")), store)
   check("this machine and S3: rclone here", E.rclone_routes(store, {"endpoint": "local"}, {"endpoint": "s1"}) == ["rclone-here"])
-  check("a tab and S3: rclone on the cluster", E.rclone_routes(store, {"endpoint": "tab:jedi"}, {"endpoint": "s1"}) == ["rclone-cluster"])
+  check("a tab and S3: rclone on the cluster, or here over slurp's SSH",
+        E.rclone_routes(store, {"endpoint": "tab:jedi"}, {"endpoint": "s1"}) == ["rclone-cluster", "rclone-here"])
   t = M.Transfer(M.new_id(), "up", {"endpoint": "local", "paths": [str(src)]}, {"endpoint": "s1", "name": "my bucket", "path": "/in"},
                  route="rclone-here", runs_on="slurp", options={"bwlimit": "1"})
   m.add(t)

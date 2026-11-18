@@ -164,3 +164,23 @@ def test_cluster_command_pause(check, s3, tmp_path):
       break
     time.sleep(0.1)
   check("no rclone left", subprocess.run(["pgrep", "-f", f"rclone --config  copy .*{big}"], capture_output=True).returncode != 0)
+
+
+def test_tab_over_ssh(check, monkeypatch):
+  """A cluster tab as an rclone remote (rclone here, the cluster without rclone): sftp through slurp's own SSH session
+  (its control socket, no new login, never a question); for Copy as a command plain ssh; rclone 1.64 needed"""
+  import types
+  conn = types.SimpleNamespace(control_path="/tmp/slurp-1-x/control", destination="me@daint", ready=True)
+  tab = RC.TabEnd(types.SimpleNamespace(destination="daint", connection=conn))
+  ssh = tab.env[f"RCLONE_CONFIG_{tab.name}_SSH"]
+  check("sftp, on slurp's session", tab.env[f"RCLONE_CONFIG_{tab.name}_TYPE"] == "sftp"
+        and ssh == "ssh -S /tmp/slurp-1-x/control -o ControlMaster=no -o BatchMode=yes me@daint", ssh)
+  check("absolute paths", tab.path("/scratch/run1") == f"{tab.name}:/scratch/run1")
+  plain = RC.TabEnd(types.SimpleNamespace(destination="daint", connection=conn), placeholder=True)
+  check("Copy as a command: plain ssh", plain.env[f"RCLONE_CONFIG_{plain.name}_SSH"] == "ssh daint")
+  check("a word with a space: quoted", RC.ssh_value(["ssh", "-S", "/a b/c", 'x"y']) == 'ssh -S "/a b/c" "x""y"')
+  monkeypatch.setattr(RC, "version", lambda: (1, 60, 1))
+  ok, why = RC.relay_ready()
+  check("rclone 1.60 here: not ready, said why", not ok and "1.64 or newer" in why and "1.60.1" in why, why)
+  monkeypatch.setattr(RC, "version", lambda: (1, 66, 0))
+  check("rclone 1.66: ready", RC.relay_ready() == (True, ""))

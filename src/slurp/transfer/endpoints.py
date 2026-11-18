@@ -248,12 +248,14 @@ def rclone_pair(store, source, dest):
   return is_rclone(store, source) or is_rclone(store, dest)
 
 def rclone_routes(store, source, dest):
-  """The rclone routes of a pair: rclone here (this machine and S3, or S3 and S3), or on the cluster of a tab"""
+  """The rclone routes of a pair: rclone here (this machine and S3, or S3 and S3), or with a tab: on its cluster
+  (first: the data does not pass this machine), or here, reaching the cluster over slurp's SSH (where the cluster has
+  no rclone)"""
   if not rclone_pair(store, source, dest):
     return []
   tab = next((ref for ref in (source, dest) if ref_id(ref).startswith("tab:")), None)
   if tab is not None and not (is_rclone(store, source) and is_rclone(store, dest)):
-    return ["rclone-cluster"]
+    return ["rclone-cluster", "rclone-here"]
   return ["rclone-here"]
 
 def globus_only(store, source, dest):
