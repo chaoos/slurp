@@ -8,7 +8,7 @@ destination.
 
 ## Setting one up
 
-**Menu → Transfer data…** (`T`), or **New transfer** in the list of transfers, opens a wizard of five steps. **Next**
+**Menu → Transfer data…** (`T`), or **New transfer** in the list of transfers, opens a wizard of six steps. **Next**
 waits until a step is complete (its tooltip says what is missing); **Back** goes back. The steps at the top can be
 clicked: any step whose steps before it are complete. **Edit…** of a transfer opens the same wizard with every step a
 click away and two buttons, **Cancel** and **Save**: Save keeps the changes once every step is complete (its tooltip
@@ -41,7 +41,7 @@ goes on as set, without a run now.
     For a large transfer (about a terabyte, or hours) slurp suggests Globus or a similar service, where both sites
     offer it: parallel streams, retries, and it runs without slurp. A rule pack can name a site's Globus collection
     (`globus = "…"`); with both sites' it is named.
-    Below the routes: where it runs, and the options. A picture shows how the data flows, here and in the summary and
+    Below the routes: where it runs (and for a transfer job its partition, time limit and account). A picture shows how the data flows, here and in the summary and
     the transfer's subtab; in the wizard with the bandwidth the check measured under its arrows and the estimate below:
 
     ```
@@ -54,16 +54,17 @@ goes on as set, without a run now.
     ```
 
     A direct route says **push** (rsync on the source logs in to the destination) or **pull** (the other way); under
-    each box what runs there (on the login node, in a transfer job). The options:
+    each box what runs there (on the login node, in a transfer job).
+4. **Options**: how rsync copies, the same at every run:
 
     - **checksums**: rsync compares the contents, not size and time. It reads every file on both sides at every
       run, also when nothing changed, and shows no progress meanwhile: the estimate counts that time, and a run says
       it is comparing. Size and time find almost every change; checksums are for when they cannot be trusted.
-    - compression (the relay only: it helps on slow links), a limit in MB/s.
-4. **When**: never by itself (the default: only when you click **Run now**, `s`), now, once at a time (`14:00`,
+    - compression (the relay only: it helps on slow links), a speed limit in MB/s.
+5. **When**: never by itself (the default: only when you click **Run now**, `s`), now, once at a time (`14:00`,
    `2026-11-20 14:00`, `+2h`), every so long (`6h`, `1d`, `30m`), daily at a time, or after a job ends. For a schedule: whether slurp logs in to the tabs by itself then (a login that needs
    you waits, and says so), and whether a missed run runs once as soon as it can or is skipped.
-5. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes. **Go** starts it (or schedules
+6. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes. **Go** starts it (or schedules
    it); **Save without starting** keeps it for later. With *never by itself* the button reads **Add**: the transfer
    is added and runs each time you click **Run now**.
 

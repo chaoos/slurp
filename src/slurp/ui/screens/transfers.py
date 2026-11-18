@@ -405,10 +405,10 @@ def globus_text(plan):
   return Text("ⓘ " + g["text"], style="bold cyan" if g.get("strong") else "cyan")
 
 class TransferWizard(ModalScreen):
-  """Set up a transfer: 1 source, 2 destination, 3 route (the check, and the choice of what it found), 4 when,
-  5 summary. Dismissed with
+  """Set up a transfer: 1 source, 2 destination, 3 route (the check, the choice of what it found, where it runs),
+  4 options (checksums, compression, a speed limit), 5 when, 6 summary. Dismissed with
   {"transfer": Transfer, "go": bool} or None. editing: a transfer whose settings it changes (its id stays)"""
-  STEPS = ["Source", "Destination", "Route", "When", "Summary"]
+  STEPS = ["Source", "Destination", "Route", "Options", "When", "Summary"]
   ROUTE_ORDER = ("same-fs", "direct-push", "direct-pull", "relay")
   DEFAULT_CSS = """
   TransferWizard { align: center middle; }
@@ -528,20 +528,25 @@ class TransferWizard(ModalScreen):
             yield Static(id="tw-job-test")
             yield Static(id="tw-node-check")
           with Horizontal(classes="tw-row"):
-            yield Checkbox("checksums: compare the contents (every file is read on both sides, at every run, also when "
-                           "nothing changed: much slower)", id="tw-checksum", compact=True)
-          yield Static(id="tw-checksum-note", classes="tw-warn")
-          with Horizontal(classes="tw-row"):
-            yield Checkbox("compress (helps on the relay over slow links)", id="tw-compress", compact=True)
-          with Horizontal(classes="tw-row"):
-            yield Label("limit to")
-            yield Input(placeholder="MB/s (none)", id="tw-bwlimit", compact=True)
-          with Horizontal(classes="tw-row"):
             yield Checkbox("Install a temporary key", id="tw-key", compact=True)
           yield Static(id="tw-key-warning")
           with Horizontal(classes="tw-row"):
             yield Button(icons.label("reload", "Check again"), id="tw-recheck", compact=True)
         with VerticalScroll(id="tw-step-3"):
+          yield Static("How rsync copies: the same at every run.", classes="tw-note")
+          with Horizontal(classes="tw-row"):
+            yield Checkbox("checksums: compare the contents (every file is read on both sides, at every run, also when "
+                           "nothing changed: much slower)", id="tw-checksum", compact=True)
+          yield Static(id="tw-checksum-note", classes="tw-warn")
+          with Horizontal(classes="tw-row"):
+            yield Checkbox("compress (helps on the relay over slow links)", id="tw-compress", compact=True)
+          yield Static(id="tw-compress-note", classes="tw-note")
+          with Horizontal(classes="tw-row"):
+            yield Label("limit the speed to")
+            yield Input(placeholder="MB/s (none)", id="tw-bwlimit", compact=True)
+            yield Label("MB/s (empty: no limit)")
+          yield Static(id="tw-options-flow", classes="tw-note")
+        with VerticalScroll(id="tw-step-4"):
           with RadioSet(id="tw-when"):
             yield RadioButton("never by itself: only when I click Run now", value=True, id="tw-when-never") # (the default)
             yield RadioButton("now", id="tw-when-now")
@@ -567,7 +572,7 @@ class TransferWizard(ModalScreen):
           yield Static("A repeated transfer copies only what changed since the run before: it keeps the destination in "
                        "step with the source (nothing is deleted there).", classes="tw-note")
           yield Static(id="tw-when-note", classes="tw-warn")
-        with VerticalScroll(id="tw-step-4"):
+        with VerticalScroll(id="tw-step-5"):
           with Horizontal(classes="tw-row"):
             yield Label("Name")
             yield Input(id="tw-name")
@@ -655,8 +660,10 @@ class TransferWizard(ModalScreen):
     if self.step == 2:
       self.start_check()
     if self.step == 3:
-      self.when_changed()
+      self.show_options()
     if self.step == 4:
+      self.when_changed()
+    if self.step == 5:
       self.fill_summary()
     self.update_next()
 
@@ -698,7 +705,7 @@ class TransferWizard(ModalScreen):
     nxt = self.query_one("#tw-next", Button)
     nxt.disabled = not ok
     nxt.tooltip = why or None
-    self.query_one("#tw-go", Button).disabled = self.step == len(self.STEPS) - 1 and not (self.how_ok()[0] and self.when_ok()[0])
+    self.query_one("#tw-go", Button).disabled = self.step == len(self.STEPS) - 1 and not (self.how_ok()[0] and self.options_ok()[0] and self.when_ok()[0])
     if self.editing is not None:
       store = self.query_one("#tw-store", Button)
       missing = self.incomplete()
@@ -741,6 +748,8 @@ class TransferWizard(ModalScreen):
         return False, f"{M.ROUTES[route]}: its check is not done"
       return self.how_ok()
     if step == 3:
+      return self.options_ok()
+    if step == 4:
       return self.when_ok()
     return True, ""
 
@@ -1127,7 +1136,6 @@ class TransferWizard(ModalScreen):
     part = self.query_one("#tw-partition", Input)
     if job and not part.value:
       part.value = str(site_of(client).get("transfer_partition") or "")
-    self.query_one("#tw-compress", Checkbox).display = route == "relay"
     if job:
       self.fill_accounts(client)
     self.ensure_node_check()
@@ -1237,6 +1245,8 @@ class TransferWizard(ModalScreen):
     event.stop()
     self.checksum_note()
     self.show_flow()
+    if self.step == 3:
+      self.show_options()
 
   def checksum_note(self):
     note = self.query_one("#tw-checksum-note", Static)
@@ -1299,15 +1309,38 @@ class TransferWizard(ModalScreen):
         return False, f"checking the login from a node of {key[1]}"
       if state is False:
         return False, words
+    return True, ""
+
+  # ---- 4: options
+  def options_ok(self):
     bw = self.query_one("#tw-bwlimit", Input).value.strip()
     if bw:
       try:
-        float(bw)
+        if float(bw) <= 0:
+          raise ValueError
       except ValueError:
-        return False, "the limit: a number of MB/s"
+        return False, "the speed limit: a number of MB/s (or empty)"
     return True, ""
 
-  # ---- 4: when
+  def show_options(self):
+    """The options as they suit the route chosen (compression only for the relay), and the estimate with them"""
+    route = self.chosen_route()
+    relay = route == "relay"
+    compress = self.query_one("#tw-compress", Checkbox)
+    compress.disabled = not relay
+    if not relay and compress.value:
+      compress.value = False
+    self.query_one("#tw-compress-note", Static).update("" if relay else "(compression only on the relay: elsewhere it would slow rsync down)")
+    self.checksum_note()
+    words = self.estimate_words(route) if route else ""
+    self.query_one("#tw-options-flow", Static).update(f"⏱ {words}" if words else "")
+
+  @on(Input.Changed, "#tw-bwlimit")
+  def bwlimit_typed(self, event):
+    event.stop()
+    self.update_next()
+
+  # ---- 5: when
   @on(RadioSet.Changed, "#tw-when")
   def when_set(self, event):
     event.stop()
@@ -1447,7 +1480,7 @@ class TransferWizard(ModalScreen):
   @on(Button.Pressed, "#tw-go")
   def go_pressed(self, event):
     event.stop()
-    if self.how_ok()[0] and self.when_ok()[0]:
+    if self.how_ok()[0] and self.options_ok()[0] and self.when_ok()[0]:
       self.dismiss({"transfer": self.build(), "go": True})
 
   @on(Button.Pressed, "#tw-store")
@@ -1459,7 +1492,7 @@ class TransferWizard(ModalScreen):
   @on(Button.Pressed, "#tw-save")
   def save_pressed(self, event):
     event.stop()
-    if self.how_ok()[0] and self.when_ok()[0]:
+    if self.how_ok()[0] and self.options_ok()[0] and self.when_ok()[0]:
       self.dismiss({"transfer": self.build(), "go": False})
 
   @on(Button.Pressed)

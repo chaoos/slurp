@@ -46,8 +46,8 @@ def test_wizard_and_tab(check, tmp_path):
       w = app.screen
       check("T: the wizard", isinstance(w, TransferWizard))
       check("step 1: Next waits for a source", w.query_one("#tw-next").disabled)
-      check("five steps", [str(b.label) for b in w.query("#tw-steps Button")] == ["1 Source", "2 Destination", "3 Route", "4 When", "5 Summary"])
-      check("a new transfer: the steps ahead cannot be jumped to", all(w.query_one(f"#tw-goto-{i}").disabled for i in range(1, 5)))
+      check("six steps", [str(b.label) for b in w.query("#tw-steps Button")] == ["1 Source", "2 Destination", "3 Route", "4 Options", "5 When", "6 Summary"])
+      check("a new transfer: the steps ahead cannot be jumped to", all(w.query_one(f"#tw-goto-{i}").disabled for i in range(1, 6)))
       w.query_one("#tw-src-path").value = str(src)
       await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
       check("a path typed: added", w.paths == [str(src)] and not w.query_one("#tw-next").disabled, w.paths)
@@ -115,8 +115,17 @@ def test_wizard_and_tab(check, tmp_path):
       flow = str(w.query_one("#tw-flow").render())
       check("checksums: the estimate says so", "with checksums" in flow, flow)
       w.query_one("#tw-checksum").value = False; await pilot.pause(0.2)
+      check("the route step has no options (they have their own step)", not any(
+        w.query_one("#tw-step-2").query(sel) for sel in ("#tw-checksum", "#tw-compress", "#tw-bwlimit")))
+      await pilot.click("#tw-next"); await pilot.pause(0.3)
+      check("step 4: the options", w.step == 3 and w.query_one("#tw-step-3").query("#tw-checksum")
+            and w.query_one("#tw-step-3").query("#tw-bwlimit"))
+      check("…compression only for the relay", w.query_one("#tw-compress").disabled)
+      w.query_one("#tw-bwlimit").value = "fast"; await pilot.pause(0.2)
+      check("a speed limit that is not a number: Next waits", w.query_one("#tw-next").disabled and "speed limit" in str(w.query_one("#tw-next").tooltip))
+      w.query_one("#tw-bwlimit").value = ""; await pilot.pause(0.2)
       await pilot.click("#tw-next"); await pilot.pause(0.2)
-      check("step 4: never by itself is the first choice, and chosen", w.when_kind() == "never"
+      check("step 5: never by itself is the first choice, and chosen", w.when_kind() == "never"
             and [b.id for b in w.query("#tw-when RadioButton")][0] == "tw-when-never")
       w.query_one("#tw-when-every").value = True
       w.query_one("#tw-every").value = "1m"; await pilot.pause(0.2)
@@ -196,6 +205,7 @@ def test_never(check, tmp_path):
       w.query_one("#tw-next").press()
       await until(pilot, lambda: w.plan.get("done"), 30); await pilot.pause(0.6)
       w.query_one("#tw-next").press(); await pilot.pause(0.2)
+      w.query_one("#tw-next").press(); await pilot.pause(0.2)
       w.query_one("#tw-when-never").value = True; await pilot.pause(0.2)
       note = str(w.query_one("#tw-when-note").render())
       check("never: it says when it runs", "only when you click Run now" in note, note)
@@ -219,10 +229,10 @@ def test_never(check, tmp_path):
       await pilot.pause(0.3)
       buttons = [str(b.label) for b in e.query("#tw-buttons Button") if b.display]
       check("editing: the buttons are Cancel and Save", buttons == ["Cancel", "Save"], buttons)
-      check("editing: every step can be gone to", all(not e.query_one(f"#tw-goto-{i}").disabled for i in range(5)),
-            [e.query_one(f"#tw-goto-{i}").disabled for i in range(5)])
-      await pilot.click("#tw-goto-4"); await pilot.pause(0.3)
-      check("a click on Summary: that step", e.step == 4 and "only on Run now" in str(e.query_one("#tw-summary").render()))
+      check("editing: every step can be gone to", all(not e.query_one(f"#tw-goto-{i}").disabled for i in range(6)),
+            [e.query_one(f"#tw-goto-{i}").disabled for i in range(6)])
+      await pilot.click("#tw-goto-5"); await pilot.pause(0.3)
+      check("a click on Summary: that step", e.step == 5 and "only on Run now" in str(e.query_one("#tw-summary").render()))
       check("…Cancel and Save there too", [str(b.label) for b in e.query("#tw-buttons Button") if b.display] == ["Cancel", "Save"])
       await pilot.click("#tw-goto-2"); await pilot.pause(0.4)
       check("a click on Route: its choices as they were", e.step == 2 and e.chosen_route() == t.route and e.chosen_runs_on() == t.runs_on,
@@ -233,11 +243,11 @@ def test_never(check, tmp_path):
       await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.3)
       store = e.query_one("#tw-store")
       check("another source: every step still a click away, Save waits for a new check and says so",
-            all(not e.query_one(f"#tw-goto-{i}").disabled for i in range(5)) and store.disabled and "3 Route" in str(store.tooltip),
+            all(not e.query_one(f"#tw-goto-{i}").disabled for i in range(6)) and store.disabled and "3 Route" in str(store.tooltip),
             (store.disabled, store.tooltip))
       await pilot.click("#tw-goto-2")
       check("checked again: Save", await until(pilot, lambda: e.plan.get("done") and not e.query_one("#tw-store").disabled, 30))
-      await pilot.click("#tw-goto-3"); await pilot.pause(0.2)
+      await pilot.click("#tw-goto-4"); await pilot.pause(0.2)
       e.query_one("#tw-when-daily").value = True; await pilot.pause(0.2)
       e.query_one("#tw-store").press(); await pilot.pause(0.5)
       check("Save: the changes kept, its schedule armed, nothing started", t.source["paths"] == [str(src), str(src / "sub")]

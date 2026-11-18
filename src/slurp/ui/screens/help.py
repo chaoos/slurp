@@ -247,7 +247,7 @@ errors rsync reported for single files, and the events of the run. **Its job**: 
 `Esc` (or ←) goes back to the list of runs.
 """),
   "TransferWizard": ("Transfer data", """
-Sets up a transfer in five steps; **Next** waits until a step is complete (its tooltip says what is missing). The
+Sets up a transfer in six steps; **Next** waits until a step is complete (its tooltip says what is missing). The
 steps at the top can be clicked: any step whose steps before it are complete. Editing a transfer (**Edit…**), every
 step is a click away and the buttons are **Cancel** and **Save**: Save keeps the changes (its schedule goes on, nothing
 starts now) once every step is complete; its tooltip says what is missing (a changed source or destination: the
@@ -269,14 +269,14 @@ check again, in Route).
    as a transfer job is checked from a node of its partition too (srun): refused there, Next refuses. As a transfer
    job: its account (one of yours there, to pick), and its batch script tested with `sbatch --test-only` as soon as
    it is chosen and when its partition, time limit or account change: when and where it would start, or Slurm's
-   error (then Next refuses). Below:
-   where it runs (in slurp; detached on the cluster's login node; as
-   a transfer job where the site has a transfer partition, e.g. xfer), checksums (they read every file on both sides
-   at every run, also when nothing changed: the estimate counts it), compression (the relay), a speed
-   limit, and for a direct route that cannot log in by itself the **temporary key** (opt-in, with its warning).
-4. **When**: never by itself (the default: only when you click **Run now**), now, once at a time, every so long,
+   error (then Next refuses). Below: where it runs (in slurp; detached on the cluster's login node; as a transfer job
+   where the site has a transfer partition, e.g. xfer), and for a direct route that cannot log in by itself the
+   **temporary key** (opt-in, with its warning).
+4. **Options**: how rsync copies, the same at every run: checksums (they read every file on both sides at every run,
+   also when nothing changed: the estimate counts it), compression (the relay only), a speed limit in MB/s.
+5. **When**: never by itself (the default: only when you click **Run now**), now, once at a time, every so long,
    daily at a time, or after a job ends; whether slurp logs in to the tabs by itself then, and what a missed run does.
-5. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes; **Go** (or **Save without
+6. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes; **Go** (or **Save without
    starting**); for *never by itself* the button is **Add**: the transfer is added and waits for **Run now**.
 """),
   "PickPathsScreen": ("Choose paths", """
