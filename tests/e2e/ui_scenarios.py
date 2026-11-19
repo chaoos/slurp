@@ -1082,8 +1082,8 @@ exec sleep 300
     check("Create: the quick tunnel is ready at the address cloudflared gave", ok and link.public_host == "fake-words-here.trycloudflare.com",
           (link and link.relay_state, link and link.relay_error))
     args = open(marker).read() if os.path.exists(marker) else ""
-    check("cloudflared runs the quick tunnel to the web view, HTTP/2, its own config", "tunnel --config" in args and "--protocol http2" in args
-          and "--url http://127.0.0.1:1" in args, args)
+    check("cloudflared runs the quick tunnel to the web view, HTTP/2, its own config; ended, it lets go of the browsers at once",
+          "tunnel --config" in args and "--protocol http2" in args and "--grace-period 1s" in args and "--url http://127.0.0.1:1" in args, args)
     check("the setting: the web links' own relay (cloudflare), the shells' stays", load_config().get("link_relay_web") == "cloudflare"
           and load_config().get("link_relay") == "lab-relay")
     check("its address: https, with the token", link.url() == "https://fake-words-here.trycloudflare.com/?token=tok-cf", link.url())

@@ -123,4 +123,7 @@ def argv(path, port):
     os.makedirs(data_dir(), exist_ok=True)
     with open(config, "w") as f:
       f.write(CONFIG)
-  return [path, "tunnel", "--config", config, "--no-autoupdate", "--protocol", "http2", "--url", f"http://127.0.0.1:{port}"]
+  # (--grace-period: when the link ends, the browsers through it are cut off at once, not after the 30 s it waits by
+  # default for what is open: a browser's websocket is open all the time)
+  return [path, "tunnel", "--config", config, "--no-autoupdate", "--protocol", "http2", "--grace-period", "1s",
+          "--url", f"http://127.0.0.1:{port}"]
