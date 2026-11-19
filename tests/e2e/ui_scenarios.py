@@ -2482,6 +2482,8 @@ async def t_memory_watch(app, pilot):
   import time as _t
   os.environ["XDG_DATA_HOME"] = os.path.join(HERE, "xdg")
   import shutil as _sh; _sh.rmtree(os.environ["XDG_DATA_HOME"], ignore_errors=True)
+  from slurp.cluster import details as _d
+  _d.MEMORY.clear() # (a watch of an earlier scenario, its file under the XDG_DATA_HOME before this one: made again)
   js = await open_job(app, pilot, "9003")
   w = js.memory
   js.query_one("#memory-every").value = 300
