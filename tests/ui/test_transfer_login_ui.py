@@ -8,7 +8,7 @@ from slurp.state import ClusterSession
 from slurp.transfer import model as M
 from slurp.transfer.manager import Manager
 from slurp.ui.app import Slurp
-from slurp.ui.screens.transfers import TransferScreen, TransferWizard
+from slurp.ui.screens.transfers import TransferScreen
 
 
 async def until(pilot, cond, t=5):
