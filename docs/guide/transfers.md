@@ -186,11 +186,31 @@ once and says which host could not log in where, what ssh said, and where the ch
 a transfer job is therefore checked from a node of the partition too, in the wizard (`srun --immediate`, a minute at
 most): refused there, the wizard does not go on; with no node free, it says it could not check there.
 
-A direct route that cannot log in by itself, where the other cluster's SSH server answers, can use a **temporary
-key** (opt-in, in step 4, with a warning): slurp makes a key on the cluster that runs rsync (in the run's folder there,
-readable only by you) and adds a line for it to `~/.ssh/authorized_keys` on the other one. The key may only run an
-rsync server (no shell, no forwarding), expires after some hours, and the line is removed when the run ends. Some
-sites forbid this, or overwrite the file (keys managed in a portal, certificates only).
+### How a direct route logs in
+
+Under the routes, for a direct route, step 4 asks **how it logs in** to the other cluster. The check says what can
+work; the flow picture shows the choice (`push · key`, `pull · your login`, and a line under it).
+
+- **By itself**: its own keys or settings (an agent, a key that cluster already accepts). Nothing else is needed.
+- **With a temporary key**: slurp makes a key pair on the cluster that runs rsync (in the run's folder there,
+  readable only by you; its private half never leaves that cluster) and adds the public half to
+  `~/.ssh/authorized_keys` on the other one: it may only run an rsync server (no shell, no forwarding), expires after
+  some hours, and the line is removed when the run ends. Where the other cluster has **rrsync** (rsync's script that
+  keeps a key to one folder), the key may also only **read in the folder of the sources** (a pull) or **write to the
+  destination** (a push), nothing else of yours; without rrsync it could run rsync on all your files there, and the
+  wizard says so. A transfer job can use it (it runs without you). Some sites forbid this, or ignore the file
+  (certificates only).
+- **With your login now**: for a cluster that asks a password or a one-time code. **Log in now…** (or later
+  **Establish connection** in the transfer's subtab) opens a terminal on the cluster that runs rsync, on the login
+  node slurp is connected to; you answer what the other cluster asks there, and slurp keeps no password or code. The
+  connection then stays open on that login node (its socket in `/tmp/slurp-<uid>/`, yours only) until it has been
+  unused for 2 hours, or **Disconnect**; rsync runs on that node and goes through it, never asking. Meanwhile root on
+  that cluster, and your own programs on that node, could use it too. A transfer job cannot use it (it runs without
+  you); **Run now** logs in first when it is not open; a run while it is closed ends at once and says so.
+
+slurp never copies your own private keys, or a password, to a cluster: a key copied there would open everything it
+opens (other clusters, GitHub, your machine) to whoever can read it, cannot be limited to rsync or expire, and stays
+in the backups and snapshots of that filesystem after it is deleted. Many sites forbid it.
 
 ## Where it runs, and if slurp closes
 

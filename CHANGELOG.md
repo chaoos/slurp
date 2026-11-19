@@ -6,6 +6,21 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers: a direct route (push, pull) asks in step 4 how it logs in to the
+  other cluster: by itself, with a temporary key, or with your login now. Your
+  login: for a cluster that asks a password or a one-time code, you answer in a
+  terminal on the cluster that runs rsync (Log in now…, or Establish connection
+  in the transfer's subtab; Run now does it first); the connection stays open
+  there until 2 hours unused or Disconnect, and rsync goes through it. Not as a
+  transfer job. The flow picture shows the login. slurp never copies your own
+  keys or passwords to a cluster.
+- Transfers: the temporary key is kept to the transfer's folder where the other
+  cluster has rrsync (a pull only reads the sources' folder, a push only writes
+  to the destination); without rrsync the wizard says it could run rsync on all
+  your files there.
+- Transfers: a run with the temporary key no longer ends at once with "cannot
+  log in": the login tried before rsync ran `true`, which the key refuses (it
+  runs only rsync); now only the login itself is tried.
 - Categories: hide the jobs of a category in the job list (Hide jobs in this
   category in the job list, `h` in the categories window; the categories in it
   too). The status line says how many jobs are hidden; Show jobs in this
