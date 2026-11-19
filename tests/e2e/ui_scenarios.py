@@ -78,6 +78,21 @@ def configure(work, home, out):
     if os.path.exists(os.path.join(LAB, name)): os.unlink(os.path.join(LAB, name))
 
 def term(app): s = app.shell; return "\n".join(s.vt.display) if s and s.vt else ""
+def process_state(screen):
+  """(when a check window shows nothing) its process: running or ended, its exit code, what it waits for, its
+  children (in CI it stayed blank now and then, not here)"""
+  session = getattr(screen, "session", None)
+  proc = getattr(session, "proc", None)
+  if proc is None:
+    return f"no process (done={getattr(session, 'done', None)}, error={getattr(session, 'error', '')!r})"
+  out = f"pid {proc.pid}: returncode {proc.poll()}, done={session.done}, fd={session.fd}, vt={session.vt is not None}"
+  try:
+    out += "\n" + subprocess.run(["ps", "-o", "pid,ppid,stat,wchan:24,etime,args", "-g", str(os.getpgid(proc.pid))],
+                                  capture_output=True, text=True, timeout=10).stdout[-1500:]
+  except (OSError, subprocess.SubprocessError) as e:
+    out += f" (ps: {e})"
+  return out
+
 def check_term(screen):
   """the text of the terminal of a check window (SshCheckScreen), its history and screen"""
   s = getattr(screen, "session", None)
@@ -3524,7 +3539,7 @@ async def t_ssh_setup(app, pilot):
   text = check_term(app.screen) if isinstance(app.screen, SshCheckScreen) else f"not the check window: {type(app.screen).__name__}"
   check("Test: a window with a terminal, as the login goes: what needs no login, the login, the verdict, ssh's log",
         ok and "1. what needs no login" in text and f"port {port} answers" in text and "slurp-check: logged in" in text
-        and "✔ works: the login works" in text and "ssh -v" in text, text[-600:])
+        and "✔ works: the login works" in text and "ssh -v" in text, (text.strip()[-600:], "" if ok else process_state(app.screen)))
   await until(pilot, lambda: app.screen.session.done, 10); await pilot.pause(0.5)
   check("…done: the keys back to the window (Close has the focus), Esc closes", app.focused is app.screen.query_one("#sc-close"))
   await pilot.press("escape"); await pilot.pause(0.3)
