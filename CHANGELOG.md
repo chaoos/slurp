@@ -6,6 +6,13 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Categories: rules put jobs in a category by their name, when the job list
+  loads (`ci-[0-9]+` into `CI`). Each takes new jobs only, the jobs in no
+  category, or all jobs (also moved out of another category); it looks at
+  each job once, so one taken out by hand is not put back. The rules window
+  (`u` in the categories window) shows how many jobs of the job list each
+  matches; Apply now puts them in at once. The form shows the matches as you
+  type.
 - Check for updates in the ☰ Menu: asks PyPI right away (also with the check
   at the start turned off). A newer slurp shows how to update it, a skipped
   version too; otherwise it says that this is the newest, or that PyPI did not

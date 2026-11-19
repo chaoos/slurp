@@ -13,7 +13,7 @@ top-left `←` button to go back.
 | Everywhere | `F10` (or **☰ Menu** in the header) the menu; `?` (or the **?** button) help of the window shown; `F1` guides; `F2` rule catalogue (`/` searches it); `F3` options |
 | Transfers | `n` (or **New transfer**) the wizard; `Enter` a transfer's subtab; `p` pause; `c` continue; `s` run now; `e` edit; `Del` delete; in a transfer's subtab `p`, `c`, `s`, `e` |
 | Transfer wizard | **Next** / **Back** through source, destination, check, how, when, summary; **Go**; in Browse… `Space` marks, `Backspace` the folder above; `Esc` cancels |
-| Categories | the tree (and *not categorized*): `n` new, `e` rename/move, `Del` delete; its jobs: `Enter` open, `c` categorize, `x` take out; `l` in the job list; `r` reload |
+| Categories | the tree (and *not categorized*): `n` new, `e` rename/move, `Del` delete; its jobs: `Enter` open, `c` categorize, `x` take out; `l` in the job list; `o` notes; `u` rules (`n` new, `e` edit, `Del` delete, `a` apply now, `Space` on/off); `r` reload |
 | Text file | `/` search (the whole file); `n` / `N` next/previous; `g` / `G` start / end; `:` a line or `50%`; `Space` / `b` page down / up; `j` / `k` a line; `f` follow; `A` the part before; `r` reload |
 | Directory | `/` search names (here as you type; `Ctrl+R` also in the subdirectories, in the background; `Esc` stops, then clears); `f` follow; `.` toggle hidden files; `s` a shell in this directory; `Backspace` or `u` go to parent |
 | HDF5 | `s` enter a dataset selection; `[` / `]` change row page (200 rows); `{` / `}` change column page; `r` reload |

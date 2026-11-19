@@ -440,8 +440,33 @@ has, the ones in the categories in it counted too), and for the one selected its
   (`cat:` in the filter). **Reload** (`r`) reads the categories and asks Slurm again.
 - **Notes…** (`o`): notes of the category, in Markdown (what it is for, how the runs differ, links); shown under its
   numbers. A rename takes them along, a delete removes them.
+- **Rules…** (`u`): rules that put jobs in a category by their name (`ci-[0-9]+` into `CI`), when the job list
+  loads; the category selected lists its own, with how many jobs of the job list each matches.
 - They are kept on the cluster (`~/.config/slurp/categories.json` in your home there), per Slurm cluster: slurp on
   your own machine and slurp on the login node see the same.
+"""),
+  "RulesScreen": ("Rules of the categories", """
+Each rule puts jobs in a category by their name, when the job list loads (`r`, or by itself). The list shows for each
+whether it is on, its pattern, its category, which jobs it takes, and how many jobs of the job list it **matches
+now** (with how many of them are not in its category yet); under it, for the rule selected: in its category already,
+in no category, in another one.
+
+- **New…** (`n`), **Edit…** (`e`, Enter), **Delete** (`Del`: the jobs it put in stay), `Space`: on or off.
+- **Apply now…** (`a`): the rule on all the jobs of the job list now, whatever it has looked at: the ones in no
+  category, or also those in another category (moved).
+- Each job is looked at once by a rule: one you take out of its category by hand is not put back. Of several rules,
+  the first that matches a job has it. A rename of a category takes its rules along, a delete removes them.
+"""),
+  "RuleFormScreen": ("A rule of the categories", """
+- **Job names that match:** a regular expression for the **whole** name: `ci-[0-9]+` takes `ci-1234` (not
+  `ci-1234-b`), `ci-.*` all that start with `ci-`, `(train|eval)_.*` either.
+- **Category:** where they go (`a/b`: b in a; made if it is new).
+- **Which jobs:** **new jobs only** (submitted from now on: the jobs of the job list now are left), **jobs in no
+  category** (those of the job list now, and the new ones), or **all jobs** (also moved out of another category).
+- **On:** off keeps the rule but it does nothing.
+
+Under the form: how many jobs of the job list it matches now, a few of their names, and what it takes of them. A
+changed pattern, category or scope looks at the jobs again. `Ctrl+S` saves.
 """),
   "CategorizeScreen": ("Categorize", """
 Put the jobs in a category: pick one in the tree, or type a new one (`a/b` makes b in a, and a if it is new).
