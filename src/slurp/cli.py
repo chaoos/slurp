@@ -61,10 +61,10 @@ def install_font():
   from .ui.icons import FONT
   if sys.platform == "win32":
     os.startfile(FONT) # (the font viewer, with Install)
-    print(f"opened {FONT}: Install there, then restart the terminal")
+    print(f"opened {FONT}: Install there, then restart the terminal (all its windows)")
     return 0
-  folder = os.path.expanduser("~/Library/Fonts") if sys.platform == "darwin" else \
-           os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "fonts")
+  from .ui.icons import RESTART, font_folder
+  folder = font_folder()
   try:
     os.makedirs(folder, exist_ok=True)
     shutil.copyfile(FONT, os.path.join(folder, os.path.basename(FONT)))
@@ -73,8 +73,9 @@ def install_font():
     return 1
   if shutil.which("fc-cache"):
     subprocess.run(["fc-cache", "-f", folder], check=False)
-  print(f"installed {os.path.basename(FONT)} in {folder}: open a new terminal window (or restart the terminal) to "
-        "see the icons. It is the terminal's machine that needs the font: over SSH, install it where you sit.")
+  print(f"installed {os.path.basename(FONT)} in {folder}: {RESTART} to see the icons (a new window is not enough "
+        "for GNOME Terminal or Konsole: one process keeps the old font for all their windows). It is the terminal's "
+        "machine that needs the font: over SSH, install it where you sit.")
   return 0
 
 def main():

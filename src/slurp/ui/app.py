@@ -381,6 +381,9 @@ class Slurp(TransfersTab, App):
     from .. import update
     if update.enabled():
       in_background(self, update.latest_version, self.version_found, group="update", connection=None)
+    from . import icons
+    if icons.style() == "nerd": # (an icon font installed by an older slurp: this one's, so that new icons are no boxes)
+      in_background(self, icons.update_installed_font, self.icon_font_updated, group="icon-font", connection=None)
     self.view_kind = "web" if self.is_web else "terminal" # (under the session holder: of the active view)
     self.theme_applied = None
     self.apply_theme()
@@ -1705,6 +1708,12 @@ class Slurp(TransfersTab, App):
     else:
       self.notify(f"slurp {__version__} is the newest" + (f" (PyPI has {version})" if version != __version__ else ""),
                   title="Check for updates", timeout=6)
+
+  def icon_font_updated(self, path):
+    from .icons import RESTART
+    if path:
+      self.notify(f"slurp's icon font, installed in {os.path.dirname(path)}, is updated to this version's: {RESTART} "
+                  "to see all the icons in it", title="icons", timeout=15)
 
   def show_update(self):
     from .screens.dialogs import UpdateScreen
