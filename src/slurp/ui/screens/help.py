@@ -518,7 +518,8 @@ file under the cursor, and (the progress file) whether slurp finds progress in i
 """),
   "ExtendScreen": ("Extend the lifetime of a link", """
 How much longer the link takes logins: 1 hour, 2, 4, 8 or 12 hours, a day, two days or a week, added to its end (to
-now, if it has ended). It says until when. Sessions that are open go on either way; this is about new logins.
+now, if it has ended). It says until when. A shell's or a drive's sessions that are open go on either way (this is
+about new logins); a web link ends with its browsers.
 """),
   "NotesScreen": ("Notes", """
 Notes of a category or a job, in Markdown: `# headings`, `**bold**`, `- lists`, `` `code` ``, `[links](https://…)`.
@@ -589,8 +590,8 @@ no reminder until a newer one. No check at all: `"update_check": false` in the c
   "WebEndingScreen": ("A web link ends soon", """
 A web link (slurp in your browser) ends in a few minutes; the title bar counts down to it (⏱, left of ?).
 
-- **It takes no more logins then** (its time limit): a browser that is open goes on, but reloading the page or a new
-  browser needs a login. **Extend lifetime…** keeps it usable (how much longer: 1 hour to a week).
+- **It ends then** (its time limit): a browser that is open loses slurp at once, a reload or a new browser gets
+  nothing. **Extend lifetime…** keeps it usable (how much longer: 1 hour to a week).
 - **Its relay ends the tunnel** (the free pinggy relay keeps one for an hour): slurp opens a new one, with a new
   address, so a browser on the old one loses slurp. That cannot be extended; a relay without a time limit (Cloudflare,
   your own) avoids it.

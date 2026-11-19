@@ -224,7 +224,7 @@ def extend_link(screen, link, done=None):
   screen.app.push_screen(ExtendScreen(link), chosen)
 
 class WebEndingScreen(ModalScreen):
-  """A web link ends in a few minutes: it takes no more logins then (Extend lifetime…), or its relay ends its tunnel
+  """A web link ends in a few minutes: it ends then, with its browsers (Extend lifetime…), or its relay ends its tunnel
   (pinggy's free hour: the web view gets a new address; nothing to extend)"""
   DEFAULT_CSS = """
   WebEndingScreen { align: center middle; }
@@ -245,8 +245,8 @@ class WebEndingScreen(ModalScreen):
     with Vertical(id="we-dialog"):
       if self.what == "expiry":
         yield Static(f"The web link {self.link.id} ends in {minutes} min", id="we-title", markup=False)
-        yield Static(f"\"{self.link.title}\" takes no more logins then. A browser that is open goes on; reloading the page "
-                     "or a new browser needs a login, which it will not take. Extend it to keep it usable.", id="we-text", markup=False)
+        yield Static(f"\"{self.link.title}\" ends then: a browser that is open loses slurp at once, a reload or a new browser "
+                     "gets nothing. Extend it to keep it usable.", id="we-text", markup=False)
       else:
         yield Static(f"The relay of the web link {self.link.id} ends its tunnel in {minutes} min", id="we-title", markup=False)
         yield Static(f"The free {self.link.relay_type} relay keeps a tunnel for an hour. slurp opens a new one at once, but "

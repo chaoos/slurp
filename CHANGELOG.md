@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Web links: when a web link expires, the browsers that came in through it
+  lose slurp at once, and a reload with its token gets nothing. Before, only
+  new logins stopped: a browser kept working past the lifetime (its session,
+  and with it the tunnel and the web view, stayed open). Through Cloudflare
+  the tunnel no longer waits 30 s for open browsers when it ends.
 - Endpoints: a tab's kind is *ssh (cluster tab)*.
 - A new SSH connection looks like the forms of the endpoints: its name first
   (the tab's name; empty: the destination, for a `~/.ssh/config` Host too),
