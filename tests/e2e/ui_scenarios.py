@@ -3364,8 +3364,9 @@ async def t_ssh_setup(app, pilot):
   dlg.query_one("#ssh-options").load_text("\n".join(known + ["ServerAliveInterval=5"]))
   from slurp.ui.screens.dialogs import SshCheckScreen
   dlg.query_one("#cluster-check-button").press()
-  ok = await until(pilot, lambda: isinstance(app.screen, SshCheckScreen) and "works" in check_term(app.screen), 30)
-  text = check_term(app.screen) if ok else ""
+  # (60 s: in CI, the app slow then, it did not end within 30 s now and then; its terminal shown also when it fails)
+  ok = await until(pilot, lambda: isinstance(app.screen, SshCheckScreen) and "works" in check_term(app.screen), 60)
+  text = check_term(app.screen) if isinstance(app.screen, SshCheckScreen) else f"not the check window: {type(app.screen).__name__}"
   check("Check…: a window with a terminal, as the login goes: what needs no login, the login, the verdict, ssh's log",
         ok and "1. what needs no login" in text and f"port {port} answers" in text and "slurp-check: logged in" in text
         and "✔ works: the login works" in text and "ssh -v" in text, text[-600:])
