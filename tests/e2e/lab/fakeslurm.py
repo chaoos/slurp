@@ -169,7 +169,10 @@ elif prog == "sinfo":
     print("normal*|up|13/5/2/20|1-00:00:00|20")
     print("debug|up|1/2/0/3|30:00|3")
 elif prog == "scontrol" and args[:2] == ["show", "reservation"]:
-  print("ReservationName=maint1 StartTime=2026-11-20T08:00:00 EndTime=2026-11-20T18:00:00 Duration=10:00:00 Nodes=nid[0000-0019] NodeCnt=20 CoreCnt=2560 Features=(null) PartitionName=(null) Flags=MAINT,SPEC_NODES State=INACTIVE")
+  # (in 30 days, from whenever the tests run: a fixed date made it "soon" (within a day) on the day before it, then
+  # active; the health and the overview card said so then, a line longer)
+  day = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+  print(f"ReservationName=maint1 StartTime={day}T08:00:00 EndTime={day}T18:00:00 Duration=10:00:00 Nodes=nid[0000-0019] NodeCnt=20 CoreCnt=2560 Features=(null) PartitionName=(null) Flags=MAINT,SPEC_NODES State=INACTIVE")
 elif prog == "sbatch" and "--help" in args:
   print("Usage: sbatch [OPTIONS(0)...] [ : [OPTIONS(N)...]] script(0) [args(0)...]\n  -A, --account=name  charge job to specified account\n"
         "  -N, --nodes=N  number of nodes\n  -t, --time=minutes  time limit\n      --mem=MB  minimum amount of real memory\n"
