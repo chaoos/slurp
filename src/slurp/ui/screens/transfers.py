@@ -19,7 +19,7 @@ from textual.widgets import Button, Checkbox, ContentSwitcher, DataTable, Input,
 
 from ...cluster.listing import listing
 from ...cluster.remote import HEALTH_STYLES, connection_health, in_background
-from ...transfer import endpoints as E, model as M, plan as P, rsync as R
+from ...transfer import endpoints as E, model as M, plan as P, rsync as R, runner as RN
 from ...transfer.host import Host
 from ...transfer.manager import client_side, site_of
 from .. import icons
@@ -108,8 +108,23 @@ RUNS_WHERE = {"slurp": "", "detached": "on the login node", "job": "as a transfe
 
 STORE_KINDS = {"s3": "S3", "smb": "SMB share", "webdav": "WebDAV"}
 
+DIRECT = ("direct-push", "direct-pull")
+
+def login_line(route, login, src_name, dst_name, scope=None):
+  """Under the flow of a direct route: how the one that runs rsync logs in to the other (the key, your login)"""
+  client, server = (src_name, dst_name) if route == "direct-push" else (dst_name, src_name)
+  mark = icons.icon("key") or "*"
+  if login == "key":
+    return Text.assemble((f"{mark} slurp ", "bold"), ("── temporary key ──▶ ", "bold yellow"), (server, "bold"),
+                         f": its public half, for rsync only{' in ' + scope if scope else ''}, until the run ends; "
+                         f"its private half is made on {client} and stays there", style="")
+  if login == "you":
+    return Text.assemble((f"{mark} you ", "bold"), ("── password, code ──▶ ", "bold yellow"), (server, "bold"),
+                         f", typed in a terminal on {client}; its connection stays open there (slurp keeps nothing)")
+  return Text("")
+
 def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=None, rate=None, estimate=None, measuring=False,
-                 src_kind="", dst_kind=""):
+                 src_kind="", dst_kind="", login="", scope=None):
   """How the data flows, as boxes and arrows: the source, slurp (the relay between two clusters), the destination; on
   each arrow how (push, pull, relay, the same filesystem), under it the bandwidth measured (rate; measuring: not yet),
   under each box what runs there, and below all the estimate (a line of words). moving: a frame number while it runs
@@ -142,11 +157,13 @@ def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=No
     boxes = [(src, src_name, "rsync (sends)"), (dst, dst_name, "rsync server (receives)")]
     arrows = ["over slurp's SSH"]
   elif route == "direct-push":
-    boxes = [(src, src_name, rsync(f"logs in to {dst_name}")), (dst, dst_name, "rsync server (receives)")]
-    arrows = ["push"]
+    how = {"key": " with the temporary key", "you": " with your login"}.get(login, "")
+    boxes = [(src, src_name, rsync(f"logs in to {dst_name}{how}")), (dst, dst_name, "rsync server (receives)")]
+    arrows = ["push" + {"key": " · key", "you": " · your login"}.get(login, "")]
   elif route == "direct-pull":
-    boxes = [(src, src_name, "rsync server (sends)"), (dst, dst_name, rsync(f"logs in to {src_name}"))]
-    arrows = ["pull"]
+    how = {"key": " with the temporary key", "you": " with your login"}.get(login, "")
+    boxes = [(src, src_name, "rsync server (sends)"), (dst, dst_name, rsync(f"logs in to {src_name}{how}"))]
+    arrows = ["pull" + {"key": " · key", "you": " · your login"}.get(login, "")]
   else: # (same-fs)
     boxes = [(src, src_name, rsync("folder to folder")), (dst, dst_name, "the same filesystem: no network")]
     arrows = ["same filesystem"]
@@ -195,6 +212,8 @@ def flow_diagram(route, runs_on, src, dst, src_name, dst_name, job="", moving=No
         line.append(" " * w)
   for line in lines:
     line.rstrip()
+  if route in DIRECT and login in ("key", "you"):
+    lines.append(login_line(route, login, src_name, dst_name, scope))
   if estimate:
     lines.append(Text.assemble(("⏱ ", "bold"), (estimate, "bold")))
   return Text("\n").join(lines)
@@ -223,6 +242,105 @@ def if_slurp_closes(t, client_name="", host="", pack=None):
 # New folder… on a tab: made, and shown to be writable (a marker written and deleted in it)
 MAKE_FOLDER = 'mkdir -p -- "$1" || exit 1\nf="$1/.slurp-test-$$"\n{ : > "$f"; } 2>/dev/null || { echo "$1 cannot be written" >&2; exit 1; }\nrm -f -- "$f"\n'
 
+
+class TransferLoginScreen(ModalScreen[bool]):
+  """Your login for a direct route: a terminal on the cluster that runs rsync, where you answer what the other
+  cluster asks (a password, a one-time code; slurp keeps nothing of it); dismissed with True once it is open"""
+  DEFAULT_CSS = """
+  TransferLoginScreen { align: center middle; }
+  #tl-dialog { width: 96%; height: 80%; border: thick $accent; background: $surface; padding: 0 1; }
+  #tl-title { text-style: bold; height: auto; margin: 1 0 0 0; }
+  #tl-note { height: auto; color: $text-muted; }
+  #tl-status { height: 1; }
+  #tl-buttons { height: auto; align-horizontal: right; margin: 1 0 0 0; }
+  #tl-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "close", "Close"), Binding("ctrl+right_square_bracket", "close", "Close", priority=True)]
+
+  def __init__(self, title, argv, note):
+    super().__init__()
+    self.title_text, self.argv, self.note = title, argv, note
+    self.session = None
+    self.closing = False
+
+  def compose(self) -> ComposeResult:
+    from ..terminal import TerminalView
+    with Vertical(id="tl-dialog"):
+      yield Static(self.title_text, id="tl-title", markup=False)
+      yield Static(self.note, id="tl-note", markup=False)
+      yield Static(id="tl-status")
+      yield TerminalView(session=self.new_session())
+      with Horizontal(id="tl-buttons"):
+        yield Button("Again", id="tl-again", compact=True, tooltip="log in once more")
+        yield Button("Close", id="tl-close", variant="primary", compact=True, tooltip="close (Ctrl-] while it runs)")
+
+  def new_session(self):
+    from ..terminal import TerminalSession
+    self.session = TerminalSession(self.app, self.argv, self.title_text)
+    return self.session
+
+  def on_mount(self):
+    from ..terminal import TerminalView
+    view = self.query_one(TerminalView)
+    view.focus()
+    self.call_after_refresh(view.attach)
+    self.set_interval(0.3, self.show_status)
+
+  def show_status(self):
+    s = self.session
+    status = self.query_one("#tl-status", Static)
+    if s is None or not s.done:
+      status.update(Text("logging in · answer what it asks in the terminal (it has the keys) · Ctrl-] closes", style="yellow"))
+    elif s.code == 0:
+      status.update(Text("✓ connected", style="bold green"))
+      if not self.closing: # (open: back to where it was asked, after a moment to see it)
+        self.closing = True
+        self.set_timer(1.2, lambda: self.dismiss(True) if self.is_attached else None)
+    else:
+      status.update(Text(f"✗ the login did not work (it ended with {s.code}): Again, or Close", style="bold red"))
+
+  @on(Button.Pressed, "#tl-again")
+  def again(self, event):
+    event.stop()
+    from ..terminal import TerminalView
+    if self.session is not None and not self.session.done:
+      self.session.terminate()
+    view = self.query_one(TerminalView)
+    view.own_session = self.new_session()
+    view.focus()
+    self.call_after_refresh(view.attach)
+
+  @on(Button.Pressed, "#tl-close")
+  def action_close(self, event=None):
+    if event is not None:
+      event.stop()
+    if self.session is not None and not self.session.done:
+      self.session.terminate()
+    self.dismiss(bool(self.session is not None and self.session.done and self.session.code == 0))
+
+def open_login(app, t, then=None):
+  """Your login of a direct route t (in a terminal on the cluster that runs rsync); then(ok) after it"""
+  try:
+    cluster, script, args = app.transfers.login_parts(t)
+  except Exception as e:
+    app.notify(f"cannot log in: {e}", title=t.name, severity="error")
+    return
+  if cluster.destination and (cluster.connection is None or not cluster.connection.ready):
+    app.notify(f"connect {cluster.name} first", title=t.name, severity="warning")
+    return
+  command = ["sh", "-c", script, "sh", *args]
+  argv = cluster.connection.command_argv(command, interactive=True) if cluster.destination else command
+  other = t.dest_name if t.route == "direct-push" else t.source_name
+  note = (f"A terminal on {cluster.name} (the login node slurp is connected to; rsync runs there too): it logs in to "
+          f"{other}. Answer what it asks; slurp keeps no password or code. The connection stays open there until "
+          f"{RN.PERSIST} unused, or Disconnect.")
+  def done(ok):
+    app.transfers.logins.pop(t.id, None)
+    if ok:
+      t.event(f"your login to {other} opened on {cluster.name}")
+    if then is not None:
+      then(bool(ok))
+  app.push_screen(TransferLoginScreen(f"Log in from {cluster.name} to {other}", argv, note), done)
 
 class PickPathsScreen(ModalScreen):
   """Pick paths on a tab: a directory listing (Enter or a click: into a folder), Space marks entries (several:
@@ -572,7 +690,8 @@ def routes_text(plan):
       text.append("  (recommended)\n" if rec else "\n", style="green")
     else:
       text.append(line, style="dim")
-      text.append(f" ✗ {info.get('why', '')[:90]}" + ("  (the temporary key could)" if info.get("keyable") else "") + "\n", style="dim")
+      could = " or ".join(w for w, k in (("the temporary key", "keyable"), ("your login", "askable")) if info.get(k))
+      text.append(f" ✗ {info.get('why', '')[:90]}" + (f"  ({could} could)" if could else "") + "\n", style="dim")
   return text
 
 def globus_text(plan):
@@ -614,6 +733,10 @@ class TransferWizard(ModalScreen):
   #tw-bwlimit, #tw-every, #tw-daily, #tw-job-id { width: 16; margin-right: 2; }
   #tw-at { width: 24; margin-right: 2; }
   #tw-key-warning { height: auto; color: $warning; border: round $warning; padding: 0 1; display: none; }
+  #tw-login-box { height: auto; border: round $panel; padding: 0 1; margin-top: 1; display: none; }
+  #tw-login { height: auto; width: 1fr; }
+  #tw-login-row { margin-top: 0; }
+  #tw-login-state { width: 1fr; }
   #tw-name { width: 1fr; }
   #tw-summary { height: auto; }
   #tw-flow, #tw-summary-flow { height: auto; margin: 1 0; }
@@ -708,6 +831,18 @@ class TransferWizard(ModalScreen):
               b = RadioButton(f"… {M.ROUTES[route]}", classes=f"tw-r-{route}", disabled=True)
               b.route = route
               yield b
+          with Vertical(id="tw-login-box"): # (a direct route: how the cluster that runs rsync logs in to the other)
+            yield Label("How it logs in", id="tw-login-label")
+            with RadioSet(id="tw-login"):
+              for login in M.LOGINS:
+                b = RadioButton(M.LOGINS[login], classes=f"tw-l-{login}")
+                b.login = login
+                yield b
+            with Horizontal(classes="tw-row", id="tw-login-row"):
+              yield Button("Log in now…", id="tw-login-now", variant="primary", compact=True,
+                           tooltip="in a terminal on the cluster that runs rsync: answer what the other cluster asks")
+              yield Static(id="tw-login-state", classes="tw-note")
+            yield Static(id="tw-key-warning")
           yield Static(id="tw-globus")
           yield Static(id="tw-flow")
           yield Static(id="tw-route-note", classes="tw-note")
@@ -727,9 +862,6 @@ class TransferWizard(ModalScreen):
             yield Checkbox("submit the next job when the time limit ends", value=True, id="tw-resubmit", compact=True)
             yield Static(id="tw-job-test")
             yield Static(id="tw-node-check")
-          with Horizontal(classes="tw-row"):
-            yield Checkbox("Install a temporary key", id="tw-key", compact=True)
-          yield Static(id="tw-key-warning")
           with Horizontal(classes="tw-row"):
             yield Checkbox("Send the secrets of the endpoint to the cluster for each run", id="tw-secrets", compact=True)
           yield Static(id="tw-secrets-warning", classes="tw-warn")
@@ -891,7 +1023,6 @@ class TransferWizard(ModalScreen):
     q("#tw-transfers", Input).value = str(o.get("transfers") or "")
     q("#tw-compress", Checkbox).value = bool(o.get("compress"))
     q("#tw-bwlimit", Input).value = str(o.get("bwlimit") or "")
-    q("#tw-key", Checkbox).value = bool(o.get("temp_key"))
     q("#tw-partition", Input).value = o.get("partition", "")
     q("#tw-time", Input).value = o.get("time", "24:00:00")
     q("#tw-account", Input).value = o.get("account", "")
@@ -1339,6 +1470,11 @@ class TransferWizard(ModalScreen):
     if base:
       for key in ("runs", "log", "created", "progress", "state", "message", "errors", "secrets_to"):
         setattr(t, key, getattr(base, key))
+    route = self.chosen_route() if self.is_mounted and self.query("#tw-route") else None
+    if route:
+      t.route = route
+      if route in DIRECT and self.chosen_login() != "own":
+        t.options = {"login": self.chosen_login()}
     return t
 
   def start_check(self, force=False):
@@ -1403,8 +1539,9 @@ class TransferWizard(ModalScreen):
         words = f"✓ {name}" + (f"  {rate_text(info.get('rate'))}" if info.get("rate") else "") + (
           f"  {P.duration(est[0])} – {P.duration(est[1])}" if est else "") + ("  (recommended)" if route == plan.get("recommended") else "")
         usable = True
-      elif info.get("keyable"):
-        words, usable = f"! {name}: logs in only with the temporary key (below) · {info.get('why', '')[:60]}", True
+      elif info.get("keyable") or info.get("askable"):
+        could = " or ".join(w for w, k in (("the temporary key", "keyable"), ("your login", "askable")) if info.get(k))
+        words, usable = f"! {name}: logs in only with {could} (below) · {info.get('why', '')[:50]}", True
       else:
         words, usable = f"✗ {name}: {info.get('why', '')[:80]}", False
       if str(b.label) != words:
@@ -1457,10 +1594,13 @@ class TransferWizard(ModalScreen):
   async def fill_runs(self):
     route = self.chosen_route()
     info = self.plan.get("routes", {}).get(route or "", {})
+    login = self.fill_login(route, info)
     client = self.job_client(route)
     runs = (["slurp"] if route in ("relay", "rclone-here") else ["globus"] if route == "globus" else
             ["detached"] + (["job"] if P.partition_of(client, site_of) else []))
     runs = info.get("runs_on") or runs
+    if login == "you": # (a transfer job runs without you: it cannot use your login)
+      runs = [r for r in runs if r != "job"] or ["detached"]
     found = route == "rclone-cluster" and info.get("runs_on") # (where the check found rclone: only there, e.g. only as a job)
     if not found and self.editing is not None and route == self.editing.route and self.editing.runs_on not in runs:
       runs = [*runs, self.editing.runs_on] # (not checked: its tab is not there to say whether its site has a transfer partition)
@@ -1491,7 +1631,7 @@ class TransferWizard(ModalScreen):
               "One end is this machine: this is a direct copy over slurp's SSH session.")
     elif route in ("direct-push", "direct-pull"):
       client = self.src if route == "direct-push" else self.dst
-      note = f"rsync runs on {client.name if client else '?'} and logs in to the other cluster by itself."
+      note = f"rsync runs on {client.name if client else '?'} and logs in to the other cluster ({M.LOGINS[login].split(' (')[0]})."
     elif route == "same-fs":
       note = f"Both see the same filesystem: rsync runs on {self.src.name if self.src else '?'}, no network."
     elif route == "globus":
@@ -1510,15 +1650,99 @@ class TransferWizard(ModalScreen):
       tab = self.side_name("src") if self.src is not None and self.side("src").is_tab else self.side_name("dst")
       note = f"rclone copies on {tab}, between its files and the bucket: not through this machine."
     self.query_one("#tw-route-note", Static).update(note)
-    key = self.query_one("#tw-key", Checkbox)
-    # (only for a direct route that cannot log in by itself: one that can needs none, and its key would be the only one)
-    needs_key = route in ("direct-push", "direct-pull") and not info.get("ok") and info.get("keyable")
-    if needs_key:
-      key.value = True
-    elif key.value and route in ("direct-push", "direct-pull") and info.get("ok"):
-      key.value = False
-    key.display = bool(needs_key)
     self.show_secrets()
+
+  # ---- how a direct route logs in: by itself, a temporary key, your login now (never your own keys: slurp copies none)
+  def chosen_login(self):
+    for b in self.query("#tw-login RadioButton").results(RadioButton):
+      if b.value:
+        return b.login
+    return "own"
+
+  def login_ends(self, route):
+    """(the cluster that runs rsync, the one it logs in to)"""
+    return (self.src, self.dst) if route == "direct-push" else (self.dst, self.src)
+
+  def fill_login(self, route, info):
+    """The login choice of a direct route: what the check found possible (labels with the names), the one chosen kept
+    (else: by itself if it can, the key, your login). -> the login chosen ("own" for other routes)"""
+    box = self.query_one("#tw-login-box")
+    box.display = route in DIRECT
+    if route not in DIRECT:
+      return "own"
+    client, server = self.login_ends(route)
+    cn, sn = (client.name if client else "?"), (server.name if server else "?")
+    checked = bool(info) and "ok" in info
+    through = info.get("login") or "own" # (the login the check succeeded with)
+    own = bool(info.get("ok")) and through == "own"
+    why = (info.get("why") or "")[:70]
+    manual = self.manual()
+    can = {"own": own or not checked or manual,
+           "key": bool(info.get("keyable") or info.get("ok")) or not checked or manual,
+           "you": bool(info.get("askable")) or not checked or manual}
+    labels = {"own": f"{cn} logs in to {sn} by itself (its own keys or settings)" + ("" if own or not checked else f"  ✗ {why}"),
+              "key": f"with a temporary key: slurp makes it on {cn}; {sn} allows it for rsync only, for a while",
+              "you": f"with your login now: you answer what {sn} asks (a password, a one-time code); not as a transfer job"}
+    buttons = {b.login: b for b in self.query("#tw-login RadioButton").results(RadioButton)}
+    for login, b in buttons.items():
+      if str(b.label) != labels[login]:
+        b.label = labels[login]
+      b.disabled = not can[login]
+    chosen = self.chosen_login() if any(b.value for b in buttons.values()) else None
+    if chosen is None or not can[chosen]:
+      wanted = M.login_of(self.editing) if self.editing is not None and self.editing.route == route else None
+      if wanted is None or not can[wanted]:
+        wanted = ("own" if own else through if info.get("ok") else "key" if info.get("keyable") else
+                  "you" if info.get("askable") else "own")
+      select(self.query_one("#tw-login", RadioSet), buttons[wanted])
+      chosen = wanted
+    self.show_login(route, chosen)
+    return chosen
+
+  def show_login(self, route, login):
+    """What the login chosen means (a warning for the key and your login), Log in now and whether it is open"""
+    client, server = self.login_ends(route)
+    cn, sn = (client.name if client else "?"), (server.name if server else "?")
+    info = self.plan.get("routes", {}).get(route or "", {})
+    warning = self.query_one("#tw-key-warning", Static)
+    warning.display = login in ("key", "you")
+    self.query_one("#tw-login-row").display = login == "you"
+    if login == "key":
+      scope = RN.key_scope(self.draft(), route)
+      push = route == "direct-push"
+      kept = (f"With rrsync on {sn}, the key may only {'write to' if push else 'read in'} {scope}: nothing else of yours there."
+              if info.get("rrsync") and scope else
+              f"⚠ {sn} has no rrsync (rsync's script that keeps a key to one folder): the key may run rsync on all your "
+              f"files there, reading and writing." if "rrsync" in info else "")
+      warning.update(f"⚠ slurp makes a key pair on {cn} (in the run's folder, readable only by you; it never leaves {cn}) "
+                     f"and adds its public half to {sn}:~/.ssh/authorized_keys: rsync only, no shell, no forwarding, "
+                     f"expiring after some hours; slurp removes it when the run ends. {kept} Anyone who can read your "
+                     f"files on {cn} could use it until then. Some sites forbid this, or ignore the file (certificates only). "
+                     "slurp never copies your own keys or passwords to a cluster.")
+    elif login == "you":
+      warning.update(f"You answer what {sn} asks in a terminal on {cn} (slurp keeps no password or code). The connection "
+                     f"then stays open on that login node of {cn} until {RN.PERSIST} unused (Disconnect closes it at once); "
+                     f"rsync runs on that node and goes through it. Meanwhile root on {cn}, and your own programs on that "
+                     "node, could use it too. A transfer job cannot (it runs without you); a repeated run needs your login "
+                     "again once it has closed.")
+      opened = info.get("ok") and info.get("login") == "you"
+      self.query_one("#tw-login-state", Static).update(
+        Text("✓ open (the check logged in through it)", style="green") if opened else
+        Text("not open yet: Log in now (or later: Establish connection, Run now does it first)", style="yellow"))
+
+  @on(RadioSet.Changed, "#tw-login")
+  async def login_set(self, event):
+    event.stop()
+    if self.rebuilding.locked():
+      return
+    await self.route_changed()
+
+  @on(Button.Pressed, "#tw-login-now")
+  def login_now(self, event):
+    """Your login, in a terminal on the cluster that runs rsync; then the route is checked again (through it)"""
+    event.stop()
+    t = self.draft()
+    open_login(self.app, t, lambda ok: self.start_check(force=True) if ok else None)
 
   def chosen_runs_on(self):
     for b in self.query("#tw-runs-on RadioButton").results(RadioButton):
@@ -1550,7 +1774,15 @@ class TransferWizard(ModalScreen):
     info = self.plan.get("routes", {}).get(route or "", {})
     flow.update(flow_diagram(route, self.chosen_runs_on(), self.src, self.dst, self.side_name("src"),
                              self.side_name("dst"), rate=info.get("rate"), estimate=self.estimate_words(route),
-                             measuring=self.checking is not None and not info, **self.kinds()) if route else "")
+                             measuring=self.checking is not None and not info, **self.kinds(), **self.login_kw(route)) if route else "")
+
+  def login_kw(self, route):
+    """The login of a direct route for the flow diagram (and the folder a restricted key is kept to)"""
+    if route not in DIRECT:
+      return {}
+    login = self.chosen_login()
+    info = self.plan.get("routes", {}).get(route, {})
+    return {"login": login, "scope": RN.key_scope(self.draft(), route) if login == "key" and info.get("rrsync") else None}
 
   def kinds(self):
     """The kinds of both ends, for the flow diagram"""
@@ -1705,11 +1937,6 @@ class TransferWizard(ModalScreen):
     note.update(f"Each run reads all {human(total)} on both sides to compare them" + (f" (about {P.duration(seconds)})" if seconds else "")
                 + ", even when nothing changed; rsync shows no progress meanwhile. Size and time find almost every change.")
 
-  @on(Checkbox.Changed, "#tw-key")
-  def key_toggled(self, event):
-    event.stop()
-    self.key_changed()
-
   def show_secrets(self):
     """rclone on a cluster needs the secrets of the endpoint (keys, a password, a token) there: asked, with what it means"""
     route = self.chosen_route()
@@ -1733,19 +1960,6 @@ class TransferWizard(ModalScreen):
     self.update_next()
 
   def key_changed(self):
-    route = self.chosen_route()
-    on_ = self.query_one("#tw-key", Checkbox).value and route in ("direct-push", "direct-pull")
-    warning = self.query_one("#tw-key-warning", Static)
-    warning.display = on_
-    if on_:
-      client, server = (self.src, self.dst) if route == "direct-push" else (self.dst, self.src)
-      repeated = False
-      warning.update(f"⚠ This adds a line to {server.name}:~/.ssh/authorized_keys for a key that slurp makes on "
-                     f"{client.name} (in the run's folder there, readable only by you). The key may only run an rsync "
-                     "server (no shell, no forwarding) and expires after some hours; slurp removes the line when the run "
-                     f"ends. Anyone who can read your files on {client.name} could use it until then. Some sites forbid "
-                     "this, or overwrite the file (keys managed elsewhere, certificates only)."
-                     + (" A repeated transfer installs it anew for each run." if repeated else ""))
     self.update_next()
 
   def how_ok(self):
@@ -1754,8 +1968,12 @@ class TransferWizard(ModalScreen):
       return False, "choose a route"
     info = self.plan.get("routes", {}).get(route, {})
     strict = not self.manual()
-    if strict and not info.get("ok") and not (info.get("keyable") and self.query_one("#tw-key", Checkbox).value):
-      return False, "this route needs the temporary key" if info.get("keyable") else "this route did not pass the check"
+    login = self.chosen_login() if route in DIRECT else "own"
+    if strict and not info.get("ok") and not (info.get("keyable") and login == "key") and not (info.get("askable") and login == "you"):
+      could = [w for w, k in (("the temporary key", "keyable"), ("your login now", "askable")) if info.get(k)]
+      return False, ("choose how it logs in: " + " or ".join(could)) if could else "this route did not pass the check"
+    if login == "you" and self.chosen_runs_on() == "job":
+      return False, "a transfer job cannot use your login (it runs without you)"
     if route == "rclone-cluster" and not self.query_one("#tw-secrets", Checkbox).value:
       return False, "agree to send the secrets of the endpoint to the cluster (or choose another route)"
     if self.chosen_runs_on() is None:
@@ -1828,7 +2046,7 @@ class TransferWizard(ModalScreen):
     route = self.chosen_route()
     o = {"checksum": q("#tw-checksum", Checkbox).value, "compress": q("#tw-compress", Checkbox).value and route == "relay",
          "bwlimit": q("#tw-bwlimit", Input).value.strip(),
-         "temp_key": q("#tw-key", Checkbox).value and route in ("direct-push", "direct-pull"),
+         "login": self.chosen_login() if route in DIRECT and self.chosen_login() != "own" else "",
          "no_verify": route == "globus" and not q("#tw-verify", Checkbox).value}
     if route == "globus":
       o["bwlimit"] = ""
@@ -1861,7 +2079,7 @@ class TransferWizard(ModalScreen):
     self.query_one("#tw-summary-flow", Static).update(
       flow_diagram(t.route, t.runs_on, self.src, self.dst, self.side_name("src"), self.side_name("dst"),
                    rate=self.plan.get("routes", {}).get(t.route, {}).get("rate"), estimate=self.estimate_words(t.route),
-                   **self.kinds()))
+                   **self.kinds(), **self.login_kw(t.route)))
     text = Text()
     def row(label, value, style=""):
       text.append(f"{label:10}", style="bold")
@@ -1884,7 +2102,10 @@ class TransferWizard(ModalScreen):
     row("Runs", "when you click Run now (Copy as a command gives the command for scrontab or cron)")
     if t.secrets_to:
       row("Secrets", f"the secrets of the endpoint go to {next(iter(t.secrets_to))} for each run (deleted when it starts)", "yellow")
-    opts = [w for k, w in (("checksum", "checksums"), ("compress", "compressed"), ("temp_key", "temporary key"),
+    if t.route in DIRECT:
+      row("Login", f"{self.login_ends(t.route)[0].name if self.login_ends(t.route)[0] else '?'} logs in "
+          + M.LOGINS[M.login_of(t)].split(" (")[0], "yellow" if M.login_of(t) != "own" else "")
+    opts = [w for k, w in (("checksum", "checksums"), ("compress", "compressed"),
                             ("no_verify", "no checksum verification")) if t.options.get(k)]
     if t.options.get("transfers"):
       opts.append(f"{t.options['transfers']} files at a time")
@@ -1895,7 +2116,8 @@ class TransferWizard(ModalScreen):
     text.append(if_slurp_closes(t, client.name if client else "", "", site_of(client)) + "\n")
     for w in self.plan.get("warnings", []):
       text.append(f"⚠ {w}\n", style="yellow")
-    if not info.get("ok") and not (info.get("keyable") and t.options.get("temp_key")):
+    login = M.login_of(t)
+    if not info.get("ok") and not (info.get("keyable") and login == "key") and not (info.get("askable") and login == "you"):
       why = info.get("why") or ("its check is not done" if info == {} else "")
       text.append(f"⚠ {M.ROUTES.get(t.route, t.route)} did not pass the check" + (f" ({why})" if why else "")
                   + ": Run now checks again first, and runs only if it passes.\n", style="bold yellow")
@@ -1999,8 +2221,23 @@ class TransfersBase(SplitScreen):
     return t.state == "paused"
 
   def run_now(self, t):
-    if not t.active and t.state != "waiting":
-      self.manager.run_now(t)
+    if t.active or t.state == "waiting":
+      return
+    if t.route in DIRECT and M.login_of(t) == "you" and t.runs_on != "job": # (your login: open first, then the run)
+      self.with_login(t, lambda: self.manager.run_now(t))
+      return
+    self.manager.run_now(t)
+
+  def with_login(self, t, then):
+    """then() once your login of t is open: asked first; not open: the terminal to log in"""
+    def known(state):
+      if state[0]:
+        then()
+      elif state[0] is False:
+        open_login(self.app, t, lambda ok: then() if ok else None)
+      else: # (not known now, e.g. a tab not connected: the run waits for it; a login that is not open then: said)
+        then()
+    self.manager.login_state(t, known)
 
   def edit(self, t):
     if t.active:
@@ -2273,6 +2510,9 @@ class TransferScreen(TransfersBase):
         yield Button(icons.label("suspended", "Pause"), id="xd-pause", variant="warning", compact=True, tooltip="stop the run; Continue goes on (p)")
         yield Button(icons.label("running", "Continue"), id="xd-resume", variant="primary", compact=True, tooltip="a new run: it goes on where it stopped (c)")
         yield Button(icons.label("reload", "Run now"), id="xd-run", compact=True, tooltip="a run now (s): when its endpoints are connected")
+        yield Button(icons.label("connect", "Establish connection"), id="xd-login", variant="primary", compact=True,
+                     tooltip="your login to the other cluster, in a terminal (a password, a code): Run now does it first if needed")
+        yield Button(icons.label("disconnect", "Disconnect"), id="xd-logout", compact=True, tooltip="close your login to the other cluster")
         yield Button(icons.label("edit", "Edit…"), id="xd-edit", compact=True, tooltip="its settings, in the wizard (e)")
         yield Button(icons.label("jobs", "Its job"), id="xd-job", compact=True, tooltip="the job window of its transfer job")
         yield Button(icons.label("reload", "Reload"), id="xd-reload", classes="xfer-reload", compact=True,
@@ -2330,8 +2570,11 @@ class TransferScreen(TransfersBase):
     self.frame = getattr(self, "frame", 0) + 1
     store = self.app.transfers.endpoint_store
     kind = lambda end: getattr(store.get(end.get("endpoint", "")), "kind", "") or ""
+    login = M.login_of(t) if t.route in DIRECT else ""
+    rr = ((t.plan.get("routes") or {}).get(t.route) or {}).get("rrsync")
     route = flow_diagram(t.route, t.runs_on, src, dst, t.source_name, t.dest_name, t.run.get("job", ""),
-                         moving=self.frame if t.state == "running" else None, src_kind=kind(t.source), dst_kind=kind(t.dest))
+                         moving=self.frame if t.state == "running" else None, src_kind=kind(t.source), dst_kind=kind(t.dest),
+                         login=login, scope=RN.key_scope(t, t.route) if login == "key" and rr else None)
     route.append(f"\n{M.ROUTES.get(t.route, t.route)}, {M.RUNS_ON.get(t.runs_on, t.runs_on)}", style="dim")
     if t.run.get("job"):
       route.append(f", job {t.run['job']}", style="dim")
@@ -2342,6 +2585,7 @@ class TransferScreen(TransfersBase):
     if t.secrets_to:
       tab = next(iter(t.secrets_to))
       route.append(f"\nthe secrets of the endpoint go to {tab} for each run (read and deleted when it starts)", style="yellow")
+    self.show_login(t, route)
     q("#xd-route", Static).update(route)
     for side in ("src", "dst"):
       self.show_end(t, side)
@@ -2414,6 +2658,30 @@ class TransferScreen(TransfersBase):
       check.append_text(routes_text(t.plan))
     q("#xd-check", Static).update(check)
     q("#xd-log", Static).update(Text("\n".join(f"{datetime.fromtimestamp(ts).strftime('%m-%d %H:%M:%S')}  {text}" for ts, text in t.log[-25:]), style="dim"))
+
+  def show_login(self, t, route):
+    """Your login of a direct route: open or not (asked every 20 s), its buttons; under the flow"""
+    q = self.query_one
+    you = t.route in DIRECT and M.login_of(t) == "you" and t.runs_on != "job"
+    known = self.manager.logins.get(t.id)
+    if you and (known is None or time.monotonic() - known[1] > 20) and not getattr(self, "asking_login", False):
+      self.asking_login = True
+      def got(_):
+        self.asking_login = False
+        self.refresh_view()
+      self.manager.login_state(t, got)
+    state = known[0] if known else (None, "")
+    q("#xd-login", Button).display = you and state[0] is not True
+    q("#xd-logout", Button).display = you and state[0] is True
+    if not you:
+      return
+    client, server = (t.source_name, t.dest_name) if t.route == "direct-push" else (t.dest_name, t.source_name)
+    if state[0]:
+      route.append(f"\nyour login {client} → {server}: open on {state[1] or client} (until {RN.PERSIST} unused)", style="green")
+    elif state[0] is False:
+      route.append(f"\nyour login {client} → {server}: not open · Establish connection (Run now does it first)", style="yellow")
+    else:
+      route.append(f"\nyour login {client} → {server}: " + (f"not known ({state[1][:80]})" if state[1] else "asking …"), style="dim")
 
   def end(self, t, side):
     """The endpoint of a side ("src", "dst") as it is now"""
@@ -2544,6 +2812,10 @@ class TransferScreen(TransfersBase):
                     group="xd-copy", name="the command of the transfer", connection=None)
     elif bid == "xd-job":
       self.app.open_transfer_job(t)
+    elif bid == "xd-login":
+      open_login(self.app, t, lambda ok: self.refresh_view())
+    elif bid == "xd-logout":
+      self.manager.close_login(t, self.refresh_view)
     elif bid == "xd-recheck":
       self.manager.recheck(t)
       self.refresh_view()
@@ -2801,7 +3073,10 @@ class TransferRunScreen(TransfersBase):
     if r.get("sources"):
       row("From", ", ".join(r["sources"]))
       row("Into", r.get("dest", ""))
-    opts = [w for k, w in (("checksum", "checksums"), ("compress", "compressed"), ("temp_key", "temporary key")) if (r.get("options") or {}).get(k)]
+    ro = r.get("options") or {}
+    opts = [w for k, w in (("checksum", "checksums"), ("compress", "compressed"), ("temp_key", "temporary key")) if ro.get(k)]
+    if ro.get("login") in ("key", "you"):
+      opts.append({"key": "temporary key", "you": "your login"}[ro["login"]])
     if (r.get("options") or {}).get("bwlimit"):
       opts.append(f"at most {r['options']['bwlimit']} MB/s")
     row("Options", ", ".join(opts) or "—")

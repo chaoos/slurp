@@ -110,7 +110,7 @@ def test_wizard_and_tab(check, tmp_path):
             (pressed("#tw-route"), pressed("#tw-runs-on")))
       await pilot.click(w.query_one(".tw-o-detached")); await pilot.pause(0.3)
       check("and it can still be changed", pressed("#tw-runs-on") == ["detached"] and w.chosen_runs_on() == "detached", pressed("#tw-runs-on"))
-      check("no temporary key for it", not w.query_one("#tw-key").display)
+      check("no login choice for it (not a direct route)", not w.query_one("#tw-login-box").display)
       flow = str(w.query_one("#tw-flow").render())
       check("how the data flows: the two tabs as boxes, the same filesystem on the arrow, rsync on the login node",
             flow.count("┌") == 2 and "same filesystem" in flow and "▶" in flow and "(on the login node)" in flow, flow)
@@ -488,13 +488,16 @@ def test_direct_job_checked_on_a_node(check, tmp_path, monkeypatch):
       w.plan["routes"]["direct-push"] = {"ok": True, "rate": 100 << 20, "estimate": [1, 2], "runs_on": ["detached", "job"]}
       w.show_plan(); await pilot.pause(0.2)
       await pilot.click(w.query_one(".tw-r-direct-push")); await pilot.pause(0.4)
-      check("a route that logs in by itself: no temporary key offered", not w.query_one("#tw-key").display and not w.query_one("#tw-key").value)
+      check("a route that logs in by itself: chosen so, no key or login warning", w.query_one("#tw-login-box").display
+            and w.chosen_login() == "own" and not w.query_one("#tw-key-warning").display, w.chosen_login())
+      w.query_one(".tw-o-job").scroll_visible(animate=False); await pilot.pause(0.3) # (under the login choice: scrolled to)
       await pilot.click(w.query_one(".tw-o-job")); await pilot.pause(0.3)
       w.query_one("#tw-partition").value = "xfer"; await pilot.pause(1.5)
       check("as a job: the login checked from a node of the partition", answers and answers[-1][:2] == ("direct-push", "xfer"), answers)
       node = str(w.query_one("#tw-node-check").render())
       check("refused there: said (Run now checks again; it may be added so)", "✗" in node and "Permission denied" in node
             and not w.query_one("#tw-next").disabled, node)
+      w.query_one(".tw-o-detached").scroll_visible(animate=False); await pilot.pause(0.3)
       await pilot.click(w.query_one(".tw-o-detached")); await pilot.pause(0.3)
       check("detached on the login node (where the check logged in): Next", not w.query_one("#tw-next").disabled, w.query_one("#tw-next").tooltip)
       w.dismiss(None); await pilot.pause(0.2)

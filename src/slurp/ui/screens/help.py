@@ -282,10 +282,25 @@ runs can be changed, and the check is not run again (what the last one found sta
    job: its account (a list of yours there to choose from; a field where none can be found), and its batch script tested with `sbatch --test-only` as soon as
    it is chosen and when its partition, time limit or account change: when and where it would start, or Slurm's
    error (then Next refuses). Below: where it runs (in slurp; detached on the cluster's login node; as a transfer job
-   where the site has a transfer partition, e.g. xfer), and for a direct route that cannot log in by itself the
-   **temporary key** (opt-in, with its warning).
+   where the site has a transfer partition, e.g. xfer). A direct route asks, under the routes, **how it logs in**: by
+   itself; with a **temporary key** (made on the cluster that runs rsync, only its public half on the other: rsync
+   only, expiring; with rrsync there only in the transfer's folder, one way); or **with your login now** (a password,
+   a one-time code: **Log in now…** opens a terminal on that cluster, the connection stays open there until 2 hours
+   unused; not as a transfer job). Each with what it means; the picture shows it. slurp never copies your own keys
+   or passwords to a cluster.
 5. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes; **Add**: the transfer is
    added and runs each time you click **Run now**.
+"""),
+  "TransferLoginScreen": ("Your login to the other cluster", """
+A terminal on the cluster that runs rsync of a direct route, on the login node slurp is connected to (rsync runs
+there too): it logs in to the other cluster. Answer what that one asks (a password, a one-time code, a host key);
+slurp keeps nothing of it. Once logged in, the connection stays open on that login node until it has been unused for
+2 hours (or **Disconnect** in the transfer's subtab), and the window closes by itself (✓ connected).
+
+- **Again**: log in once more (after a typo, a code that expired).
+- **Close** (`Esc`; `Ctrl-]` while it runs): stop.
+
+While it is open, root on that cluster, and your own programs on that node, could use the connection too.
 """),
   "EndpointsScreen": ("Endpoints", """
 Where transfers take data from and put it: this machine, every tab (a cluster tab is an endpoint by itself, as long
