@@ -50,3 +50,36 @@ def test_a_newer_version(check, monkeypatch):
       app.version_found("99.0.1"); await pilot.pause(0.3)
       check("a newer one than the skipped: said again", app.new_version == "99.0.1")
   asyncio.run(main())
+
+
+def test_check_for_updates(check, monkeypatch):
+  """☰ Menu → Check for updates: PyPI asked now; a newer slurp (a skipped one too): how to update; the newest or
+  offline: said"""
+  from slurp.ui.screens.menu import MenuScreen
+  answers, asked = ["99.0.0"], []
+  def latest(timeout=5, now=None, force=False):
+    asked.append(force)
+    return answers[-1]
+  monkeypatch.setattr(update, "latest_version", latest)
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(140, 40)) as pilot:
+      await until(pilot, lambda: app.main is not None and app.screen.query("#menu"))
+      app.action_menu()
+      ok = await until(pilot, lambda: isinstance(app.screen, MenuScreen) and app.screen.query("#menu-list"))
+      menu = app.screen.query_one("#menu-list")
+      check("in the menu", ok and menu.get_option("check_updates") is not None)
+      menu.highlighted = menu.get_option_index("check_updates"); await pilot.press("enter")
+      ok = await until(pilot, lambda: isinstance(app.screen, UpdateScreen))
+      check("a newer one: asked now (not the cache), how to update", ok and asked == [True] and app.screen.version == "99.0.0", asked)
+      await pilot.press("escape"); await pilot.pause(0.2)
+      from slurp import __version__
+      answers.append(__version__)
+      app.action_check_updates()
+      ok = await until(pilot, lambda: any("is the newest" in str(n.message) for n in app._notifications))
+      check("the newest: said", ok and not isinstance(app.screen, UpdateScreen))
+      answers.append(None)
+      app.action_check_updates()
+      ok = await until(pilot, lambda: any("PyPI did not answer" in str(n.message) for n in app._notifications))
+      check("offline: said", ok)
+  asyncio.run(main())

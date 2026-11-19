@@ -86,6 +86,8 @@ slurp tells you itself when there is a newer version: at the start it asks PyPI 
 background; offline nothing happens), says so, and the title bar shows **⬆ slurp <version>** until it quits. A click
 shows what changed, how slurp is installed on this machine (pipx, uv tool, pip, or a git checkout) and the command
 that updates it, to copy; then quit slurp and start it again. **Skip this version** stops the reminder until a newer
-one; `"update_check": false` in the config stops the check.
+one; `"update_check": false` in the config stops the check. **☰ Menu → Check for updates** asks PyPI right away
+(also with the check at the start off): a newer version shows how to update, as above (a skipped one too); otherwise
+it says that this is the newest, or that PyPI did not answer.
 
 When using tmux, enable the mouse (`set -g mouse on`) to click and scroll in slurp.

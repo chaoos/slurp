@@ -22,6 +22,7 @@ def test_the_newest_version(check, monkeypatch):
   check("the newest release (not a pre-release), from slurp-ui", update.latest_version() == "0.10.0" and calls == [update.URL], calls)
   check("asked again the same day: from the cache, not PyPI", update.latest_version() == "0.10.0" and len(calls) == 1)
   check("a day later: asked again", update.latest_version(now=time.time() + 25 * 3600) == "0.10.0" and len(calls) == 2)
+  check("force (Check for updates): asked now, not the cache", update.latest_version(force=True) == "0.10.0" and len(calls) == 3)
 
 
 def test_offline(check, monkeypatch):

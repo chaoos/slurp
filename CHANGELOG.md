@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Check for updates in the ☰ Menu: asks PyPI right away (also with the check
+  at the start turned off). A newer slurp shows how to update it, a skipped
+  version too; otherwise it says that this is the newest, or that PyPI did not
+  answer.
 - Transfers: a transfer job that waits in the queue is no longer taken as
   ended by the result of the run before it. It "ended" at once with the old
   exit code, and an rclone job's keys were removed before it started (rclone:

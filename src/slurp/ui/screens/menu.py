@@ -32,6 +32,7 @@ ITEMS = [
   ("guides", "Guides", "F1", "docs"),
   ("rule_catalogue", "Rule catalogue", "F2", "rules"),
   ("options", "Options", "F3", "options"),
+  ("check_updates", "Check for updates", "", "reload"),
   ("about", "About slurp", "", "about"),
   None,
   ("quit", "Quit", "q", "quit"),

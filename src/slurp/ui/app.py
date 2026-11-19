@@ -1684,6 +1684,25 @@ class Slurp(TransfersTab, App):
     self.new_version = version
     self.notify(f"slurp {version} is available (this is {__version__}): ⬆ in the title bar says how to update", timeout=12)
 
+  def action_check_updates(self):
+    """Check for updates (the menu): PyPI asked now (also with the check at the start off); a newer slurp: how to
+    update it (a skipped version too: asked for), else said"""
+    from .. import update
+    self.notify("asking PyPI for the newest slurp …", timeout=4)
+    in_background(self, lambda: update.latest_version(timeout=10, force=True), self.updates_checked, group="update", connection=None)
+
+  def updates_checked(self, version):
+    from .. import update, __version__
+    from .screens.dialogs import UpdateScreen
+    if not version:
+      self.notify("PyPI did not answer (offline? a proxy?): try again later", title="Check for updates", severity="warning", timeout=8)
+    elif update.newer(version, __version__):
+      self.new_version = version
+      self.push_screen(UpdateScreen(version))
+    else:
+      self.notify(f"slurp {__version__} is the newest" + (f" (PyPI has {version})" if version != __version__ else ""),
+                  title="Check for updates", timeout=6)
+
   def show_update(self):
     from .screens.dialogs import UpdateScreen
     if self.new_version:
