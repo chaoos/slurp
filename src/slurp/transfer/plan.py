@@ -10,6 +10,7 @@ The routes:
   relay        rsync on the source, its server on the destination, the bytes through slurp (always possible when both
                tabs are connected and both have rsync)"""
 
+import re
 import secrets
 import shlex
 import time
@@ -17,7 +18,7 @@ import time
 from ..cluster import sshsetup
 from ..cluster.storage import parse_quota_table
 from ..state import log
-from . import relay, rsync as R, runner as RN
+from . import model as M, relay, rsync as R, runner as RN
 
 SAMPLE = 64 * 1024 * 1024 # bytes of the speed probes at most
 PROBE_SECONDS = 6
@@ -211,11 +212,12 @@ def known_hosts(host, port, files):
 LOGIN_SCRIPT = 'printf "%s" "$1" > "$2/known_hosts"; chmod 600 "$2/known_hosts"; shift 2; ssh "$@" </dev/null 2>&1 | tail -n 5'
 LOGIN_REMOTE = f"printf '\\n{RN.DIRECT_MARK} %s\\n' \"$(rsync --version 2>/dev/null | head -n 1)\""
 
-def login_works(client, target, folder, key=False):
-  """Can the cluster client log in to target by itself (no password, no question)? -> (ok, rsync there or why not)"""
+def login_works(client, target, folder, key=False, master=None):
+  """Can the cluster client log in to target by itself (no password, no question; master: through your open login)?
+  -> (ok, rsync there or why not)"""
   if not target or target.get("error"):
     return False, (target or {}).get("error") or "this machine cannot be reached from a cluster"
-  args = [*RN.ssh_options(target, folder, key), target["host"], LOGIN_REMOTE]
+  args = [*RN.ssh_options(target, folder, key, master), target["host"], LOGIN_REMOTE]
   result = client.sh(LOGIN_SCRIPT, target.get("known_hosts", ""), folder, *args, timeout=90)
   out = result.stdout or ""
   for line in out.splitlines():
@@ -285,9 +287,15 @@ def sample_file(host, paths):
   script = 'for p in "$@"; do find "$p" -type f -size +1M 2>/dev/null | head -n 1; done | head -n 1'
   return ((host.sh(script, *paths, timeout=60).stdout or "").strip().splitlines() or [""])[0]
 
-def direct_rate(client, target, folder, sample, push, key=False, has_timeout=True):
+def asks(why):
+  """Would the other cluster take a login that asks (a password, a one-time code)? From what ssh said when it was
+  refused: Permission denied (publickey,password,keyboard-interactive)"""
+  m = re.search(r"Permission denied \(([^)]*)\)", why or "")
+  return bool(m) and any(w in m.group(1).split(",") for w in ("password", "keyboard-interactive"))
+
+def direct_rate(client, target, folder, sample, push, key=False, has_timeout=True, master=None):
   """Bytes per second of a direct route: a sample through ssh, less the time of the login"""
-  ssh = shlex.join(["ssh", *RN.ssh_options(target, folder, key), target["host"]])
+  ssh = shlex.join(["ssh", *RN.ssh_options(target, folder, key, master), target["host"]])
   read = f"head -c {SAMPLE} {shlex.quote(sample)}" if sample else f"head -c {SAMPLE} /dev/urandom"
   limit = "timeout 30 " if has_timeout else ""
   code, login = timed(client, f"{limit}{ssh} true </dev/null")
@@ -456,22 +464,32 @@ def check(source, dest, transfer, source_cluster, dest_cluster, report=lambda pl
       plan["routes"][route]["why"] = f"no ssh on {client.name}"
       step(route, "info", plan["routes"][route]["why"])
       continue
+    # (the login chosen for this route: the temporary key, or your login now through its open connection)
+    login = M.login_of(transfer) if route == transfer.route else "own"
+    master = RN.control_path(transfer.id) if login == "you" else None
     try:
       probe_folder = RN.folder_of(client, transfer)
       client.sh('mkdir -p "$1" && chmod 700 "$1"', probe_folder, retry=False)
-      ok, why = login_works(client, target, probe_folder, key=bool(transfer.options.get("temp_key")) and route == transfer.route)
+      ok, why = login_works(client, target, probe_folder, key=login == "key", master=master)
     except Exception as e:
       ok, why = False, str(e)
-    plan["routes"][route].update(ok=ok, why="" if ok else why)
-    # (its sshd answers, only the login without asking is refused: the temporary key, opt-in, could do it)
+    plan["routes"][route].update(ok=ok, why="" if ok else why, login=login if ok else "")
+    # (its sshd answers, only the login without asking is refused: the temporary key, opt-in, could do it; one that
+    # asks a password or a code: your login now could)
     plan["routes"][route]["keyable"] = not ok and any(w in why for w in ("Permission denied", "publickey", "Too many authentication"))
+    plan["routes"][route]["askable"] = (not ok and asks(why)) or (ok and login == "you")
+    if plan["routes"][route]["keyable"] or login == "key": # (rrsync there: the key is kept to the transfer's folder)
+      plan["routes"][route]["rrsync"] = RN.rrsync_on(dest if push else source)
     if ok:
       plan["routes"][route]["rate"] = r = direct_rate(client, target, probe_folder, sample, push,
-                                                     has_timeout="timeout" in client_facts.get("has", []))
-      step(route, "ok", f"{client.name} logs in to {target['host']} (rsync {why})" + (f", {human(r)}/s" if r else ", speed not measured"))
-    elif plan["routes"][route]["keyable"]:
-      step(route, "info", f"{client.name} reaches {target['host']}, but cannot log in without asking ({why}): "
-                          "the temporary key (opt-in, in the next step) could")
+                                                     has_timeout="timeout" in client_facts.get("has", []), master=master)
+      how = {"key": " with the temporary key", "you": " through your login"}.get(login, "")
+      step(route, "ok", f"{client.name} logs in to {target['host']}{how} (rsync {why})" + (f", {human(r)}/s" if r else ", speed not measured"))
+    elif plan["routes"][route]["keyable"] or plan["routes"][route]["askable"]:
+      could = " or ".join(w for w, k in (("the temporary key", "keyable"), ("your login now (it asks a password or a code)", "askable"))
+                          if plan["routes"][route][k])
+      step(route, "info", f"{client.name} reaches {target['host']}, but cannot log in without asking ({why}): {could} could "
+                          "(How it logs in, below the routes)")
     else:
       step(route, "info", f"no login from {client.name} to {target['host']} without asking: {why}")
     if stop():

@@ -53,6 +53,7 @@ class Manager:
     self.shown = set()      # ids whose details (or the list) are shown: looked at more often
     self.listeners = []     # fn(transfer or None) on the UI thread when something changed
     self.checking = set()   # ids being checked again (their details: Check again)
+    self.logins = {}        # id -> ((open, login node) or (None, why), when looked): your login of a direct route
     self.lock = threading.RLock()
     for t in self.store.transfers: # (runs that went on without slurp: followed again)
       if t.run and t.runs_on in ("detached", "job", "globus"):
@@ -126,6 +127,8 @@ class Manager:
   def delete(self, t):
     if t.active:
       raise ValueError("pause it first")
+    if M.login_of(t) == "you" and t.route in ("direct-push", "direct-pull"):
+      self.close_login(t) # (your login: not left open)
     self.store.remove(t)
     self.followed.pop(t.id, None)
     self.changed(None)
@@ -748,21 +751,28 @@ class Manager:
       facts = P.facts(client)
       if not facts.get("version"):
         raise OSError(f"no rsync on {client.name}")
-      target, known, key = None, "", False
+      target, known, key, master, scope = None, "", False, None, None
       if t.route in ("direct-push", "direct-pull"):
         src, dst = self.ends(t)
         target = P.target_of(dst if t.route == "direct-push" else src)
         if not target or target.get("error"):
           raise OSError((target or {}).get("error") or "the other side cannot be reached")
         known = target.pop("known_hosts", "")
-        key = bool(t.options.get("temp_key"))
+        how = M.login_of(t)
+        key = how == "key"
+        if how == "you":
+          if t.runs_on == "job":
+            raise OSError("a transfer job cannot use your login (it runs without you): choose the temporary key, or detached")
+          master = RN.control_path(t.id)
+        rrsync = ((t.plan.get("routes") or {}).get(t.route) or {}).get("rrsync") if key else ""
+        scope = RN.key_scope(t, t.route) if rrsync else None
       folder = RN.folder_of(client, t)
-      text = RN.command(t, t.route, folder, facts["version"], target, key=key)
-      login = RN.preflight(target, folder, key) if target else ""
+      text = RN.command(t, t.route, folder, facts["version"], target, key=key, master=master, scope=scope)
+      login = RN.preflight(target, folder, key, master) if target else ""
       folder = RN.prepare(client, t, text, job=t.runs_on == "job", known_hosts=known, login=login)
       run_target = (target or {}).get("host", "")
       if key:
-        self.install_key(t, client, source if client is dest else dest, folder)
+        self.install_key(t, client, source if client is dest else dest, folder, rrsync if scope else "", scope)
       run = {"folder": folder, "client": client_side(t.route), "target": run_target}
       if t.runs_on == "job":
         run["job"] = RN.submit(client, folder)
@@ -782,17 +792,70 @@ class Manager:
       self.followed[t.id] = time.monotonic() + 2
     self.from_thread(started)
 
-  def install_key(self, t, client, server, folder):
-    """The temporary key (opt-in): made on the cluster that runs rsync, allowed on the other one for a while"""
+  def install_key(self, t, client, server, folder, rrsync="", scope=None):
+    """The temporary key (opt-in): made on the cluster that runs rsync, allowed on the other one for a while (with
+    rrsync there: only in the transfer's folder, only one way)"""
     public = RN.make_key(client, folder, t)
     hours = 12 + 3 * ((t.plan.get("routes", {}).get(t.route, {}).get("estimate") or [0, 0])[1] / 3600)
     if t.runs_on == "job":
       hours += 24 # (it may wait in the queue)
-    RN.install_key(server, RN.key_line(public, t, min(hours, 24 * 14)), t)
-    t.event(f"temporary key installed on {server.name} (for {hours:.0f} h)")
+    hours = min(hours, 24 * 14)
+    push = t.route == "direct-push"
+    RN.install_key(server, RN.key_line(public, t, hours, rrsync, "-wo" if push else "-ro", scope or ""), t,
+                   make=scope if scope and push else "")
+    t.event(f"temporary key installed on {server.name} (for {hours:.0f} h; "
+            + (f"rsync only, only {'writing to' if push else 'reading in'} {scope})" if scope else "any rsync there: no rrsync on it)"))
+
+  # ---- your login now (a direct route that logs in with a password or a code): an ssh connection that stays open on
+  # the login node of the cluster that runs rsync; you answer in a terminal
+  def login_parts(self, t):
+    """(the cluster that runs rsync, the script and its arguments that log in to the other one there, in a terminal)"""
+    source, dest = self.hosts(t)
+    client = source if client_side(t.route) == "source" else dest
+    src, dst = self.ends(t)
+    target = P.target_of(dst if t.route == "direct-push" else src)
+    if not target or target.get("error"):
+      raise OSError((target or {}).get("error") or "the other side cannot be reached")
+    known = target.pop("known_hosts", "")
+    folder = RN.folder_of(client, t)
+    return client.cluster, RN.LOGIN_SCRIPT, RN.login_args(t, folder, target, known)
+
+  def login_state(self, t, done):
+    """Is your login of t open? done((open, login node) or (None, why)) on the UI thread (in a thread)"""
+    def work():
+      try:
+        source, dest = self.hosts(t)
+        client = source if client_side(t.route) == "source" else dest
+        if not client.ready:
+          raise NotConnected(f"{client.name} is not connected")
+        src, dst = self.ends(t)
+        target = P.target_of(dst if t.route == "direct-push" else src)
+        state = RN.login_state(client, t, target, RN.folder_of(client, t))
+      except Exception as e:
+        state = (None, str(e))
+      self.logins[t.id] = (state, time.monotonic())
+      self.from_thread(done, state)
+    threading.Thread(target=work, daemon=True, name=f"login of {t.name}").start()
+
+  def close_login(self, t, done=None):
+    """Disconnect: your login of t closed (in a thread)"""
+    def work():
+      try:
+        source, dest = self.hosts(t)
+        client = source if client_side(t.route) == "source" else dest
+        src, dst = self.ends(t)
+        target = P.target_of(dst if t.route == "direct-push" else src)
+        RN.close_login(client, t, target, RN.folder_of(client, t))
+        self.logins[t.id] = ((False, ""), time.monotonic())
+        self.from_thread(t.event, "your login closed (Disconnect)")
+      except Exception as e:
+        log.debug(f"closing the login of {t.name}: {e!r}")
+      if done is not None:
+        self.from_thread(done)
+    threading.Thread(target=work, daemon=True, name=f"closing the login of {t.name}").start()
 
   def remove_key(self, t):
-    if not t.options.get("temp_key") or t.route not in ("direct-push", "direct-pull"):
+    if M.login_of(t) != "key" or t.route not in ("direct-push", "direct-pull"):
       return
     def work():
       try:
@@ -897,6 +960,9 @@ class Manager:
     checked = ((t.plan.get("facts") or {}).get(side) or {}).get("host", "")
     host, target = result.get("host") or "the cluster", t.run.get("target") or "the other cluster"
     why = said[-1] if said else "the login was refused"
+    if M.login_of(t) == "you":
+      return (f"your login from {host} to {target} is not open (closed, unused for {RN.PERSIST}, or opened on another login "
+              f"node than {host}) ({why}). Establish connection, then Run now.")
     hint = (" A transfer job runs on a node of its partition: the other site may accept your key only from some hosts "
             "(e.g. its login nodes)." if t.runs_on == "job" else
             " It may accept your key only from some hosts (e.g. from= in authorized_keys at JSC).")
@@ -1082,7 +1148,8 @@ class Manager:
     info = (t.plan.get("routes") or {}).get(t.route) or {}
     if t.route == "rclone-cluster" and info.get("runs_on") and t.runs_on not in info["runs_on"]: # (rclone only on the nodes)
       return False
-    return bool(info.get("ok") or (info.get("keyable") and t.options.get("temp_key")))
+    login = M.login_of(t)
+    return bool(info.get("ok") or (info.get("keyable") and login == "key") or (info.get("askable") and login == "you"))
 
   def run_now(self, t):
     """Run now (the user's): a route that did not pass its last check (a manual transfer may be added so) is checked
@@ -1226,6 +1293,8 @@ class Manager:
       body = [f"# on {t.source_name}:", f"rsync {shlex.join(opts)} -- {paths} {dest}"]
     elif t.route in ("direct-push", "direct-pull"):
       push = t.route == "direct-push"
+      if M.login_of(t) in ("key", "you"): # (slurp's during its own runs: not for a command run by cron)
+        head.append(f"# (slurp's runs log in {M.LOGINS[M.login_of(t)].split(' (')[0]}; this command needs a login that works by itself)")
       target, why = ssh_of(dst if push else src)
       if target is None:
         body = [why]

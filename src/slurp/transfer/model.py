@@ -43,7 +43,20 @@ RUNS_ON = {
   "job":      "as a transfer job",
   "globus":   "at Globus",
 }
+# how the cluster that runs rsync of a direct route logs in to the other one (options["login"]); slurp never copies
+# your own keys or passwords to a cluster
+LOGINS = {
+  "own": "by itself (its own keys or settings)",
+  "key": "with a temporary key (made on the cluster, rsync only)",
+  "you": "with your login now (password, one-time code)",
+}
 HISTORY = 50 # runs kept per transfer
+
+def login_of(t):
+  """How a direct route logs in: own, key, you (an older transfer: temp_key is the temporary key)"""
+  o = t.options or {}
+  login = o.get("login") or ("key" if o.get("temp_key") else "own")
+  return login if login in LOGINS else "own"
 
 def tab_ref(cluster):
   """How a transfer names a tab: its destination (None: this machine), its name, and its SSH settings (to open it

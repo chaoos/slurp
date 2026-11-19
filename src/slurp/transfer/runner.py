@@ -16,6 +16,7 @@ after a new start).
 """
 
 import json
+import os
 import shlex
 import time
 
@@ -99,11 +100,23 @@ DIRECT_MARK = "SLURP-DIRECT"
 # (login scripts that print would break rsync's protocol); `read` takes one byte at a time from a pipe, cat the rest
 RSH = ('#!/bin/sh\nssh "$@" | { while IFS= read -r l; do [ "$l" = ' + DIRECT_MARK + ' ] && break; done; exec cat; }\n')
 
-def ssh_options(target, folder, key=False):
+# your login to the other cluster (a direct route that logs in "with your login now"): an ssh connection that stays
+# open on the login node of the cluster that runs rsync, in a folder of /tmp only you can use (%i: your uid there)
+CONTROL_DIR = "/tmp/slurp-%i"
+PERSIST = "2h" # (it closes after so long unused; Disconnect closes it at once)
+
+def control_path(tid):
+  return f"{CONTROL_DIR}/{tid}"
+
+def ssh_options(target, folder, key=False, master=None, batch=True):
   """ssh's options on the cluster that runs rsync, to log in to the other one (target: host, port, user, jump):
-  never asking, the host key as this machine knows it (in the run's folder) or as that cluster knows it"""
-  out = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=30", "-o", "StrictHostKeyChecking=yes",
+  never asking (batch), the host key as this machine knows it (in the run's folder) or as that cluster knows it;
+  master: through your open login (its socket), never a new one"""
+  out = (["-o", "BatchMode=yes"] if batch else []) + [
+         "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=30", "-o", "StrictHostKeyChecking=yes",
          "-o", f"UserKnownHostsFile={folder}/known_hosts ~/.ssh/known_hosts"]
+  if master:
+    out += ["-o", f"ControlPath={master}", "-o", "ControlMaster=no"]
   if target.get("port") and str(target["port"]) != "22":
     out += ["-p", str(target["port"])]
   if target.get("user"):
@@ -114,31 +127,88 @@ def ssh_options(target, folder, key=False):
     out += ["-i", f"{folder}/key", "-o", "IdentitiesOnly=yes"]
   return out
 
-def command(transfer, route, folder, version, target=None, key=False):
+def key_scope(transfer, route):
+  """The folder a temporary key is kept to (rrsync on the other cluster): a push: the destination (written only); a
+  pull: the folder all its sources are in (read only). None: no such folder (a path that is not absolute)"""
+  if route == "direct-push":
+    dest = transfer.dest["path"]
+    return (dest.rstrip("/") or "/") if dest.startswith("/") else None
+  bases = []
+  for path in R.sources(transfer):
+    if not path.startswith("/"):
+      return None
+    parts = path.rstrip("/").split("/")
+    first = next((i for i, part in enumerate(parts) if R.is_pattern(part)), None) # (a pattern: the folder before it)
+    bases.append("/".join(parts[:first if first is not None else -1]) or "/")
+  return os.path.commonpath(bases) if bases else None
+
+def relative(path, scope):
+  """A path as the restricted key sees it: within its folder (a folder's trailing / kept: its contents)"""
+  rel = os.path.relpath(path.rstrip("/") or "/", scope)
+  return rel + ("/" if path.endswith("/") and rel != "." else "")
+
+def command(transfer, route, folder, version, target=None, key=False, master=None, scope=None):
   """The rsync command of a run on a cluster (the file `command`): same-fs on the source; direct-push on the source to
-  target (the destination); direct-pull on the destination from target (the source)"""
+  target (the destination); direct-pull on the destination from target (the source). scope: the folder the temporary
+  key is kept to there (rrsync): the paths there are within it"""
   opts = R.options(transfer.options, version)
   paths, dest = R.sources(transfer), transfer.dest["path"].rstrip("/") + "/"
   if route == "same-fs":
     args = [*opts, "--", *R.marked(paths), dest]
   else:
-    rsh = shlex.join(["sh", f"{folder}/rsh", *ssh_options(target, folder, key)])
+    rsh = shlex.join(["sh", f"{folder}/rsh", *ssh_options(target, folder, key, master)])
     remote = [f"--rsh={rsh}", f"--rsync-path=printf '\\n{DIRECT_MARK}\\n'; exec rsync"]
     host = target["host"]
     if route == "direct-push":
-      args = [*opts, *remote, "--", *R.marked(paths), f"{host}:{dest}"]
+      args = [*opts, *remote, "--", *R.marked(paths), f"{host}:{'./' if scope else dest}"]
     else: # (patterns on the other side: its rsync, the sender, expands them)
-      args = [*opts, *remote, "--", *[f"{host}:{p}" for p in paths], dest]
+      args = [*opts, *remote, "--", *[f"{host}:{relative(p, scope) if scope else p}" for p in paths], dest]
   return ("#!/bin/sh\n# the rsync command of slurp transfer " + transfer.id + " (patterns among the sources: their matches)\n"
           "set -- " + shlex.join(args) + "\n" + R.EXPAND + "\nexec rsync \"$@\"\n")
 
-def preflight(target, folder, key=False):
+def preflight(target, folder, key=False, master=None):
   """The login to the other cluster with the ssh of the run (the file `preflight`): it must work where rsync runs"""
   # (only the login: ssh ends with 255 when it could not log in; the temporary key refuses `true` (rsync only), so
   # another exit code is a login all the same)
   return ("#!/bin/sh\n# the login of a direct route, tried before rsync\nssh "
-          + shlex.join([*ssh_options(target, folder, key), target["host"], "true"]) + " </dev/null\n"
+          + shlex.join([*ssh_options(target, folder, key, master), target["host"], "true"]) + " </dev/null\n"
           "[ $? -ne 255 ] || exit 255\n")
+
+# your login now: on the cluster that runs rsync, in a terminal (you answer what the other cluster asks), an ssh
+# connection to it that stays open there; its folder in /tmp: yours only ($1 the transfer, $2 its run folder, $3 the
+# host keys as this machine knows them, then ssh's options and the host)
+LOGIN_SCRIPT = r"""d=/tmp/slurp-$(id -u)
+mkdir -m 700 "$d" 2>/dev/null
+if [ ! -d "$d" ] || [ -L "$d" ] || [ ! -O "$d" ]; then echo "slurp: $d is not yours: not used" >&2; exit 1; fi
+chmod 700 "$d" || exit 1
+t=$1 f=$2; shift 2
+mkdir -p "$f" && chmod 700 "$f" || exit 1
+printf '%s' "$1" > "$f/known_hosts"; chmod 600 "$f/known_hosts"; shift
+if ssh -O check -o ControlPath="$d/$t" "$@" 2>/dev/null; then echo "slurp: the connection is open already"; exit 0; fi
+rm -f "$d/$t"
+echo "slurp: logging in to the other cluster from $(hostname); answer what it asks"
+ssh -o ControlMaster=yes -o ControlPath="$d/$t" -o ControlPersist=""" + PERSIST + r""" "$@" true || exit $?
+ssh -O check -o ControlPath="$d/$t" "$@" 2>/dev/null || { echo "slurp: the login worked, but no connection stayed open" >&2; exit 1; }
+echo "slurp: connected; it stays open on $(hostname) until """ + PERSIST + r""" unused, or Disconnect"
+"""
+
+def login_args(transfer, folder, target, known_hosts):
+  """The arguments of LOGIN_SCRIPT (sh -c LOGIN_SCRIPT sh ARGS…)"""
+  return [transfer.id, folder, known_hosts or "", *ssh_options(target, folder, batch=False), target["host"]]
+
+# is it open? / close it ($1 the transfer, then ssh's options and the host): "open <host>" or nothing
+CHECK_SCRIPT = ('t=$1; shift; ssh -O check -o ControlPath="/tmp/slurp-$(id -u)/$t" "$@" </dev/null >/dev/null 2>&1 '
+                '&& echo "open $(hostname)"; exit 0')
+EXIT_SCRIPT = 't=$1; shift; ssh -O exit -o ControlPath="/tmp/slurp-$(id -u)/$t" "$@" </dev/null >/dev/null 2>&1; rm -f "/tmp/slurp-$(id -u)/$t"; exit 0'
+
+def login_state(host, transfer, target, folder):
+  """(open, the login node it is open on): your login of a transfer, on the cluster that runs rsync"""
+  out = host.sh(CHECK_SCRIPT, transfer.id, *ssh_options(target, folder), target["host"], retry=False).stdout or ""
+  words = out.split()
+  return (bool(words) and words[0] == "open"), (words[1] if len(words) > 1 else "")
+
+def close_login(host, transfer, target, folder):
+  host.sh(EXIT_SCRIPT, transfer.id, *ssh_options(target, folder), target["host"], retry=False)
 
 def job_script(transfer, folder):
   """The batch script of a transfer job"""
@@ -290,18 +360,47 @@ def make_key(host, folder, transfer):
     raise OSError(f"no key made on {host.name}: {(result.stderr or '').strip()[:200]}")
   return " ".join(key[-1].split()[:2])
 
-def key_line(public, transfer, hours):
-  """The line in authorized_keys: only rsync (the command of a direct route), no shell, no forwarding, until it expires"""
+def forced(rrsync="", mode="", scope=""):
+  """The forced command of a temporary key: rrsync (mode -ro: a pull reads, -wo: a push writes) kept to its folder
+  (scope); without rrsync there: any rsync server"""
+  if not (rrsync and scope):
+    return FORCED
+  program = FORCED_PROGRAM.replace('eval "exec rsync --server $c"',
+                                   'SSH_ORIGINAL_COMMAND="rsync --server $c" exec ' + shlex.join([rrsync, mode, scope]))
+  return program.replace('"', '\\"')
+
+def key_line(public, transfer, hours, rrsync="", mode="", scope=""):
+  """The line in authorized_keys: only rsync (the command of a direct route; with rrsync: only in its folder, only
+  one way), no shell, no forwarding, until it expires"""
   until = time.strftime("%Y%m%d%H%M", time.gmtime(time.time() + hours * 3600))
-  return f'expiry-time="{until}Z",restrict,command="{FORCED}" {public} {KEY_COMMENT.format(id=transfer.id)}'
+  return f'expiry-time="{until}Z",restrict,command="{forced(rrsync, mode, scope)}" {public} {KEY_COMMENT.format(id=transfer.id)}'
+
+# rrsync on the other cluster (rsync's own script that keeps a key to a folder): its path if it can be used (its
+# rsync there, python3 for the python one, -wo known), else nothing
+RRSYNC_SCRIPT = r"""r=$(command -v rrsync 2>/dev/null) || exit 0
+p=$(sed -n "s/^RSYNC *= *'\(.*\)'.*/\1/p; s/^my *\$rsync *= *'\(.*\)'.*/\1/p" "$r" | head -n 1)
+[ -n "$p" ] && [ -x "$p" ] || exit 0
+if head -n 1 "$r" | grep -q python; then command -v python3 >/dev/null 2>&1 || exit 0; fi
+grep -q -- "-wo" "$r" || exit 0
+echo "$r"
+"""
+
+def rrsync_on(host):
+  try:
+    return (host.sh(RRSYNC_SCRIPT, retry=False, timeout=30).stdout or "").strip().splitlines()[-1:][0] if host else ""
+  except Exception:
+    return ""
 
 KEYS_SCRIPT = ('f="$HOME/.ssh/authorized_keys"; mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh" || exit 1; '
                '[ -e "$f" ] || { : > "$f" && chmod 600 "$f"; } || exit 1; '
                't=$(mktemp "$HOME/.ssh/.slurp.XXXXXX") || exit 1; grep -v " $1\\$" "$f" > "$t"; '
                'if [ -n "$2" ]; then printf "%s\\n" "$2" >> "$t"; fi; cat "$t" > "$f"; r=$?; rm -f "$t"; exit $r')
 
-def install_key(host, line, transfer):
-  """Put the line into authorized_keys there (one of this transfer replaces the old one)"""
+def install_key(host, line, transfer, make=""):
+  """Put the line into authorized_keys there (one of this transfer replaces the old one); make: a folder made first
+  (the destination a restricted key writes to: rrsync needs it there)"""
+  if make:
+    host.sh('mkdir -p -- "$1"', make, retry=False)
   result = host.sh(KEYS_SCRIPT, KEY_COMMENT.format(id=transfer.id), line, retry=False)
   if result.returncode:
     raise OSError(f"cannot change ~/.ssh/authorized_keys on {host.name}: {(result.stderr or '').strip()[:200]}")
