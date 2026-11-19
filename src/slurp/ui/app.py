@@ -1938,6 +1938,7 @@ class Slurp(TransfersTab, App):
         accounts = slurm_accounts()
       jobs = load_jobs(since, scope, accounts)
       self.load_categories(cluster)
+      self.apply_category_rules(cluster, jobs)
       # the list is shown now; the command, error file and progress of each job (files on the cluster) follow. Until
       # then a job keeps what the last load found, and a new one shows spinners
       known = cluster.jobs
@@ -1969,6 +1970,25 @@ class Slurp(TransfersTab, App):
       if not getattr(cluster, "told_categories", False):
         cluster.told_categories = True
         self.call_from_thread(self.notify, f"the categories cannot be read: {e}", title=cluster.name, severity="warning", timeout=12)
+
+  def apply_category_rules(self, cluster, jobs):
+    """(in a worker of the tab, after the categories are read) the rules of the categories on the jobs listed: the
+    file is written only if one has something to do (a job to put in, newer jobs to note as seen); said"""
+    from ..cluster import categories
+    store = cluster.categories
+    pairs = [(job.jid, job.rec.get("JobName") or "") for job in jobs]
+    if store is None or not store.rules or not store.rules_due(pairs) or cluster.slurm_cluster is None:
+      return
+    try:
+      store, done = categories.change(cluster.slurm_cluster, lambda st: st.apply_rules(pairs))
+    except (OSError, ValueError) as e:
+      log.warning(f"category rules of {cluster.name}: {e}")
+      return
+    cluster.categories = store
+    if done:
+      text = "; ".join(f"{len(jids)} job{'s' if len(jids) != 1 else ''} put in {path}" for path, jids in done.items())
+      log.info(f"category rules of {cluster.name}: {text}")
+      self.call_from_thread(self.notify, f"by the rules of the categories: {text}", title=cluster.name, timeout=8)
 
   def write_pending_categories(self, cluster):
     """(in a worker of the tab) the changes to the categories made while the cluster could not be reached: on the
