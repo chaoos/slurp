@@ -82,4 +82,5 @@ def test_check_for_updates(check, monkeypatch):
       app.action_check_updates()
       ok = await until(pilot, lambda: any("PyPI did not answer" in str(n.message) for n in app._notifications))
       check("offline: said", ok)
+      await pilot.press("q") # (quit as the app does: torn down under its tick, the main screen is gone mid-way)
   asyncio.run(main())
