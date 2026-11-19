@@ -88,3 +88,20 @@ def test_kept_renamed_deleted(check):
   s.drop_rule("b")
   check("drop_rule", s.rules == [] and "rules" not in s.to_data())
   check("as changes by name (kept to be done later, offline)", all(op in c.OPS for op in ("set_rule", "drop_rule", "apply_rules", "apply_rule")))
+
+
+def test_hidden(check):
+  s = c.Store("daint")
+  s.assign(["1"], "noise/sub")
+  s.hide("noise")
+  check("hidden: itself and the categories in it, not others", s.hidden_by("noise") == "noise" and s.hidden_by("noise/sub") == "noise"
+        and s.hidden_by("other") == "" and s.hidden_by("") == "")
+  check("kept in the file's data", c.Store("daint", s.to_data()).hidden == {"noise"} and s.to_data()["hidden"] == ["noise"])
+  s.rename("noise", "archive/noise")
+  check("a rename takes it along", s.hidden == {"archive/noise"} and s.hidden_by("archive/noise/sub") == "archive/noise")
+  s.hide("archive/noise", False)
+  check("shown again", s.hidden == set() and "hidden" not in s.to_data())
+  s.hide("archive/noise")
+  s.delete("archive")
+  check("a delete removes it", s.hidden == set())
+  check("as a change by name (offline)", "hide" in c.OPS)

@@ -157,6 +157,13 @@ class Store:
         self.cancelled[str(jid)] = cancel_entry(jid, entry)
       except ValueError:
         pass
+    self.hidden = set() # (categories whose jobs the job list leaves out, with those of the categories in them)
+    for p in data.get("hidden") or []:
+      try:
+        self.hidden.add(normalize(p))
+      except ValueError:
+        pass
+    self.paths.update(*(lineage(p) for p in self.hidden))
     self.rules = []
     for entry in data.get("rules") or []:
       try:
@@ -174,7 +181,8 @@ class Store:
                if self.job_notes else {}),
             **({"cancelled": dict(sorted(self.cancelled.items(), key=lambda kv: [int(x) for x in kv[0].split("_")]))}
                if self.cancelled else {}),
-            **({"rules": [dict(r) for r in self.rules]} if self.rules else {})}
+            **({"rules": [dict(r) for r in self.rules]} if self.rules else {}),
+            **({"hidden": sorted(self.hidden)} if self.hidden else {})}
 
   # ---- reading
   def category_of(self, jid):
@@ -204,6 +212,10 @@ class Store:
     None if not said"""
     jid = str(jid)
     return self.cancelled.get(jid) or self.cancelled.get(array_of(jid))
+
+  def hidden_by(self, path):
+    """The hidden category a category is hidden with (itself, or one it is in), "" if it is shown"""
+    return next((h for h in lineage(path) if h in self.hidden), "") if path else ""
 
   def rule(self, rid):
     return next((r for r in self.rules if r["id"] == rid), None)
@@ -258,6 +270,15 @@ class Store:
     else:
       self.cancelled[jid] = cancel_entry(jid, entry)
     return jid
+
+  def hide(self, path, hidden=True):
+    """Hide the jobs of a category (and of those in it) in the job list, or show them again"""
+    path = self.add(path)
+    if hidden:
+      self.hidden.add(path)
+    else:
+      self.hidden.discard(path)
+    return path
 
   def set_rule(self, entry):
     """Add a rule, or change the one with its id (in its place)"""
@@ -365,6 +386,7 @@ class Store:
       entry["category"] = moved(entry["category"])
     for rule in self.rules:
       rule["category"] = moved(rule["category"])
+    self.hidden = {moved(p) for p in self.hidden}
     return new
 
   def delete(self, path):
@@ -374,6 +396,7 @@ class Store:
     self.paths = {p for p in self.paths if not within(p, path)}
     self.notes = {p: text for p, text in self.notes.items() if not within(p, path)}
     self.rules = [r for r in self.rules if not within(r["category"], path)] # (its rules go with it)
+    self.hidden = {p for p in self.hidden if not within(p, path)}
     for jid, entry in list(self.jobs.items()):
       if within(entry["category"], path):
         if up:
@@ -440,7 +463,7 @@ def load(cluster):
   return Store(cluster, read_all()["clusters"].get(cluster))
 
 OPS = ("add", "assign", "unassign", "rename", "delete", "note", "job_note", "cancel_reason", "set_rule", "drop_rule", "apply_rules",
-       "apply_rule") # (the changes, by name: kept to be done later, see jobcache)
+       "apply_rule", "hide") # (the changes, by name: kept to be done later, see jobcache)
 
 def apply_op(store, op):
   """[name, args...] on a store; its result"""
