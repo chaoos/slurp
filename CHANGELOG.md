@@ -6,6 +6,12 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Icons in the browser: the page waits for the icon font before it draws
+  (at most 3 s). The terminal of the page keeps each glyph as first drawn:
+  icons drawn before the font came stayed boxes until a hover drew them again.
+- Icons in the terminal: an icon font installed by an older slurp is updated
+  at the start (said: restart the terminal, all its windows). `--install-font`
+  says that a new window is not enough for GNOME Terminal or Konsole.
 - Web links: when a web link expires, the browsers that came in through it
   lose slurp at once, and a reload with its token gets nothing. Before, only
   new logins stopped: a browser kept working past the lifetime (its session,

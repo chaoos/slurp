@@ -67,7 +67,11 @@ through, which is your own computer, also when slurp runs on a cluster over SSH:
 slurp --install-font               # Linux, macOS: into your fonts; Windows: opens the font to install
 ```
 
-Then open a new terminal window. Your terminal's font stays: the terminal takes only the icons from slurp's font.
+Then quit the terminal completely (all its windows) and start it again: GNOME Terminal and Konsole keep one process
+for all their windows, so a new window alone keeps the fonts they had (some icons then show, newer ones are boxes).
+Your terminal's font stays: the terminal takes only the icons from slurp's font. A newer slurp that finds an older
+copy installed on its machine updates it at the start and says so (restart the terminal then); a copy on another
+machine (your own, with slurp on a cluster) is updated by `slurp --install-font` there.
 Without slurp installed on that machine, download
 [slurp-icons.ttf](https://github.com/chaoos/slurp/raw/main/src/slurp/ui/fonts/slurp-icons.ttf) and install it like any
 font. A terminal with a [Nerd Font](https://www.nerdfonts.com/) shows the icons too, and a browser has them already.
