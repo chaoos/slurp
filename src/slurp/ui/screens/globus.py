@@ -274,7 +274,7 @@ class GlobusEndpointScreen(ModalScreen):
         if self.tab is not None and self.link:
           yield Button("Remove the link", id="ge-unlink", variant="error", compact=True)
         yield Button("Cancel", id="ge-cancel", compact=True)
-        yield Button("Save", id="ge-save", variant="primary", compact=True)
+        yield Button("Save" if d or self.link else "Add", id="ge-save", variant="primary", compact=True)
 
   def on_mount(self):
     table = self.query_one("#ge-results", ClickTable)

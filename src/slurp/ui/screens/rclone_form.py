@@ -93,7 +93,7 @@ class RcloneEndpointScreen(ModalScreen):
                        tooltip="Test also writes a marker (.slurp-test-…) and deletes it")
         yield Button("Test", id="rc-test", compact=True)
         yield Button("Cancel", id="rc-cancel", compact=True)
-        yield Button("Save", id="rc-save", variant="primary", compact=True)
+        yield Button("Save" if d else "Add", id="rc-save", variant="primary", compact=True)
 
   def on_mount(self):
     ok, why = RC.available()
