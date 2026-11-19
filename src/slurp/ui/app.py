@@ -2390,7 +2390,10 @@ class Slurp(TransfersTab, App):
     pattern = self.job_filter.casefold()
     from ..cluster.categories import within
     only = self.job_filter.strip()[4:].strip().strip("/") if pattern.startswith("cat:") else None # (cat:a/b: that category)
-    visible_jobs = [job for job in all_jobs if (not self.problems_only or job_has_problems(job)) and (
+    # (the jobs of hidden categories: left out, unless cat: asks for a category)
+    hidden = [job for job in all_jobs if store and job.category and store.hidden_by(job.category)] if only is None else []
+    hidden_ids = {job.jid for job in hidden}
+    visible_jobs = [job for job in all_jobs if job.jid not in hidden_ids and (not self.problems_only or job_has_problems(job)) and (
       (not job.category if only == "-" else within(job.category, only) and (job.category or not only)) if only is not None else
       not pattern or pattern in " ".join(str(value or "") for value in (
       job.jid, job.rec.get("JobName"), job.state, job.rec.get("User"), job.rec.get("Account"),
@@ -2466,6 +2469,10 @@ class Slurp(TransfersTab, App):
       status += f" · {len(finished)} finished since {cluster.since:%m-%d %H:%M}, {sum(j.node_hours() for j in finished):.1f} node hours"
     if pattern:
       status += f" · {len(visible_jobs)} of {len(all_jobs)} jobs match '{self.job_filter}'"
+    if hidden:
+      tops = sorted({store.hidden_by(job.category) for job in hidden})
+      status += (f" · {len(hidden)} hidden job{'s' if len(hidden) != 1 else ''} (in {', '.join(tops[:3])}{' …' if len(tops) > 3 else ''}:"
+                 " K, Show in the job list)")
     if self.problems_only:
       status += f" · only the {len(visible_jobs)} jobs with problems (!: all)"
     if errors:
