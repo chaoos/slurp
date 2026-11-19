@@ -134,8 +134,11 @@ def command(transfer, route, folder, version, target=None, key=False):
 
 def preflight(target, folder, key=False):
   """The login to the other cluster with the ssh of the run (the file `preflight`): it must work where rsync runs"""
-  return ("#!/bin/sh\n# the login of a direct route, tried before rsync\nexec ssh "
-          + shlex.join([*ssh_options(target, folder, key), target["host"], "true"]) + " </dev/null\n")
+  # (only the login: ssh ends with 255 when it could not log in; the temporary key refuses `true` (rsync only), so
+  # another exit code is a login all the same)
+  return ("#!/bin/sh\n# the login of a direct route, tried before rsync\nssh "
+          + shlex.join([*ssh_options(target, folder, key), target["host"], "true"]) + " </dev/null\n"
+          "[ $? -ne 255 ] || exit 255\n")
 
 def job_script(transfer, folder):
   """The batch script of a transfer job"""
