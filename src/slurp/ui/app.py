@@ -908,7 +908,8 @@ class Slurp(TransfersTab, App):
         log.debug(f"keeping the subtabs of {c.name}: {e!r}")
         return None
     update_config(tabs=[{"destination": c.destination, "since": c.since_value, "scope": c.scope,
-                         "collapse_arrays": c.collapse_arrays, **({"ssh": c.ssh, "name": c.name} if c.ssh else {}),
+                         "collapse_arrays": c.collapse_arrays, **({"ssh": c.ssh} if c.ssh else {}),
+                         **({"name": c.name} if c.ssh or c.name != (c.destination or "Local") else {}),
                          **({"pre_login": c.pre_login} if c.pre_login else {}),
                          **({"pre_login_fallback": True} if c.pre_login and c.pre_login_fallback else {}), "views": views(c)}
                         for c in self.clusters],
@@ -932,6 +933,7 @@ class Slurp(TransfersTab, App):
     settings = sshsetup.clean(destination.get("ssh")) if isinstance(destination, dict) else None
     pre_login = str(destination.get("pre_login") or "").strip() if isinstance(destination, dict) else ""
     fallback = bool(destination.get("pre_login_fallback")) and bool(pre_login) if isinstance(destination, dict) else False
+    name = str(destination.get("name") or "").strip() if isinstance(destination, dict) else "" # (the tab's own name)
     if isinstance(destination, dict):
       destination = destination.get("destination") or ""
     self.main.remove_class("-no-tabs")
@@ -940,9 +942,9 @@ class Slurp(TransfersTab, App):
       cluster.ssh = settings
       self.clusters.append(cluster)
     elif not destination or is_local_destination(destination):
-      self.clusters.append(ClusterSession("Local" if not destination else destination))
+      self.clusters.append(ClusterSession(name or ("Local" if not destination else destination)))
     else:
-      self.clusters.append(ClusterSession(destination, destination))
+      self.clusters.append(ClusterSession(name or destination, destination))
     if self.clusters[-1].destination:
       self.clusters[-1].pre_login, self.clusters[-1].pre_login_fallback = pre_login, fallback
     from ..cluster import jobcache
@@ -960,6 +962,7 @@ class Slurp(TransfersTab, App):
       settings = sshsetup.clean(result.get("ssh")) if isinstance(result, dict) else None
       pre_login = str(result.get("pre_login") or "").strip() if isinstance(result, dict) else ""
       fallback = bool(result.get("pre_login_fallback")) and bool(pre_login) if isinstance(result, dict) else False
+      name = str(result.get("name") or "").strip() if isinstance(result, dict) else ""
       if isinstance(result, dict) and not settings:
         result = result.get("destination") or ""
       destination = settings["host"] if settings else str(result or "").strip()
@@ -968,7 +971,7 @@ class Slurp(TransfersTab, App):
         return
       changed = (destination, settings, pre_login, fallback) != (cluster.destination, cluster.ssh, cluster.pre_login, cluster.pre_login_fallback)
       cluster.destination, cluster.ssh, cluster.pre_login, cluster.pre_login_fallback = destination, settings, pre_login, fallback
-      cluster.name = sshsetup.label(settings) if settings else destination
+      cluster.name = sshsetup.label(settings) if settings else (name or destination)
       c = cluster.connection
       if c is not None: # (the session takes them at its next login)
         c.destination, c.ssh_options, c.pre_login, c.pre_login_fallback = destination, sshsetup.ssh_args(settings), pre_login, fallback

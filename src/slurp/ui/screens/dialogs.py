@@ -621,11 +621,16 @@ class SshCheckScreen(ModalScreen):
     self.dismiss()
 
 
+def sshsetup_label(settings):
+  from ...cluster import sshsetup
+  return sshsetup.label(settings)
+
 class AddClusterScreen(ModalScreen):
-  """A new tab. The main way: an SSH destination, a Host of ~/.ssh/config (its user, jump hosts and keys are there;
-  suggested as you type) or user@host; empty: this machine. The fallback: the full SSH settings (user, host, port,
-  jump hosts, identity files, more options). Check tries the connection without asking anything and says what is
-  wrong; Add adds the tab, checked or not. Dismissed with the destination (str), {"ssh": settings}, or None.
+  """A new tab, as the forms of the endpoints: its name (the tab's), then the main way: an SSH destination, a Host of
+  ~/.ssh/config (its user, jump hosts and keys are there; suggested as you type) or user@host; empty: this machine.
+  The fallback: the full SSH settings (user, host, port, jump hosts, identity files, more options). Test tries the
+  connection in a terminal and says what is wrong; Add adds the tab, tested or not. Dismissed with the destination
+  (str), {"destination" or "ssh": settings, "name", "pre_login", …}, or None.
   With a cluster: its SSH settings, to see and change (Save): filled in, with the blocks of ~/.ssh/config that apply
   and what ssh makes of it all (ssh -G)."""
   DEFAULT_CSS = """
@@ -633,8 +638,11 @@ class AddClusterScreen(ModalScreen):
   #cluster-dialog { width: 100; max-width: 98%; height: auto; max-height: 96%; border: thick $accent; background: $surface; padding: 1 2; }
   #cluster-body { height: auto; max-height: 80vh; } /* (the buttons below stay in view, whatever is above) */
   #cluster-title { text-style: bold; margin-bottom: 1; }
-  #cluster-destination { width: 1fr; }
-  #cluster-hint { height: auto; color: $text-muted; margin-bottom: 1; }
+  .cluster-note { height: auto; color: $text-muted; }
+  .cluster-row { height: auto; margin-top: 1; }
+  .cluster-row Label { width: 18; }
+  .cluster-row Input { width: 1fr; }
+  #cluster-hint { height: auto; color: $text-muted; margin: 0 0 1 18; }
   #cluster-full { height: auto; margin-bottom: 1; }
   .ssh-row { height: 1; margin-bottom: 1; }
   .ssh-row Label { width: 16; padding: 0 1 0 0; }
@@ -656,11 +664,16 @@ class AddClusterScreen(ModalScreen):
     hosts = sshsetup.config_hosts()
     with Vertical(id="cluster-dialog"):
       with VerticalScroll(id="cluster-body"):
-        yield Static(f"SSH settings of the tab {self.cluster.name}" if self.cluster else "Add a tab: a cluster (or this machine)",
-                     id="cluster-title", markup=False)
-        yield Label("SSH destination")
-        yield Input(placeholder="a Host of your ~/.ssh/config (best), or user@host; empty: this machine", id="cluster-destination",
-                    suggester=SuggestFromList(hosts, case_sensitive=False) if hosts else None)
+        yield Static(f"The SSH connection {self.cluster.name}" if self.cluster else "A new SSH connection", id="cluster-title", markup=False)
+        yield Static("A cluster (or this machine) as a tab: its jobs, files, shells; and an endpoint of transfers.",
+                     classes="cluster-note", markup=False)
+        with Horizontal(classes="cluster-row"):
+          yield Label("Name")
+          yield Input(placeholder="the tab's name, shown everywhere (default: the destination)", id="cluster-name")
+        with Horizontal(classes="cluster-row"):
+          yield Label("SSH destination")
+          yield Input(placeholder="a Host of your ~/.ssh/config (best), or user@host; empty: this machine", id="cluster-destination",
+                      suggester=SuggestFromList(hosts, case_sensitive=False) if hosts else None)
         yield Static("The best way: an entry of ~/.ssh/config with the user, jump hosts and keys of the cluster; ssh, "
                      "scp and your other tools use it too." + (f" Yours: {', '.join(hosts[:12])}" + (" …" if len(hosts) > 12 else "")
                      if hosts else " You have none yet."), id="cluster-hint", markup=False)
@@ -669,42 +682,47 @@ class AddClusterScreen(ModalScreen):
                                           ("User", "user", "your user there (default: as here, or ~/.ssh/config)"),
                                           ("Port", "port", "22"),
                                           ("Jump hosts", "jump", "ProxyJump: user@gateway[:port], more separated by commas"),
-                                          ("Identity files", "identities", "private keys, e.g. ~/.ssh/cscs-key (more: commas)"),
-                                          ("Tab name", "name", "the tab's name (default: user@host)")):
+                                          ("Identity files", "identities", "private keys, e.g. ~/.ssh/cscs-key (more: commas)")):
             with Horizontal(classes="ssh-row"):
               yield Label(label)
               yield Input(placeholder=placeholder, id=f"ssh-{key}", compact=True)
           yield Label("More ssh options, one per line: Key=Value (e.g. ForwardAgent=yes, ServerAliveInterval=30, "
                       "UserKnownHostsFile=…, PreferredAuthentications=…, ProxyCommand=…)")
           yield TextArea(id="ssh-options", soft_wrap=False)
-        yield Label("Run before login (optional)")
-        yield Input(placeholder="a command on this machine before every login, e.g. one that signs your key (cscs-keygen, step ssh login …)",
-                    id="ssh-pre-login", tooltip="it runs in the login pane: answer it there (a password, a code); then the login follows. "
-                    "What it exports (eval $(ssh-agent): SSH_AUTH_SOCK, …) is there for the login")
+        with Horizontal(classes="cluster-row"):
+          yield Label("Run before login")
+          yield Input(placeholder="(optional) a command here before every login, e.g. one that signs your key (cscs-keygen, step ssh login …)",
+                      id="ssh-pre-login", tooltip="it runs in the login pane: answer it there (a password, a code); then the login follows. "
+                      "What it exports (eval $(ssh-agent): SSH_AUTH_SOCK, …) is there for the login")
         yield Checkbox("only when the login fails without it (first a login without it: a key or certificate that is still "
                        "valid is not made anew)", id="ssh-pre-login-fallback", compact=True)
         if self.cluster is not None:
           yield Static(id="cluster-config")
-      with Horizontal(id="cluster-actions"):
-        yield Button("Cancel", id="cluster-cancel", compact=True)
-        yield Button("Check…", id="cluster-check-button", compact=True,
+      with Horizontal(id="cluster-actions"): # (as the endpoints' forms: Test, Cancel, Add)
+        yield Button("Test", id="cluster-check-button", compact=True,
                      tooltip="try the connection in a terminal, as the login goes (answer what it asks), and say what is wrong")
+        yield Button("Cancel", id="cluster-cancel", compact=True)
         yield Button("Save" if self.cluster else "Add", id="cluster-confirm", variant="primary", compact=True,
                      tooltip="the tab takes these settings (the next login uses them)" if self.cluster else
                      "add the tab (checked or not); it logs in")
 
   def on_mount(self):
-    self.query_one("#cluster-destination", Input).focus()
+    self.query_one("#cluster-name", Input).focus()
     cluster = self.cluster
     if cluster is None:
       return
     settings = cluster.ssh or {}
+    default = sshsetup_label(settings) if settings else cluster.destination
+    if cluster.name != default: # (its own name: shown; the default stays empty, it follows the destination)
+      self.query_one("#cluster-name", Input).value = cluster.name
     self.query_one("#ssh-pre-login", Input).value = cluster.pre_login or ""
     self.query_one("#ssh-pre-login-fallback", Checkbox).value = bool(cluster.pre_login_fallback)
     if settings:
       self.query_one("#cluster-full", Collapsible).collapsed = False
-      for key in ("host", "user", "port", "jump", "name"):
+      for key in ("host", "user", "port", "jump"):
         self.query_one(f"#ssh-{key}", Input).value = str(settings.get(key) or "")
+      if settings.get("name"):
+        self.query_one("#cluster-name", Input).value = settings["name"]
       self.query_one("#ssh-identities", Input).value = ", ".join(settings.get("identities") or [])
       self.query_one("#ssh-options", TextArea).load_text("\n".join(settings.get("options") or []))
       self.query_one("#ssh-host", Input).focus()
@@ -765,7 +783,8 @@ class AddClusterScreen(ModalScreen):
     """The full settings filled in ({} if no host)"""
     from ...cluster import sshsetup
     value = lambda key: self.query_one(f"#ssh-{key}", Input).value.strip()
-    raw = {key: value(key) for key in ("host", "user", "port", "jump", "name")}
+    raw = {key: value(key) for key in ("host", "user", "port", "jump")}
+    raw["name"] = self.query_one("#cluster-name", Input).value.strip()
     raw["identities"] = [v for v in value("identities").split(",") if v.strip()]
     raw["options"] = [line for line in self.query_one("#ssh-options", TextArea).text.splitlines() if line.strip()]
     return sshsetup.clean(raw) or {}
@@ -774,10 +793,11 @@ class AddClusterScreen(ModalScreen):
     settings = self.settings()
     pre_login = self.query_one("#ssh-pre-login", Input).value.strip()
     destination = self.query_one("#cluster-destination", Input).value.strip()
+    name = self.query_one("#cluster-name", Input).value.strip()
     before = {"pre_login": pre_login, **({"pre_login_fallback": True} if self.query_one("#ssh-pre-login-fallback", Checkbox).value else {})} if pre_login else {}
     if settings:
       return {"ssh": settings, **before}
-    return {"destination": destination, **before} if pre_login else destination
+    return {"destination": destination, **before, **({"name": name} if name else {})} if pre_login or name else destination
 
   @on(Button.Pressed, "#cluster-check-button")
   def check_pressed(self, event):
@@ -801,10 +821,14 @@ class AddClusterScreen(ModalScreen):
 
   @on(Button.Pressed, "#cluster-confirm")
   @on(Input.Submitted, "#cluster-destination")
+  @on(Input.Submitted, "#cluster-name")
   def add_pressed(self):
     from ...cluster import sshsetup
     settings = self.settings()
     errors = sshsetup.option_errors(settings) if settings else []
+    name = self.query_one("#cluster-name", Input).value.strip()
+    if name and any(c.name == name for c in self.app.clusters if c is not self.cluster):
+      errors.append(f"a tab is called {name} already")
     if errors:
       self.notify("; ".join(errors), severity="error")
       return

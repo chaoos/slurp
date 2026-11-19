@@ -3510,7 +3510,8 @@ async def t_ssh_setup(app, pilot):
   await pilot.click("#cluster-add")
   ok = await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
   dlg = app.screen
-  check("+: the destination first (a Host of ~/.ssh/config, encouraged), the full settings folded", ok and app.focused is dlg.query_one("#cluster-destination")
+  check("+: as the endpoints' forms, the name first (focused), then the destination (a Host of ~/.ssh/config, encouraged), the full settings folded",
+        ok and app.focused is dlg.query_one("#cluster-name") and dlg.query_one("#cluster-destination")
         and dlg.query_one("#cluster-full").collapsed and "~/.ssh/config" in str(dlg.query_one("#cluster-hint").render()))
   dlg.query_one("#cluster-full").collapsed = False; await pilot.pause(0.2)
   for key, value in (("host", "127.0.0.1"), ("port", port), ("user", user), ("identities", relay)):
@@ -3521,7 +3522,7 @@ async def t_ssh_setup(app, pilot):
   # (60 s: in CI, the app slow then, it did not end within 30 s now and then; its terminal shown also when it fails)
   ok = await until(pilot, lambda: isinstance(app.screen, SshCheckScreen) and "works" in check_term(app.screen), 60)
   text = check_term(app.screen) if isinstance(app.screen, SshCheckScreen) else f"not the check window: {type(app.screen).__name__}"
-  check("Check…: a window with a terminal, as the login goes: what needs no login, the login, the verdict, ssh's log",
+  check("Test: a window with a terminal, as the login goes: what needs no login, the login, the verdict, ssh's log",
         ok and "1. what needs no login" in text and f"port {port} answers" in text and "slurp-check: logged in" in text
         and "✔ works: the login works" in text and "ssh -v" in text, text[-600:])
   await until(pilot, lambda: app.screen.session.done, 10); await pilot.pause(0.5)
@@ -3584,8 +3585,9 @@ async def t_ssh_edit(app, pilot):
         ok and dlg.query_one("#cluster-destination").value == "lab" and f"@127.0.0.1 port {port}" in config
         and str(dlg.query_one("#cluster-confirm").label) == "Save", config)
   dlg.query_one("#cluster-full").collapsed = False; await pilot.pause(0.2)
-  for key, value in (("host", "127.0.0.1"), ("port", port), ("user", getpass.getuser()), ("identities", relay), ("name", "lab-full")):
+  for key, value in (("host", "127.0.0.1"), ("port", port), ("user", getpass.getuser()), ("identities", relay)):
     dlg.query_one(f"#ssh-{key}").value = value
+  dlg.query_one("#cluster-name").value = "lab-full" # (the name: first, as the endpoints' forms)
   dlg.query_one("#ssh-options").load_text(f"UserKnownHostsFile={os.path.join(LAB, 'known_hosts')}")
   dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
   check("Save: the tab takes them (its name, its settings), kept; the session at its next login", cluster.name == "lab-full"
@@ -3602,8 +3604,9 @@ async def t_ssh_edit(app, pilot):
   # back to the Host of ssh_config
   app.edit_ssh_settings(cluster); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
   dlg = app.screen
-  for key in ("host", "port", "user", "identities", "name"):
+  for key in ("host", "port", "user", "identities"):
     dlg.query_one(f"#ssh-{key}").value = ""
+  dlg.query_one("#cluster-name").value = ""
   dlg.query_one("#ssh-options").load_text("")
   dlg.query_one("#cluster-destination").value = "lab"
   dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.5)

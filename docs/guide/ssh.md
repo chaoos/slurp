@@ -72,15 +72,17 @@ Each tab keeps its own job list, shell, and session. Switching tabs shows the
 list as it was loaded; `r` (or **Reload**) loads it again. While a list
 loads, the old one stays visible, the footer shows the progress, and `a` (or
 the **Abort** button, which replaces **Reload** meanwhile) stops it.
-**Shell on the cluster** (in the menu, or `t`) opens a login shell on the cluster of the tab in a subtab. The **+** tab button adds another local or remote connection: best an **SSH destination**, a Host of your
+**Shell on the cluster** (in the menu, or `t`) opens a login shell on the cluster of the tab in a subtab. The **+** tab button adds another local or remote connection, in a form like the endpoints': its **Name** first (the
+tab's name; empty: the destination), then best an **SSH destination**, a Host of your
 `~/.ssh/config` (suggested as you type), or `user@host`; as a fallback the **Full SSH settings** (host, user,
-port, jump hosts, identity files, more `ssh` options, the tab's name), kept with the tab. **Check…** tries the
+port, jump hosts, identity files, more `ssh` options), kept with the tab. Its buttons are **Test**, **Cancel** and
+**Add**, as the endpoints' forms. **Test** tries the
 connection in a window with a terminal, as the tab's login goes: what needs no login (what ssh makes of it, the
 keys, the name, the port, the server), the command before the login if there is one, and the login itself, where
 you answer what it asks (a host key, a passphrase, a password, a one-time code). Then it says whether it works,
 or precisely what does not (the host key, the keys and what the server accepts, …), with the end of `ssh -v`'s
-log; the connection window has the same **Check…**. A tab can be added
-checked or not.
+log; the connection window has the same check (**Check…**). A tab can be added
+tested or not.
 
 **Run before login** (in the same dialog, for a `~/.ssh/config` destination too) is a command run on this machine
 before every login of the tab, e.g. one that signs a key first (`cscs-keygen`, `step ssh login`, `tsh login`). It

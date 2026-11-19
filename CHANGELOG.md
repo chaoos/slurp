@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- A new SSH connection looks like the forms of the endpoints: its name first
+  (the tab's name; empty: the destination, for a `~/.ssh/config` Host too),
+  and the buttons Test, Cancel, Add. Editing a tab can rename it. A new
+  endpoint's button says Add too (Save when editing).
 - Transfers: a direct route (push, pull) asks in step 4 how it logs in to the
   other cluster: by itself, with a temporary key, or with your login now. Your
   login: for a cluster that asks a password or a one-time code, you answer in a

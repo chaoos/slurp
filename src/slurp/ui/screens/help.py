@@ -629,12 +629,14 @@ Which directory of the tab's cluster to open, in a new subtab (each time another
 Enter), your scratch, project, … (`$SCRATCH`, `$PROJECT`, `$STORE`, `$WORK`, those set on the cluster), or a path
 typed in the field below (`~/…` and relative paths are in your home). `Esc` cancels.
 """),
-  "AddClusterScreen": ("Add a cluster", """
-A new tab. The best way: an **SSH destination**, a Host of your `~/.ssh/config` with the cluster's user, jump hosts
-and keys (suggested as you type; ssh, scp and your other tools use it too), or `user@host`; blank: this machine.
+  "AddClusterScreen": ("A new SSH connection", """
+A new tab, as the forms of the endpoints. **Name**: the tab's name, shown everywhere (empty: the destination; no two
+tabs with one name). The best way to reach it: an **SSH destination**, a Host of your `~/.ssh/config` with the
+cluster's user, jump hosts and keys (suggested as you type; ssh, scp and your other tools use it too), or
+`user@host`; blank: this machine.
 
 The fallback, **Full SSH settings**: host, user, port, jump hosts (ProxyJump), identity files (only these are tried),
-the tab's name, and more ssh options, one `Key=Value` per line. They are kept with the tab.
+and more ssh options, one `Key=Value` per line. They are kept with the tab.
 
 **Run before login** (both ways): a command on this machine before every login of the tab, e.g. one that signs your
 key for the day (`cscs-keygen`, `step ssh login`, `tsh login`). It runs in the login pane: answer it there (a
@@ -643,15 +645,15 @@ password, a one-time code; `Ctrl-C` ends only it); when it ends, the SSH login f
 without the command that asks nothing; only if it fails, the command and the login again (a certificate still valid
 is not made anew).
 
-**Check…** tries the connection in a window with a terminal, as the tab's login goes: what needs no login (what ssh
+**Test** tries the connection in a window with a terminal, as the tab's login goes: what needs no login (what ssh
 makes of the settings, the keys, the host name, the port and the server), the command before the login if there is
 one, and the login itself, where you answer what it asks (a host key, a passphrase, a password, a code). Then whether
-it works, or what is wrong, precisely, with the end of ssh's verbose log. **Add** adds the tab, checked or not; the
-login runs in the pane on the right.
+it works, or what is wrong, precisely, with the end of ssh's verbose log. **Cancel** closes it; **Add** adds the tab,
+tested or not; the login runs in the pane on the right.
 
 From a tab's overview (**SSH settings…**) the same dialog shows the tab's settings, filled in, with the blocks of your
 `~/.ssh/config` that apply (with their file and line) and what ssh makes of it all (`ssh -G`); **Save** changes the tab
-(the next login uses it: **Reconnect**).
+(a new name renames it at once; the rest: the next login uses it, **Reconnect**).
 """),
   "InteractiveJobScreen": ("Interactive job", """
 An `sbatch` command for a job that only holds nodes (`sleep infinity`), for shells on them from its job window. The
