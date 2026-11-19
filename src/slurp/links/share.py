@@ -737,10 +737,16 @@ class ShareManager:
     self.heartbeat()
     for link in self.links:
       if link.server is not None and not link.open():
-        link.server.close() # no new logins; the sessions go on
+        link.server.close() # no new logins; the sessions of a shell or a drive go on
         link.server = None
         audit(f"link {link.id} takes no more logins: {link.why_closed()}")
         self.events("closed", link, None, link.why_closed())
+      if link.kind == "web" and link.expired() and link.live_sessions:
+        # (a web link's session is the browser's way into all of slurp: its lifetime ends it, as Revoke does; the
+        # tunnel closes with it, and the web view once no web link is left)
+        audit(f"link {link.id} expired: its {len(link.live_sessions)} web session(s) ended")
+        for s in link.live_sessions:
+          s.close()
       if link.finished and link.tunnel is not None and link.tunnel.returncode is None:
         try:
           link.tunnel.terminate()
