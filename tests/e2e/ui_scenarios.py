@@ -1401,6 +1401,106 @@ async def t_categories(app, pilot):
   await pilot.press("r"); await until(pilot, lambda: cluster.loader is None, 30)
   cluster.marked.clear()
 
+async def t_category_rules(app, pilot):
+  """Rules of the categories: u in the categories window; a rule by job name (its matches as it is typed), new jobs
+  only: the jobs there are left, new ones (arrays) put in when the job list loads, said; a job taken out by hand is
+  not put back; Apply now; a changed rule looks at the jobs again; delete; kept in the file on the cluster"""
+  from slurp.cluster import categories as cats
+  from slurp.ui.screens.category_rules import ApplyRuleScreen, RuleFormScreen, RulesScreen
+  from slurp.ui.screens.categories import change_categories
+  arrays(False)
+  await reload(app, pilot)
+  cluster = app.cluster
+  store = lambda: cluster.categories
+  def file_rules():
+    data = json.load(open(CATEGORIES_FILE)) if os.path.exists(CATEGORIES_FILE) else {}
+    return data.get("clusters", {}).get("lab", {}).get("rules", [])
+  async def rules_window():
+    app.action_categories()
+    await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10); await pilot.pause(0.3)
+    await pilot.press("u")
+    return await until(pilot, lambda: isinstance(app.screen, RulesScreen) and app.screen.query("#ru-table"), 5)
+  async def change(op):
+    done = []
+    change_categories(app, cluster, op, lambda st, r: done.append(r))
+    await until(pilot, lambda: done, 10)
+  runs = [str(9010 + i) for i in range(5)] # (run10 … run14)
+  await change(["unassign", runs]) # (from no category: whatever a scenario before did)
+  ok = await rules_window()
+  check("u in the categories window: the rules window, none yet", ok and "No rules yet" in str(app.screen.query_one("#ru-detail").render()))
+  await pilot.press("n")
+  ok = await until(pilot, lambda: isinstance(app.screen, RuleFormScreen) and app.screen.query("#rf-preview"), 5)
+  form = app.screen
+  form.query_one("#rf-pattern").value = "run1[0-4]"
+  form.query_one("#rf-category").value = "auto/runs"
+  await pilot.pause(0.3)
+  preview = str(form.query_one("#rf-preview").render())
+  check("the form: what it matches in the job list, as it is typed; new jobs only: not these", ok and "matches 5 jobs of the job list" in preview
+        and "5 in no category" in preview and "run10" in preview and "none of these (they are not new)" in preview, preview)
+  form.query_one("#rf-pattern").value = "run1[0-4"; await pilot.pause(0.2)
+  check("…a pattern that is no regular expression: said", "not a regular expression" in str(form.query_one("#rf-preview").render()))
+  form.query_one("#rf-pattern").value = "run1[0-4]"; await pilot.pause(0.2)
+  await pilot.press("ctrl+s")
+  newest = max(int(cats.array_of(j)) for j in cluster.jobs if cats.array_of(j).isdigit())
+  ok = await until(pilot, lambda: len(store().rules) == 1, 10)
+  rule = store().rules[0] if ok else {}
+  check("saved: kept on the cluster, new jobs: those above the newest of the job list", ok and file_rules() == [rule]
+        and rule["scope"] == "new" and rule["after"] == newest and rule["category"] == "auto/runs", file_rules())
+  await pilot.pause(0.3)
+  table = app.screen.query_one("#ru-table")
+  row = [str(c) for c in table.get_row(rule["id"])] if ok else []
+  check("in the list: on, its pattern, category, what it takes, how many it matches now", row[1:4] == ["run1[0-4]", "auto/runs", "new jobs"]
+        and row[4].startswith("5"), row)
+  await pilot.press("escape"); await pilot.pause(0.2)
+  await reload(app, pilot)
+  check("the job list loads: the jobs there are left (not new)", not any(store().category_of(j) for j in runs))
+  # a second rule: arrays, new; then new jobs come
+  ok = await rules_window()
+  await pilot.press("n"); await until(pilot, lambda: isinstance(app.screen, RuleFormScreen), 5); await pilot.pause(0.2)
+  app.screen.query_one("#rf-pattern").value = "[0-9]+-arr"
+  app.screen.query_one("#rf-category").value = "auto/arrays"
+  await pilot.press("ctrl+s"); await until(pilot, lambda: len(store().rules) == 2, 10)
+  await pilot.press("escape"); await pilot.pause(0.2)
+  arrays(True)
+  app.clear_notifications()
+  await reload(app, pilot)
+  notes = [str(n.message) for n in app._notifications]
+  check("new jobs (arrays) put in when the job list loads, as a whole; said", store().category_of("9500") == "auto/arrays"
+        and store().category_of("9600_7") == "auto/arrays" and any("by the rules of the categories" in n and "auto/arrays" in n for n in notes), notes)
+  await change(["unassign", ["9500"]])
+  await reload(app, pilot)
+  check("each job once: one taken out by hand is not put back", store().category_of("9500") == "" and store().category_of("9600") == "auto/arrays")
+  # Apply now: the first rule on the jobs there
+  ok = await rules_window()
+  table = app.screen.query_one("#ru-table")
+  table.move_cursor(row=table.get_row_index(rule["id"])); await pilot.pause(0.2)
+  detail = str(app.screen.query_one("#ru-detail").render())
+  check("the rule selected: what it matches, in it, in no category", "matches 5 jobs" in detail and "5 in no category" in detail, detail)
+  await pilot.press("a"); ok = await until(pilot, lambda: isinstance(app.screen, ApplyRuleScreen), 5)
+  await pilot.click("#ar-none")
+  ok = ok and await until(pilot, lambda: all(store().category_of(j) == "auto/runs" for j in runs), 10)
+  check("Apply now: the 5 in no category put in", ok, [store().category_of(j) for j in runs])
+  # a changed rule: all jobs, another pattern: looks at the jobs again
+  await change(["assign", ["9020"], "elsewhere"])
+  await pilot.press("e"); await until(pilot, lambda: isinstance(app.screen, RuleFormScreen), 5); await pilot.pause(0.2)
+  app.screen.query_one("#rf-pattern").value = "run(1[0-4]|20)"
+  app.screen.query_one("#rf-scope-all").value = True
+  await pilot.press("ctrl+s"); await until(pilot, lambda: store().rule(rule["id"])["scope"] == "all", 10)
+  check("changed: it looks at the jobs again", store().rule(rule["id"])["after"] == 0)
+  await pilot.press("escape"); await pilot.pause(0.2)
+  await reload(app, pilot)
+  check("all: also moved out of another category", store().category_of("9020") == "auto/runs")
+  ok = await rules_window()
+  await pilot.press("delete"); await until(pilot, lambda: isinstance(app.screen, dialogs.ConfirmScreen), 5)
+  await pilot.click("#confirm-yes")
+  ok = await until(pilot, lambda: len(store().rules) == 1, 10)
+  check("delete: gone (its jobs stay)", ok and len(file_rules()) == 1 and store().category_of("9010") == "auto/runs")
+  await pilot.press("escape"); await pilot.pause(0.2)
+  await change(["delete", "auto"])
+  check("…a category deleted: its rules go too", store().rules == [] and file_rules() == [])
+  arrays(False)
+  await reload(app, pilot)
+
 async def t_status_page(app, pilot):
   """A failing login to a cluster whose site has a status page (rule pack: status): the footer says to check it, a
   click on it opens it (and a click beside it the connection window); the connection window says so with a link"""

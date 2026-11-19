@@ -272,6 +272,7 @@ class CategoriesScreen(SplitScreen):
     Binding("l", "in_list", "In the job list"),
     Binding("r", "reload", "Reload"),
     Binding("o", "notes", "Notes"),
+    Binding("u", "rules", "Rules"),
   ]
   DEFAULT_CSS = """
   #cat-body { height: 1fr; }
@@ -329,6 +330,7 @@ class CategoriesScreen(SplitScreen):
           yield Button("Categorize…", id="cat-categorize", tooltip="the marked jobs (m), else the one selected, in a category, another or a new one (c)", compact=True)
           yield Button("Take job out", id="cat-take-out", variant="warning", tooltip="the marked jobs (m), else the one selected, leave their category (x)", compact=True)
           yield Button("Notes…", id="cat-notes-edit", tooltip="notes of the category, in Markdown (o)", compact=True)
+          yield Button("Rules…", id="cat-rules", tooltip="rules that put jobs in categories by their name (u)", compact=True)
         yield ClickTable(id="cat-jobs", cursor_type="row", zebra_stripes=True)
 
   def on_mount(self):
@@ -494,6 +496,15 @@ class CategoriesScreen(SplitScreen):
       out.append("No jobs in it yet: in the job list, mark jobs (m) and categorize them (c).\n" if store.paths else
                  "No categories yet. In the job list: mark jobs (m), then c puts them in a category (a new one is made); "
                  "or New here.\n", style="dim")
+    rules = [] if none or not self.path else store.rules_of(self.path)
+    if rules:
+      from .category_rules import job_pairs
+      pairs = job_pairs(self.cluster)
+      out.append("Rules ", style="bold")
+      for i, rule in enumerate(rules):
+        n = store.rule_count(rule, pairs)["match"]
+        out.append(("; " if i else "") + rule["pattern"] + (" (off)" if not rule["on"] else "") + f": matches {n} of the job list")
+      out.append("  (u)\n", style="dim")
     if unknown:
       out.append(f"{len(unknown)} no longer known to Slurm (accounting kept only so long): {', '.join(unknown[:8])}"
                  + (" …" if len(unknown) > 8 else "") + "\n", style="dim")
@@ -688,11 +699,13 @@ class CategoriesScreen(SplitScreen):
     n = store.count(path)
     up = cat.parent(path)
     inner = len([p for p in store.paths if cat.within(p, path) and p != path])
+    rules = len([r for r in store.rules if cat.within(r["category"], path)])
     def done(yes):
       if yes:
         change_categories(self.app, self.cluster, ["delete", path], lambda st, p: self.changed(p), "deleting a category")
     self.app.push_screen(ConfirmScreen(f"Delete the category {path}?",
                                        (f"The {inner} categories in it go too. " if inner else "")
+                                       + (f"Its {rules} rule{'s' if rules != 1 else ''} go too. " if rules else "")
                                        + (f"Its {n} job{'s' if n != 1 else ''} go to {up}." if n and up else
                                           f"Its {n} job{'s' if n != 1 else ''} are in no category then (the jobs stay as they are)." if n else
                                           "It has no jobs."), "Delete"), done)
@@ -707,6 +720,14 @@ class CategoriesScreen(SplitScreen):
       self.marked.clear()
       self.changed()
     change_categories(self.app, self.cluster, ["unassign", jids], done, "taking jobs out")
+
+  @on(Button.Pressed, "#cat-rules")
+  def action_rules(self, event=None):
+    """The rules of the categories (a new one: into the category selected)"""
+    from .category_rules import RulesScreen
+    def closed(_):
+      self.changed()
+    self.app.push_screen(RulesScreen("" if self.path == NONE else self.path), closed)
 
   @on(Button.Pressed, "#cat-list")
   def action_in_list(self, event=None):
