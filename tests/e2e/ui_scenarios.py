@@ -1501,6 +1501,60 @@ async def t_category_rules(app, pilot):
   arrays(False)
   await reload(app, pilot)
 
+async def t_hidden_categories(app, pilot):
+  """Hidden categories: Hide jobs in this category in the job list (h, in the categories window): the job list
+  leaves them out (those of the categories in it too) and its status line counts them; cat: shows them; a category
+  in a hidden one says so; Show … again; kept on the cluster"""
+  from slurp.ui.screens.categories import change_categories
+  await reload(app, pilot)
+  cluster = app.cluster
+  store = lambda: cluster.categories
+  async def change(op):
+    done = []
+    change_categories(app, cluster, op, lambda st, r: done.append(r))
+    await until(pilot, lambda: done, 10)
+  await change(["assign", ["9010", "9011"], "noise"])
+  await change(["assign", ["9012"], "noise/sub"])
+  app.action_categories()
+  await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10); await pilot.pause(0.3)
+  cs = app.screen
+  tree = cs.query_one("#cat-tree")
+  tree.move_cursor(find_node(tree, "noise")); await pilot.pause(0.4)
+  button = cs.query_one("#cat-hide")
+  check("the category's details: Hide jobs in this category in the job list", cs.path == "noise"
+        and str(button.label) == "Hide jobs in this category in the job list" and not button.disabled, (cs.path, str(button.label)))
+  await pilot.press("h")
+  ok = await until(pilot, lambda: store().hidden == {"noise"}, 10); await pilot.pause(0.3)
+  data = json.load(open(CATEGORIES_FILE))
+  check("h: hidden, kept on the cluster; now Show jobs in this category in the job list", ok and data["clusters"]["lab"].get("hidden") == ["noise"]
+        and str(button.label) == "Show jobs in this category in the job list"
+        and "Hidden in the job list" in str(cs.query_one("#cat-info").render()), str(button.label))
+  check("…the tree says so", "hidden" in str(find_node(tree, "noise").label))
+  tree.move_cursor(find_node(tree, "noise/sub")); await pilot.pause(0.4)
+  check("a category in it: hidden with it (its button off, it says so)", button.disabled and str(button.label) == "Hidden with noise"
+        and "with noise" in str(cs.query_one("#cat-info").render()), str(button.label))
+  app.show_view(None); await pilot.pause(0.5)
+  table = app.main.query_one("#jobs")
+  rows = [str(k.value) for k in table.rows]
+  check("the job list leaves them out (the one in noise/sub too)", not {"9010", "9011", "9012"} & set(rows) and "9013" in rows, rows[:12])
+  check("…its status line: 3 hidden jobs", "3 hidden jobs (in noise" in cluster.summary, cluster.summary[-140:])
+  await pilot.press("slash"); await pilot.pause(0.2)
+  app.main.query_one("#jfilter").value = "cat:noise"; await pilot.pause(0.5)
+  check("cat:noise shows them", sorted(str(k.value) for k in table.rows) == ["9010", "9011", "9012"] and "hidden" not in cluster.summary)
+  app.main.query_one("#jfilter").value = ""; await pilot.pause(0.3)
+  await pilot.press("escape"); await pilot.pause(0.2)
+  app.action_categories(); await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10); await pilot.pause(0.3)
+  cs = app.screen
+  tree = cs.query_one("#cat-tree")
+  tree.move_cursor(find_node(tree, "noise")); await pilot.pause(0.4)
+  await pilot.click("#cat-hide")
+  ok = await until(pilot, lambda: store().hidden == set(), 10)
+  app.show_view(None); await pilot.pause(0.5)
+  rows = [str(k.value) for k in app.main.query_one("#jobs").rows]
+  check("Show jobs in this category in the job list: back, no hidden jobs said", ok and {"9010", "9011", "9012"} <= set(rows)
+        and "hidden" not in cluster.summary, cluster.summary[-120:])
+  await change(["delete", "noise"])
+
 async def t_status_page(app, pilot):
   """A failing login to a cluster whose site has a status page (rule pack: status): the footer says to check it, a
   click on it opens it (and a click beside it the connection window); the connection window says so with a link"""
