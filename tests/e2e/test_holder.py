@@ -114,6 +114,9 @@ def test_holder(check, lab):
           page = await resp.text()
           check("with the token: textual-serve's page, pointing to this holder's websocket", resp.status == 200 and "textual-terminal" in page and "/ws" in page)
           check("…with slurp's icon font for the codepoints of the icons", "/slurp-icons.ttf" in page and "U+F0000-F1FFF" in page)
+          wait, start = page.find("fromCodePoint(0xF0322)"), page.find("js/textual.js")
+          check("…and its start waits for that font (before textual.js sets window.onload: the icons are no boxes)",
+                0 < wait < start and "fonts.load" in page, (wait, start))
         async with s.get(base + "/static/js/textual.js") as resp:
           check("its script is served", resp.status == 200)
         async with s.get(base + "/slurp-icons.ttf") as resp:
