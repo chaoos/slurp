@@ -6,6 +6,7 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Endpoints: a tab's kind is *ssh (cluster tab)*.
 - A new SSH connection looks like the forms of the endpoints: its name first
   (the tab's name; empty: the destination, for a `~/.ssh/config` Host too),
   and the buttons Test, Cancel, Add. Editing a tab can rename it. A new

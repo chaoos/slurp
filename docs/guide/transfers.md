@@ -82,7 +82,7 @@ given). Transfers of an older version that had a schedule say once that it is go
 
 An endpoint is where data comes from or goes to: **this machine**, and every **tab** (a cluster tab is an endpoint by
 itself while it is open; closed, a transfer's endpoint shows *tab not open*, with a button that opens it again).
-**Menu → Endpoints…** shows them in a subtab of the Transfers tab: each with its kind, where it is, its state (●
+**Menu → Endpoints…** shows them in a subtab of the Transfers tab: each with its kind (a tab: *ssh (cluster tab)*), where it is, its state (●
 connected with its latency, ○ needs login, connecting, needs you, tab not open) and how many transfers use it, with
 **Connect**, **Disconnect**, **Test**, **Edit…** and **Delete** (refused while transfers use it, which it names).
 **Enter** (or a click) opens its window: a tab's is its connection window (as in the tab); an S3, SMB, WebDAV or

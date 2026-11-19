@@ -20,7 +20,7 @@ from ..state import log
 from . import model as M
 
 LOCAL = "local"
-KINDS = {"local": "this machine", "tab": "cluster tab", "s3": "S3", "globus": "Globus", "smb": "SMB", "webdav": "WebDAV"}
+KINDS = {"local": "this machine", "tab": "ssh (cluster tab)", "s3": "S3", "globus": "Globus", "smb": "SMB", "webdav": "WebDAV"}
 SECRETS = {"s3": ["access_key", "secret_key", "session_token"], "globus": ["refresh_token"], "smb": ["password"],  # (webdav: password or token)
            "webdav": ["password"]}
 OPTIONAL_SECRETS = {"session_token"} # (an S3 session token: only for temporary keys)
