@@ -58,8 +58,9 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: OpenSSH and sshfs
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends openssh-server openssh-client sshfs
+          # (retries: a mirror that did not answer once failed the whole job before any test)
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install -y --no-install-recommends openssh-server openssh-client sshfs
           sudo mkdir -p /run/sshd
       - name: rclone (the transfers to S3 and WebDAV; here and on the lab, the same machine)
         run: |
