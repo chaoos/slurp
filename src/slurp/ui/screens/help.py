@@ -460,6 +460,14 @@ in no category, in another one.
 - Each job is looked at once by a rule: one you take out of its category by hand is not put back. Of several rules,
   the first that matches a job has it. A rename of a category takes its rules along, a delete removes them.
 """),
+  "ApplyRuleScreen": ("Apply a rule now", """
+The rule on all the jobs of the job list now (queued, and those finished since …), whatever it has looked at before.
+It says how many jobs it matches: in its category already, in no category, in another one.
+
+- **Put the … in no category in …:** only those in no category.
+- **Also move the … in another:** those in another category too (shown only if there are any).
+- `Esc` (**Cancel**): nothing changes.
+"""),
   "RuleFormScreen": ("A rule of the categories", """
 - **Job names that match:** a regular expression for the **whole** name: `ci-[0-9]+` takes `ci-1234` (not
   `ci-1234-b`), `ci-.*` all that start with `ci-`, `(train|eval)_.*` either.
