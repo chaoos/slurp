@@ -440,6 +440,9 @@ has, the ones in the categories in it counted too), and for the one selected its
   (`cat:` in the filter). **Reload** (`r`) reads the categories and asks Slurm again.
 - **Notes…** (`o`): notes of the category, in Markdown (what it is for, how the runs differ, links); shown under its
   numbers. A rename takes them along, a delete removes them.
+- **Hide jobs in this category in the job list** (`h`): the job list leaves out its jobs (and those of the
+  categories in it) and counts them in its status line (*3 hidden jobs*); the tree marks it *hidden*. **Show jobs in
+  this category in the job list** shows them again. `cat:` in the job list's filter shows them all the same.
 - **Rules…** (`u`): rules that put jobs in a category by their name (`ci-[0-9]+` into `CI`), when the job list
   loads; the category selected lists its own, with how many jobs of the job list each matches.
 - They are kept on the cluster (`~/.config/slurp/categories.json` in your home there), per Slurm cluster: slurp on

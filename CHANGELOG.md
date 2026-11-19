@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Categories: hide the jobs of a category in the job list (Hide jobs in this
+  category in the job list, `h` in the categories window; the categories in it
+  too). The status line says how many jobs are hidden; Show jobs in this
+  category in the job list brings them back, `cat:` in the filter shows them.
 - Categories: rules put jobs in a category by their name, when the job list
   loads (`ci-[0-9]+` into `CI`). Each takes new jobs only, the jobs in no
   category, or all jobs (also moved out of another category); it looks at

@@ -83,6 +83,17 @@ annotates the category selected in Markdown (what it is for, how its runs
 differ, links); the window shows the notes rendered under its numbers, a
 rename takes them along.
 
+### Hidden categories
+
+**Hide jobs in this category in the job list** (`h`, under the numbers of the
+category selected) leaves the jobs of a category you are not interested in
+out of the job list, with those of the categories in it. The status line says
+how many it leaves out (*3 hidden jobs (in noise …)*), the tree marks the
+category *hidden*, and its details say so; a category in a hidden one says
+it is hidden with it. **Show jobs in this category in the job list** brings
+them back. `cat:noise` in the job list's filter shows them all the same. The
+hidden categories are kept with the categories on the cluster.
+
 ### Rules: jobs into a category by their name
 
 **Rules…** (`u` in the categories window) puts jobs in a category by
