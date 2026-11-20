@@ -1295,6 +1295,10 @@ def rules_markdown(facts=None, where="", query=""):
          "Module rules also apply in part to a uenv's modules view (--view=modules). " + stacks_text
          + (" The rules that do not apply there are greyed out." if facts is not None else ""),
          ""]
+  if facts is not None:
+    from ..sites import pack_text
+    site = pack_text(facts.site)
+    out += [f"**Site pack:** {site}." if site else f"**Site pack:** none for {where or 'this cluster'} (only what slurp finds itself).", ""]
   if query.strip():
     count = sum(rule_matches(r, query) for r in RULES.values())
     out += [f"**Search:** {count} of {len(RULES)} rules match “{query.strip()}”" + ("" if count else " (Esc shows all)") + ".", ""]

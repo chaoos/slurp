@@ -5,7 +5,15 @@ A pack is a TOML file. The built-in ones are in packs/ next to this module, the 
 ~/.config/slurp/rules/ (they take precedence). A pack applies when one of its "match" patterns (fnmatch) matches the
 tab's name, its SSH destination, or the login node's host name.
 
+Versions: a pack's "schema" is the version of its format (the keys and what they mean): this slurp reads SCHEMA and
+older, and leaves out a pack of a newer schema (it might mean something else by a key); without one: 1. Its "version"
+is the version of its content, a date (YYYY.MM.DD), raised with every change of a built-in pack: the rule catalogue
+says which pack and version applies, so that a finding can be traced to the pack it came from. A new key that older
+slurps can ignore needs no new schema; a key that changes its meaning, or one that must not be ignored, does.
+
 Keys (all optional):
+  schema = 1                       # the version of the format (see above)
+  version = "2026.11.20"           # the version of the content (see above)
   match = ["daint*", "*.cscs.ch"]
   name = "CSCS Alps"
   scratch_purge_days = 30          # Q04, Q05
@@ -34,6 +42,7 @@ import fnmatch
 import functools
 import os
 import pathlib
+import re
 from importlib import resources
 
 try:
@@ -42,6 +51,8 @@ except ImportError: # Python < 3.11
   tomllib = None
 
 BUILTIN = resources.files(__package__) / "packs" # (the packs that come with slurp)
+SCHEMA = 1 # the newest pack format this slurp reads
+VERSION = re.compile(r"\d{4}\.\d{2}\.\d{2}") # a pack's version: the date of its content
 
 def user_dir():
   base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
@@ -62,11 +73,25 @@ def load_packs():
           pack = tomllib.load(f)
       except (OSError, tomllib.TOMLDecodeError) as e:
         from ..state import log
-        log.warning(f"rule pack {path}: {e}")
+        log.warning(f"site pack {path}: {e}")
+        continue
+      schema = pack.get("schema", 1)
+      if not isinstance(schema, int) or isinstance(schema, bool) or schema < 1 or schema > SCHEMA:
+        from ..state import log
+        log.warning(f"site pack {path}: schema {schema!r}, this slurp reads 1 to {SCHEMA}: left out (a newer slurp reads it)")
         continue
       pack["_path"] = str(path)
+      pack["_builtin"] = directory is BUILTIN
       packs.append(pack)
   return packs
+
+def pack_text(pack):
+  """What a pack is, for the rule catalogue: its name, version, and where it is from ("" without a pack)"""
+  if not pack:
+    return ""
+  version = str(pack.get("version") or "")
+  where = "built in" if pack.get("_builtin") else f"yours: {pack.get('_path', '')}"
+  return f"{pack.get('name') or os.path.basename(pack.get('_path', '')) or 'a site pack'}" + (f", version {version}" if version else "") + f" ({where})"
 
 @functools.lru_cache(maxsize=64)
 def status_page(tab, destination):

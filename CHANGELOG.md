@@ -6,6 +6,12 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Site packs (what slurp knows about CSCS Alps, JSC's clusters, …) are
+  versioned on their own: each has a `schema` (its format; a pack of a newer
+  schema than slurp reads is left out) and a `version` (the date of its
+  content). The rule catalogue says which pack applies to the tab, its
+  version, and whether it is built in or yours. They moved to
+  `src/slurp/sites/packs/` (your own stay in `~/.config/slurp/rules/`).
 - New rule Q08: core dumps in `$HOME`. A crash writes its core file into the
   program's working directory: where sbatch was run (or `--chdir`), changed by
   the script's `cd` or `srun --chdir`; where the program or the script is does

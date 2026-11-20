@@ -1,4 +1,6 @@
 # Jülich Supercomputing Centre (JSC): JUWELS (Cluster and Booster). Logins: juwels.fz-juelich.de and its numbered login nodes.
+schema = 1
+version = "2026.11.20"
 name = "JSC JUWELS"
 match = ["juwels*"]
 docs = "https://apps.fz-juelich.de/jsc/hps/juwels/index.html"

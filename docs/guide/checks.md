@@ -117,6 +117,11 @@ the tab, its SSH destination or the login node's host name. It can also name
 the site's documentation (`docs`, for the guides) and its status page
 (`status`, shown when the login fails). See `src/slurp/sites/__init__.py` for the keys.
 
+Each pack has a `schema` (the version of its format: slurp leaves out a pack
+of a newer schema than it reads; without one: 1) and a `version` (the date
+of its content, `YYYY.MM.DD`). The rule catalogue of a tab says which pack
+applies there, its version, and whether it is built in or yours.
+
 **Without the UI**, `slurp check job.sh ...` prints the findings of batch
 scripts (on the machine it runs on, e.g. a login node): exit code 1 if a script
 has errors; `--all` adds the hints, `--no-probe` checks only the text,

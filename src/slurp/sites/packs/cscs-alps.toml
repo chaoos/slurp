@@ -1,4 +1,6 @@
 # CSCS Alps (daint, clariden, santis, eiger): GH200 nodes (4 Grace-Hopper modules of 72 cores each), uenv.
+schema = 1
+version = "2026.11.20"
 name = "CSCS Alps"
 match = ["daint*", "clariden*", "santis*", "eiger*", "*.cscs.ch", "*.alps.cscs.ch"]
 docs = "https://docs.cscs.ch"

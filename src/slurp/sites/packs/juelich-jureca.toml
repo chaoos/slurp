@@ -1,4 +1,6 @@
 # Jülich Supercomputing Centre (JSC): JURECA (JURECA-DC and JURECA-HWAI). Logins: jureca.fz-juelich.de and its numbered login nodes.
+schema = 1
+version = "2026.11.20"
 name = "JSC JURECA"
 match = ["jureca*"]
 docs = "https://apps.fz-juelich.de/jsc/hps/jureca/index.html"
