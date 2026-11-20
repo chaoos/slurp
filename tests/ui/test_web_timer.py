@@ -16,6 +16,13 @@ async def until(pilot, cond, t=5):
   return False
 
 
+def extend_ready(app):
+  """The window that asks how much longer, with its choice mounted: a Select has its value only then (read before,
+  on a slow runner: NULL; set before: replaced by its default when it mounts)"""
+  from textual.widgets import Select
+  return isinstance(app.screen, ExtendScreen) and bool(app.screen.query("#ex-for")) and app.screen.query_one("#ex-for").value is not Select.NULL
+
+
 def web_link(expiry_left):
   link = sh.Link("web", "this slurp (test)", "Local", lambda: [], relay="ssh-j.com", uses=None, web_port=1, web_token="t" * 24)
   link.created = time.time() - 600
@@ -32,7 +39,8 @@ def test_the_countdown_and_the_warning(check):
       check("no web link: no timer", not timer.display)
       link = web_link(20 * 60 + 5)
       app.link_manager.links.append(link)
-      ok = await until(pilot, lambda: timer.display and str(timer.label)[:6] in ("⏱ 20:0", "⏱ 19:5")) # (20 min: give or take a slow start)
+      # (20 min: give or take a slow start; and laid out: just shown, its region is empty, a click there hits the menu)
+      ok = await until(pilot, lambda: timer.display and str(timer.label)[:6] in ("⏱ 20:0", "⏱ 19:5") and timer.region.width > 0)
       check("a web link with a time limit: the countdown, left of ?", ok and not timer.has_class("-ending")
             and timer.parent.children.index(timer) == timer.parent.children.index(app.screen.query_one("#view-help")) - 1, str(timer.label))
       await pilot.click("#web-timer")
@@ -45,7 +53,7 @@ def test_the_countdown_and_the_warning(check):
       before = link.expires
       check("the button: Extend lifetime…", str(app.screen.query_one("#we-extend").label) == "Extend lifetime…")
       app.screen.query_one("#we-extend").press() # (not a click: a notification can take it)
-      ok = await until(pilot, lambda: isinstance(app.screen, ExtendScreen))
+      ok = await until(pilot, lambda: extend_ready(app))
       ex = app.screen
       options = [label for label, _ in ex.query_one("#ex-for")._options]
       check("it asks how much longer: 1 hour, 2 hours, 8 hours, … a week; 1 hour first", ok and options[:3] == ["1 hour", "2 hours", "4 hours"]
@@ -61,11 +69,11 @@ def test_the_countdown_and_the_warning(check):
       ls = app.screen
       check("the link's window: Extend lifetime…", str(ls.query_one("#lv-extend").label) == "Extend lifetime…" and ls.query_one("#lv-extend").display)
       before = link.expires
-      ls.query_one("#lv-extend").press(); ok = await until(pilot, lambda: isinstance(app.screen, ExtendScreen))
+      ls.query_one("#lv-extend").press(); ok = await until(pilot, lambda: extend_ready(app))
       app.screen.query_one("#ex-for").value = 86400; app.screen.query_one("#ex-ok").press(); await pilot.pause(0.3)
       check("…a day more", ok and abs(link.expires - before - 86400) < 2 and app.screen is ls, (link.expires - before) / 3600)
       before = link.expires
-      ls.query_one("#lv-extend").press(); await until(pilot, lambda: isinstance(app.screen, ExtendScreen))
+      ls.query_one("#lv-extend").press(); await until(pilot, lambda: extend_ready(app))
       app.screen.query_one("#ex-cancel").press(); await pilot.pause(0.3)
       check("Cancel: as it was", link.expires == before and app.screen is ls)
       await pilot.press("escape"); await pilot.pause(0.2)

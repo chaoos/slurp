@@ -6,6 +6,189 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Site packs (what slurp knows about CSCS Alps, JSC's clusters, …) are
+  versioned on their own: each has a `schema` (its format; a pack of a newer
+  schema than slurp reads is left out) and a `version` (the date of its
+  content). The rule catalogue and the tab's overview say which pack applies
+  to the tab, its version, and whether it is built in or yours; About slurp
+  and `slurp --version` list all packs slurp reads, with their versions. They moved to
+  `src/slurp/sites/packs/` (your own stay in `~/.config/slurp/rules/`).
+- New rule Q08: core dumps in `$HOME`. A crash writes its core file into the
+  program's working directory: where sbatch was run (or `--chdir`), changed by
+  the script's `cd` or `srun --chdir`; where the program or the script is does
+  not matter. Said when the programs run in home (or project storage) while
+  core files are allowed (the script's `ulimit -c`, else the login shell's,
+  which Slurm passes on to the job), and when core files are there already:
+  how many, how big, whether after the job started, and which of these put
+  them there (an error from 1 GB in home).
+- Icons in the browser: the page waits for the icon font before it draws
+  (at most 3 s). The terminal of the page keeps each glyph as first drawn:
+  icons drawn before the font came stayed boxes until a hover drew them again.
+- Icons in the terminal: an icon font installed by an older slurp is updated
+  at the start (said: restart the terminal, all its windows). `--install-font`
+  says that a new window is not enough for GNOME Terminal or Konsole.
+- Web links: when a web link expires, the browsers that came in through it
+  lose slurp at once, and a reload with its token gets nothing. Before, only
+  new logins stopped: a browser kept working past the lifetime (its session,
+  and with it the tunnel and the web view, stayed open). Through Cloudflare
+  the tunnel no longer waits 30 s for open browsers when it ends.
+- Endpoints: a tab's kind is *ssh (cluster tab)*.
+- A new SSH connection looks like the forms of the endpoints: its name first
+  (the tab's name; empty: the destination, for a `~/.ssh/config` Host too),
+  and the buttons Test, Cancel, Add. Editing a tab can rename it. A new
+  endpoint's button says Add too (Save when editing).
+- Transfers: a direct route (push, pull) asks in step 4 how it logs in to the
+  other cluster: by itself, with a temporary key, or with your login now. Your
+  login: for a cluster that asks a password or a one-time code, you answer in a
+  terminal on the cluster that runs rsync (Log in now…, or Establish connection
+  in the transfer's subtab; Run now does it first); the connection stays open
+  there until 2 hours unused or Disconnect, and rsync goes through it. Not as a
+  transfer job. The flow picture shows the login. slurp never copies your own
+  keys or passwords to a cluster.
+- Transfers: the temporary key is kept to the transfer's folder where the other
+  cluster has rrsync (a pull only reads the sources' folder, a push only writes
+  to the destination); without rrsync the wizard says it could run rsync on all
+  your files there.
+- Transfers: a run with the temporary key no longer ends at once with "cannot
+  log in": the login tried before rsync ran `true`, which the key refuses (it
+  runs only rsync); now only the login itself is tried.
+- Categories: hide the jobs of a category in the job list (Hide jobs in this
+  category in the job list, `h` in the categories window; the categories in it
+  too). The status line says how many jobs are hidden; Show jobs in this
+  category in the job list brings them back, `cat:` in the filter shows them.
+- Categories: rules put jobs in a category by their name, when the job list
+  loads (`ci-[0-9]+` into `CI`). Each takes new jobs only, the jobs in no
+  category, or all jobs (also moved out of another category); it looks at
+  each job once, so one taken out by hand is not put back. The rules window
+  (`u` in the categories window) shows how many jobs of the job list each
+  matches; Apply now puts them in at once. The form shows the matches as you
+  type.
+- Check for updates in the ☰ Menu: asks PyPI right away (also with the check
+  at the start turned off). A newer slurp shows how to update it, a skipped
+  version too; otherwise it says that this is the newest, or that PyPI did not
+  answer.
+- Transfers: a transfer job that waits in the queue is no longer taken as
+  ended by the result of the run before it. It "ended" at once with the old
+  exit code, and an rclone job's keys were removed before it started (rclone:
+  "didn't find section in config file"). A new run starts without the old
+  result, and a result of another job is not this run's.
+- Transfers: runs on a cluster say why they failed. rclone's plain-text errors
+  (an option an older rclone does not know, a remote it cannot make) were
+  dropped, so a failed run said nothing; now they are the run's errors and
+  message. The run's log names the rclone and its command, and a failed
+  run writes its log into its output (a transfer job's `job-<id>.out`).
+- Directories: **Shell here** (`s`) opens a shell in a subtab that starts in
+  the directory shown (your login shell, on the cluster or this machine).
+- Transfers: the root of an S3, SMB or WebDAV endpoint as the source (Choose
+  this folder at its top) copies all of it; rclone's filter matched nothing
+  and the run ended "done" at once.
+- Endpoints: an endpoint's window says what its server is, without changing
+  anything: WebDAV and S3 software from their headers (Nextcloud/ownCloud
+  version from status.php, WebDAV classes, the bucket's region), SMB the
+  dialect, signing, encryption, logins and Samba (an SMB2 negotiate), the
+  space where the server tells, Globus what it knows of the collection.
+- Transfers: editing a transfer from S3, SMB, WebDAV or Globus shows its
+  sources in step 1 (and what goes where in step 2); the list stayed empty.
+- Transfers: rclone on this machine reaching a cluster over slurp's SSH runs
+  the cluster's sftp-server behind a marker, so login scripts that print
+  text (a chatty `.bashrc`) no longer break it ("packet too long"); copies
+  both ways and Verify tested.
+- Transfers: a transfer job of rclone on the cluster with the cluster as the
+  destination (from S3, SMB or WebDAV) looks up your accounts and fills in
+  the transfer partition of that cluster (the account list waited for ever).
+- Endpoints: Enter (or a click) opens an endpoint's window: a cluster tab's
+  connection window, or for S3, SMB, WebDAV and Globus a window alike (address,
+  settings, secrets as there or missing, connection and last test, the
+  transfers using it, the course of its tests; Test, Edit…, Disconnect, Copy
+  address). The connection window's Mount… maps the drive of its own tab.
+- Transfers: the route in the list and in the runs says what moves the data
+  first: `rsync · relay · in slurp`, `rclone · on the cluster · transfer job`,
+  `Globus · at Globus`; rclone here reaching a cluster over slurp's SSH:
+  `rclone · relay · in slurp`.
+- Transfers: rclone on the cluster also where only the transfer partition's
+  nodes have rclone (not the login nodes): it runs as a transfer job, and the
+  wizard checks for rclone on a node of the partition first. The job test
+  (`sbatch --test-only`) of an rclone transfer job works again.
+  Editing such a transfer set up to run detached offers only the transfer
+  job; Run now of one still set to detached says to choose it.
+- Transfers: an rclone run that fails says each cause once (without rclone's
+  retry summaries and times), no longer calls exit 1 a usage error, and
+  explains an SMB server whose reads rclone cannot take (impacket's test
+  server).
+- Transfers: between a tab and S3, SMB or WebDAV, rclone can also run on
+  this machine and reach the cluster over the tab's SSH session (sftp, no new
+  login): for clusters without rclone. Needs rclone 1.64 or newer here; the
+  check recommends rclone on the cluster where it is there.
+- Transfers: the flow picture names an SMB share and WebDAV as such (both
+  were labelled S3).
+- Transfers: **New folder…** checks the new folder can be written (a test
+  file written and deleted in it), on every endpoint. On S3 a folder could
+  not be made and no error was said (S3 has no empty folders: rclone's mkdir
+  does nothing there, even without write rights); now a refusal is said, and
+  the new folder is shown in its folder until something is copied into it.
+- Transfers: the pickers of the source and the destination (Browse…) have a
+  **Reload** button (`r`): the folder shown is listed again, the marks kept.
+- **Run before login**: what the command exports (e.g. `eval "$(ssh-agent -s)"`)
+  is in the environment of the login. New box **only when the login fails
+  without it**: first a login without the command that asks nothing; only if
+  it fails, the command and the login again (a certificate that is still
+  valid is not made anew). **Check…** goes the same way.
+- A login the server ends after **too many authentication failures** (an
+  agent with many keys offers them before the configured one, e.g. a CSCS
+  certificate) is tried once more with only the configured keys
+  (`IdentitiesOnly=yes`), and slurp says how to keep it so in
+  `~/.ssh/config`.
+- The overview's **Disconnect** shows its whole label again.
+- The overview no longer looks connected while a tab connects or reconnects
+  (a login that fails, e.g. on a host key that changed): no Jobs and no
+  health then, what ssh printed last (a changed host key said plainly), and
+  **Abort** instead of **Disconnect**.
+- **Transfers**: data from one tab to another (cluster to cluster, or this
+  machine), with rsync over the tabs' own SSH sessions: Menu → Transfer
+  data… (`T`) sets one up in a wizard (source, destination, options, the
+  route with its check, summary: Add); sources may be patterns (`/path/to/dir/*.h5`:
+  each match). The check (it changes nothing) says what remains to
+  copy, the room on the destination (free space, quota, a purged scratch),
+  and which routes work, each with its measured speed and an estimate: the
+  same filesystem, direct (one cluster logs in to the other by itself;
+  opt-in: a temporary key, restricted to rsync, that expires), or the relay
+  through slurp (always possible: the clusters need not reach each other).
+  Large transfers are pointed to Globus where sites offer it. A transfer
+  runs in slurp, detached on the cluster, or as a transfer job (a site's
+  transfer partition, e.g. `xfer` on Alps; its progress in `progress.json`),
+  each time you click Run now (a transfer can be added even when its route
+  did not pass the check: Run now checks first). There are no schedules:
+  **Copy as a command** gives the rsync (or `sbatch --wrap`) line of a run
+  for scrontab or cron. It is idempotent: a run
+  copies only what is missing or changed, goes on from half-copied files,
+  and never deletes. The tab **Transfers** (there while transfers exist)
+  lists them; each has a subtab with its progress (rate, time left, files),
+  what happens if slurp closes, its runs and its log; Pause (a transfer job:
+  cancelled, after a warning), Continue (a new run or job), Run now, Edit.
+  Its source and destination are **endpoints**, shown as cards with their
+  state (connected, needs login, tab not open) and a button for what they
+  need; Run now waits until every endpoint is connected. This machine and
+  every open tab are endpoints; Menu → Endpoints… lists them with their
+  state and how many transfers use each (deleting one in use is refused).
+  **Globus collections** are endpoints too (Endpoints → New endpoint…; a
+  tab can be linked to its site's collection): a transfer between them is a
+  Globus task that slurp submits and follows (also across a restart; the
+  data does not pass this machine); Pause cancels the task, Continue
+  submits a new one. One Globus login (its token only in the system
+  keyring), with the consents collections need. New extra `transfers`
+  (keyring, globus-sdk), also in `all`.
+  **S3 buckets** (AWS or S3-compatible) are endpoints as well: their keys
+  only in the keyring, Test with a write test for destinations; rclone
+  copies on this machine (this machine or another bucket) or on the
+  cluster of a tab (detached or as a transfer job, after you agree to send
+  the keys there for each run: read and deleted when the run starts), with
+  its progress, Pause, Continue, Verify (`rclone check`) and Copy as a
+  command (the keys as placeholders).
+  **SMB shares** and **WebDAV folders** (Nextcloud, ownCloud, SharePoint,
+  …) work the same way through rclone: their password or token only in
+  the keyring, obscured for rclone.
+- Rule packs: `transfer_partition`, `transfer_hosts`, `globus`,
+  `login_node_limits` (transfers).
 - Progress: only lines like the progress count (the structure of the
   line, its numbers aside): a `checkpoint 1/1 saved` in the log is no
   longer taken for the progress and no longer breaks the current pace.

@@ -43,7 +43,7 @@ More in [Install and start](install.md).
 In the app, the `?` key (or the **?** button of a window) explains the window shown, `F1` opens the guides (job
 scripts, arrays, filesystems, GPUs, …) and `F2` the rule catalogue.
 
-**Version**: `slurp --version`; the header of the app shows it too. slurp is in beta: settings, link formats and the
+**Version**: `slurp --version` (with the versions of the site packs); the header of the app shows it too. slurp is in beta: settings, link formats and the
 helper may still change between versions. What changed: the [changelog](changelog.md).
 
 The pictures are screenshots of slurp against the lab of its tests, a fake Slurm cluster with sample jobs and files

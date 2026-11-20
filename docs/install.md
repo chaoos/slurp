@@ -38,6 +38,7 @@ python -m pip install ".[all]"
 | `links` | [shells and drives on your own machine](remote/links.md), [remote web access](remote/web-access.md) | asyncssh |
 | `hdf5` | the [HDF5 view](guide/files.md) | h5py |
 | `web` | [`--serve` and Textual Web](remote/browser.md) | textual-serve, textual-web |
+| `transfers` | [S3 buckets, SMB shares, WebDAV folders](guide/transfers.md#s3-smb-and-webdav) and [Globus collections](guide/transfers.md#globus) as endpoints of transfers, secrets in the system keyring (S3, SMB and WebDAV also need [rclone](https://rclone.org/install/)) | keyring, globus-sdk |
 
 Without `h5py` the HDF5 view shows `h5dump -H` when `h5dump` is installed. System commands such as `ssh`, `squeue`,
 `sacct`, `scontrol`, `srun` and `sbatch` are installed separately and must be there locally or on the SSH host.
@@ -66,7 +67,11 @@ through, which is your own computer, also when slurp runs on a cluster over SSH:
 slurp --install-font               # Linux, macOS: into your fonts; Windows: opens the font to install
 ```
 
-Then open a new terminal window. Your terminal's font stays: the terminal takes only the icons from slurp's font.
+Then quit the terminal completely (all its windows) and start it again: GNOME Terminal and Konsole keep one process
+for all their windows, so a new window alone keeps the fonts they had (some icons then show, newer ones are boxes).
+Your terminal's font stays: the terminal takes only the icons from slurp's font. A newer slurp that finds an older
+copy installed on its machine updates it at the start and says so (restart the terminal then); a copy on another
+machine (your own, with slurp on a cluster) is updated by `slurp --install-font` there.
 Without slurp installed on that machine, download
 [slurp-icons.ttf](https://github.com/chaoos/slurp/raw/main/src/slurp/ui/fonts/slurp-icons.ttf) and install it like any
 font. A terminal with a [Nerd Font](https://www.nerdfonts.com/) shows the icons too, and a browser has them already.
@@ -85,6 +90,8 @@ slurp tells you itself when there is a newer version: at the start it asks PyPI 
 background; offline nothing happens), says so, and the title bar shows **⬆ slurp <version>** until it quits. A click
 shows what changed, how slurp is installed on this machine (pipx, uv tool, pip, or a git checkout) and the command
 that updates it, to copy; then quit slurp and start it again. **Skip this version** stops the reminder until a newer
-one; `"update_check": false` in the config stops the check.
+one; `"update_check": false` in the config stops the check. **☰ Menu → Check for updates** asks PyPI right away
+(also with the check at the start off): a newer version shows how to update, as above (a skipped one too); otherwise
+it says that this is the newest, or that PyPI did not answer.
 
 When using tmux, enable the mouse (`set -g mouse on`) to click and scroll in slurp.

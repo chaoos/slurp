@@ -17,7 +17,7 @@ The rules, by category:
 | R | Requests that make no sense | `--mem=4` (4 MB), `--time=2:00` (2 minutes), more CPUs/GPUs/memory than a node has, time over the partition's maximum, unknown partition or account |
 | B | Beginner mistakes | several nodes but no `srun`, arrays that never use `$SLURM_ARRAY_TASK_ID`, logs without `%j`, results left in the node's `/tmp`, `srun` in a loop, the same job twice, dependencies that can never be met, heavy work on the login node |
 | P | Paths, files, programs | the log directory does not exist (the job fails without a log), missing directories and inputs, programs missing or not executable, built for another CPU, shared libraries not found, GPU code for other GPUs, changed since submission, the program of many tasks in home or project instead of scratch |
-| Q | Quota and storage | writing where the quota (space or files) is full, little room left, output in `$HOME`, inputs close to the scratch purge, very many files in one directory, logs in home or project instead of scratch |
+| Q | Quota and storage | writing where the quota (space or files) is full, little room left, output in `$HOME`, inputs close to the scratch purge, very many files in one directory, logs in home or project instead of scratch, core dumps in home (where sbatch was run, `--chdir` or a `cd` there, with core files allowed; core files already there) |
 | E | Environment | modules without versions or `module purge`, `conda activate` without the hook, `pip install` in jobs, modules that cannot be loaded, site advice; uenv not pulled, without version and tag, without a view, `module load` without the modules view |
 | N | NUMA placement | tasks not aligned with NUMA domains, threads and tasks not bound, GPUs not assigned to tasks, `srun` without `--cpus-per-task` (Slurm 22.05+) |
 | U | Usage and outcome | much more time or memory than used, low CPU usage, why a job failed (OOM, TIMEOUT, exit codes), why it waits (pending reasons), known errors in the logs, long jobs without checkpoints |
@@ -110,12 +110,18 @@ the tab's cluster.
 **Site rule packs** add what Slurm does not tell: scratch purge days, parallel
 filesystems, NUMA domains per node, the GPU architecture, site plugin options
 of `sbatch`, the software stacks (`stacks`, if not found), rules that do not apply, and site advice. A pack is a TOML file
-in `src/slurp/checks/packs/` (included: CSCS Alps, and JSC's JURECA, JUWELS, JUSUF and
+in `src/slurp/sites/packs/` (included: CSCS Alps, and JSC's JURECA, JUWELS, JUSUF and
 JEDI) or in
 `~/.config/slurp/rules/`; it applies when one of its `match` patterns matches
 the tab, its SSH destination or the login node's host name. It can also name
 the site's documentation (`docs`, for the guides) and its status page
-(`status`, shown when the login fails). See `src/slurp/checks/rulepacks.py` for the keys.
+(`status`, shown when the login fails). See `src/slurp/sites/__init__.py` for the keys.
+
+Each pack has a `schema` (the version of its format: slurp leaves out a pack
+of a newer schema than it reads; without one: 1) and a `version` (the date
+of its content, `YYYY.MM.DD`). The rule catalogue and the overview of a tab say
+which pack applies there, its version, and whether it is built in or yours;
+About slurp (`?` → slurp) and `slurp --version` list all packs slurp reads.
 
 **Without the UI**, `slurp check job.sh ...` prints the findings of batch
 scripts (on the machine it runs on, e.g. a login node): exit code 1 if a script

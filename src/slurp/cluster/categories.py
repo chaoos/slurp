@@ -6,7 +6,13 @@ config directory), so slurp on your own machine and slurp on the login node see 
 by several clusters (whose job ids repeat): the file has one part per Slurm cluster (its ClusterName).
 
 Every change reads the file again, changes it and writes it back (another slurp may have changed it meanwhile); a
-file that is not valid JSON is never overwritten."""
+file that is not valid JSON is never overwritten.
+
+Rules put jobs in a category by their name (a regular expression that matches the whole name: ci-[0-9]+), when the
+job list loads. Each looks at a job once: it keeps the highest job id it has seen ("after"), so a job taken out of
+its category by hand is not put back. What it takes (its scope): new jobs (submitted after it was made), the jobs in
+no category (those of the job list then, and the new ones), or all (also moved out of other categories). The first
+rule that matches a job (in their order) has it."""
 
 import json
 import os
@@ -69,6 +75,49 @@ def cancel_entry(jid, entry):
     raise ValueError("no reason")
   return {k: v for k, v in out.items() if v}
 
+SCOPES = {"new": "new jobs (submitted from now on)", "uncategorized": "the jobs in no category (now and new ones)",
+          "all": "all jobs (also out of other categories, now and new ones)"}
+
+def job_number(jid):
+  """The number of a job or array ("123_4" -> 123), None if it is not one of the store's"""
+  jid = array_of(jid)
+  return int(jid) if jid.isdigit() else None
+
+def rule_entry(entry):
+  """A rule as kept: {id, pattern, category, scope, on, after, made}; ValueError if it is not one"""
+  if not isinstance(entry, dict):
+    raise ValueError("not a rule")
+  rid = str(entry.get("id") or "")
+  if not re.fullmatch(r"[0-9a-z]{1,16}", rid):
+    raise ValueError(f"not the id of a rule: {rid!r}")
+  pattern = str(entry.get("pattern") or "")
+  if not pattern.strip():
+    raise ValueError("give the rule a pattern of job names (ci-[0-9]+)")
+  if len(pattern) > 200:
+    raise ValueError("a pattern has at most 200 characters")
+  try:
+    re.compile(pattern)
+  except re.error as e:
+    raise ValueError(f"not a regular expression: {e}") from None
+  scope = entry.get("scope") or "new"
+  if scope not in SCOPES:
+    raise ValueError(f"no scope {scope!r}")
+  try:
+    after = max(0, int(entry.get("after") or 0))
+  except (TypeError, ValueError):
+    after = 0
+  return {"id": rid, "pattern": pattern, "category": normalize(entry.get("category")), "scope": scope,
+          "on": entry.get("on", True) is not False, "after": after, "made": str(entry.get("made") or "")[:40]}
+
+def rule_matches(rule, name):
+  try:
+    return re.fullmatch(rule["pattern"], name or "") is not None
+  except re.error:
+    return False
+
+def rule_text(rule):
+  return f"{rule['pattern']} → {rule['category']}"
+
 class Store:
   """The categories of one Slurm cluster: their paths, the jobs in them ({jid: {category, name, added}}), notes of
   categories (Markdown, {path: text}), notes of jobs (Markdown, {jid: text}; of any job, in a category or not) and
@@ -108,6 +157,22 @@ class Store:
         self.cancelled[str(jid)] = cancel_entry(jid, entry)
       except ValueError:
         pass
+    self.hidden = set() # (categories whose jobs the job list leaves out, with those of the categories in them)
+    for p in data.get("hidden") or []:
+      try:
+        self.hidden.add(normalize(p))
+      except ValueError:
+        pass
+    self.paths.update(*(lineage(p) for p in self.hidden))
+    self.rules = []
+    for entry in data.get("rules") or []:
+      try:
+        rule = rule_entry(entry)
+      except ValueError:
+        continue
+      if not any(r["id"] == rule["id"] for r in self.rules):
+        self.rules.append(rule)
+        self.paths.update(lineage(rule["category"]))
 
   def to_data(self):
     return {"categories": sorted(self.paths), "jobs": dict(sorted(self.jobs.items())),
@@ -115,7 +180,9 @@ class Store:
             **({"job_notes": dict(sorted(self.job_notes.items(), key=lambda kv: [int(x) for x in kv[0].split("_")]))}
                if self.job_notes else {}),
             **({"cancelled": dict(sorted(self.cancelled.items(), key=lambda kv: [int(x) for x in kv[0].split("_")]))}
-               if self.cancelled else {})}
+               if self.cancelled else {}),
+            **({"rules": [dict(r) for r in self.rules]} if self.rules else {}),
+            **({"hidden": sorted(self.hidden)} if self.hidden else {})}
 
   # ---- reading
   def category_of(self, jid):
@@ -145,6 +212,28 @@ class Store:
     None if not said"""
     jid = str(jid)
     return self.cancelled.get(jid) or self.cancelled.get(array_of(jid))
+
+  def hidden_by(self, path):
+    """The hidden category a category is hidden with (itself, or one it is in), "" if it is shown"""
+    return next((h for h in lineage(path) if h in self.hidden), "") if path else ""
+
+  def rule(self, rid):
+    return next((r for r in self.rules if r["id"] == rid), None)
+
+  def rules_of(self, path):
+    """The rules that put jobs in a category (not those of the categories in it)"""
+    return [r for r in self.rules if r["category"] == path]
+
+  def rule_count(self, rule, jobs):
+    """What a rule makes of the jobs of the job list ([(jid, name)]; an array once): {match, there (in its category
+    already), none (in no category), other (in another one)}"""
+    out = {"match": 0, "there": 0, "none": 0, "other": 0}
+    for jid in {array_of(j): n for j, n in jobs if job_number(j) is not None}.items():
+      if rule_matches(rule, jid[1]):
+        now = self.category_of(jid[0])
+        out["match"] += 1
+        out["there" if now == rule["category"] else "none" if not now else "other"] += 1
+    return out
 
   def job_notes_of(self, jid):
     """The notes of a job (Markdown; an array task: its own), "" if none"""
@@ -181,6 +270,73 @@ class Store:
     else:
       self.cancelled[jid] = cancel_entry(jid, entry)
     return jid
+
+  def hide(self, path, hidden=True):
+    """Hide the jobs of a category (and of those in it) in the job list, or show them again"""
+    path = self.add(path)
+    if hidden:
+      self.hidden.add(path)
+    else:
+      self.hidden.discard(path)
+    return path
+
+  def set_rule(self, entry):
+    """Add a rule, or change the one with its id (in its place)"""
+    rule = rule_entry(entry)
+    self.paths.update(lineage(rule["category"]))
+    for i, r in enumerate(self.rules):
+      if r["id"] == rule["id"]:
+        self.rules[i] = rule
+        return rule["id"]
+    self.rules.append(rule)
+    return rule["id"]
+
+  def drop_rule(self, rid):
+    self.rules = [r for r in self.rules if r["id"] != rid]
+    return rid
+
+  def apply_rules(self, jobs):
+    """The rules on the jobs of the job list ([(jid, name)]; an array as a whole): each job once per rule (the ones
+    above its "after"), the first that matches has it. {path: [jids]} put in"""
+    seen = {}
+    for jid, name in jobs:
+      if job_number(jid) is not None:
+        seen.setdefault(array_of(jid), name)
+    done = {}
+    for jid, name in sorted(seen.items(), key=lambda kv: job_number(kv[0])):
+      for rule in self.rules:
+        if not rule["on"] or job_number(jid) <= rule["after"] or not rule_matches(rule, name):
+          continue
+        now = self.category_of(jid)
+        if now != rule["category"] and (not now or rule["scope"] == "all"):
+          self.assign([jid], rule["category"], {jid: name})
+          done.setdefault(rule["category"], []).append(jid)
+        break # (the first that matches has it, also when it is already there)
+    top = max((job_number(j) for j in seen), default=0)
+    for rule in self.rules:
+      if rule["on"]:
+        rule["after"] = max(rule["after"], top)
+    return done
+
+  def apply_rule(self, rid, jobs, move=False):
+    """A rule now on the jobs of the job list ([(jid, name)]), whatever it has seen: the ones in no category, move:
+    also those in another one. [jids] put in"""
+    rule = self.rule(rid)
+    if rule is None:
+      raise ValueError("the rule is gone (deleted meanwhile?)")
+    done = []
+    for jid, name in {array_of(j): n for j, n in jobs if job_number(j) is not None}.items():
+      now = self.category_of(jid)
+      if rule_matches(rule, name) and now != rule["category"] and (not now or move):
+        self.assign([jid], rule["category"], {jid: name})
+        done.append(jid)
+    return done
+
+  def rules_due(self, jobs):
+    """Would apply_rules change anything (a job to put in, an "after" to move)? (to write the file only then)"""
+    numbers = [job_number(j) for j, _ in jobs]
+    top = max((n for n in numbers if n is not None), default=0)
+    return any(r["on"] and r["after"] < top for r in self.rules)
 
   def add(self, path):
     path = normalize(path)
@@ -228,6 +384,9 @@ class Store:
     self.notes = notes
     for entry in self.jobs.values():
       entry["category"] = moved(entry["category"])
+    for rule in self.rules:
+      rule["category"] = moved(rule["category"])
+    self.hidden = {moved(p) for p in self.hidden}
     return new
 
   def delete(self, path):
@@ -236,6 +395,8 @@ class Store:
     up = parent(path)
     self.paths = {p for p in self.paths if not within(p, path)}
     self.notes = {p: text for p, text in self.notes.items() if not within(p, path)}
+    self.rules = [r for r in self.rules if not within(r["category"], path)] # (its rules go with it)
+    self.hidden = {p for p in self.hidden if not within(p, path)}
     for jid, entry in list(self.jobs.items()):
       if within(entry["category"], path):
         if up:
@@ -301,7 +462,8 @@ def cluster_name():
 def load(cluster):
   return Store(cluster, read_all()["clusters"].get(cluster))
 
-OPS = ("add", "assign", "unassign", "rename", "delete", "note", "job_note", "cancel_reason") # (the changes, by name: kept to be done later, see jobcache)
+OPS = ("add", "assign", "unassign", "rename", "delete", "note", "job_note", "cancel_reason", "set_rule", "drop_rule", "apply_rules",
+       "apply_rule", "hide") # (the changes, by name: kept to be done later, see jobcache)
 
 def apply_op(store, op):
   """[name, args...] on a store; its result"""

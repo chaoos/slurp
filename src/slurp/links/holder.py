@@ -79,10 +79,30 @@ def icon_font_path():
 
 # The terminal of the web page draws in Roboto Mono; slurp's icons (codepoints of Nerd Fonts' Material Design icons)
 # come from slurp's icon font, one cell wide, under the same name: the browser takes it for those codepoints only.
+# The terminal of the page (xterm.js) draws on a canvas and keeps each glyph as it first drew it. A browser loads a
+# face with a unicode-range only when it is needed, and a canvas does not wait for it: the icons drawn before the icon
+# font came stayed boxes (until a hover drew them anew). So the page's start (textual.js sets window.onload: it makes
+# the terminal and connects) waits until the browser has both faces of the icon font, at most 3 s.
+FONT_WAIT = """<script>
+(function () {
+  var glyph = String.fromCodePoint(0xF0322), fonts = document.fonts;
+  var ready = fonts && fonts.load ? Promise.race([
+    Promise.all(['16px "Roboto Mono"', 'bold 16px "Roboto Mono"'].map(function (f) { return fonts.load(f, glyph); })),
+    new Promise(function (done) { setTimeout(done, 3000); })
+  ]).catch(function () {}) : Promise.resolve();
+  var start = null;
+  Object.defineProperty(window, "onload", { configurable: true, get: function () { return start; },
+                                            set: function (f) { start = f; } });
+  window.addEventListener("load", function (e) {
+    ready.then(function () { if (typeof start === "function") start.call(window, e); });
+  });
+})();
+</script>"""
+
 ICON_FONT_HEAD = ('<link rel="preload" href="/slurp-icons.ttf" as="font" type="font/ttf" crossorigin>'
                   '<style>' + "".join('@font-face { font-family: "Roboto Mono"; src: url("/slurp-icons.ttf") format("truetype"); '
                                       f'font-weight: {weight}; unicode-range: U+F0000-F1FFF; }}' for weight in (400, 700))
-                  + '</style>') # (the weights of the text's faces, exactly: a face of another weight is passed over; bold labels too)
+                  + '</style>' + FONT_WAIT) # (the weights of the text's faces, exactly: a face of another weight is passed over; bold labels too)
 
 # The web page opens slurp:// links (for the slurp helper on the user's computer) like any URL from the app
 # (window.open). A browser may refuse that without a click right before, and nothing shows when the helper is not set

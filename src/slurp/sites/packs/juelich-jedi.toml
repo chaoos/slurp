@@ -1,4 +1,6 @@
 # Jülich Supercomputing Centre (JSC): JEDI (the preparatory system for JUPITER). Logins: jedi.fz-juelich.de and its numbered login nodes.
+schema = 1
+version = "2026.11.20"
 name = "JSC JEDI"
 match = ["jedi*"]
 docs = "https://apps.fz-juelich.de/jsc/hps/jedi/index.html"

@@ -182,7 +182,7 @@ class ConnectionScreen(ModalScreen):
   @on(Button.Pressed, "#conn-drive-mount")
   def drive_mount_pressed(self, event):
     event.stop()
-    self.app.action_cluster_drive()
+    self.app.action_cluster_drive(self.cluster) # (this window's tab: also when opened from the Endpoints)
 
   @on(Button.Pressed, "#conn-drive-unmount")
   def drive_unmount_pressed(self, event):
@@ -366,7 +366,7 @@ class ConnectionScreen(ModalScreen):
 
   def site_status(self):
     """When the login fails: the cluster may be down; its site's status page (a link), if a rule pack knows it"""
-    from ...checks.rulepacks import status_page
+    from ...sites import status_page
     url = status_page(self.cluster.name, self.cluster.destination or "")
     text = Text("\nThe cluster may be down or in maintenance: ", style="yellow")
     if url:
@@ -403,7 +403,8 @@ class ConnectionScreen(ModalScreen):
     if cluster.ssh:
       grid.add_row("SSH settings", " ".join(sshsetup.ssh_args(cluster.ssh) + [cluster.destination]))
     if cluster.pre_login:
-      grid.add_row("Before the login", Text(f"{cluster.pre_login}  (runs in the login pane before every login)"))
+      grid.add_row("Before the login", Text(f"{cluster.pre_login}  " + ("(runs in the login pane when a login without it fails)"
+                                                                        if cluster.pre_login_fallback else "(runs in the login pane before every login)")))
     if c is not None:
       grid.add_row("Logged in as", f"{c.user or '-'} on {c.hostname or '-'}" + (f" (home {c.home})" if c.home else ""))
       if c.groups:
@@ -476,7 +477,7 @@ class ConnectionScreen(ModalScreen):
     event.stop()
     from .dialogs import SshCheckScreen
     cluster = self.cluster
-    self.app.push_screen(SshCheckScreen(cluster.destination, cluster.ssh, cluster.pre_login))
+    self.app.push_screen(SshCheckScreen(cluster.destination, cluster.ssh, cluster.pre_login, cluster.pre_login_fallback))
 
   @on(Button.Pressed, "#conn-reconnect")
   def action_reconnect(self):

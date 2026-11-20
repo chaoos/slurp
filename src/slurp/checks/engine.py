@@ -456,6 +456,7 @@ class Facts:
   user: str = ""
   site: dict = field(default_factory=dict)           # the rule pack
   stacks: set = field(default_factory=set)           # the software stacks there: "modules", "uenv" (empty: unknown)
+  core: dict = field(default_factory=dict)           # core files: "soft", "hard" (ulimit -c of a login shell), "pattern" (kernel)
   time: float = 0
 
   def partition(self, name=None):
@@ -507,7 +508,8 @@ def gather_facts(force=False):
           ["sh", "-c", "grep -nE '^[^#]*(module +(load|add|swap)|^ *ml +[A-Za-z]|conda +activate|source +activate|uenv +start)' "
                        "\"$HOME/.bashrc\" \"$HOME/.bash_profile\" 2>/dev/null | head -10"],
           ["sacctmgr", "-nP", "show", "user", user, "format=defaultaccount"],
-          ["sh", "-c", "command -v uenv"]]
+          ["sh", "-c", "command -v uenv"],
+          ["bash", "-lc", CORE_FACTS]]
   res = run_many(cmds, timeout=60)
   f = Facts(time=time.time(), user=user)
   f.partitions = parse_sinfo(res[0].stdout)
@@ -530,12 +532,23 @@ def gather_facts(force=False):
   for line in res[6].stdout.splitlines():
     f.bashrc.append(line.strip())
   f.default_account = res[7].stdout.strip().splitlines()[0].strip() if res[7].stdout.strip() else ""
-  from . import rulepacks
-  f.site = rulepacks.pack_for(key, getattr(conn(), "destination", "") or "", f)
+  from .. import sites
+  f.site = sites.pack_for(key, getattr(conn(), "destination", "") or "", f)
   f.stacks = detect_stacks(f, bool(res[8].stdout.strip()))
+  f.core = parse_core_facts(res[9].stdout if len(res) > 9 else "")
   with _facts_lock:
     _facts[key] = f
   return f
+
+# Core files: the limit of a login shell (Slurm passes the limits of the shell sbatch runs in on to the job:
+# PropagateResourceLimits, ALL by default) and where the kernel writes them (a name: in the working directory of the
+# program; /path: there; |program: handed to a program, systemd-coredump, apport, …; of this node: compute nodes alike)
+CORE_FACTS = 'echo "slurp-core-soft=$(ulimit -Sc)"; echo "slurp-core-hard=$(ulimit -Hc)"; ' \
+             'echo "slurp-core-pattern=$(cat /proc/sys/kernel/core_pattern 2>/dev/null)"'
+
+def parse_core_facts(text):
+  """{"soft", "hard", "pattern"} of CORE_FACTS' output (a login shell may print more: its lines are left out)"""
+  return {m.group(1): m.group(2).strip() for m in re.finditer(r"^slurp-core-(soft|hard|pattern)=(.*)$", text, re.M)}
 
 def detect_stacks(facts, uenv_command=False):
   """The software stacks of a cluster: "modules" (Lmod or environment modules in a login shell), "uenv" (sbatch's
@@ -605,6 +618,7 @@ for a in "$@"; do
     info=""
     if [ "$k" = x ] && [ "$t" = f ]; then info=$(file -L -b -- "$p" 2>/dev/null | head -c 160); fi
     if [ "$k" = n ] && [ "$t" = d ]; then info=$(find "$p" -maxdepth 1 2>/dev/null | head -100001 | wc -l); fi
+    if [ "$k" = c ] && [ "$t" = d ]; then info=$(find "$p" -maxdepth 1 -type f \( -name core -o -name 'core.[0-9]*' \) -printf '%s %T@\n' 2>/dev/null | awk '{n++; s+=$1; if ($2>m) m=$2} END {printf "%d %d %d", n, s, m}'); fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$a" "$t" "$x" "$w" "$s" "$info" "$r"
   else
     printf '%s\t-\n' "$a"
@@ -826,6 +840,8 @@ def interesting_paths(ctx):
     interp = s.shebang[2:].strip().split()
     if interp and interp[0].startswith("/"):
       out.append(("x", interp[0]))
+  if ctx.count_files or ctx.job is None: # (core files there: Q08)
+    out += [("c", d) for d, _, _ in core_dirs(ctx)]
   for kind, path, _line in referenced_paths(ctx):
     out.append((kind, path))
   submit, other = alternative_bases(ctx)
@@ -836,6 +852,58 @@ def interesting_paths(ctx):
       if submit:
         out.append(("f", os.path.normpath(os.path.join(submit, word))))
   return list(dict.fromkeys(out))
+
+# Where the programs of a job run: a crash writes its core file into the program's working directory (not where the
+# program or the script is): --chdir or where sbatch was run, then the script's cd, srun --chdir
+CD = re.compile(r"""^\s*cd(?:\s+(?:--\s+)?("[^"]*"|'[^']*'|[^\s;&|]+))?\s*(?:$|&&|\|\||;)""")
+NOT_PROGRAMS = {"cd", "export", "unset", "module", "ml", "echo", "printf", "mkdir", "cp", "mv", "rm", "ln", "touch", "source",
+                ".", "set", "ulimit", "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case",
+                "esac", "date", "hostname", "sleep", "wait", "exit", "return", "true", "false", "cat", "ls", "pwd", "env",
+                "uenv", "conda", "trap", "shift", "local", "declare", "[", "[[", "test", "{", "}", "tar", "sbatch"}
+LAUNCH_DIR = re.compile(r"\s(?:--chdir[= ]|-D\s*)(\S+)")
+
+def core_dirs(ctx):
+  """[(directory, why the programs run there, line)] of the job's programs, as far as known (a script alone, without
+  --chdir: where it will be submitted is not known; a cd to an unknown place: from there on not known)"""
+  s = ctx.script
+  if s is None:
+    return []
+  home = (ctx.facts.env.get("HOME") if ctx.facts else None) or ctx.env.get("HOME")
+  wd, chdir = ctx.workdir(), ctx.opt("chdir")
+  if chdir:
+    cur = (wd, f"--chdir={chdir}", ctx.directive_line("chdir")) if wd and os.path.isabs(wd) else None
+  elif ctx.job is not None and wd:
+    cur = (wd, "sbatch was run there, without --chdir", None)
+  else:
+    cur = None
+  out = []
+  for line, t in s.code_lines():
+    m = CD.match(t)
+    if m:
+      target = (m.group(1) or "~").strip("\"'")
+      if target in ("~", "$HOME", "${HOME}"):
+        path = home
+      elif target == "-":
+        path = None
+      else:
+        path = ctx.expand(target)
+        if path and not os.path.isabs(path):
+          path = os.path.normpath(os.path.join(cur[0], path)) if cur else None
+      cur = (os.path.normpath(path), f"{t.strip()} (line {line})", line) if path else None
+      continue
+    words = t.split()
+    if not words or "=" in words[0] and not words[0].startswith(("./", "/")) or words[0] in NOT_PROGRAMS:
+      continue
+    launched = LAUNCH_DIR.search(t) if re.match(r"\s*(srun|mpirun|mpiexec)\b", t) else None
+    if launched:
+      path = ctx.expand(launched.group(1).strip("\"'"))
+      entry = (os.path.normpath(os.path.join(cur[0], path) if cur and not os.path.isabs(path) else path),
+               f"its --chdir (line {line})", line) if path and (os.path.isabs(path) or cur) else None
+    else:
+      entry = cur
+    if entry and entry[0] not in [d for d, _, _ in out]:
+      out.append(entry)
+  return out
 
 def output_pattern(value, ctx):
   """An --output pattern with the job's values, %-patterns of unknown values as in a fresh job"""
@@ -1227,6 +1295,10 @@ def rules_markdown(facts=None, where="", query=""):
          "Module rules also apply in part to a uenv's modules view (--view=modules). " + stacks_text
          + (" The rules that do not apply there are greyed out." if facts is not None else ""),
          ""]
+  if facts is not None:
+    from ..sites import pack_text
+    site = pack_text(facts.site)
+    out += [f"**Site pack:** {site}." if site else f"**Site pack:** none for {where or 'this cluster'} (only what slurp finds itself).", ""]
   if query.strip():
     count = sum(rule_matches(r, query) for r in RULES.values())
     out += [f"**Search:** {count} of {len(RULES)} rules match “{query.strip()}”" + ("" if count else " (Esc shows all)") + ".", ""]

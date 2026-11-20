@@ -450,6 +450,10 @@ def access_text(entry):
 DIR_LIMIT = 20000 # entries listed at most
 SEARCH_LIMIT = 5000 # matches of a search in the subdirectories at most
 
+def shell_in(path):
+  """The command of a shell that starts in a directory: there, then the user's login shell (its $SHELL)"""
+  return ["sh", "-c", 'cd -- "$1" || exit 1; exec "${SHELL:-/bin/sh}" -l', "sh", path]
+
 class DirScreen(SplitScreen):
   """Directory browser: click (or Enter) a subdirectory to enter it, a file to open it"""
   SHOW_BACK = True
@@ -462,11 +466,13 @@ class DirScreen(SplitScreen):
     Binding("f", "follow", "Follow"),
     Binding("r", "reload", "Reload"),
     Binding("full_stop", "hidden", "Hidden files"),
+    Binding("s", "shell_here", "Shell here"),
   ]
 
-  def __init__(self, crumbs, path, bases=(), env=None):
+  def __init__(self, crumbs, path, bases=(), env=None, search=""):
     super().__init__()
     self.path = os.path.normpath(path)
+    self.initial_search = search # (shown with its search open on these names: a part of them, or a pattern, *.log)
     self.base_crumbs = list(crumbs)
     self.crumbs = [*crumbs, self.path.rstrip("/") + "/"]
     self.bases, self.env = list(bases), env # passed on to the files opened from here (e.g. the job's WorkDir)
@@ -485,6 +491,7 @@ class DirScreen(SplitScreen):
     with Horizontal(id="dbar"):
       yield Input(self.path, id="dpath", tooltip="The directory: edit and Enter to go there (~ is your home)")
       yield Horizontal(id="dplaces")
+      yield Button(icons.label("shell", "Shell here"), id="dshell", compact=True, tooltip="a shell in this directory, in a subtab (s)")
     yield Static(id="dstatus")
     yield ClickTable(id="dir", cursor_type="row", zebra_stripes=True)
     with Horizontal(id="dsearch"):
@@ -498,6 +505,9 @@ class DirScreen(SplitScreen):
     for key, label in DIR_COLUMNS:
       table.add_column(label, key=key)
     self.timer = self.set_interval(2.0, self.action_reload, pause=True)
+    if self.initial_search:
+      self.query_one("#dsearch").add_class("visible")
+      self.query_one("#dfilter", Input).value = self.initial_search
     self.query_one("#dstatus", Static).update("listing …")
     self.action_reload()
     table.focus()
@@ -511,6 +521,18 @@ class DirScreen(SplitScreen):
     bar = self.query_one("#dplaces", Horizontal)
     bar.remove_children()
     bar.mount_all(Button(label, id=f"dplace-{i}", compact=True, tooltip=path) for i, (label, path) in enumerate(places))
+
+  @on(Button.Pressed, "#dshell")
+  def shell_pressed(self, event):
+    event.stop()
+    self.action_shell_here()
+
+  def action_shell_here(self):
+    """A shell in this directory, in a subtab: the login shell of the tab's cluster (or this machine's), started there"""
+    cluster = self.app.cluster
+    name = os.path.basename(self.path.rstrip("/")) or self.path
+    where = (cluster.name if cluster is not None and cluster.destination else "this machine")
+    self.app.open_shell(shell_in(self.path), f"shell in {name} on {where}", focus=True)
 
   @on(Button.Pressed, "#dplaces Button")
   def place_pressed(self, event):

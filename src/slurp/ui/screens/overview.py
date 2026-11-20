@@ -41,6 +41,7 @@ class OverviewScreen(SplitScreen):
         yield Static(id="ov-about")
         yield Static(id="ov-health")
         yield Static(id="ov-ssh")
+        yield Static(id="ov-transfers")
         with Center():
           with Horizontal(id="ov-links"):
             yield Button(icons.label("jobs", "Jobs"), id="ov-jobs", variant="primary", compact=True, tooltip="the job list (j)")
@@ -143,6 +144,10 @@ class OverviewScreen(SplitScreen):
   def on_click(self, event):
     if open_clicked_url(self.app, event): # (the site's status page, its docs)
       event.stop()
+      return
+    if getattr(event.widget, "id", None) == "ov-transfers" and self.app.transfers.summary_for(self.cluster): # (its transfers)
+      event.stop()
+      self.app.show_transfers()
 
   # ---- what it shows
   def show(self):
@@ -153,19 +158,30 @@ class OverviewScreen(SplitScreen):
     d = self.data(cluster) if cluster else {}
     info = d.get("info")
     state = self.app.connect_state(cluster) if cluster else None
-    connected = cluster is not None and state is None
+    c = cluster.connection if cluster and cluster.destination else None
+    live = cluster is not None and (not cluster.destination or (c is not None and c.ready)) # (its session answers)
+    connected = cluster is not None and state is None and live
     lines = {"#ov-name": Text(icons.label("cluster" if cluster.destination else "local", cluster.name), style="bold") if cluster else Text(""),
              "#ov-about": self.about(cluster, info) if cluster else Text(""),
              "#ov-health": self.health(cluster, d, info) if connected else Text(""),
-             "#ov-ssh": self.ssh(cluster, state) if cluster else Text(""),
+             "#ov-ssh": self.ssh(cluster, state, live) if cluster else Text(""),
+             "#ov-transfers": Text(self.app.transfers.summary_for(cluster), style="cyan") if cluster else Text(""),
              "#ov-site": self.site(cluster) if cluster else Text("")}
     for sel, text in lines.items():
       q(sel).update(text)
       q(sel).display = bool(text.plain.strip()) # (no empty lines)
     q("#ov-links").display = connected
     q("#ov-connect-row").display = state == "idle"
-    c = cluster.connection if cluster and cluster.destination else None
     q("#ov-disconnect-row").display = c is not None and c.state not in ("new", "closed") and state != "idle"
+    button = q("#ov-disconnect")
+    label = icons.label("disconnect", "Disconnect" if live else "Abort") # (not connected yet: the login is given up)
+    if str(button.label) != label:
+      button.label = label
+      button.tooltip = ("end the SSH session of this tab" if live else
+                        "give up the login (the tab stays not connected; Connect tries again)")
+      # (its width follows the label: Abort → Disconnect; a hidden row would keep the narrow one)
+      button.refresh(layout=True)
+      q("#ov-disconnect-row").refresh(layout=True)
     q("#ov-config-row").display = bool(cluster and cluster.destination)
     if connected:
       jobs = q("#ov-jobs")
@@ -204,8 +220,9 @@ class OverviewScreen(SplitScreen):
     level, why = cluster_health(info)
     return Text(f"● {dict(good='healthy', warn='degraded', bad='unhealthy')[level]}: {why}", style=HEALTH_STYLES[level])
 
-  def ssh(self, cluster, state):
-    """The SSH session: its state (as the footer has it); not connected: what happened, and Connect"""
+  def ssh(self, cluster, state, live=True):
+    """The SSH session: its state (as the footer has it); not connected: what happened, and Connect; while it
+    connects: what ssh printed last (a changed host key: said plainly)"""
     if not cluster.destination:
       return Text("")
     if state == "idle":
@@ -215,7 +232,23 @@ class OverviewScreen(SplitScreen):
       return Text.assemble((f"Not connected to {cluster.destination}", "bold"), f"\n{why}")
     if state == "connecting":
       return Text.assemble((f"Connecting to {cluster.destination} …", "bold yellow"), "\nlog in on the right")
-    return self.app.connection_text(cluster)
+    text = self.app.connection_text(cluster)
+    if not live:
+      said = self.ssh_said(cluster)
+      if any("REMOTE HOST IDENTIFICATION HAS CHANGED" in line or "Host key verification failed" in line
+             or ("Host key for" in line and "has changed" in line) for line in said):
+        text.append(f"\nThe host key of {cluster.destination} changed: ssh does not trust it. Ask the site whether that is "
+                    "expected before you remove the old key (ssh-keygen -R <host>) and log in again.", style="bold red")
+      elif said:
+        text.append("\nssh: " + " | ".join(said[-2:])[:160], style="dim")
+    return text
+
+  def ssh_said(self, cluster):
+    """The last lines of the login's terminal (what ssh printed)"""
+    t = cluster.login_terminal
+    if t is None or t.vt is None:
+      return []
+    return [line.strip() for line in t.vt.display if line.strip()]
 
   def jobs_label(self, cluster):
     if not cluster.loaded:
@@ -226,15 +259,20 @@ class OverviewScreen(SplitScreen):
 
   def pack(self, cluster):
     import fnmatch
-    from ...checks.rulepacks import load_packs
+    from ...sites import load_packs
     names = [n.lower() for n in (cluster.name, cluster.destination or "") if n]
     names += [n.split("@")[-1] for n in names if "@" in n]
     return next((p for p in load_packs() if any(fnmatch.fnmatch(n, pat.lower()) for pat in p.get("match", []) for n in names)), {})
 
   def site(self, cluster):
-    """The site's status page and documentation (a click opens them), if a rule pack knows the site"""
+    """The site pack of the tab (its name and version) and the site's status page and documentation (a click opens
+    them), if a pack knows the site"""
+    from ...sites import pack_name
     pack = self.pack(cluster)
     text = Text()
+    if pack:
+      text.append(pack_name(pack) + (f" · pack {pack['version']}" if pack.get("version") else "") + ("" if pack.get("_builtin") else " (yours)"),
+                  style="dim")
     for key, label in (("status", "status"), ("docs", "docs")):
       url = str(pack.get(key) or "")
       if url.startswith(("https://", "http://")):

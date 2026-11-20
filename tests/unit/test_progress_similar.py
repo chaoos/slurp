@@ -46,7 +46,6 @@ def test_the_current_pace_from_the_reads(check, monkeypatch):
   j = job("502")
   clock = [1000.0]
   monkeypatch.setattr(J.time, "time", lambda: clock[0])
-  lines = [f"step {i}/100" for i in range(1, 11)]
   for read, n in enumerate((10, 15, 20, 25)): # (every 10 s, 5 steps more; a 1/1 in between)
     clock[0] = 1000.0 + 10 * read + 0.123
     tail = "\n".join([f"step {i}/100" for i in range(1, n + 1)] + ["checkpoint 1/1 saved"])

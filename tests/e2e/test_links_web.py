@@ -96,3 +96,53 @@ async def web_link(check, mgr, events, KNOWN):
 def test_web_link(check, links, link_manager):
   mgr, events = link_manager
   asyncio.run(web_link(check, mgr, events, links.KNOWN))
+
+
+async def web_link_expires(check, mgr, events, KNOWN):
+  """When its lifetime ends, a web link ends: its sessions too (the browser that came in through it is out, a reload
+  with the token too), not only its new logins"""
+  async def page(request):
+    return web.Response(text="the web view")
+  app = web.Application(); app.add_routes([web.get("/", page)])
+  runner = web.AppRunner(app); await runner.setup(); site = web.TCPSite(runner, "127.0.0.1", 0); await site.start()
+  view_port = site._server.sockets[0].getsockname()[1]
+  link = mgr.create(sh.Link("web", "this slurp (test)", "lab", lambda: [], relay="lab-relay", uses=None,
+                            web_port=view_port, web_token="tok456", expiry=12))
+  ok = await until(lambda: link.ready(), 20)
+  check("the web link is up (12 s to live)", ok, (link.relay_state, link.relay_error))
+  local = free_port()
+  argv = shlex.split(sh.client_commands(link)[0][1].replace("8000:", f"{local}:", 1))
+  argv = [argv[0], "-o", f"UserKnownHostsFile={KNOWN}", "-o", "StrictHostKeyChecking=accept-new", "-o", "ExitOnForwardFailure=yes", *argv[1:]]
+  t = Term(argv, client_env(link.password))
+  async def get(path="/?token=tok456"):
+    def fetch():
+      import urllib.request
+      try:
+        return urllib.request.urlopen(f"http://127.0.0.1:{local}{path}", timeout=5).read().decode()
+      except Exception as e:
+        return f"error: {e}"
+    return await blocking(fetch)
+  body = ""
+  for _ in range(40):
+    await asyncio.sleep(0.25)
+    body = await get()
+    if body == "the web view": break
+  check("before its end: the browser reaches the web view", body == "the web view", (body, t.out[-300:]))
+  ok = await until(lambda: (mgr.tick(), link.expired())[1], 20) # (the app ticks every second)
+  for _ in range(20):
+    mgr.tick(); await asyncio.sleep(0.25)
+  body = await get()
+  check("expired: the browser that came in through it no longer reaches the web view (a reload with the token neither)",
+        ok and body != "the web view", body)
+  check("…its sessions ended, it is finished, its tunnel closed", not link.live_sessions and link.finished
+        and await until(lambda: (mgr.tick(), link.relay_state == "closed")[1], 15), ([s.ended for s in link.sessions], link.relay_state))
+  try:
+    os.kill(t.pid, 15)
+  except OSError:
+    pass
+  mgr.shutdown(); await runner.cleanup()
+
+
+def test_web_link_expires(check, links, link_manager):
+  mgr, events = link_manager
+  asyncio.run(web_link_expires(check, mgr, events, links.KNOWN))

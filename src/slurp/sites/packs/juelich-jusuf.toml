@@ -1,4 +1,6 @@
 # Jülich Supercomputing Centre (JSC): JUSUF. Logins: jusuf.fz-juelich.de and its numbered login nodes.
+schema = 1
+version = "2026.11.20"
 name = "JSC JUSUF"
 match = ["jusuf*"]
 docs = "https://apps.fz-juelich.de/jsc/hps/jusuf/index.html"

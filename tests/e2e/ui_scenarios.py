@@ -78,6 +78,21 @@ def configure(work, home, out):
     if os.path.exists(os.path.join(LAB, name)): os.unlink(os.path.join(LAB, name))
 
 def term(app): s = app.shell; return "\n".join(s.vt.display) if s and s.vt else ""
+def process_state(screen):
+  """(when a check window shows nothing) its process: running or ended, its exit code, what it waits for, its
+  children (in CI it stayed blank now and then, not here)"""
+  session = getattr(screen, "session", None)
+  proc = getattr(session, "proc", None)
+  if proc is None:
+    return f"no process (done={getattr(session, 'done', None)}, error={getattr(session, 'error', '')!r})"
+  out = f"pid {proc.pid}: returncode {proc.poll()}, done={session.done}, fd={session.fd}, vt={session.vt is not None}"
+  try:
+    out += "\n" + subprocess.run(["ps", "-o", "pid,ppid,stat,wchan:24,etime,args", "-g", str(os.getpgid(proc.pid))],
+                                  capture_output=True, text=True, timeout=10).stdout[-1500:]
+  except (OSError, subprocess.SubprocessError) as e:
+    out += f" (ps: {e})"
+  return out
+
 def check_term(screen):
   """the text of the terminal of a check window (SshCheckScreen), its history and screen"""
   s = getattr(screen, "session", None)
@@ -159,7 +174,7 @@ class UISession:
         await until(pilot, lambda: app.main is not None and app.cluster.connection is not None, 30)
         app.connect_tab() # (no login at the start: Connect)
         await until(pilot, lambda: "passphrase" in term(app), 30); await pilot.pause(0.3)
-        await pilot.press(*"pw123", "enter")
+        await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
         if not await until(pilot, lambda: app.ssh.ready and app.cluster.loaded, 30):
           raise RuntimeError(f"no login to the lab: {term(app)[-500:]}")
         self.ready.set_result(True)
@@ -271,7 +286,7 @@ async def t_close(app, pilot):
   check("keys do nothing without a tab", isinstance(app.screen, MainScreen) and app.shell is None)
   app.add_cluster("lab"); await pilot.pause(0.5)
   ok = await until(pilot, lambda: "passphrase" in term(app), 15); await pilot.pause(0.3)
-  await pilot.press(*"pw123", "enter")
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
   ok = ok and await until(pilot, lambda: app.ssh.ready and app.cluster.loaded, 30)
   check("+ adds a tab again, the UI is back", ok and not main.has_class("-no-tabs") and main.query_one("#jobs").row_count == 40)
 
@@ -318,7 +333,7 @@ async def t_reconnect(app, pilot):
   ok = await until(pilot, lambda: "passphrase" in term(app), 15)
   check("Reconnect: the window closes, the login is in the pane and has the focus", ok and not isinstance(app.screen, ConnectionScreen)
         and app.shell is app.cluster.login_terminal and isinstance(app.focused, TerminalView), type(app.focused).__name__)
-  await pilot.press(*"pw123", "enter")
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
   check("typed straight into it: logged in again", await until(pilot, lambda: app.ssh.ready and app.shell is None, 20))
 
 async def t_connect_button(app, pilot):
@@ -338,7 +353,7 @@ async def t_connect_button(app, pilot):
   await pilot.click("#connect")
   ok = await until(pilot, lambda: "passphrase" in term(app), 15)
   check("Connect: the login is in the pane", ok and app.shell is cluster.login_terminal)
-  await pilot.press(*"pw123", "enter")
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
   ok = await until(pilot, lambda: app.ssh.ready, 20); await pilot.pause(0.5)
   check("logged in: Connect is gone, the job list has the focus", ok and not panel.display and table.display
         and isinstance(app.focused, ClickTable), type(app.focused).__name__)
@@ -353,9 +368,12 @@ async def t_connect_button(app, pilot):
   await pilot.click("#ov-connect")
   ok = await until(pilot, lambda: "passphrase" in term(app), 15)
   check("Connect in the overview: the login is in the pane", ok and app.shell is cluster.login_terminal)
-  await pilot.press(*"pw123", "enter")
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
   ok = await until(pilot, lambda: app.ssh.ready, 20); await pilot.pause(0.5)
   check("logged in again: Disconnect in the overview", ok and ov.query_one("#ov-disconnect-row").display)
+  button = ov.query_one("#ov-disconnect")
+  check("…its whole label shown (as wide as its text, after Abort while it logged in)",
+        button.size.width >= len(str(button.label)), (str(button.label), button.size))
   app.show_view(None); await pilot.pause(0.4) # (the job list again, for the scenarios after this one)
 
 async def t_restart(app, pilot):
@@ -490,7 +508,7 @@ async def t_ci_noconn(app, pilot):
   await pilot.click("#ov-connect")
   ok = await until(pilot, lambda: "passphrase" in term(app), 15); await pilot.pause(0.3)
   check("Connect: the login is in front", ok and app.shell is app.cluster.login_terminal)
-  await pilot.press(*"pw123", "enter")
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
   await until(pilot, lambda: app.ssh.ready, 20)
   ok = await until(pilot, lambda: "degraded" in card_text(app), 20)
   check("…logged in: the overview shows the cluster", ok, card_text(app))
@@ -553,7 +571,7 @@ async def t_pane_help(app, pilot):
   app.save_screenshot(filename="pane_help.svg", path=OUT)
   await pilot.press("escape"); await pilot.pause(0.3)
   check("Esc: back, the pane has the focus", isinstance(app.focused, TerminalView))
-  await pilot.press(*"pw123", "enter")
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
   check("the login in the pane goes on: logged in again", await until(pilot, lambda: app.ssh.ready and app.shell is None, 20))
 
 def fv_ids(screen, sel):
@@ -1079,8 +1097,8 @@ exec sleep 300
     check("Create: the quick tunnel is ready at the address cloudflared gave", ok and link.public_host == "fake-words-here.trycloudflare.com",
           (link and link.relay_state, link and link.relay_error))
     args = open(marker).read() if os.path.exists(marker) else ""
-    check("cloudflared runs the quick tunnel to the web view, HTTP/2, its own config", "tunnel --config" in args and "--protocol http2" in args
-          and "--url http://127.0.0.1:1" in args, args)
+    check("cloudflared runs the quick tunnel to the web view, HTTP/2, its own config; ended, it lets go of the browsers at once",
+          "tunnel --config" in args and "--protocol http2" in args and "--grace-period 1s" in args and "--url http://127.0.0.1:1" in args, args)
     check("the setting: the web links' own relay (cloudflare), the shells' stays", load_config().get("link_relay_web") == "cloudflare"
           and load_config().get("link_relay") == "lab-relay")
     check("its address: https, with the token", link.url() == "https://fake-words-here.trycloudflare.com/?token=tok-cf", link.url())
@@ -1347,6 +1365,29 @@ async def t_categories(app, pilot):
   ok = await until(pilot, lambda: cluster.categories.category_of("9003") == "proj X/checks", 10); await pilot.pause(0.4)
   check("c there: the job into a category; it leaves 'not categorized'", ok and "9003" not in [str(k.value) for k in jt.rows]
         and str(loose_node().label) == f"not categorized  {n_loose - 1}", (str(loose_node().label), cs.path == NONE, "9003" in [str(k.value) for k in jt.rows], type(app.screen).__name__, app.focused))
+  # marking there, as in the job list: m marks (and moves on), c and x work on the marked ones, M all or none
+  jt.focus(); jt.move_cursor(row=0)
+  two = [str(k.value) for k in jt.rows][:2]
+  await pilot.press("m", "m"); await pilot.pause(0.3)
+  cells = [str(jt.get_row(j)[0]) for j in two]
+  check("m in the categories window: two marked, shown with ●; the buttons say so", cs.marked == set(two) and all(c.startswith("● ") for c in cells)
+        and "Categorize 2 jobs" in str(cs.query_one("#cat-categorize").label) and "Take 2 jobs out" in str(cs.query_one("#cat-take-out").label),
+        (cs.marked, cells))
+  await pilot.press("c"); await pilot.pause(0.5)
+  check("c: the dialog, for the 2 marked jobs", isinstance(app.screen, CategorizeScreen) and "2 jobs" in str(app.screen.query_one("#cz-title").render()))
+  app.screen.query_one("#cz-path").value = "proj X/batch"; await pilot.press("enter")
+  ok = await until(pilot, lambda: all(cluster.categories.category_of(j) == "proj X/batch" for j in two), 10); await pilot.pause(0.4)
+  check("both in the category; the marks gone", ok and not cs.marked and "Categorize…" == str(cs.query_one("#cat-categorize").label), cs.marked)
+  tree.move_cursor(find_node(tree, "proj X/batch")); await pilot.pause(0.5)
+  jt.focus()
+  await pilot.press("M"); await pilot.pause(0.3)
+  check("M: all of its jobs marked", cs.marked == set(two), cs.marked)
+  await pilot.press("M"); await pilot.pause(0.2)
+  check("M again: none", not cs.marked)
+  await pilot.press("M", "x")
+  ok = await until(pilot, lambda: not any(cluster.categories.category_of(j) for j in two), 10); await pilot.pause(0.4)
+  check("x: the marked ones out of their category", ok and not cs.marked)
+  tree.move_cursor(loose_node()); await pilot.pause(0.5)
   await pilot.press("l"); await pilot.pause(0.8)
   shown = [str(k.value) for k in table.rows] if app.screen is app.main else []
   check("In the job list (l): cat:- lists the jobs in no category", app.main.query_one("#jfilter").value == "cat:-" and shown
@@ -1374,6 +1415,160 @@ async def t_categories(app, pilot):
   os.unlink(CATEGORIES_FILE)
   await pilot.press("r"); await until(pilot, lambda: cluster.loader is None, 30)
   cluster.marked.clear()
+
+async def t_category_rules(app, pilot):
+  """Rules of the categories: u in the categories window; a rule by job name (its matches as it is typed), new jobs
+  only: the jobs there are left, new ones (arrays) put in when the job list loads, said; a job taken out by hand is
+  not put back; Apply now; a changed rule looks at the jobs again; delete; kept in the file on the cluster"""
+  from slurp.cluster import categories as cats
+  from slurp.ui.screens.category_rules import ApplyRuleScreen, RuleFormScreen, RulesScreen
+  from slurp.ui.screens.categories import change_categories
+  arrays(False)
+  await reload(app, pilot)
+  cluster = app.cluster
+  store = lambda: cluster.categories
+  def file_rules():
+    data = json.load(open(CATEGORIES_FILE)) if os.path.exists(CATEGORIES_FILE) else {}
+    return data.get("clusters", {}).get("lab", {}).get("rules", [])
+  async def rules_window():
+    app.action_categories()
+    await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10); await pilot.pause(0.3)
+    await pilot.press("u")
+    return await until(pilot, lambda: isinstance(app.screen, RulesScreen) and app.screen.query("#ru-table"), 5)
+  async def change(op):
+    done = []
+    change_categories(app, cluster, op, lambda st, r: done.append(r))
+    await until(pilot, lambda: done, 10)
+  runs = [str(9010 + i) for i in range(5)] # (run10 … run14)
+  await change(["unassign", runs]) # (from no category: whatever a scenario before did)
+  ok = await rules_window()
+  check("u in the categories window: the rules window, none yet", ok and "No rules yet" in str(app.screen.query_one("#ru-detail").render()))
+  await pilot.press("n")
+  ok = await until(pilot, lambda: isinstance(app.screen, RuleFormScreen) and app.screen.query("#rf-preview"), 5)
+  form = app.screen
+  form.query_one("#rf-pattern").value = "run1[0-4]"
+  form.query_one("#rf-category").value = "auto/runs"
+  await pilot.pause(0.3)
+  preview = str(form.query_one("#rf-preview").render())
+  check("the form: what it matches in the job list, as it is typed; new jobs only: not these", ok and "matches 5 jobs of the job list" in preview
+        and "5 in no category" in preview and "run10" in preview and "none of these (they are not new)" in preview, preview)
+  form.query_one("#rf-pattern").value = "run1[0-4"; await pilot.pause(0.2)
+  check("…a pattern that is no regular expression: said", "not a regular expression" in str(form.query_one("#rf-preview").render()))
+  form.query_one("#rf-pattern").value = "run1[0-4]"; await pilot.pause(0.2)
+  await pilot.press("ctrl+s")
+  newest = max(int(cats.array_of(j)) for j in cluster.jobs if cats.array_of(j).isdigit())
+  ok = await until(pilot, lambda: len(store().rules) == 1, 10)
+  rule = store().rules[0] if ok else {}
+  check("saved: kept on the cluster, new jobs: those above the newest of the job list", ok and file_rules() == [rule]
+        and rule["scope"] == "new" and rule["after"] == newest and rule["category"] == "auto/runs", file_rules())
+  await pilot.pause(0.3)
+  table = app.screen.query_one("#ru-table")
+  row = [str(c) for c in table.get_row(rule["id"])] if ok else []
+  check("in the list: on, its pattern, category, what it takes, how many it matches now", row[1:4] == ["run1[0-4]", "auto/runs", "new jobs"]
+        and row[4].startswith("5"), row)
+  await pilot.press("escape"); await pilot.pause(0.2)
+  await reload(app, pilot)
+  check("the job list loads: the jobs there are left (not new)", not any(store().category_of(j) for j in runs))
+  # a second rule: arrays, new; then new jobs come
+  ok = await rules_window()
+  await pilot.press("n"); await until(pilot, lambda: isinstance(app.screen, RuleFormScreen), 5); await pilot.pause(0.2)
+  app.screen.query_one("#rf-pattern").value = "[0-9]+-arr"
+  app.screen.query_one("#rf-category").value = "auto/arrays"
+  await pilot.press("ctrl+s"); await until(pilot, lambda: len(store().rules) == 2, 10)
+  await pilot.press("escape"); await pilot.pause(0.2)
+  arrays(True)
+  app.clear_notifications()
+  await reload(app, pilot)
+  notes = [str(n.message) for n in app._notifications]
+  check("new jobs (arrays) put in when the job list loads, as a whole; said", store().category_of("9500") == "auto/arrays"
+        and store().category_of("9600_7") == "auto/arrays" and any("by the rules of the categories" in n and "auto/arrays" in n for n in notes), notes)
+  await change(["unassign", ["9500"]])
+  await reload(app, pilot)
+  check("each job once: one taken out by hand is not put back", store().category_of("9500") == "" and store().category_of("9600") == "auto/arrays")
+  # Apply now: the first rule on the jobs there
+  ok = await rules_window()
+  table = app.screen.query_one("#ru-table")
+  table.move_cursor(row=table.get_row_index(rule["id"])); await pilot.pause(0.2)
+  detail = str(app.screen.query_one("#ru-detail").render())
+  check("the rule selected: what it matches, in it, in no category", "matches 5 jobs" in detail and "5 in no category" in detail, detail)
+  await pilot.press("a"); ok = await until(pilot, lambda: isinstance(app.screen, ApplyRuleScreen), 5)
+  await pilot.click("#ar-none")
+  ok = ok and await until(pilot, lambda: all(store().category_of(j) == "auto/runs" for j in runs), 10)
+  check("Apply now: the 5 in no category put in", ok, [store().category_of(j) for j in runs])
+  # a changed rule: all jobs, another pattern: looks at the jobs again
+  await change(["assign", ["9020"], "elsewhere"])
+  await pilot.press("e"); await until(pilot, lambda: isinstance(app.screen, RuleFormScreen), 5); await pilot.pause(0.2)
+  app.screen.query_one("#rf-pattern").value = "run(1[0-4]|20)"
+  app.screen.query_one("#rf-scope-all").value = True
+  await pilot.press("ctrl+s"); await until(pilot, lambda: store().rule(rule["id"])["scope"] == "all", 10)
+  check("changed: it looks at the jobs again", store().rule(rule["id"])["after"] == 0)
+  await pilot.press("escape"); await pilot.pause(0.2)
+  await reload(app, pilot)
+  check("all: also moved out of another category", store().category_of("9020") == "auto/runs")
+  ok = await rules_window()
+  await pilot.press("delete"); await until(pilot, lambda: isinstance(app.screen, dialogs.ConfirmScreen), 5)
+  await pilot.click("#confirm-yes")
+  ok = await until(pilot, lambda: len(store().rules) == 1, 10)
+  check("delete: gone (its jobs stay)", ok and len(file_rules()) == 1 and store().category_of("9010") == "auto/runs")
+  await pilot.press("escape"); await pilot.pause(0.2)
+  await change(["delete", "auto"])
+  check("…a category deleted: its rules go too", store().rules == [] and file_rules() == [])
+  arrays(False)
+  await reload(app, pilot)
+
+async def t_hidden_categories(app, pilot):
+  """Hidden categories: Hide jobs in this category in the job list (h, in the categories window): the job list
+  leaves them out (those of the categories in it too) and its status line counts them; cat: shows them; a category
+  in a hidden one says so; Show … again; kept on the cluster"""
+  from slurp.ui.screens.categories import change_categories
+  await reload(app, pilot)
+  cluster = app.cluster
+  store = lambda: cluster.categories
+  async def change(op):
+    done = []
+    change_categories(app, cluster, op, lambda st, r: done.append(r))
+    await until(pilot, lambda: done, 10)
+  await change(["assign", ["9010", "9011"], "noise"])
+  await change(["assign", ["9012"], "noise/sub"])
+  app.action_categories()
+  await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10); await pilot.pause(0.3)
+  cs = app.screen
+  tree = cs.query_one("#cat-tree")
+  tree.move_cursor(find_node(tree, "noise")); await pilot.pause(0.4)
+  button = cs.query_one("#cat-hide")
+  check("the category's details: Hide jobs in this category in the job list", cs.path == "noise"
+        and str(button.label) == "Hide jobs in this category in the job list" and not button.disabled, (cs.path, str(button.label)))
+  await pilot.press("h")
+  ok = await until(pilot, lambda: store().hidden == {"noise"}, 10); await pilot.pause(0.3)
+  data = json.load(open(CATEGORIES_FILE))
+  check("h: hidden, kept on the cluster; now Show jobs in this category in the job list", ok and data["clusters"]["lab"].get("hidden") == ["noise"]
+        and str(button.label) == "Show jobs in this category in the job list"
+        and "Hidden in the job list" in str(cs.query_one("#cat-info").render()), str(button.label))
+  check("…the tree says so", "hidden" in str(find_node(tree, "noise").label))
+  tree.move_cursor(find_node(tree, "noise/sub")); await pilot.pause(0.4)
+  check("a category in it: hidden with it (its button off, it says so)", button.disabled and str(button.label) == "Hidden with noise"
+        and "with noise" in str(cs.query_one("#cat-info").render()), str(button.label))
+  app.show_view(None); await pilot.pause(0.5)
+  table = app.main.query_one("#jobs")
+  rows = [str(k.value) for k in table.rows]
+  check("the job list leaves them out (the one in noise/sub too)", not {"9010", "9011", "9012"} & set(rows) and "9013" in rows, rows[:12])
+  check("…its status line: 3 hidden jobs", "3 hidden jobs (in noise" in cluster.summary, cluster.summary[-140:])
+  await pilot.press("slash"); await pilot.pause(0.2)
+  app.main.query_one("#jfilter").value = "cat:noise"; await pilot.pause(0.5)
+  check("cat:noise shows them", sorted(str(k.value) for k in table.rows) == ["9010", "9011", "9012"] and "hidden" not in cluster.summary)
+  app.main.query_one("#jfilter").value = ""; await pilot.pause(0.3)
+  await pilot.press("escape"); await pilot.pause(0.2)
+  app.action_categories(); await until(pilot, lambda: isinstance(app.screen, CategoriesScreen), 10); await pilot.pause(0.3)
+  cs = app.screen
+  tree = cs.query_one("#cat-tree")
+  tree.move_cursor(find_node(tree, "noise")); await pilot.pause(0.4)
+  await pilot.click("#cat-hide")
+  ok = await until(pilot, lambda: store().hidden == set(), 10)
+  app.show_view(None); await pilot.pause(0.5)
+  rows = [str(k.value) for k in app.main.query_one("#jobs").rows]
+  check("Show jobs in this category in the job list: back, no hidden jobs said", ok and {"9010", "9011", "9012"} <= set(rows)
+        and "hidden" not in cluster.summary, cluster.summary[-120:])
+  await change(["delete", "noise"])
 
 async def t_status_page(app, pilot):
   """A failing login to a cluster whose site has a status page (rule pack: status): the footer says to check it, a
@@ -2456,6 +2651,8 @@ async def t_memory_watch(app, pilot):
   import time as _t
   os.environ["XDG_DATA_HOME"] = os.path.join(HERE, "xdg")
   import shutil as _sh; _sh.rmtree(os.environ["XDG_DATA_HOME"], ignore_errors=True)
+  from slurp.cluster import details as _d
+  _d.MEMORY.clear() # (a watch of an earlier scenario, its file under the XDG_DATA_HOME before this one: made again)
   js = await open_job(app, pilot, "9003")
   w = js.memory
   js.query_one("#memory-every").value = 300
@@ -3189,7 +3386,7 @@ async def t_drive(app, pilot):
   await pilot.click("#connstatus"); await pilot.pause(0.5)
   await pilot.click("#conn-reconnect")
   await until(pilot, lambda: "passphrase" in term(app), 15)
-  await pilot.press(*"pw123", "enter")
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
   await until(pilot, lambda: cluster.connection and cluster.connection.ready, 30)
   ok = await until(pilot, lambda: drive.state == "mounted", 40)
   listing = await asyncio.get_running_loop().run_in_executor(None, lambda: sorted(os.listdir(mnt)) if ok else [])
@@ -3328,7 +3525,8 @@ async def t_ssh_setup(app, pilot):
   await pilot.click("#cluster-add")
   ok = await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
   dlg = app.screen
-  check("+: the destination first (a Host of ~/.ssh/config, encouraged), the full settings folded", ok and app.focused is dlg.query_one("#cluster-destination")
+  check("+: as the endpoints' forms, the name first (focused), then the destination (a Host of ~/.ssh/config, encouraged), the full settings folded",
+        ok and app.focused is dlg.query_one("#cluster-name") and dlg.query_one("#cluster-destination")
         and dlg.query_one("#cluster-full").collapsed and "~/.ssh/config" in str(dlg.query_one("#cluster-hint").render()))
   dlg.query_one("#cluster-full").collapsed = False; await pilot.pause(0.2)
   for key, value in (("host", "127.0.0.1"), ("port", port), ("user", user), ("identities", relay)):
@@ -3336,11 +3534,12 @@ async def t_ssh_setup(app, pilot):
   dlg.query_one("#ssh-options").load_text("\n".join(known + ["ServerAliveInterval=5"]))
   from slurp.ui.screens.dialogs import SshCheckScreen
   dlg.query_one("#cluster-check-button").press()
-  ok = await until(pilot, lambda: isinstance(app.screen, SshCheckScreen) and "works" in check_term(app.screen), 30)
-  text = check_term(app.screen) if ok else ""
-  check("Check…: a window with a terminal, as the login goes: what needs no login, the login, the verdict, ssh's log",
+  # (60 s: in CI, the app slow then, it did not end within 30 s now and then; its terminal shown also when it fails)
+  ok = await until(pilot, lambda: isinstance(app.screen, SshCheckScreen) and "works" in check_term(app.screen), 60)
+  text = check_term(app.screen) if isinstance(app.screen, SshCheckScreen) else f"not the check window: {type(app.screen).__name__}"
+  check("Test: a window with a terminal, as the login goes: what needs no login, the login, the verdict, ssh's log",
         ok and "1. what needs no login" in text and f"port {port} answers" in text and "slurp-check: logged in" in text
-        and "✔ works: the login works" in text and "ssh -v" in text, text[-600:])
+        and "✔ works: the login works" in text and "ssh -v" in text, (text.strip()[-600:], "" if ok else process_state(app.screen)))
   await until(pilot, lambda: app.screen.session.done, 10); await pilot.pause(0.5)
   check("…done: the keys back to the window (Close has the focus), Esc closes", app.focused is app.screen.query_one("#sc-close"))
   await pilot.press("escape"); await pilot.pause(0.3)
@@ -3401,8 +3600,9 @@ async def t_ssh_edit(app, pilot):
         ok and dlg.query_one("#cluster-destination").value == "lab" and f"@127.0.0.1 port {port}" in config
         and str(dlg.query_one("#cluster-confirm").label) == "Save", config)
   dlg.query_one("#cluster-full").collapsed = False; await pilot.pause(0.2)
-  for key, value in (("host", "127.0.0.1"), ("port", port), ("user", getpass.getuser()), ("identities", relay), ("name", "lab-full")):
+  for key, value in (("host", "127.0.0.1"), ("port", port), ("user", getpass.getuser()), ("identities", relay)):
     dlg.query_one(f"#ssh-{key}").value = value
+  dlg.query_one("#cluster-name").value = "lab-full" # (the name: first, as the endpoints' forms)
   dlg.query_one("#ssh-options").load_text(f"UserKnownHostsFile={os.path.join(LAB, 'known_hosts')}")
   dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
   check("Save: the tab takes them (its name, its settings), kept; the session at its next login", cluster.name == "lab-full"
@@ -3419,8 +3619,9 @@ async def t_ssh_edit(app, pilot):
   # back to the Host of ssh_config
   app.edit_ssh_settings(cluster); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
   dlg = app.screen
-  for key in ("host", "port", "user", "identities", "name"):
+  for key in ("host", "port", "user", "identities"):
     dlg.query_one(f"#ssh-{key}").value = ""
+  dlg.query_one("#cluster-name").value = ""
   dlg.query_one("#ssh-options").load_text("")
   dlg.query_one("#cluster-destination").value = "lab"
   dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
@@ -3428,7 +3629,7 @@ async def t_ssh_edit(app, pilot):
         and cluster.connection.ssh_options == [], (cluster.name, cluster.ssh))
   app.disconnect(cluster); await pilot.pause(0.5); app.connect_tab()
   ok = await until(pilot, lambda: "passphrase" in term(app), 15)
-  await pilot.press(*"pw123", "enter")
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
   ok = await until(pilot, lambda: cluster.connection.ready, 30)
   check("…and it logs in as before", ok)
 
@@ -3455,7 +3656,7 @@ async def t_pre_login(app, pilot):
   ok = await until(pilot, lambda: "passphrase" in term(app), 15)
   check("it ends (said, with its exit code), then the SSH login as usual", ok and "ended with 3; the SSH login follows" in term(app)
         and open(signed).read().strip() == "signed with 42", term(app)[-400:])
-  await pilot.press(*"pw123", "enter")
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
   ok = await until(pilot, lambda: cluster.connection.ready, 30)
   check("…and it logs in", ok)
   app.action_connection(); await pilot.pause(0.8)
@@ -3468,13 +3669,490 @@ async def t_pre_login(app, pilot):
   await pilot.press(*"77", "enter")
   ok = await until(pilot, lambda: "passphrase" in check_term(app.screen), 20)
   check("…then the login asks for the passphrase there", ok and open(signed).read().strip() == "signed with 77", check_term(app.screen)[-400:])
-  await pilot.press(*"pw123", "enter")
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
   ok = await until(pilot, lambda: "works" in check_term(app.screen), 30)
   check("…the answer taken: it works", ok and "slurp-check: logged in" in check_term(app.screen), check_term(app.screen)[-400:])
   await until(pilot, lambda: app.screen.session.done, 10); await pilot.pause(0.5)
   await pilot.press("escape"); await pilot.pause(0.3)
   await pilot.press("escape"); await pilot.pause(0.3)
+  # only when the login fails without it (the lab's key needs its passphrase: a login that asks nothing fails); what
+  # it exports is there for the login
+  os.unlink(signed)
+  command2 = f"printf 'one-time code: '; read code; echo \"signed with $code\" > {signed}; export SLURP_SIGNED=yes"
   app.edit_ssh_settings(cluster); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
+  app.screen.query_one("#ssh-pre-login").value = command2
+  app.screen.query_one("#ssh-pre-login-fallback").value = True
+  app.screen.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
+  check("the box: saved with the tab", cluster.pre_login_fallback and cluster.connection.pre_login_fallback
+        and any(t.get("pre_login_fallback") for t in load_config().get("tabs") or []))
+  app.disconnect(cluster); await pilot.pause(0.5)
+  calls = os.path.join(LAB, "ssh_calls.log")
+  before = len(open(calls).read().splitlines())
+  app.connect_tab()
+  ok = await until(pilot, lambda: "one-time code:" in term(app), 20)
+  masters = [l for l in open(calls).read().splitlines()[before:] if " -M " in l]
+  check("first a login without it that asks nothing (it failed), then the command", ok and masters and "BatchMode=yes" in masters[0]
+        and "BatchMode=yes" not in cluster.connection.argv and not os.path.exists(signed), (masters, term(app)[-300:]))
+  await pilot.press(*"43", "enter")
+  ok = await until(pilot, lambda: "passphrase" in term(app), 15)
+  check("…what it exported is there for the login", ok and "it set SLURP_SIGNED for the login" in term(app), term(app)[-400:])
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
+  ok = await until(pilot, lambda: cluster.connection.ready, 30)
+  check("…and it logs in", ok and open(signed).read().strip() == "signed with 43")
+  check("logged in: the next login tries without it first again", not cluster.connection.pre_login_due)
+  app.edit_ssh_settings(cluster); await until(pilot, lambda: isinstance(app.screen, AddClusterScreen), 5)
+  check("the dialog shows the box", app.screen.query_one("#ssh-pre-login-fallback").value)
   app.screen.query_one("#ssh-pre-login").value = ""
   app.screen.query_one("#cluster-confirm").press(); await pilot.pause(0.5)
-  check("emptied: no command any more", cluster.pre_login == "" and cluster.connection.pre_login == "")
+  check("emptied: no command any more", cluster.pre_login == "" and cluster.connection.pre_login == "" and not cluster.pre_login_fallback)
+
+
+# ---- transfers: the lab's "cluster" is this machine, its login scripts print text (the junk) on every channel
+async def t_transfer_s3(app, pilot):
+  """S3 with the lab's tab: rclone on the cluster (the lab is this machine, with an S3 server in the test): refused
+  without the user's agreement to send the keys; detached up into the bucket, then as a transfer job down from it; the
+  keys file is gone after each run; a run again copies nothing"""
+  import glob
+  import urllib.request
+  from moto.server import ThreadedMotoServer
+  import boto3
+  from slurp.transfer import endpoints as E, model as M, secrets as S
+  server = ThreadedMotoServer(ip_address="127.0.0.1", port=0)
+  server.start()
+  try:
+    host, port = server.get_host_and_port()
+    url = f"http://{host}:{port}"
+    urllib.request.urlopen(urllib.request.Request(url + "/moto-api/reset", method="POST")).read()
+    client = boto3.client("s3", endpoint_url=url, aws_access_key_id="AK", aws_secret_access_key="SK", region_name="us-east-1")
+    client.create_bucket(Bucket="lab")
+    store = app.transfers.endpoint_store
+    store.add(E.EndpointDef("s3lab", "lab bucket", "s3", {"provider": "Other", "endpoint": url, "region": "us-east-1", "bucket": "lab"},
+                            ["access_key", "secret_key"]))
+    S.put(S.user("s3lab", "access_key"), "AK")
+    S.put(S.user("s3lab", "secret_key"), "SK")
+    lab = next(c for c in app.clusters if c.destination)
+    ref = M.tab_ref(lab)
+    src, dst = xfer_tree("s3")
+    check("a tab and S3: rclone on the cluster, or here over slurp's SSH",
+          E.rclone_routes(store, {"endpoint": E.tab_id(lab)}, {"endpoint": "s3lab"}) == ["rclone-cluster", "rclone-here"])
+    up = M.Transfer(M.new_id(), "up to S3", {"endpoint": E.tab_id(lab), "tab": ref, "paths": [src]},
+                    {"endpoint": "s3lab", "name": "lab bucket", "path": "/up"}, route="rclone-cluster", runs_on="detached")
+    app.transfers.add(up)
+    plan = app.transfers.rclone_check(up, lambda p: None)
+    check("the check: rclone on the lab, the bucket written", plan["routes"]["rclone-cluster"]["ok"] and "on lab" in plan["steps"]["rclone"]["text"]
+          and "can be written" in plan["steps"]["rclone"]["text"], plan)
+    up.plan = plan
+    app.transfers.run_now(up)
+    check("without the agreement to send the keys: refused", up.state == "failed" and "keys" in up.message, up.message)
+    up.secrets_to = {lab.destination: ["s3lab"]}
+    app.transfers.run_now(up)
+    check("detached: done", await until(pilot, lambda: up.state == "done", 90), (up.state, up.message, up.log[-4:]))
+    found = sorted(o["Key"] for o in client.list_objects_v2(Bucket="lab").get("Contents", []))
+    check("in the bucket", found == ["up/src/b.txt", "up/src/sub/a.bin"], found)
+    folder = up.runs[-1]["folder"]
+    check("the keys file is gone", folder and not os.path.exists(os.path.join(folder, "keys")), folder)
+    check("no key in the run's folder", not any("SK" in open(f, errors="replace").read().replace("SKIP", "")
+                                                for f in glob.glob(os.path.join(folder, "*")) if os.path.isfile(f)))
+    check("its progress was rclone's (bytes)", up.runs[-1]["bytes"] >= 400_000, up.runs[-1])
+    down = M.Transfer(M.new_id(), "down from S3", {"endpoint": "s3lab", "name": "lab bucket", "paths": ["/up/src"]},
+                      {"endpoint": E.tab_id(lab), "tab": ref, "path": dst}, route="rclone-cluster", runs_on="job",
+                      options={"time": "1:00:00"}, secrets_to={lab.destination: ["s3lab"]})
+    down.plan = {"routes": {"rclone-cluster": {"ok": True}}}
+    app.transfers.add(down)
+    app.transfers.run_now(down)
+    check("as a transfer job: done", await until(pilot, lambda: down.state == "done", 120), (down.state, down.message, down.log[-4:]))
+    check("the files", same_tree(src, os.path.join(dst, "src")))
+    check("…its keys gone too", not os.path.exists(os.path.join(down.runs[-1]["folder"], "keys")))
+    app.transfers.run_now(down)
+    check("a run again: done", await until(pilot, lambda: down.state == "done" and len(down.runs) == 2, 120), (down.state, down.message))
+    # rclone here, the lab reached over slurp's SSH session (sftp): for a cluster without rclone
+    from slurp.transfer import rclone as RC
+    relay = M.Transfer(M.new_id(), "up over SSH", {"endpoint": E.tab_id(lab), "tab": ref, "paths": [src]},
+                       {"endpoint": "s3lab", "name": "lab bucket", "path": "/relay"}, route="rclone-here", runs_on="slurp")
+    app.transfers.add(relay)
+    plan = app.transfers.rclone_check(relay, lambda p: None)
+    ready, why = RC.relay_ready()
+    if not ready: # (rclone here older than 1.64: no --sftp-ssh)
+      info = plan["routes"]["rclone-here"]
+      check("rclone here over SSH: needs rclone 1.64, said; the cluster route still there", not info["ok"] and "1.64" in info["why"]
+            and plan["routes"]["rclone-cluster"]["ok"] and plan["recommended"] == "rclone-cluster", plan)
+    else:
+      check("rclone here over SSH: checked", plan["routes"]["rclone-here"]["ok"] and "over slurp's SSH" in plan["steps"]["rclone"]["text"], plan)
+      relay.plan = plan
+      app.transfers.run_now(relay)
+      check("over SSH: done", await until(pilot, lambda: relay.state == "done", 90), (relay.state, relay.message, relay.log[-4:]))
+      found = sorted(o["Key"] for o in client.list_objects_v2(Bucket="lab").get("Contents", []) if o["Key"].startswith("relay/"))
+      check("…in the bucket", found == ["relay/src/b.txt", "relay/src/sub/a.bin"], found)
+      text = app.transfers.command_text(relay)
+      check("Copy as a command: plain ssh, no control socket", "ssh lab" in text.replace("'", "") or lab.destination in text, text)
+      results = []
+      app.transfers.verify(relay, results.append)
+      check("over SSH: Verify, the same", await until(pilot, lambda: results, 90) and results[0][0], results)
+      back = os.path.join(os.path.dirname(dst), "back")
+      down2 = M.Transfer(M.new_id(), "down over SSH", {"endpoint": "s3lab", "name": "lab bucket", "paths": ["/relay/src"]},
+                         {"endpoint": E.tab_id(lab), "tab": ref, "path": back}, route="rclone-here", runs_on="slurp")
+      down2.plan = {"routes": {"rclone-here": {"ok": True, "runs_on": ["slurp"]}}}
+      app.transfers.add(down2)
+      app.transfers.run_now(down2)
+      check("down over SSH: done, the files on the lab", await until(pilot, lambda: down2.state == "done", 90)
+            and same_tree(src, os.path.join(back, "src")), (down2.state, down2.message))
+      app.transfers.delete(down2)
+    # the Endpoints: Enter on the lab's tab: its connection window; on the bucket: its window
+    from slurp.ui.screens.connection import ConnectionScreen
+    from slurp.ui.screens.endpoint import EndpointScreen
+    await app.run_action("endpoints"); await pilot.pause(0.6)
+    table = app.screen.query_one("#ep-list")
+    keys = [table.coordinate_to_cell_key((i, 0)).row_key.value for i in range(table.row_count)]
+    table.move_cursor(row=keys.index(E.tab_id(lab))); table.focus(); await pilot.pause(0.2)
+    await pilot.press("enter"); await pilot.pause(0.6)
+    check("Endpoints: Enter on the lab: its connection window", isinstance(app.screen, ConnectionScreen) and app.screen.cluster is lab,
+          type(app.screen).__name__)
+    await pilot.press("escape"); await pilot.pause(0.3)
+    table = app.screen.query_one("#ep-list")
+    table.move_cursor(row=keys.index("s3lab")); table.focus(); await pilot.pause(0.2)
+    await pilot.press("enter"); await pilot.pause(0.6)
+    check("…on the bucket: its window", isinstance(app.screen, EndpointScreen) and app.screen.eid == "s3lab", type(app.screen).__name__)
+    await pilot.press("escape"); await pilot.pause(0.3)
+    for t in (up, down, relay):
+      app.transfers.delete(t)
+  finally:
+    server.stop()
+
+
+async def t_transfer_webdav(app, pilot):
+  """WebDAV with the lab's tab: rclone on the cluster (the lab: this machine), the password sent for the run (obscured
+  in the keys file, deleted when the run starts): detached up into the WebDAV folder; no password left"""
+  import glob
+  import socket
+  import subprocess
+  from slurp.transfer import endpoints as E, model as M, secrets as S
+  with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+  root = os.path.join(HERE, "davroot")
+  os.makedirs(root, exist_ok=True)
+  server = subprocess.Popen(["rclone", "--config", "", "serve", "webdav", root, "--addr", f"127.0.0.1:{port}", "--user", "dav",
+                             "--pass", "pw789"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+  try:
+    def listening():
+      try:
+        socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+        return True
+      except OSError:
+        return False
+    await until(pilot, listening, 10)
+    store = app.transfers.endpoint_store
+    store.add(E.EndpointDef("davlab", "lab dav", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"]))
+    S.put(S.user("davlab", "password"), "pw789")
+    lab = next(c for c in app.clusters if c.destination)
+    ref = M.tab_ref(lab)
+    src, _ = xfer_tree("dav")
+    t = M.Transfer(M.new_id(), "up to WebDAV", {"endpoint": E.tab_id(lab), "tab": ref, "paths": [src]},
+                   {"endpoint": "davlab", "name": "lab dav", "path": "/up"}, route="rclone-cluster", runs_on="detached",
+                   secrets_to={lab.destination: ["davlab"]})
+    app.transfers.add(t)
+    plan = app.transfers.rclone_check(t, lambda p: None)
+    check("WebDAV: the check passed (the folder made at the run)", plan["routes"]["rclone-cluster"]["ok"] and "is made at the run" in plan["steps"]["rclone"]["text"], plan)
+    t.plan = plan
+    app.transfers.run_now(t)
+    check("WebDAV: detached on the cluster: done", await until(pilot, lambda: t.state == "done", 90), (t.state, t.message, t.log[-4:]))
+    check("WebDAV: the files there", same_tree(src, os.path.join(root, "up", "src")))
+    folder = t.runs[-1]["folder"]
+    check("WebDAV: no password left in the run's folder", not os.path.exists(os.path.join(folder, "keys"))
+          and not any("pw789" in open(f, errors="replace").read() for f in glob.glob(os.path.join(folder, "*")) if os.path.isfile(f)))
+    app.transfers.delete(t)
+  finally:
+    server.kill()
+
+
+def xfer_tree(name, big=0):
+  """A source tree in the lab (the cluster) and an empty destination folder -> (source, destination)"""
+  src, dst = os.path.join(HERE, "xfer", name, "src"), os.path.join(HERE, "xfer", name, "dst")
+  os.makedirs(os.path.join(src, "sub"), exist_ok=True)
+  os.makedirs(dst, exist_ok=True)
+  with open(os.path.join(src, "sub", "a.bin"), "wb") as f:
+    f.write(os.urandom(400_000))
+  with open(os.path.join(src, "b.txt"), "w") as f:
+    f.write("hello")
+  if big:
+    with open(os.path.join(src, "big.bin"), "wb") as f:
+      f.write(os.urandom(big))
+  return src, dst
+
+def same_tree(a, b):
+  for root, _, files in os.walk(a):
+    for name in files:
+      p = os.path.join(root, name)
+      q = os.path.join(b, os.path.relpath(p, a))
+      if not os.path.exists(q) or open(p, "rb").read() != open(q, "rb").read():
+        return False
+  return True
+
+async def t_transfer_wizard(app, pilot):
+  """lab → this machine with the wizard: the check over SSH, the relay chosen, Go, done; Run now copies nothing"""
+  from slurp.ui.screens.transfers import TransferScreen, TransferWizard
+  src, dst = xfer_tree("wizard")
+  lab = app.cluster
+  await pilot.press("T"); await pilot.pause(0.4)
+  w = app.screen
+  check("T: the wizard, from the tab shown", isinstance(w, TransferWizard) and w.src is lab)
+  w.query_one("#tw-src-path").value = src
+  await pilot.click("#tw-src-path"); await pilot.press("enter"); await pilot.pause(0.2)
+  check("what the source holds, counted on the cluster", await until(pilot, lambda: "2 files" in str(w.query_one("#tw-src-paths").render()), 30),
+        str(w.query_one("#tw-src-paths").render()))
+  w.query_one("#tw-next").press(); await pilot.pause(0.3)
+  w.query_one("#tw-dst-tab").value = "local"; await pilot.pause(0.3) # (this machine)
+  w.query_one("#tw-dst-path").value = dst; await pilot.pause(0.2)
+  w.query_one("#tw-next").press(); await pilot.pause(0.3) # (the options: as they are)
+  w.query_one("#tw-next").press() # (the route)
+  check("the check over SSH ends", await until(pilot, lambda: w.plan.get("done"), 90), w.plan.get("steps"))
+  steps = str(w.query_one("#tw-check-steps").render())
+  check("rsync on both, what remains", "rsync 3" in steps and "in 2 files to copy" in steps, steps)
+  await pilot.pause(0.6)
+  relay_label = str(w.query_one(".tw-r-relay").label)
+  check("the relay passed, with its speed", relay_label.startswith("✓ relay") and "/s" in relay_label, relay_label)
+  check("a direct route needs a login by itself: not from this machine", not w.plan["routes"]["direct-pull"]["ok"])
+  await pilot.pause(0.6)
+  await pilot.click(w.query_one(".tw-r-relay")); await pilot.pause(0.4)
+  check("the relay: in slurp", w.chosen_route() == "relay" and w.chosen_runs_on() == "slurp", (w.chosen_route(), w.chosen_runs_on()))
+  w.query_one("#tw-next").press(); await pilot.pause(0.3) # (the summary)
+  w.query_one("#tw-go").press() # (Add)
+  await pilot.pause(0.5)
+  t = app.transfers.transfers[-1]
+  check("Add: added, not started", t.state == "new" and not t.runs, (t.state, t.runs))
+  app.transfers.run_now(t)
+  check("Run now: done through the relay", await until(pilot, lambda: t.state == "done", 90), (t.state, t.message, t.log[-4:]))
+  check("the files are on this machine", same_tree(src, os.path.join(dst, "src")))
+  check("its subtab", isinstance(app.screen, TransferScreen) and app.in_transfers)
+  app.transfers.start(t)
+  check("Run now: done again", await until(pilot, lambda: t.state == "done" and len(t.runs) == 2, 60), (t.state, t.message))
+  check("…and it copied nothing (idempotent)", (t.progress.get("stats") or {}).get("transferred") == 0, t.progress.get("stats"))
+  app.leave_transfers(); await pilot.pause(0.3)
+
+async def t_transfer_job(app, pilot):
+  """A transfer job on the lab: its progress from progress.json, Pause (scancel, after the warning), Continue (a new job), done"""
+  from slurp.transfer import model as M
+  from slurp.ui.screens.transfers import TransferScreen
+  src, dst = xfer_tree("job", big=30_000_000)
+  lab = next(c for c in app.clusters if c.destination)
+  ref = M.tab_ref(lab)
+  t = M.Transfer(M.new_id(), "job run", {"tab": ref, "paths": [src]}, {"tab": ref, "path": dst}, route="same-fs", runs_on="job",
+                 options={"partition": "normal", "time": "01:00:00", "bwlimit": "1"}, plan={"remaining_bytes": 30_400_005})
+  app.transfers.add(t)
+  tested = []
+  app.transfers.test_job(t, "same-fs", tested.append)
+  check("its job script tested on the cluster (sbatch --test-only)", await until(pilot, lambda: tested, 30)
+        and tested[0][0] is True and "to start at" in tested[0][1], tested)
+  app.transfers.run_now(t)
+  app.open_transfer(t); await pilot.pause(0.3)
+  check("submitted: a transfer job", await until(pilot, lambda: t.run.get("job"), 30) and t.state in ("queued", "running"), (t.state, t.message))
+  check("its progress from the cluster", await until(pilot, lambda: t.state == "running" and t.progress.get("bytes", 0) > 1_000_000, 40),
+        (t.state, t.progress))
+  calls = open(os.path.join(LAB, "sbatch_calls")).read()
+  check("sbatch with the job's script", f"XFER={t.run['job']}" in calls)
+  first = t.run["job"]
+  screen = app.screen
+  check("the details", isinstance(screen, TransferScreen))
+  # Its job, while it runs (just submitted: not in the job list as it was loaded): its job window, in the lab's tab
+  check("…not in the job list loaded before", first not in lab.jobs, list(lab.jobs)[:5])
+  await pilot.click("#xd-job")
+  from slurp.ui.screens.job import JobScreen
+  check("Its job: the job window of its transfer job", await until(
+    pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.job.jid == first and not app.in_transfers, 20),
+    (type(app.screen).__name__, getattr(getattr(app.screen, "job", None), "jid", None)))
+  app.open_transfer(t); await pilot.pause(0.5)
+  screen = app.screen
+  check("back in its details", isinstance(screen, TransferScreen) and t.state == "running", (type(screen).__name__, t.state))
+  await until(pilot, lambda: screen.query_one("#xd-pause").display and screen.query_one("#xd-pause").region.width > 0, 10)
+  await pilot.pause(0.3) # (laid out: the click lands on Pause)
+  await pilot.click("#xd-pause"); await pilot.pause(0.4)
+  check("Pause: it warns (the job is cancelled)", isinstance(app.screen, ConfirmScreen) and "cancels Slurm job" in str(app.screen.dialog_message))
+  await pilot.click("#confirm-yes")
+  check("paused", await until(pilot, lambda: t.state == "paused", 40), (t.state, t.message))
+  check("scancel of its job", first in open(os.path.join(LAB, "scancel_calls")).read())
+  t.options["bwlimit"] = ""
+  await pilot.click("#xd-resume")
+  check("Continue: a new job, done", await until(pilot, lambda: t.state == "done", 60), (t.state, t.message, t.log[-4:]))
+  check("another job", t.runs[-1]["job"] and t.runs[-1]["job"] != first, t.runs)
+  check("the history: paused, done", [r["result"] for r in t.runs] == ["paused", "done"], t.runs)
+  check("the files are whole", same_tree(src, os.path.join(dst, "src")))
+  folder = os.path.join(LAB, "cache", "slurp", "transfers", t.id)
+  check("its folder on the cluster: progress.json, result.json, the log", all(os.path.exists(os.path.join(folder, f)) for f in ("progress.json", "result.json", "log")))
+  app.leave_transfers(); await pilot.pause(0.3)
+
+async def t_transfer_detached(app, pilot):
+  """Detached on the lab's login node: followed in its folder there, done"""
+  from slurp.transfer import model as M
+  src, dst = xfer_tree("detached")
+  lab = next(c for c in app.clusters if c.destination)
+  ref = M.tab_ref(lab)
+  t = M.Transfer(M.new_id(), "detached run", {"tab": ref, "paths": [src]}, {"tab": ref, "path": dst}, route="same-fs", runs_on="detached")
+  app.transfers.add(t)
+  app.transfers.run_now(t)
+  check("done", await until(pilot, lambda: t.state == "done", 60), (t.state, t.message, t.log[-4:]))
+  check("the files", same_tree(src, os.path.join(dst, "src")))
+  ov_line = app.transfers.summary_for(lab)
+  check("nothing under way: no line in the overview", ov_line == "", ov_line)
+  app.open_transfer(t); await pilot.pause(0.5)
+  app.screen.action_open_end(0)
+  check("its source, a click: the folder on the cluster, in the cluster's tab", await until(
+    pilot, lambda: isinstance(app.screen, DirScreen) and app.screen.path == src and app.cluster is lab and not app.in_transfers, 20),
+    (type(app.screen).__name__, getattr(app.screen, "path", "")))
+  app.leave_transfers(); await pilot.pause(0.2)
+
+
+async def t_host_key_changed(app, pilot):
+  """The host key of the cluster changed: the reconnect fails, and while slurp tries again the overview does not look
+  connected: no Jobs, no health asked, Abort instead of Disconnect, and it says the host key changed"""
+  lab = next(c for c in app.clusters if c.destination)
+  known = os.path.join(LAB, "known_hosts")
+  saved = open(known).read()
+  other = open(os.path.join(HERE, "share", "otherkey.pub")).read().split()[:2]
+  try:
+    open(known, "w").write(saved.split()[0] + " " + " ".join(other) + "\n") # (another key for the host)
+    app.activate_cluster(app.clusters.index(lab), connect=False)
+    app.show_overview(); await pilot.pause(0.3)
+    lab.connection.kill_session() # (the session breaks: slurp reconnects by itself, and fails)
+    ov = app.screen
+    said = lambda: str(ov.query_one("#ov-ssh").render())
+    check("the reconnect fails on the changed host key: said", await until(pilot, lambda: "host key" in said() and "changed" in said(), 60), said())
+    check("…not shown as connected: no Jobs, no health", not ov.query_one("#ov-links").display and not ov.query_one("#ov-health").display)
+    button = ov.query_one("#ov-disconnect")
+    check("…Abort instead of Disconnect", ov.query_one("#ov-disconnect-row").display and "Abort" in str(button.label), str(button.label))
+    button.press(); await pilot.pause(0.5)
+    check("Abort: not connected, Connect", ov.query_one("#ov-connect-row").display and not lab.connection.wanted)
+  finally:
+    open(known, "w").write(saved)
+  app.connect_tab()
+  await until(pilot, lambda: "passphrase" in term(app), 30); await pilot.pause(0.3)
+  await pilot.pause(0.5); await pilot.press(*"pw123", "enter") # (after the prompt: ssh flushes what was typed before it)
+  check("the right key back: connected again", await until(pilot, lambda: lab.connection.ready, 30))
+  app.show_overview()
+  check("…Disconnect again", await until(pilot, lambda: isinstance(app.screen, OverviewScreen)
+                                          and "Disconnect" in str(app.screen.query_one("#ov-disconnect").label), 10))
+
+async def t_shell_here(app, pilot):
+  """The directory browser on the lab: Shell here (s): a shell in a subtab that starts in that directory, there"""
+  from slurp.ui.screens.files import DirScreen, open_path
+  folder = os.path.join(LAB, "shell here")
+  os.makedirs(folder, exist_ok=True)
+  open_path(app, ["files"], folder); await pilot.pause(1.0)
+  check("the directory browser", isinstance(app.screen, DirScreen), type(app.screen).__name__)
+  app.screen.query_one("#dir").focus(); await pilot.press("s")
+  ok = await until(pilot, lambda: isinstance(app.screen, TerminalScreen), 15)
+  await pilot.pause(2.0) # (its login: the lab's slow login scripts)
+  await pilot.press(*"pwd", "enter")
+  check("a shell, in that directory on the lab", ok and await until(pilot, lambda: sterm(app).count(folder) >= 1 and "pwd" in sterm(app), 15),
+        sterm(app)[-400:])
+  app.action_close_view(); await pilot.pause(0.5)
+
+async def t_transfer_rclone_errors(app, pilot):
+  """rclone on the cluster that fails in plain text (an older rclone: an option it does not know, exit 1), as a transfer
+  job: the cause in the transfer's message and errors, in the run's log, and in the job's output file (it was empty)"""
+  import glob
+  import socket
+  import subprocess
+  import time
+  from slurp.transfer import endpoints as E, model as M, secrets as S
+  davroot = os.path.join(HERE, "rcerr-dav")
+  os.makedirs(os.path.join(davroot, "run1"), exist_ok=True)
+  open(os.path.join(davroot, "run1", "a.txt"), "w").write("a")
+  with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+  dav = subprocess.Popen(["rclone", "--config", "", "serve", "webdav", davroot, "--addr", f"127.0.0.1:{port}", "--user", "dav", "--pass", "pw"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+  for _ in range(50):
+    try:
+      socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+      break
+    except OSError:
+      time.sleep(0.2)
+  fake = os.path.join(LAB, "fakebin", "rclone")
+  with open(fake, "w") as f:
+    f.write('#!/bin/sh\nif [ "$1" = version ]; then echo "rclone v1.50.2"; exit 0; fi\n'
+            'echo "Error: unknown flag: --use-json-log" >&2\necho "Usage:" >&2\necho "  rclone copy source:path dest:path [flags]" >&2\n'
+            'echo "2026/11/18 20:00:00 Fatal error: unknown flag: --use-json-log" >&2\nexit 1\n')
+  os.chmod(fake, 0o755)
+  try:
+    store = app.transfers.endpoint_store
+    store.add(E.EndpointDef("davx", "dav failing", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"]))
+    S.put(S.user("davx", "password"), "pw")
+    lab = next(c for c in app.clusters if c.destination)
+    _, dst = xfer_tree("rcerr")
+    t = M.Transfer(M.new_id(), "dav to lab", {"endpoint": "davx", "name": "dav", "paths": ["/run1"]},
+                   {"endpoint": E.tab_id(lab), "tab": M.tab_ref(lab), "path": dst}, route="rclone-cluster", runs_on="job",
+                   options={"partition": "normal", "time": "0:10:00"}, secrets_to={lab.destination: ["davx"]})
+    t.plan = {"routes": {"rclone-cluster": {"ok": True, "runs_on": ["detached", "job"]}}}
+    app.transfers.add(t)
+    app.transfers.run_now(t)
+    check("failed", await until(pilot, lambda: t.state == "failed", 90), (t.state, t.message))
+    check("its message: rclone's cause", "unknown flag: --use-json-log" in t.message and "Usage" not in t.message, t.message)
+    check("…its errors too, without rclone's usage", any("unknown flag" in e for e in t.errors) and not any("rclone copy source" in e for e in t.errors), t.errors)
+    folder = t.runs[-1]["folder"] if t.runs else ""
+    check("it ran (in its folder)", bool(folder), (t.message, t.runs[-1:], t.log[-5:]))
+    log = open(os.path.join(folder, "log")).read() if folder else ""
+    check("the run's log: the rclone it ran, its command, the cause", "rclone v1.50.2" in log and "== rclone --config" in log
+          and "unknown flag" in log and "slurp: rclone ended with 1" in log, log[-800:])
+    outs = glob.glob(os.path.join(folder, "job-*.out"))
+    out = open(outs[0]).read() if outs else ""
+    check("the job's output file: the run and its log, not empty", "== run" in out and "unknown flag" in out and "the run ended with 1" in out, out[-800:])
+    app.transfers.delete(t)
+  finally:
+    os.remove(fake)
+    dav.kill()
+
+async def t_transfer_job_queued(app, pilot):
+  """A transfer job that waits in the queue, after a run before it: not taken as ended by the result of that run (it
+  was: the new run "ended" at once with the old exit code, and its keys were removed before the job started: rclone
+  found no remote, "didn't find section in config file")"""
+  import socket
+  import subprocess
+  import time
+  from slurp.transfer import endpoints as E, model as M, secrets as S
+  davroot = os.path.join(HERE, "queued-dav")
+  os.makedirs(os.path.join(davroot, "run1"), exist_ok=True)
+  open(os.path.join(davroot, "run1", "a.txt"), "w").write("a")
+  with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+  dav = subprocess.Popen(["rclone", "--config", "", "serve", "webdav", davroot, "--addr", f"127.0.0.1:{port}", "--user", "dav", "--pass", "pw",
+                          "--dir-cache-time", "0s"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) # (no cache: a file added is seen)
+  queue = os.path.join(LAB, "xfer_queue")
+  try:
+    for _ in range(50):
+      try:
+        socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+        break
+      except OSError:
+        time.sleep(0.2)
+    store = app.transfers.endpoint_store
+    store.add(E.EndpointDef("davq", "dav queued", "webdav", {"url": f"http://127.0.0.1:{port}", "user": "dav"}, ["password"]))
+    S.put(S.user("davq", "password"), "pw")
+    lab = next(c for c in app.clusters if c.destination)
+    _, dst = xfer_tree("queued")
+    t = M.Transfer(M.new_id(), "dav to lab, queued", {"endpoint": "davq", "name": "dav", "paths": ["/run1"]},
+                   {"endpoint": E.tab_id(lab), "tab": M.tab_ref(lab), "path": dst}, route="rclone-cluster", runs_on="job",
+                   options={"partition": "normal", "time": "0:10:00"}, secrets_to={lab.destination: ["davq"]})
+    t.plan = {"routes": {"rclone-cluster": {"ok": True, "runs_on": ["detached", "job"]}}}
+    app.transfers.add(t)
+    app.transfers.run_now(t)
+    check("the first run: done", await until(pilot, lambda: t.state == "done", 90), (t.state, t.message))
+    open(os.path.join(davroot, "run1", "b.txt"), "w").write("b")
+    open(queue, "w").write("8")
+    app.transfers.run_now(t)
+    check("the second: submitted", await until(pilot, lambda: t.run.get("job") and t.state in ("queued", "running"), 30), (t.state, t.message))
+    folder = t.run.get("folder", "")
+    await pilot.pause(4)
+    app.transfers.reload([t]); await pilot.pause(2)
+    check("while it waits in the queue: not ended by the run before", t.state in ("queued", "running") and len(t.runs) == 1,
+          (t.state, t.message, len(t.runs)))
+    check("…its keys still there for it", os.path.exists(os.path.join(folder, "keys")), os.listdir(folder) if folder else None)
+    check("then it runs: done, the new file there", await until(pilot, lambda: t.state == "done" and len(t.runs) == 2, 90)
+          and os.path.exists(os.path.join(dst, "run1", "b.txt")), (t.state, t.message, t.errors[-3:], [os.path.join(r, f) for r, _, fs in os.walk(dst) for f in fs],
+                                                                  open(os.path.join(folder, "log")).read()[-1500:] if folder else ""))
+    app.transfers.delete(t)
+  finally:
+    if os.path.exists(queue):
+      os.remove(queue)
+    dav.kill()

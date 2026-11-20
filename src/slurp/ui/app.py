@@ -53,6 +53,7 @@ from ..config import load_config, update_config
 from ..links.share import ShareManager, SFTP_SERVERS, MAX_FAILURES, available as share_available
 from .screens.links import ShellChoiceScreen, LinkSetupScreen, LinkScreen, DriveScreen
 from .screens.script import ScriptScreen # (registers the view of batch scripts)
+from .transfers_tab import CLUSTER_ACTIONS, TransfersTab
 from ..links import mounts
 from ..checks.engine import check_jobs, counts as checks_counts, SEVERITY_ICON, SEVERITY_STYLE, ERROR, WARNING
 
@@ -82,10 +83,10 @@ def checks_cell(findings):
 
 def new_session(cluster):
   """The SSH session of a tab (not started): its destination, with its full SSH settings if it has them"""
-  return RemoteSSH(cluster.destination, sshsetup.ssh_args(cluster.ssh), cluster.pre_login)
+  return RemoteSSH(cluster.destination, sshsetup.ssh_args(cluster.ssh), cluster.pre_login, cluster.pre_login_fallback)
 
 
-class Slurp(App):
+class Slurp(TransfersTab, App):
   TITLE = "slurp"
   ENABLE_COMMAND_PALETTE = False # (Textual's palette and its ⭘ in the header: the menu of the job list has what slurp does)
   CSS = """
@@ -136,6 +137,7 @@ class Slurp(App):
   #cluster-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 1; }
   #cluster-tabs Button.cluster-tab { margin-right: 0; }
   #cluster-tabs #about { dock: right; margin-right: 0; text-style: bold; }
+  #cluster-tabs Button.transfers-tab { margin-right: 3; }
   #view-tabs { height: 1; padding: 0 1; background: $boost; }
   #view-tabs Button { height: 1; min-height: 1; padding: 0 1; margin-right: 0; }
   #view-tabs Button.view-close { width: 3; min-width: 3; padding: 0; margin-right: 1; color: $text-muted; }
@@ -235,6 +237,7 @@ class Slurp(App):
   #dpath:focus { background: $surface; }
   #dplaces { width: auto; height: 1; }
   #dplaces Button { margin-left: 1; min-width: 6; }
+  #dshell { margin-left: 1; min-width: 6; }
   #dir { height: 1fr; }
   #hstatus, #hpage { height: 1; padding: 0 1; background: $panel; }
   #hbody { height: 1fr; }
@@ -262,6 +265,7 @@ class Slurp(App):
     Binding("t", "cluster_shell", "Shell", show=False),
     Binding("d", "login_dir", "Open a directory", show=False),
     Binding("F", "cluster_drive", "Map a directory", show=False),
+    Binding("T", "transfer_data", "Transfer data", show=False),
     Binding("W", "web_access", "Web", show=False),
     Binding("i", "interactive_job", "Interactive job", show=False),
     Binding("C", "cluster_info", "Health", show=False),
@@ -296,6 +300,7 @@ class Slurp(App):
       cluster = ClusterSession(tab.get("name") or destination or "Local", destination)
       cluster.ssh = sshsetup.clean(tab.get("ssh")) if destination else None
       cluster.pre_login = str(tab.get("pre_login") or "") if destination else ""
+      cluster.pre_login_fallback = bool(tab.get("pre_login_fallback")) and bool(cluster.pre_login)
       cluster.since_value = tab.get("since") or "1d"
       cluster.scope = tab.get("scope") or "me"
       cluster.collapse_arrays = tab.get("collapse_arrays", True)
@@ -314,6 +319,7 @@ class Slurp(App):
     self.problems_only = False # the job list shows only jobs with errors or warnings of the checks
     self.job_column_keys = None
     self.spinner_frame = 0
+    self.init_transfers() # (the Transfers tab: transfers_tab.py)
 
   def get_default_screen(self):
     return MainScreen()
@@ -375,6 +381,9 @@ class Slurp(App):
     from .. import update
     if update.enabled():
       in_background(self, update.latest_version, self.version_found, group="update", connection=None)
+    from . import icons
+    if icons.style() == "nerd": # (an icon font installed by an older slurp: this one's, so that new icons are no boxes)
+      in_background(self, icons.update_installed_font, self.icon_font_updated, group="icon-font", connection=None)
     self.view_kind = "web" if self.is_web else "terminal" # (under the session holder: of the active view)
     self.theme_applied = None
     self.apply_theme()
@@ -424,6 +433,10 @@ class Slurp(App):
 
   def shutdown(self):
     """End the shells, logins and remote shells of all tabs (their subtabs are kept for the next start first)"""
+    try:
+      self.transfers.shutdown() # (runs through slurp: paused, so that rsync keeps what it copied)
+    except Exception as e:
+      log.debug(f"pausing the transfers at the end: {e!r}")
     try:
       self.save_tabs()
       from .restore import session_ended
@@ -475,6 +488,24 @@ class Slurp(App):
     cluster.attempts += 1
     cluster.ready_generation = None
 
+  def too_many_keys(self, c, lines):
+    """The server ended the login after too many keys (ssh offers the agent's keys before the configured one, e.g. a
+    certificate it offers last): once, the login again with only the configured keys (IdentitiesOnly=yes: they may come
+    from the agent too), and how to keep it so. True if it logs in again"""
+    if not any("Too many authentication failures" in line for line in lines) or "IdentitiesOnly=yes" in c.ssh_options:
+      return False
+    cluster = next((x for x in self.clusters if x.connection is c), None)
+    if cluster is None:
+      return False
+    c.ssh_options += ["-o", "IdentitiesOnly=yes"]
+    c.event("too many authentication failures: logging in again with only the configured keys (IdentitiesOnly=yes)")
+    self.notify(f"{cluster.destination} refused after too many keys (the agent's are offered first): logging in again with "
+                f"only the configured key. To keep it so, add \"IdentitiesOnly yes\" to Host {cluster.destination} in "
+                "~/.ssh/config", title=cluster.name, severity="warning", timeout=15)
+    cluster.broken_at = None
+    self.login(cluster, show=cluster.show_login)
+    return True
+
   def needs_login(self, cluster):
     """A remote tab without a live session (none yet, closed, or broken with the login process gone)"""
     if not cluster.destination:
@@ -490,6 +521,7 @@ class Slurp(App):
     if not 0 <= index < len(self.clusters):
       return
     cluster = self.clusters[index]
+    self.in_transfers = False # (a cluster tab is shown)
     if connect and self.needs_login(cluster):
       cluster.attempts = 0
       self.login(cluster)
@@ -576,6 +608,10 @@ class Slurp(App):
 
   def select_cluster(self, index):
     """A click on a tab: show it (one without a session shows Connect); on the active tab again: log in"""
+    if self.in_transfers: # (from the Transfers tab: that tab is shown)
+      self.leave_transfers(index)
+      self.save_tabs()
+      return
     if index == self.cluster_index:
       if self.needs_login(self.cluster):
         self.connect_tab()
@@ -674,7 +710,7 @@ class Slurp(App):
       mode = "overview"
       if self.clusters:
         self.cluster.current_view = mode
-    if self.clusters:
+    if self.clusters and not self.is_transfers_mode(mode):
       history = self.cluster.view_history
       if mode in history:
         history.remove(mode)
@@ -732,6 +768,9 @@ class Slurp(App):
     self.refresh_status()
 
   def action_close_view(self):
+    if self.in_transfers:
+      self.close_current_transfer_view()
+      return
     if self.current_mode == "_default":
       self.close_jobs()
       return
@@ -756,6 +795,9 @@ class Slurp(App):
                                    "Close"), lambda ok: self.close_view(view) if ok else None)
 
   def refresh_view_tabs(self, screen):
+    if getattr(screen, "TRANSFERS", False): # (a window of the Transfers tab: its own subtabs)
+      self.refresh_transfer_tabs(screen)
+      return
     bar = screen.query("#view-tabs").first(Horizontal) if screen.query("#view-tabs") else None
     jobs = bar.query("#view-jobs") if bar is not None else None
     if not jobs:
@@ -808,6 +850,9 @@ class Slurp(App):
       what.append(f"its {shells} shell{'s' if shells > 1 else ''}")
     if len(cluster.views) > shells:
       what.append(f"its other subtabs ({len(cluster.views) - shells})")
+    moving = self.transfers_for_tab(cluster)
+    if moving:
+      what.append(f"the connection of {len(moving)} transfer{'s' if len(moving) > 1 else ''} under way (they wait for the tab)")
     self.push_screen(ConfirmScreen(f"Close the tab {cluster.name}?", f"This ends {', '.join(what[:-1])} and {what[-1]}."
                                    if len(what) > 1 else f"This ends {what[0]}.", "Close tab"),
                      lambda ok: self.close_cluster(cluster) if ok else None)
@@ -819,7 +864,7 @@ class Slurp(App):
     if cluster not in self.clusters:
       return
     index = self.clusters.index(cluster)
-    current = cluster is self.cluster
+    current = cluster is self.cluster and not self.in_transfers
     if cluster.loader is not None:
       cluster.loader.abort.set()
       cluster.loader.cancel()
@@ -849,8 +894,9 @@ class Slurp(App):
         self.cluster_index = 0
         remote.ssh_connection = None
         self.populate()
-    elif index < self.cluster_index:
-      self.cluster_index -= 1
+    elif index < self.cluster_index or (self.in_transfers and self.cluster_index >= len(self.clusters)):
+      self.cluster_index = max(0, min(self.cluster_index - (index < self.cluster_index), len(self.clusters) - 1))
+      remote.ssh_connection = self.cluster.connection if self.clusters else None
     self.main.set_class(not self.clusters, "-no-tabs")
     self.refresh_status()
     self.save_tabs()
@@ -865,10 +911,12 @@ class Slurp(App):
         log.debug(f"keeping the subtabs of {c.name}: {e!r}")
         return None
     update_config(tabs=[{"destination": c.destination, "since": c.since_value, "scope": c.scope,
-                         "collapse_arrays": c.collapse_arrays, **({"ssh": c.ssh, "name": c.name} if c.ssh else {}),
-                         **({"pre_login": c.pre_login} if c.pre_login else {}), "views": views(c)}
+                         "collapse_arrays": c.collapse_arrays, **({"ssh": c.ssh} if c.ssh else {}),
+                         **({"name": c.name} if c.ssh or c.name != (c.destination or "Local") else {}),
+                         **({"pre_login": c.pre_login} if c.pre_login else {}),
+                         **({"pre_login_fallback": True} if c.pre_login and c.pre_login_fallback else {}), "views": views(c)}
                         for c in self.clusters],
-                  active=self.cluster_index)
+                  active=self.cluster_index, transfers_tab=self.transfers_state())
 
   def restore_views(self, cluster=None):
     """The subtabs of the last run of a tab, opened again when it is ready (connected, its job list loaded)"""
@@ -887,6 +935,8 @@ class Slurp(App):
       return
     settings = sshsetup.clean(destination.get("ssh")) if isinstance(destination, dict) else None
     pre_login = str(destination.get("pre_login") or "").strip() if isinstance(destination, dict) else ""
+    fallback = bool(destination.get("pre_login_fallback")) and bool(pre_login) if isinstance(destination, dict) else False
+    name = str(destination.get("name") or "").strip() if isinstance(destination, dict) else "" # (the tab's own name)
     if isinstance(destination, dict):
       destination = destination.get("destination") or ""
     self.main.remove_class("-no-tabs")
@@ -895,11 +945,11 @@ class Slurp(App):
       cluster.ssh = settings
       self.clusters.append(cluster)
     elif not destination or is_local_destination(destination):
-      self.clusters.append(ClusterSession("Local" if not destination else destination))
+      self.clusters.append(ClusterSession(name or ("Local" if not destination else destination)))
     else:
-      self.clusters.append(ClusterSession(destination, destination))
+      self.clusters.append(ClusterSession(name or destination, destination))
     if self.clusters[-1].destination:
-      self.clusters[-1].pre_login = pre_login
+      self.clusters[-1].pre_login, self.clusters[-1].pre_login_fallback = pre_login, fallback
     from ..cluster import jobcache
     jobcache.load(self.clusters[-1])
     self.refresh_cluster_tabs()
@@ -914,18 +964,20 @@ class Slurp(App):
         return
       settings = sshsetup.clean(result.get("ssh")) if isinstance(result, dict) else None
       pre_login = str(result.get("pre_login") or "").strip() if isinstance(result, dict) else ""
+      fallback = bool(result.get("pre_login_fallback")) and bool(pre_login) if isinstance(result, dict) else False
+      name = str(result.get("name") or "").strip() if isinstance(result, dict) else ""
       if isinstance(result, dict) and not settings:
         result = result.get("destination") or ""
       destination = settings["host"] if settings else str(result or "").strip()
       if not destination:
         self.notify("a tab of a cluster needs a destination (this machine: add a tab with an empty one)", severity="warning")
         return
-      changed = (destination, settings, pre_login) != (cluster.destination, cluster.ssh, cluster.pre_login)
-      cluster.destination, cluster.ssh, cluster.pre_login = destination, settings, pre_login
-      cluster.name = sshsetup.label(settings) if settings else destination
+      changed = (destination, settings, pre_login, fallback) != (cluster.destination, cluster.ssh, cluster.pre_login, cluster.pre_login_fallback)
+      cluster.destination, cluster.ssh, cluster.pre_login, cluster.pre_login_fallback = destination, settings, pre_login, fallback
+      cluster.name = sshsetup.label(settings) if settings else (name or destination)
       c = cluster.connection
       if c is not None: # (the session takes them at its next login)
-        c.destination, c.ssh_options, c.pre_login = destination, sshsetup.ssh_args(settings), pre_login
+        c.destination, c.ssh_options, c.pre_login, c.pre_login_fallback = destination, sshsetup.ssh_args(settings), pre_login, fallback
       self.refresh_cluster_tabs()
       self.save_tabs()
       self.refresh_status()
@@ -990,6 +1042,8 @@ class Slurp(App):
         button.display = bool(self.new_version)
         if self.new_version and str(button.label) != f"⬆ slurp {self.new_version}":
           button.label = f"⬆ slurp {self.new_version}"
+    if self.spinner_frame % 4 == 0: # (each second) the transfers: their schedules, the runs on clusters
+      self.transfers.tick()
     if self.spinner_frame % 4 == 0: # (each second) the drives on this machine
       for c in self.clusters:
         if c.drive is not None:
@@ -1017,6 +1071,14 @@ class Slurp(App):
         lines = [line.strip() for line in t.vt.display if line.strip()] if t.vt is not None else []
         if lines and c.state != "closed":
           c.event("ssh said: " + " | ".join(lines[-3:]))
+        if c.state == "broken" and c.wanted and self.too_many_keys(c, lines):
+          continue # (logging in again, with the configured keys only)
+        if c.state == "broken" and c.wanted and c.retry_now: # (the login without the command before it failed: with it, now)
+          c.retry_now = False
+          c.event("the login without the command before it failed: running the command, then the login")
+          cluster.broken_at = None
+          self.login(cluster, show=True)
+          continue
       if c.ready and cluster.ready_generation != c.generation: # (re)connected
         cluster.ready_generation, cluster.attempts, cluster.show_login = c.generation, 0, False
         cluster.broken_at = None
@@ -1080,7 +1142,7 @@ class Slurp(App):
 
   def status_hint(self, cluster):
     """" · check status.cscs.ch" (a link) for a tab whose site has a status page (rule packs), else None"""
-    from ..checks.rulepacks import status_page
+    from ..sites import status_page
     url = status_page(cluster.name, cluster.destination or "")
     if not url:
       return None
@@ -1155,7 +1217,7 @@ class Slurp(App):
         continue
       existing = {button.id: button for button in tabs.query("Button.cluster-tab")}
       for index, cluster in enumerate(self.clusters):
-        variant = "primary" if index == self.cluster_index else "default"
+        variant = "primary" if index == self.cluster_index and not self.in_transfers else "default"
         label = self.tab_label(cluster)
         button_id = f"cluster-tab-{index}"
         if button_id in existing:
@@ -1168,6 +1230,7 @@ class Slurp(App):
           tabs.mount(Button(label, id=button_id, classes="cluster-tab", variant=variant, compact=True),
                      Button("✕", id=f"cluster-close-{index}", classes="cluster-close", compact=True, tooltip="close the tab"),
                      before=add.first())
+      self.refresh_transfers_button(tabs)
       for button in tabs.query("Button.cluster-tab, Button.cluster-close"): # of closed tabs
         if int(button.id.rsplit("-", 1)[1]) >= len(self.clusters):
           button.remove()
@@ -1180,9 +1243,14 @@ class Slurp(App):
         self.refresh_view_tabs(screen)
     cluster = self.cluster
     loading, connection = self.load_text(cluster), self.connection_text(cluster)
+    if self.in_transfers: # (the Transfers tab has no connection of its own)
+      loading, connection = Text(""), Text("Transfers", style="dim")
     links = self.links_text()
     if links is not None:
       connection = Text.assemble(connection, links)
+    moving = self.transfers.footer()
+    if moving:
+      connection = Text.assemble(connection, (f" · {moving}", "bold cyan"))
     for screen in dict.fromkeys([self.main, *self.screen_stack]):
       if not isinstance(screen, SplitScreen) or not screen.is_mounted:
         continue
@@ -1192,7 +1260,7 @@ class Slurp(App):
       for widget in screen.query("#connstatus"):
         widget.update(connection)
         for other in HEALTH_STYLES:
-          widget.set_class(other == level and bool(cluster.destination), f"-{other}")
+          widget.set_class(other == level and bool(cluster.destination) and not self.in_transfers, f"-{other}")
       if isinstance(screen, MainScreen) and screen.query("#reload"):
         self.show_no_slurm(cluster)
         stale = self.stale_text(cluster)
@@ -1309,9 +1377,9 @@ class Slurp(App):
         self.refresh_status()
     self.push_screen(LinkSetupScreen(kind, title, cluster.name, argv, path=path, read_only_argv=read_only_argv), created)
 
-  def action_cluster_drive(self):
-    """The login directory of the tab as a drive for the user's own machine (SFTP)"""
-    cluster = self.cluster
+  def action_cluster_drive(self, cluster=None):
+    """The login directory of the tab (None: the current one) as a drive for the user's own machine (SFTP)"""
+    cluster = cluster or self.cluster
     if cluster.destination and (cluster.connection is None or not cluster.connection.ready):
       self.notify(f"{cluster.name}: log in first", severity="warning")
       return
@@ -1457,6 +1525,8 @@ class Slurp(App):
     button = self.screen.query_one("#menu", Button)
     at = (button.region.x, button.region.y + 1)
     def chosen(action):
+      if action and self.in_transfers and action in CLUSTER_ACTIONS: # (it acts on a cluster: its tab first)
+        self.leave_transfers()
       if action:
         self.call_later(self.run_action, action)
     self.push_screen(MenuScreen(at), chosen)
@@ -1619,6 +1689,31 @@ class Slurp(App):
       return
     self.new_version = version
     self.notify(f"slurp {version} is available (this is {__version__}): ⬆ in the title bar says how to update", timeout=12)
+
+  def action_check_updates(self):
+    """Check for updates (the menu): PyPI asked now (also with the check at the start off); a newer slurp: how to
+    update it (a skipped version too: asked for), else said"""
+    from .. import update
+    self.notify("asking PyPI for the newest slurp …", timeout=4)
+    in_background(self, lambda: update.latest_version(timeout=10, force=True), self.updates_checked, group="update", connection=None)
+
+  def updates_checked(self, version):
+    from .. import update, __version__
+    from .screens.dialogs import UpdateScreen
+    if not version:
+      self.notify("PyPI did not answer (offline? a proxy?): try again later", title="Check for updates", severity="warning", timeout=8)
+    elif update.newer(version, __version__):
+      self.new_version = version
+      self.push_screen(UpdateScreen(version))
+    else:
+      self.notify(f"slurp {__version__} is the newest" + (f" (PyPI has {version})" if version != __version__ else ""),
+                  title="Check for updates", timeout=6)
+
+  def icon_font_updated(self, path):
+    from .icons import RESTART
+    if path:
+      self.notify(f"slurp's icon font, installed in {os.path.dirname(path)}, is updated to this version's: {RESTART} "
+                  "to see all the icons in it", title="icons", timeout=15)
 
   def show_update(self):
     from .screens.dialogs import UpdateScreen
@@ -1793,6 +1888,8 @@ class Slurp(App):
   def check_action(self, action, parameters):
     if not self.clusters and action not in ("quit", "command_palette", "help_quit", "view_help", "about", "guides", "rule_catalogue", "options"):
       return False # no tab: only + (and quit)
+    if self.in_transfers and action in CLUSTER_ACTIONS:
+      return False # (the Transfers tab: no cluster of its own; from the menu the cluster tab is shown first)
     if action == "reload": # a key of the job table, not of the other windows
       return self.screen is self.main
     if action in ("switch_side", "close_shell"):
@@ -1853,6 +1950,7 @@ class Slurp(App):
         accounts = slurm_accounts()
       jobs = load_jobs(since, scope, accounts)
       self.load_categories(cluster)
+      self.apply_category_rules(cluster, jobs)
       # the list is shown now; the command, error file and progress of each job (files on the cluster) follow. Until
       # then a job keeps what the last load found, and a new one shows spinners
       known = cluster.jobs
@@ -1884,6 +1982,25 @@ class Slurp(App):
       if not getattr(cluster, "told_categories", False):
         cluster.told_categories = True
         self.call_from_thread(self.notify, f"the categories cannot be read: {e}", title=cluster.name, severity="warning", timeout=12)
+
+  def apply_category_rules(self, cluster, jobs):
+    """(in a worker of the tab, after the categories are read) the rules of the categories on the jobs listed: the
+    file is written only if one has something to do (a job to put in, newer jobs to note as seen); said"""
+    from ..cluster import categories
+    store = cluster.categories
+    pairs = [(job.jid, job.rec.get("JobName") or "") for job in jobs]
+    if store is None or not store.rules or not store.rules_due(pairs) or cluster.slurm_cluster is None:
+      return
+    try:
+      store, done = categories.change(cluster.slurm_cluster, lambda st: st.apply_rules(pairs))
+    except (OSError, ValueError) as e:
+      log.warning(f"category rules of {cluster.name}: {e}")
+      return
+    cluster.categories = store
+    if done:
+      text = "; ".join(f"{len(jids)} job{'s' if len(jids) != 1 else ''} put in {path}" for path, jids in done.items())
+      log.info(f"category rules of {cluster.name}: {text}")
+      self.call_from_thread(self.notify, f"by the rules of the categories: {text}", title=cluster.name, timeout=8)
 
   def write_pending_categories(self, cluster):
     """(in a worker of the tab) the changes to the categories made while the cluster could not be reached: on the
@@ -2285,7 +2402,10 @@ class Slurp(App):
     pattern = self.job_filter.casefold()
     from ..cluster.categories import within
     only = self.job_filter.strip()[4:].strip().strip("/") if pattern.startswith("cat:") else None # (cat:a/b: that category)
-    visible_jobs = [job for job in all_jobs if (not self.problems_only or job_has_problems(job)) and (
+    # (the jobs of hidden categories: left out, unless cat: asks for a category)
+    hidden = [job for job in all_jobs if store and job.category and store.hidden_by(job.category)] if only is None else []
+    hidden_ids = {job.jid for job in hidden}
+    visible_jobs = [job for job in all_jobs if job.jid not in hidden_ids and (not self.problems_only or job_has_problems(job)) and (
       (not job.category if only == "-" else within(job.category, only) and (job.category or not only)) if only is not None else
       not pattern or pattern in " ".join(str(value or "") for value in (
       job.jid, job.rec.get("JobName"), job.state, job.rec.get("User"), job.rec.get("Account"),
@@ -2361,6 +2481,10 @@ class Slurp(App):
       status += f" · {len(finished)} finished since {cluster.since:%m-%d %H:%M}, {sum(j.node_hours() for j in finished):.1f} node hours"
     if pattern:
       status += f" · {len(visible_jobs)} of {len(all_jobs)} jobs match '{self.job_filter}'"
+    if hidden:
+      tops = sorted({store.hidden_by(job.category) for job in hidden})
+      status += (f" · {len(hidden)} hidden job{'s' if len(hidden) != 1 else ''} (in {', '.join(tops[:3])}{' …' if len(tops) > 3 else ''}:"
+                 " K, Show in the job list)")
     if self.problems_only:
       status += f" · only the {len(visible_jobs)} jobs with problems (!: all)"
     if errors:

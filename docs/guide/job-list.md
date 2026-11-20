@@ -76,11 +76,50 @@ category, with their numbers: `c` there (or on any job of the window) puts
 the job selected in a category.
 **New** (`n`), **Rename** (`e`: another path moves it with all it has, into an
 existing category they merge), **Delete** (`Del`: its jobs go to the category
-it is in), **Categorize…** (`c`) and **Take job out** (`x`) for the job
-selected, **In the job list** (`l`) and **Reload** (`r`). **Notes…** (`o`)
+it is in), **Categorize…** (`c`) and **Take job out** (`x`) for the marked
+jobs or else the one selected (`m` marks a job and moves on, `M` marks all of
+them or none, as in the job list), **In the job list** (`l`) and **Reload** (`r`). **Notes…** (`o`)
 annotates the category selected in Markdown (what it is for, how its runs
 differ, links); the window shows the notes rendered under its numbers, a
 rename takes them along.
+
+### Hidden categories
+
+**Hide jobs in this category in the job list** (`h`, under the numbers of the
+category selected) leaves the jobs of a category you are not interested in
+out of the job list, with those of the categories in it. The status line says
+how many it leaves out (*3 hidden jobs (in noise …)*), the tree marks the
+category *hidden*, and its details say so; a category in a hidden one says
+it is hidden with it. **Show jobs in this category in the job list** brings
+them back. `cat:noise` in the job list's filter shows them all the same. The
+hidden categories are kept with the categories on the cluster.
+
+### Rules: jobs into a category by their name
+
+**Rules…** (`u` in the categories window) puts jobs in a category by
+themselves, when the job list loads. A rule has a pattern of job names, a
+regular expression for the whole name (`ci-[0-9]+` takes `ci-1234`, not
+`ci-1234-b`; `ci-.*` takes all that start with `ci-`), and the category they go
+into (`CI`). Which jobs it takes:
+
+- **New jobs only**: those submitted from now on; the jobs of the job list now
+  are left as they are.
+- **Jobs in no category**: those of the job list now, and the new ones.
+- **All jobs**: also moved out of another category.
+
+The form shows, as you type, how many jobs of the job list the pattern matches
+and a few of their names. The rules window lists every rule with how many jobs
+of the job list it **matches now** (and how many of them are not in its
+category yet); the categories window names the rules of the category selected.
+**Apply now…** (`a`) applies the rule selected to all the jobs of the job list
+at once: the ones in no category, or also those in another one.
+
+A rule looks at each job once: a job you take out of its category by hand is
+not put back. Of several rules, the first that matches a job has it. A changed
+pattern, category or scope looks at the jobs again; `Space` turns a rule off
+and on. The rules are kept with the categories on the cluster; a rename of a
+category takes its rules along, a delete removes them. slurp says when a rule
+has put jobs in a category.
 
 The categories are kept on the cluster, in `~/.config/slurp/categories.json`
 in your home there, so slurp on your own machine and slurp on the login node

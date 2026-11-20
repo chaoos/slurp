@@ -1,4 +1,4 @@
-"""The add dialog keeps Cancel, Check… and Add in view, also on a small terminal with the full settings unfolded and
+"""The add dialog keeps Test, Cancel and Add in view, also on a small terminal with the full settings unfolded and
 much in them"""
 import asyncio
 

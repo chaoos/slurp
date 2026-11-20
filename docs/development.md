@@ -23,7 +23,8 @@ src/slurp/            the package (installed with pip; `slurp` is slurp.cli:main
   cli.py launch.py      the command line, how slurp starts itself again
   config.py state.py    settings kept between runs; logging and the data of the tabs
   cluster/              Slurm here or over SSH: the connection, jobs, their files, storage, categories
-  checks/               the checks of batch scripts: engine, rules, site rule packs (packs/*.toml), fixes, guides
+  checks/               the checks of batch scripts: engine, rules, fixes, guides
+  sites/                the site packs (packs/*.toml): what slurp knows about a site that Slurm does not tell
   links/                shells, drives and web views on your own machine, the session holder, sshfs;
                         windows/ and linux/: the slurp helper
   ui/                   the Textual app, its widgets, terminals and logo; screens/: the windows

@@ -130,3 +130,4 @@ class MainScreen(SplitScreen):
       self.app.activate_cluster(self.app.cluster_index, connect=False) # (no login at the start: Connect in the overview)
     else:
       self.set_class(True, "-no-tabs")
+    self.app.restore_transfers() # (the subtabs of the Transfers tab, and the tab itself if it was shown)

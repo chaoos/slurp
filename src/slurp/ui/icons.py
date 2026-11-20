@@ -17,6 +17,37 @@ from ..config import load_config
 
 STYLES = ("nerd", "symbols", "none")
 FONT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "slurp-icons.ttf")
+# (a terminal that keeps one process for all its windows, GNOME Terminal, Konsole: a new window keeps the old font)
+RESTART = "quit the terminal completely (all its windows) and start it again"
+
+def font_folder():
+  """Where this user's fonts are (slurp --install-font puts slurp's there); None on Windows (its font viewer installs)"""
+  import sys
+  if sys.platform == "win32":
+    return None
+  return os.path.expanduser("~/Library/Fonts") if sys.platform == "darwin" else \
+    os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "fonts")
+
+def update_installed_font():
+  """An installed copy of slurp's icon font (slurp --install-font, of an older slurp: icons added since are boxes in
+  the terminal) made the same as this slurp's -> its path if it was updated, else None (none installed, the same,
+  or it cannot be written)"""
+  import shutil
+  import subprocess
+  folder = font_folder()
+  path = os.path.join(folder, os.path.basename(FONT)) if folder else None
+  try:
+    if path is None or not os.path.exists(path):
+      return None
+    with open(path, "rb") as a, open(FONT, "rb") as b:
+      if a.read() == b.read():
+        return None
+    shutil.copyfile(FONT, path)
+  except OSError:
+    return None
+  if shutil.which("fc-cache"):
+    subprocess.run(["fc-cache", "-f", folder], check=False, capture_output=True)
+  return path
 
 
 ICONS = {
@@ -47,6 +78,7 @@ ICONS = {
   "about": ("?", 0xF02FD, "information_outline"),
   "quit": ("⎋", 0xF0206, "exit_to_app"),
   "array": ("⊞", 0xF0136, "checkbox_multiple_blank"),
+  "transfer": ("⇅", 0xF048A, "send"), # (the glyph of submit: in the font already)
   # actions
   "connect": ("⇄", 0xF0318, "lan_connect"),
   "reconnect": ("⇄", 0xF031A, "lan_pending"),
