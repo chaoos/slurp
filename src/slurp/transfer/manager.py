@@ -1420,7 +1420,7 @@ def average_rate(history, seconds=30):
   return (end_b - start[1]) / span if span > 0 else 0.0
 
 def site_of(cluster):
-  from ..checks.rulepacks import site_pack
+  from ..sites import site_pack
   return site_pack(cluster.name, cluster.destination or "") if cluster is not None else {}
 
 def _copy(plan):

@@ -1,4 +1,5 @@
-"""Site rule packs: what the checks should know about a cluster that Slurm does not tell.
+"""Site packs: what slurp should know about a site that Slurm does not tell (for the checks, transfers, the overview,
+the login).
 
 A pack is a TOML file. The built-in ones are in packs/ next to this module, the user's own in
 ~/.config/slurp/rules/ (they take precedence). A pack applies when one of its "match" patterns (fnmatch) matches the

@@ -366,7 +366,7 @@ class ConnectionScreen(ModalScreen):
 
   def site_status(self):
     """When the login fails: the cluster may be down; its site's status page (a link), if a rule pack knows it"""
-    from ...checks.rulepacks import status_page
+    from ...sites import status_page
     url = status_page(self.cluster.name, self.cluster.destination or "")
     text = Text("\nThe cluster may be down or in maintenance: ", style="yellow")
     if url:

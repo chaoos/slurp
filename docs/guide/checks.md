@@ -110,12 +110,12 @@ the tab's cluster.
 **Site rule packs** add what Slurm does not tell: scratch purge days, parallel
 filesystems, NUMA domains per node, the GPU architecture, site plugin options
 of `sbatch`, the software stacks (`stacks`, if not found), rules that do not apply, and site advice. A pack is a TOML file
-in `src/slurp/checks/packs/` (included: CSCS Alps, and JSC's JURECA, JUWELS, JUSUF and
+in `src/slurp/sites/packs/` (included: CSCS Alps, and JSC's JURECA, JUWELS, JUSUF and
 JEDI) or in
 `~/.config/slurp/rules/`; it applies when one of its `match` patterns matches
 the tab, its SSH destination or the login node's host name. It can also name
 the site's documentation (`docs`, for the guides) and its status page
-(`status`, shown when the login fails). See `src/slurp/checks/rulepacks.py` for the keys.
+(`status`, shown when the login fails). See `src/slurp/sites/__init__.py` for the keys.
 
 **Without the UI**, `slurp check job.sh ...` prints the findings of batch
 scripts (on the machine it runs on, e.g. a login node): exit code 1 if a script

@@ -1142,7 +1142,7 @@ class Slurp(TransfersTab, App):
 
   def status_hint(self, cluster):
     """" · check status.cscs.ch" (a link) for a tab whose site has a status page (rule packs), else None"""
-    from ..checks.rulepacks import status_page
+    from ..sites import status_page
     url = status_page(cluster.name, cluster.destination or "")
     if not url:
       return None

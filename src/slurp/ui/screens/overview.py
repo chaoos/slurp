@@ -259,7 +259,7 @@ class OverviewScreen(SplitScreen):
 
   def pack(self, cluster):
     import fnmatch
-    from ...checks.rulepacks import load_packs
+    from ...sites import load_packs
     names = [n.lower() for n in (cluster.name, cluster.destination or "") if n]
     names += [n.split("@")[-1] for n in names if "@" in n]
     return next((p for p in load_packs() if any(fnmatch.fnmatch(n, pat.lower()) for pat in p.get("match", []) for n in names)), {})

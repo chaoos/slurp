@@ -532,8 +532,8 @@ def gather_facts(force=False):
   for line in res[6].stdout.splitlines():
     f.bashrc.append(line.strip())
   f.default_account = res[7].stdout.strip().splitlines()[0].strip() if res[7].stdout.strip() else ""
-  from . import rulepacks
-  f.site = rulepacks.pack_for(key, getattr(conn(), "destination", "") or "", f)
+  from .. import sites
+  f.site = sites.pack_for(key, getattr(conn(), "destination", "") or "", f)
   f.stacks = detect_stacks(f, bool(res[8].stdout.strip()))
   f.core = parse_core_facts(res[9].stdout if len(res) > 9 else "")
   with _facts_lock:
