@@ -265,9 +265,14 @@ class OverviewScreen(SplitScreen):
     return next((p for p in load_packs() if any(fnmatch.fnmatch(n, pat.lower()) for pat in p.get("match", []) for n in names)), {})
 
   def site(self, cluster):
-    """The site's status page and documentation (a click opens them), if a rule pack knows the site"""
+    """The site pack of the tab (its name and version) and the site's status page and documentation (a click opens
+    them), if a pack knows the site"""
+    from ...sites import pack_name
     pack = self.pack(cluster)
     text = Text()
+    if pack:
+      text.append(pack_name(pack) + (f" · pack {pack['version']}" if pack.get("version") else "") + ("" if pack.get("_builtin") else " (yours)"),
+                  style="dim")
     for key, label in (("status", "status"), ("docs", "docs")):
       url = str(pack.get(key) or "")
       if url.startswith(("https://", "http://")):

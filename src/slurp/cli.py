@@ -11,13 +11,25 @@ import time
 from .launch import slurp_command
 
 
+class VersionAction(argparse.Action):
+  """--version: slurp's version and the site packs it reads (with their versions), as lines"""
+  def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, help="show the version of slurp "
+               "and of its site packs, and exit"):
+    super().__init__(option_strings, dest, nargs=0, default=default, help=help)
+
+  def __call__(self, parser, namespace, values, option_string=None):
+    from . import VERSION_TEXT
+    from .sites import packs_table
+    print("\n".join([f"slurp {VERSION_TEXT}", *packs_table()]))
+    parser.exit()
+
+
 def check_main(argv):
   """slurp check FILE...: the checks of batch scripts as text, on the machine it runs on (e.g. a login node).
   Exit code 1 if a script has errors, 2 if a file cannot be read."""
-  from . import VERSION_TEXT
   parser = argparse.ArgumentParser(prog="slurp check", description="Check Slurm batch scripts (the rules of slurp's "
                                    "rule catalogue: slurp check --rules lists them).")
-  parser.add_argument("--version", action="version", version=f"slurp {VERSION_TEXT}")
+  parser.add_argument("--version", action=VersionAction)
   parser.add_argument("files", nargs="*", metavar="FILE")
   parser.add_argument("--no-probe", action="store_true", help="only the script itself: no paths, programs or quota")
   parser.add_argument("--rules", action="store_true", help="print the rule catalogue (Markdown) and exit")
@@ -88,7 +100,7 @@ def main():
                                    "clusters over SSH (one tab per cluster, added with +). "
                                    "'slurp check FILE...' checks batch scripts without the UI.")
   from . import VERSION_TEXT, __version__
-  parser.add_argument("--version", action="version", version=f"slurp {VERSION_TEXT}")
+  parser.add_argument("--version", action=VersionAction)
   parser.add_argument("--log", metavar="FILE", help="write a debug log (all slurm commands that are run) to FILE")
   parser.add_argument("--serve", action="store_true", help="serve the app in a browser with textual-serve")
   parser.add_argument("--host", default="127.0.0.1", help="web server bind address for --serve (default: 127.0.0.1)")

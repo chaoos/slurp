@@ -91,7 +91,29 @@ def pack_text(pack):
     return ""
   version = str(pack.get("version") or "")
   where = "built in" if pack.get("_builtin") else f"yours: {pack.get('_path', '')}"
-  return f"{pack.get('name') or os.path.basename(pack.get('_path', '')) or 'a site pack'}" + (f", version {version}" if version else "") + f" ({where})"
+  return f"{pack_name(pack)}" + (f", version {version}" if version else "") + f" ({where})"
+
+def pack_name(pack):
+  return str(pack.get("name") or os.path.basename(pack.get("_path", "")).removesuffix(".toml") or "a site pack")
+
+def packs_table(packs=None):
+  """The packs this slurp reads, as lines (slurp --version): name, version, built in or yours (its file)"""
+  packs = load_packs() if packs is None else packs
+  if not packs:
+    return [f"site packs (format {SCHEMA}): none"]
+  width = max(len(pack_name(p)) for p in packs)
+  return [f"site packs (format {SCHEMA}):"] + [
+    f"  {pack_name(p):<{width}}  {str(p.get('version') or '-'):<10}  " + ("built in" if p.get("_builtin") else f"yours: {p.get('_path', '')}")
+    for p in packs]
+
+def packs_line(packs=None):
+  """The packs this slurp reads, in one line (About slurp): the built-in ones, then yours"""
+  packs = load_packs() if packs is None else packs
+  def names(group):
+    return ", ".join(pack_name(p) + (f" {p['version']}" if p.get("version") else "") for p in group)
+  builtin, yours = [p for p in packs if p.get("_builtin")], [p for p in packs if not p.get("_builtin")]
+  parts = ([f"built in: {names(builtin)}"] if builtin else []) + ([f"yours ({user_dir()}): {names(yours)}"] if yours else [])
+  return "; ".join(parts) + f" (format {SCHEMA})" if parts else "none"
 
 @functools.lru_cache(maxsize=64)
 def status_page(tab, destination):

@@ -119,8 +119,9 @@ the site's documentation (`docs`, for the guides) and its status page
 
 Each pack has a `schema` (the version of its format: slurp leaves out a pack
 of a newer schema than it reads; without one: 1) and a `version` (the date
-of its content, `YYYY.MM.DD`). The rule catalogue of a tab says which pack
-applies there, its version, and whether it is built in or yours.
+of its content, `YYYY.MM.DD`). The rule catalogue and the overview of a tab say
+which pack applies there, its version, and whether it is built in or yours;
+About slurp (`?` → slurp) and `slurp --version` list all packs slurp reads.
 
 **Without the UI**, `slurp check job.sh ...` prints the findings of batch
 scripts (on the machine it runs on, e.g. a login node): exit code 1 if a script

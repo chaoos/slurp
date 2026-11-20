@@ -534,8 +534,8 @@ The name of a category: `a/b` is b in the category a (made too, if it is new). R
 with all it has; into a category that exists, the two are merged.
 """),
   "AboutScreen": ("About slurp", """
-slurp in general (how it works, where to find what), its version (and the commit it runs from), and the machine it
-runs on: host, system, CPUs, memory, load, user; how this slurp runs (in the background, its views), the active tab,
+slurp in general (how it works, where to find what), its version (and the commit it runs from), the site packs it reads
+(with their versions; the active tab's pack), and the machine it runs on: host, system, CPUs, memory, load, user; how this slurp runs (in the background, its views), the active tab,
 where its settings and logs are. **Copy details** copies the version and the machine as text, for a bug report.
 """),
   "HelperSetupScreen": ("The slurp helper", """
@@ -929,6 +929,8 @@ def about_facts(app):
   f["libraries"] = ", ".join(libs)
   path = cloudflare.binary()
   f["cloudflared"] = f"{cloudflare.version(path) or '?'} ({path})" if path else "not here (downloaded when a web link through Cloudflare is made)"
+  from ...sites import packs_line, pack_text, site_pack
+  f["packs"] = packs_line()
   # the machine
   f["host"] = socket.getfqdn()
   f["hostname"] = platform.node()
@@ -985,13 +987,15 @@ def about_facts(app):
     c = cluster.connection
     f["tab"] = (f"{cluster.name}: " + (f"SSH {cluster.destination}" + (f", login node {c.hostname} as {c.user}" if c is not None and c.hostname else "")
                                         if cluster.destination else "this machine"))
+    f["tab_pack"] = pack_text(site_pack(cluster.name, cluster.destination or "")) or "none (only what slurp finds itself)"
   return f
 
 FACTS = [("Version", [("slurp", "version"), ("from", "commit"), ("installed in", "package"), ("Python", "python"),
-                      ("libraries", "libraries"), ("cloudflared", "cloudflared")]),
+                      ("libraries", "libraries"), ("cloudflared", "cloudflared"),
+                      ("site packs", "packs")]),
          ("This machine (slurp runs here)", [("host", "host"), ("hostname", "hostname"), ("system", "os"), ("CPUs", "cpus"),
                                              ("memory", "memory"), ("load", "load"), ("up for", "uptime"), ("user", "user")]),
-         ("This slurp", [("process", "process"), ("runs", "session"), ("view", "view"), ("active tab", "tab"),
+         ("This slurp", [("process", "process"), ("runs", "session"), ("view", "view"), ("active tab", "tab"), ("its site pack", "tab_pack"),
                          ("config", "config"), ("logs", "state")])]
 
 def about_text(facts):
