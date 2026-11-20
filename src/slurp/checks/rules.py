@@ -8,7 +8,7 @@ import re
 import shlex
 
 from .engine import (
-  rule, Finding, ERROR, WARNING, INFO, RULES, parse_time, time_text, parse_mem, mem_text, to_int, known_options, output_pattern, referenced_paths, strip_comment, submit_options, is_placeholder
+  rule, Finding, ERROR, WARNING, INFO, RULES, core_dirs, parse_time, time_text, parse_mem, mem_text, to_int, known_options, output_pattern, referenced_paths, strip_comment, submit_options, is_placeholder
 )
 
 def F(rule_id, evidence, line=None, severity="", fix="", snippet=""):
@@ -1022,6 +1022,82 @@ def q07(ctx):
       yield F("Q07", f"no --output: the log slurm-<job id>.out goes to the working directory {wd}, in ${where[0]}"
                      + (" (the script changes to scratch only after Slurm opened it)" if cds else ""), ctx.directive_line("chdir"), severity,
               snippet=f"#SBATCH --output={scratch}/logs/%x-%j.out")
+
+def core_limit(ctx):
+  """(core files allowed: True, False or None (not known), why, line): the script's ulimit -c, else the login shell's
+  (Slurm passes the limits of the shell sbatch runs in on to the job)"""
+  core = ctx.facts.core if ctx.facts else {}
+  hard = core.get("hard", "")
+  for line, t in reversed(list(ctx.script.code_lines())):
+    m = re.search(r"\bulimit\s+(?:-[a-zA-Z]+\s+)*-[SH]*c\s*(\S+)", t)
+    if m:
+      value = m.group(1)
+      if value == "0":
+        return False, f"the script switches them off ({t.strip()}, line {line})", line
+      if hard == "0":
+        return False, f"the script asks for them ({t.strip()}), but the hard limit is 0", line
+      return True, f"the script allows them ({t.strip()}, line {line})", line
+  soft = core.get("soft", "")
+  if soft == "0":
+    return False, "your login shell has ulimit -c 0", None
+  if soft == "unlimited" or soft.isdigit():
+    return True, (f"your login shell allows them (ulimit -c {soft}), and Slurm passes the limits of the shell sbatch "
+                  "runs in on to the job"), None
+  return None, "", None
+
+def size_text(n):
+  for unit in ("bytes", "kB", "MB", "GB", "TB"):
+    if n < 1024 or unit == "TB":
+      return f"{n:.0f} {unit}" if unit == "bytes" else f"{n:.1f} {unit}"
+    n /= 1024
+
+@rule("Q08", WARNING, "Core dumps in $HOME",
+      "The programs of the job run in $HOME (or project storage) while core files are allowed, or core files are "
+      "already there. A crashing program writes its core file (a copy of its memory) into the directory it runs in, "
+      "its working directory: where sbatch was run (or --chdir), changed by the script's cd or srun --chdir. Not "
+      "where the program or the script is: a program from $HOME run in scratch dumps to scratch. Core files are "
+      "allowed by ulimit -c in the script, or in your login shell (often set in .bashrc): Slurm passes the limits of "
+      "the shell sbatch runs in on to the job.",
+      "A core file is as big as the memory the program used, often gigabytes, and every task that crashes writes its "
+      "own (core.<pid>): an MPI job of 128 ranks can write hundreds of GB within seconds. The small home quota is full, "
+      "and then other jobs, and even logging in, fail. The files are easy to miss: they are named core or core.12345.",
+      "Run in scratch (#SBATCH --chdir=/scratch/…, or cd $SCRATCH/run || exit 1), or switch core files off in the "
+      "script: ulimit -c 0 (most are never looked at). To debug a crash, allow them only in a run in scratch. Delete "
+      "the core files that are there (they are only useful with the exact program that wrote them).",
+      "# sbatch run in $HOME, no --chdir: the job runs in $HOME\nulimit -c unlimited\nsrun ./sim    # 128 ranks crash: "
+      "128 core files in $HOME\n\nulimit -c 0   # better: no core files (or run in scratch)")
+def q08(ctx):
+  env = ctx.facts.env if ctx.facts else {}
+  pattern = (ctx.facts.core if ctx.facts else {}).get("pattern", "")
+  allowed, why_limit, limit_line = core_limit(ctx)
+  dirs = core_dirs(ctx)
+  if pattern.startswith("/"): # (the cluster writes them to one place)
+    where = os.path.dirname(pattern)
+    dirs = [(where, f"the cluster writes core files there (core_pattern {pattern})", None)] if "%" not in where else []
+  dumped = any("core dumped" in text for text in (ctx.logs or {}).values())
+  started = ctx.job.rec.get("Start", "") if ctx.job is not None else ""
+  for d, why, line in dirs:
+    where = storage_of(d, env)
+    if not where or where[0] == "SCRATCH":
+      continue
+    info = ctx.probe("c", d)
+    n, size, newest = ([int(x) for x in info.file.split()] + [0, 0, 0])[:3] if info and info.exists and info.file.strip() else (0, 0, 0)
+    place = f"in ${where[0]}" + ("" if d == where[1] else f" ({where[1]})")
+    snippet = "ulimit -c 0    # no core files" + (f"\n#SBATCH --chdir={env['SCRATCH']}/run    # or run in scratch" if env.get("SCRATCH") else "")
+    if n:
+      import datetime
+      when = datetime.datetime.fromtimestamp(newest)
+      mine = started and when.isoformat() >= started
+      yield F("Q08", f"{n} core file{'s' if n > 1 else ''} ({size_text(size)}) in {d}, the newest of {when:%Y-%m-%d %H:%M}"
+                     + (", after this job started" if mine else "") + f": the programs run there, {place}: {why}"
+                     + (f"; core files: {why_limit}" if why_limit else "") + (" (the log says: core dumped)" if dumped else ""),
+              line or limit_line, ERROR if size >= 1024 ** 3 and where[0] == "HOME" else WARNING,
+              fix=f"delete them: find {d} -maxdepth 1 -type f \\( -name core -o -name 'core.[0-9]*' \\) -ls (check, then -delete); then: "
+                  + RULES["Q08"].fix,
+              snippet=snippet)
+    elif allowed and not pattern.startswith("|"):
+      yield F("Q08", f"the programs run in {d}, {place}: {why}; core files: {why_limit}. A crash writes one per task there"
+                     + (" (the log says: core dumped)" if dumped else ""), line or limit_line, snippet=snippet)
 
 @rule("B09", WARNING, "Heavy work on the login node",
       "Your processes on the login node that keep CPUs busy for a long time.",

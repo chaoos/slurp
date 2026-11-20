@@ -6,6 +6,14 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- New rule Q08: core dumps in `$HOME`. A crash writes its core file into the
+  program's working directory: where sbatch was run (or `--chdir`), changed by
+  the script's `cd` or `srun --chdir`; where the program or the script is does
+  not matter. Said when the programs run in home (or project storage) while
+  core files are allowed (the script's `ulimit -c`, else the login shell's,
+  which Slurm passes on to the job), and when core files are there already:
+  how many, how big, whether after the job started, and which of these put
+  them there (an error from 1 GB in home).
 - Icons in the browser: the page waits for the icon font before it draws
   (at most 3 s). The terminal of the page keeps each glyph as first drawn:
   icons drawn before the font came stayed boxes until a hover drew them again.
