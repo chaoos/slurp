@@ -3083,6 +3083,7 @@ async def t_lazy(app, pilot):
     keys = [k.value for k in t.columns]
     return t.get_row(jid)[keys.index(key)]
   import slurp.cluster.jobs as sj
+  await until(pilot, lambda: app.cluster.loader is None, 60) # (the load after the login may still read the files of the jobs)
   real_run_many, seen = sj.run_many, []
   sj.run_many = lambda cmds, *a, **k: (seen.extend(cmds), real_run_many(cmds, *a, **k))[1]
   try:
