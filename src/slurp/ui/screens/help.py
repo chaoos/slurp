@@ -632,14 +632,22 @@ Which directory of the tab's cluster to open, in a new subtab (each time another
 Enter), your scratch, project, … (`$SCRATCH`, `$PROJECT`, `$STORE`, `$WORK`, those set on the cluster), or a path
 typed in the field below (`~/…` and relative paths are in your home). `Esc` cancels.
 """),
+  "SiteClusterScreen": ("Choose a cluster to log in to", """
+The clusters of the site packs (built in, and yours in `~/.config/slurp/rules/`): the cluster, its site, its host,
+how it logs in (directly or through a jump host; the command before the login, or a key) and the pack's version.
+Type to search: every word must match the cluster, its site, its host or the pack (`juwels booster`, `cscs`, `lumi`;
+`jülich`, `juelich` and `julich` are the same). `↑` `↓` move in the list while you type; below it, how the highlighted
+one logs in, what it needs on this machine and what to do once. `Enter`, a click or **Choose** takes it: it fills in
+the form, to see and change before **Add**. `Esc` cancels.
+"""),
   "AddClusterScreen": ("A new SSH connection", """
 A new tab, as the forms of the endpoints. **Name**: the tab's name, shown everywhere (empty: the destination; no two
 tabs with one name). The best way to reach it: an **SSH destination**, a Host of your `~/.ssh/config` with the
 cluster's user, jump hosts and keys (suggested as you type; ssh, scp and your other tools use it too), or
 `user@host`; blank: this machine.
 
-**From a site** (a new tab): a cluster slurp knows how to log in to (CSCS Alps: Daint, Santis, Clariden, Eiger; JSC:
-JURECA, JUWELS, JUSUF, JEDI). It fills in the form: the name, the full settings (host, jump host, key), the command
+**From a site** (a new tab): **Choose…** opens a window with the clusters slurp knows how to log in to (from its site
+packs: CSCS Alps, JSC, LUMI, CINECA Leonardo, and yours), to search; **Clear** takes the choice back. It fills in the form: the name, the full settings (host, jump host, key), the command
 before the login; fill in your user. Below it: how the site logs in, what it needs on this machine (✔ found, ✖ not,
 and where to get it), what to do once. Everything stays to see and change before **Add**. The fields the site needs
 from you (your user) have a yellow border until filled in; **Add** or **Test** without them turns them red, with what

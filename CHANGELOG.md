@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- New SSH connection, **From a site**: **Choose…** opens a window to search
+  the clusters of all site packs (every word must match the cluster, its
+  site, its host or the pack; `↑` `↓` while typing, `Enter` takes it), with
+  how the highlighted one logs in below the list; **Clear** takes the
+  choice back. It was a drop-down, long with many packs.
 - Site packs for LUMI (CSC; `lumi.csc.fi` with a key of your own registered
   in MyAccessID or MyCSC; Lustre everywhere, container wrapper advice for
   Conda and pip) and CINECA's Leonardo (`login.leonardo.cineca.it`; 2FA with

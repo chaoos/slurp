@@ -83,8 +83,10 @@ go on (the command before the login may make the key, for example). **Browse…*
 `~/.ssh`; slurp does not read or show its content). Its buttons are **Test**, **Cancel** and
 **Add**, as the endpoints' forms.
 
-**From a site**, at the top of a new connection, lists the clusters slurp knows how to log in to, from its site
-packs: CSCS Alps (Daint, Santis, Clariden, Eiger), JSC's JURECA, JUWELS (Cluster, Booster), JUSUF and JEDI, LUMI
+**From a site**, at the top of a new connection: **Choose…** opens a window with the clusters slurp knows how to log
+in to, to search (every word you type must match the cluster, its site, its host or the pack: `juwels booster`,
+`cscs`, `lumi`; `↑` `↓` while typing, `Enter` takes it; below the list, how the highlighted one logs in), and
+**Clear** takes the choice back. They come from its site packs: CSCS Alps (Daint, Santis, Clariden, Eiger), JSC's JURECA, JUWELS (Cluster, Booster), JUSUF and JEDI, LUMI
 (a key registered in MyAccessID or MyCSC) and CINECA's Leonardo (a 12-hour certificate from `step ssh login`). One
 fills in the form: its name, the full settings (the host; at CSCS the jump host `ela.cscs.ch` and the key
 `~/.ssh/cscs-key`), and the command before the login (at CSCS `cscs-key sign --headless`, only when a login without

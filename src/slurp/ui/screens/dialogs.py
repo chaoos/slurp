@@ -15,7 +15,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
-  Button, Checkbox, Collapsible, Input, Label, RadioButton,
+  Button, Checkbox, Collapsible, DataTable, Input, Label, RadioButton,
   RadioSet, Select, Static, TextArea
 )
 from textual.suggester import SuggestFromList
@@ -629,6 +629,164 @@ def sshsetup_label(settings):
   from ...cluster import sshsetup
   return sshsetup.label(settings)
 
+def site_login_text(entry):
+  """What a site's cluster's login is, what it needs here (found or not), what to do once; where it comes from"""
+  out = Text()
+  out.append(f"{entry['site']}", style="bold")
+  out.append(f" (site pack {entry['version'] or 'without version'}, {'built in' if entry['builtin'] else 'yours'}): ", style="dim")
+  how = [f"through the jump host {entry['jump'].replace('{user}@', '')}" if entry.get("jump") else "directly",
+         f"with {', '.join(entry.get('identities', []))}" if entry.get("identities") else ""]
+  out.append("logs in " + " ".join(h for h in how if h))
+  if entry.get("pre_login"):
+    out.append(f"; first {entry['pre_login']} here, in the login pane"
+               + (" (when a login without it fails)" if entry.get("pre_login_fallback") else " (before every login)"))
+  out.append(". Fill in " + (entry.get("user_label") or "your user there") + " (User).\n")
+  for need in entry.get("needs", []):
+    found = shutil.which(need["command"])
+    out.append(f"✔ {need['command']}: {found}\n" if found else f"✖ {need['command']} is not installed here: ", style="green" if found else "red")
+    if not found:
+      out.append(need.get("install", "") + "\n")
+  if entry.get("setup"):
+    out.append(entry["setup"].strip() + "\n")
+  if not entry["builtin"]:
+    out.append("From your own pack: check what it fills in (the command runs on this machine).\n", style="yellow")
+  return out
+
+def site_login_way(entry):
+  """How a site's cluster logs in, in a few words (a column of the search window)"""
+  parts = [f"via {entry['jump'].replace('{user}@', '')}" if entry.get("jump") else "direct"]
+  if entry.get("pre_login"):
+    parts.append(entry["pre_login"].split()[0])
+  elif entry.get("identities"):
+    parts.append("key")
+  return ", ".join(parts)
+
+def site_cluster_words(entry):
+  """What a search of the sites' clusters looks in: the cluster, its site, its host and jump host, the pack (its file)"""
+  words = [entry.get("title", ""), entry.get("name", ""), entry.get("site", ""), entry.get("host", ""), entry.get("id", ""),
+           entry.get("jump", "").replace("{user}@", "")]
+  return " ".join(words).lower()
+
+class SiteClusterScreen(ModalScreen[str | None]):
+  """The clusters of the site packs, to choose one for a new SSH connection: a search (each word must match the
+  cluster, its site, host or pack), the list (↑ ↓ while typing; Enter or a click chooses), and how the highlighted one
+  logs in. Dismissed with its id, or None"""
+  DEFAULT_CSS = """
+  SiteClusterScreen { align: center middle; }
+  #sc-dialog { width: 120; max-width: 96%; height: 90%; border: thick $accent; background: $surface; padding: 1 2; }
+  #sc-title { text-style: bold; height: auto; }
+  #sc-search { margin-top: 1; }
+  #sc-list { height: 1fr; margin-top: 1; }
+  #sc-count { height: auto; color: $text-muted; }
+  #sc-info-scroll { height: 12; border: round $panel; padding: 0 1; }
+  #sc-info { height: auto; }
+  #sc-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #sc-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+  def __init__(self, clusters, chosen=None):
+    super().__init__()
+    self.clusters, self.chosen = clusters, chosen
+    self.shown = []
+
+  def compose(self) -> ComposeResult:
+    from ..widgets import ClickTable
+    with Vertical(id="sc-dialog"):
+      yield Static("Choose a cluster to log in to", id="sc-title")
+      yield Input(placeholder="search: a cluster, a site, a host (e.g. daint, jülich, lumi, cineca); ↑ ↓ choose, Enter takes it",
+                  id="sc-search")
+      yield ClickTable(id="sc-list", cursor_type="row", zebra_stripes=True)
+      yield Static(id="sc-count")
+      with VerticalScroll(id="sc-info-scroll"):
+        yield Static(id="sc-info")
+      with Horizontal(id="sc-buttons"):
+        yield Button("Cancel", id="sc-cancel", compact=True)
+        yield Button("Choose", id="sc-ok", variant="primary", compact=True)
+
+  def on_mount(self):
+    from ..widgets import ClickTable
+    table = self.query_one("#sc-list", ClickTable)
+    for key, label in (("cluster", "Cluster"), ("site", "Site"), ("host", "Host"), ("login", "Login"), ("pack", "Pack")):
+      table.add_column(label, key=key)
+    self.populate()
+    if self.chosen in [c["id"] for c in self.shown]:
+      table.move_cursor(row=[c["id"] for c in self.shown].index(self.chosen))
+    self.query_one("#sc-search", Input).focus()
+
+  def populate(self):
+    from ..widgets import ClickTable
+    table = self.query_one("#sc-list", ClickTable)
+    terms = self.query_one("#sc-search", Input).value.lower().split()
+    terms = [t.replace("ü", "u").replace("ue", "u") for t in terms] # (jülich, juelich, julich)
+    def matches(entry):
+      words = site_cluster_words(entry).replace("ü", "u").replace("ue", "u")
+      return all(t in words for t in terms)
+    self.shown = [c for c in self.clusters if matches(c)]
+    self.shown.sort(key=lambda c: (c["site"].lower(), c["title"].lower()))
+    table.clear()
+    for c in self.shown:
+      pack = f"{c['version'] or '-'}" + ("" if c["builtin"] else " (yours)")
+      table.add_row(Text(c["title"], style="bold"), c["site"], c.get("host", ""), site_login_way(c), pack, key=c["id"])
+    if self.shown:
+      table.move_cursor(row=0) # (a new search: its first match)
+    self.query_one("#sc-count", Static).update(
+      f"{len(self.shown)} of {len(self.clusters)} clusters" + (f" match {' '.join(terms)}" if terms else "")
+      + " · from the site packs (built in, and yours in ~/.config/slurp/rules)")
+    self.query_one("#sc-ok", Button).disabled = not self.shown
+    self.show_info()
+
+  def current(self):
+    from ..widgets import ClickTable
+    table = self.query_one("#sc-list", ClickTable)
+    if not self.shown or not table.row_count:
+      return None
+    return self.shown[min(table.cursor_row, len(self.shown) - 1)]
+
+  def show_info(self):
+    entry = self.current()
+    self.query_one("#sc-info", Static).update(site_login_text(entry) if entry else Text("no cluster matches", style="dim"))
+
+  @on(Input.Changed, "#sc-search")
+  def search_changed(self, event):
+    self.populate()
+
+  def on_key(self, event):
+    """↑ ↓ (and page up, page down) move in the list while the search has the focus"""
+    from ..widgets import ClickTable
+    if self.focused is not self.query_one("#sc-search", Input):
+      return
+    table = self.query_one("#sc-list", ClickTable)
+    moves = {"down": table.action_cursor_down, "up": table.action_cursor_up, "pagedown": table.action_page_down,
+             "pageup": table.action_page_up}
+    if event.key in moves:
+      event.stop()
+      event.prevent_default()
+      moves[event.key]()
+
+  @on(DataTable.RowHighlighted, "#sc-list")
+  def highlighted(self, event):
+    self.show_info()
+
+  @on(DataTable.RowSelected, "#sc-list")
+  def selected(self, event):
+    event.stop()
+    self.dismiss(event.row_key.value)
+
+  @on(Input.Submitted, "#sc-search")
+  @on(Button.Pressed, "#sc-ok")
+  def ok(self, event):
+    event.stop()
+    entry = self.current()
+    if entry is not None:
+      self.dismiss(entry["id"])
+
+  @on(Button.Pressed, "#sc-cancel")
+  def action_cancel(self, event=None):
+    if event is not None:
+      event.stop()
+    self.dismiss(None)
+
 class AddClusterScreen(ModalScreen):
   """A new tab, as the forms of the endpoints: its name (the tab's), then the main way: an SSH destination, a Host of
   ~/.ssh/config (its user, jump hosts and keys are there; suggested as you type) or user@host; empty: this machine.
@@ -647,7 +805,8 @@ class AddClusterScreen(ModalScreen):
   .cluster-row Label { width: 18; }
   .cluster-row Input { width: 1fr; }
   #cluster-hint { height: auto; color: $text-muted; margin: 0 0 1 18; }
-  #cluster-site { width: 1fr; }
+  #cluster-site { width: 1fr; height: 1; }
+  #cluster-site-choose, #cluster-site-clear { margin-left: 1; }
   #cluster-site-info { height: auto; margin: 1 0 0 18; padding: 0 1; border-left: wide $accent; }
   #cluster-full { height: auto; margin-bottom: 1; }
   .ssh-row { height: 1; margin-bottom: 1; }
@@ -688,9 +847,11 @@ class AddClusterScreen(ModalScreen):
         if sites:
           with Horizontal(classes="cluster-row"):
             yield Label("From a site")
-            yield Select([(f"{c['site']} · {c['title']}", c["id"]) for c in sites], prompt="(none: fill in yourself)",
-                         id="cluster-site", compact=True, tooltip="a cluster slurp knows how to log in to: fills in the fields "
+            yield Static(Text("(none: fill in yourself)", style="dim"), id="cluster-site")
+            yield Button("Choose…", id="cluster-site-choose", compact=True,
+                         tooltip=f"a cluster slurp knows how to log in to ({len(sites)}, searchable): fills in the fields "
                          "below (see and change them before Add)")
+            yield Button("Clear", id="cluster-site-clear", compact=True, tooltip="no site: the form as you fill it in")
           yield Static(id="cluster-site-info")
         with Horizontal(classes="cluster-row"):
           yield Label("Name")
@@ -752,6 +913,7 @@ class AddClusterScreen(ModalScreen):
     self.query_one("#cluster-name", Input).focus()
     if self.query("#cluster-site-info"):
       self.query_one("#cluster-site-info").display = False
+      self.query_one("#cluster-site-clear").display = False
     for hint in self.query(".required-hint"):
       hint.display = False
     cluster = self.cluster
@@ -777,15 +939,33 @@ class AddClusterScreen(ModalScreen):
       self.query_one("#cluster-destination", Input).value = cluster.destination or ""
     self.show_config()
 
-  @on(Select.Changed, "#cluster-site")
-  def site_chosen(self, event):
-    """A site's cluster: its login fills in the form (the full settings, the command before the login), and what it
-    needs and what to do once is said; (none): the form as it was filled in"""
+  @on(Button.Pressed, "#cluster-site-choose")
+  def choose_site(self, event=None):
+    """The search window of the sites' clusters; the one chosen fills in the form"""
+    if event is not None:
+      event.stop()
+    def chosen(cluster_id):
+      if cluster_id is not None:
+        self.site_chosen(cluster_id)
+    self.app.push_screen(SiteClusterScreen(self.site_choices(), (self.site or {}).get("id")), chosen)
+
+  @on(Button.Pressed, "#cluster-site-clear")
+  def clear_site(self, event=None):
+    if event is not None:
+      event.stop()
+    self.site_chosen(None)
+
+  def site_chosen(self, cluster_id):
+    """A site's cluster (its id): its login fills in the form (the full settings, the command before the login), and
+    what it needs and what to do once is said; None: no site, the form as it was filled in"""
     from ... import sites
-    entry = next((c for c in self.site_choices() if c["id"] == event.value), None)
+    entry = next((c for c in self.site_choices() if c["id"] == cluster_id), None)
     self.site = entry
     info = self.query_one("#cluster-site-info", Static)
     info.display = entry is not None
+    self.query_one("#cluster-site", Static).update(Text.assemble((entry["title"], "bold"), f" · {entry['site']}") if entry
+                                                    else Text("(none: fill in yourself)", style="dim"))
+    self.query_one("#cluster-site-clear").display = entry is not None
     self.mark_required()
     if entry is None:
       return
@@ -809,27 +989,7 @@ class AddClusterScreen(ModalScreen):
       self.query_one(f"#ssh-{first.replace('_', '-')}", Input).focus()
 
   def site_text(self, entry):
-    """What the site's login is, what it needs here (found or not), what to do once; where it comes from"""
-    out = Text()
-    out.append(f"{entry['site']}", style="bold")
-    out.append(f" (site pack {entry['version'] or 'without version'}, {'built in' if entry['builtin'] else 'yours'}): ", style="dim")
-    how = [f"through the jump host {entry['jump'].replace('{user}@', '')}" if entry.get("jump") else "directly",
-           f"with {', '.join(entry.get('identities', []))}" if entry.get("identities") else ""]
-    out.append("logs in " + " ".join(h for h in how if h))
-    if entry.get("pre_login"):
-      out.append(f"; first {entry['pre_login']} here, in the login pane"
-                 + (" (when a login without it fails)" if entry.get("pre_login_fallback") else " (before every login)"))
-    out.append(". Fill in " + (entry.get("user_label") or "your user there") + " (User).\n")
-    for need in entry.get("needs", []):
-      found = shutil.which(need["command"])
-      out.append(f"✔ {need['command']}: {found}\n" if found else f"✖ {need['command']} is not installed here: ", style="green" if found else "red")
-      if not found:
-        out.append(need.get("install", "") + "\n")
-    if entry.get("setup"):
-      out.append(entry["setup"].strip() + "\n")
-    if not entry["builtin"]:
-      out.append("From your own pack: check what it fills in (the command runs on this machine).\n", style="yellow")
-    return out
+    return site_login_text(entry)
 
   REQUIRED_LABELS = {"user": "the user", "host": "the host", "port": "the port", "jump": "the jump host",
                      "identities": "the identity files", "pre_login": "the command before the login"}
