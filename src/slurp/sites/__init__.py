@@ -36,6 +36,28 @@ Keys (all optional):
   pattern = "conda activate"
   text = "..."
   severity = "info"
+
+The clusters of the site, offered in the form of a new SSH connection (From a site): they fill in its fields, to see
+and change before Add; nothing is used without the form. [login] is how all of them log in, a [[clusters]] entry
+can say otherwise for its own:
+  [login]
+  user_label = "your CSCS username" # what the user is (the form asks for it)
+  jump = "{user}@ela.cscs.ch"      # a jump host; {user}: the user filled in
+  identities = ["~/.ssh/cscs-key"] # private keys (the jump host is offered them too)
+  options = ["AddressFamily=inet"] # more ssh options, Key=Value
+  port = 22
+  pre_login = "cscs-key sign --headless" # a command here before the login (in the login pane: answer it there)
+  pre_login_fallback = true        # …only when a login without it fails (a key still valid is not signed anew)
+  needs = [{ command = "cscs-key", install = "https://…" }] # programs here that the login needs, and how to get them
+  setup = "…"                      # what to do once, before the first login (plain text, shown in the form)
+  [[clusters]]
+  name = "daint"                   # the tab's name
+  title = "Daint"                  # in the list (with the pack's name)
+  host = "daint.alps.cscs.ch"
+
+A login command (pre_login) runs on the user's machine and a host or jump host decides where the login goes: a pack
+that is not built in or the user's own (one fetched from elsewhere, some day) must never set them without the user
+seeing them in the form first.
 """
 
 import fnmatch
@@ -84,6 +106,81 @@ def load_packs():
       pack["_builtin"] = directory is BUILTIN
       packs.append(pack)
   return packs
+
+LOGIN_KEYS = ("user_label", "host", "port", "jump", "identities", "options", "pre_login", "pre_login_fallback", "needs", "setup")
+HOST = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?")
+JUMP_HOST = re.compile(r"(?:(?:\{user\}|[A-Za-z0-9._-]+)@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d{1,5})?")
+OPTION = re.compile(r"[A-Za-z][A-Za-z0-9]*\s*(=|\s)\s*\S.*")
+
+def login_errors(entry):
+  """What is wrong with the login of a pack's cluster (merged with its [login]): [text]"""
+  errors = []
+  def kind(key, type_, what):
+    value = entry.get(key)
+    if key in entry and (not isinstance(value, type_) or isinstance(value, bool) and type_ is not bool): # (true is no number)
+      errors.append(f"{key}: not {what}")
+  for key in ("name", "title", "host", "jump", "user_label", "pre_login", "setup"):
+    kind(key, str, "text")
+  kind("port", int, "a number")
+  kind("pre_login_fallback", bool, "true or false")
+  for key in ("identities", "options", "needs"):
+    kind(key, list, "a list")
+  if errors:
+    return errors
+  if not entry.get("name") or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", entry["name"]):
+    errors.append(f"name {entry.get('name')!r}: letters, digits, . _ - (the tab's name)")
+  if not HOST.fullmatch(entry.get("host") or ""):
+    errors.append(f"host {entry.get('host')!r}: not a host name")
+  if entry.get("jump") and not all(JUMP_HOST.fullmatch(j) for j in entry["jump"].split(",")):
+    errors.append(f"jump {entry['jump']!r}: not [user@]host[:port] (more: commas)")
+  if "port" in entry and not 0 < entry["port"] < 65536:
+    errors.append(f"port {entry['port']}: not 1 to 65535")
+  if not all(isinstance(i, str) and i.startswith(("~/", "/")) for i in entry.get("identities", [])):
+    errors.append("identities: paths (~/… or /…)")
+  if not all(isinstance(o, str) and OPTION.fullmatch(o) for o in entry.get("options", [])):
+    errors.append("options: Key=Value")
+  if "\n" in entry.get("pre_login", ""):
+    errors.append("pre_login: one line")
+  for need in entry.get("needs", []):
+    if not isinstance(need, dict) or not re.fullmatch(r"[A-Za-z0-9._+-]+", str(need.get("command", ""))) \
+       or not str(need.get("install", "https://")).startswith("https://"):
+      errors.append(f"needs: {need!r}: {{ command = name, install = https://… }}")
+  return errors
+
+def site_clusters(packs=None):
+  """The clusters the site packs offer for a new SSH connection, their login merged with the pack's [login]:
+  [{"id": "<pack file>/<name>", "site", "version", "builtin", "name", "title", "host", …}] (an entry that is not
+  right: left out, logged)"""
+  packs = load_packs() if packs is None else packs
+  out, seen = [], set()
+  for pack in packs:
+    login = pack.get("login") if isinstance(pack.get("login"), dict) else {}
+    for raw in pack.get("clusters") or []:
+      if not isinstance(raw, dict):
+        continue
+      entry = {k: v for k, v in login.items() if k in LOGIN_KEYS} | raw
+      errors = login_errors(entry)
+      ident = f"{os.path.basename(pack.get('_path', '')).removesuffix('.toml')}/{entry.get('name')}"
+      if errors:
+        from ..state import log
+        log.warning(f"site pack {pack.get('_path')}: the cluster {entry.get('name')!r} is left out: {'; '.join(errors)}")
+        continue
+      if ident in seen: # (yours of the same file name before the built-in one)
+        continue
+      seen.add(ident)
+      out.append({**{k: entry[k] for k in ("name", *LOGIN_KEYS) if k in entry}, "id": ident, "site": pack_name(pack),
+                  "title": entry.get("title") or entry["name"], "version": str(pack.get("version") or ""),
+                  "builtin": bool(pack.get("_builtin"))})
+  return out
+
+def login_settings(entry, user=""):
+  """The fields of the new-connection form for a site's cluster, the user filled in: {"name", "host", "user", "port",
+  "jump", "identities", "options", "pre_login", "pre_login_fallback"}"""
+  jump = entry.get("jump", "")
+  jump = jump.replace("{user}@", f"{user}@" if user else "") # (no user yet: the jump host as ssh's default makes it)
+  return {"name": entry["name"], "host": entry["host"], "user": user, "port": str(entry.get("port") or ""), "jump": jump,
+          "identities": list(entry.get("identities", [])), "options": list(entry.get("options", [])),
+          "pre_login": entry.get("pre_login", ""), "pre_login_fallback": bool(entry.get("pre_login_fallback"))}
 
 def pack_text(pack):
   """What a pack is, for the rule catalogue: its name, version, and where it is from ("" without a pack)"""

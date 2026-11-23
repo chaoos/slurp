@@ -1,6 +1,6 @@
 # CSCS Alps (daint, clariden, santis, eiger): GH200 nodes (4 Grace-Hopper modules of 72 cores each), uenv.
 schema = 1
-version = "2026.11.20"
+version = "2026.11.23"
 name = "CSCS Alps"
 match = ["daint*", "clariden*", "santis*", "eiger*", "*.cscs.ch", "*.alps.cscs.ch"]
 docs = "https://docs.cscs.ch"
@@ -12,6 +12,39 @@ numa_domains = 4
 cuda_arch = "sm_90"
 gpus_implicit = true
 options = ["uenv", "view"]
+
+# How to log in (docs.cscs.ch/access/ssh): through ela.cscs.ch, with ~/.ssh/cscs-key signed by cscs-key (a day).
+[login]
+user_label = "your CSCS username"
+jump = "{user}@ela.cscs.ch"
+identities = ["~/.ssh/cscs-key"]
+pre_login = "cscs-key sign --headless" # (no browser here: the device flow, a link and a code to open elsewhere)
+pre_login_fallback = true             # (a key is valid for a day, at most 5 a day: signed only when the login fails)
+needs = [{ command = "cscs-key", install = "https://docs.cscs.ch/access/ssh/" }]
+setup = """Once, before the first login:
+1. A key of your own, with a passphrase: ssh-keygen -t ed25519 -f ~/.ssh/cscs-key
+2. The program cscs-key on this machine: brew install eth-cscs/tap/cscs-key, or its release binary in ~/.local/bin (see docs.cscs.ch/access/ssh).
+Then each login: when the signed key has expired (after a day), slurp runs cscs-key sign --headless in the login pane first: open the link it shows, log in there (password and code). At most 5 keys a day can be signed."""
+
+[[clusters]]
+name = "daint"
+title = "Daint"
+host = "daint.alps.cscs.ch"
+
+[[clusters]]
+name = "santis"
+title = "Santis"
+host = "santis.alps.cscs.ch"
+
+[[clusters]]
+name = "clariden"
+title = "Clariden"
+host = "clariden.alps.cscs.ch"
+
+[[clusters]]
+name = "eiger"
+title = "Eiger"
+host = "eiger.alps.cscs.ch"
 
 [[advice]]
 pattern = "conda\\s+(activate|create)|source\\s+activate"

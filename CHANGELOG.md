@@ -6,6 +6,11 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Site packs can describe how their clusters log in: `[login]` for all of the
+  site's clusters, `[[clusters]]` for each (name, host, jump host, keys, ssh
+  options, the command before the login, programs it needs, what to do once).
+  Entries that are not right are left out (logged). The packs of CSCS Alps and
+  JSC have them, from docs.cscs.ch and JSC's access pages.
 - SSH connections with full settings: a jump host is offered the tab's identity
   files too. With `ssh -J` the options of the command line (`-i`) reach only the
   destination, so a jump host that wants the same key (CSCS: `ela.cscs.ch` with

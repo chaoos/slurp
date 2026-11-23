@@ -1,7 +1,27 @@
 # Jülich Supercomputing Centre (JSC): JUWELS (Cluster and Booster). Logins: juwels.fz-juelich.de and its numbered login nodes.
 schema = 1
-version = "2026.11.20"
+version = "2026.11.23"
 name = "JSC JUWELS"
 match = ["juwels*"]
 docs = "https://apps.fz-juelich.de/jsc/hps/juwels/index.html"
 status = "https://status.jsc.fz-juelich.de/"
+
+# How to log in (apps.fz-juelich.de/jsc/hps/juwels/access.html): directly, with a key uploaded in JuDoor (with from=…).
+[login]
+user_label = "your JSC user (as in JuDoor)"
+identities = ["~/.ssh/id_ed25519_jsc"]
+setup = """Once, before the first login:
+1. A key with a passphrase (JSC does not allow keys without one): ssh-keygen -a 100 -t ed25519 -f ~/.ssh/id_ed25519_jsc
+2. Upload its public half (~/.ssh/id_ed25519_jsc.pub) in JuDoor (judoor.fz-juelich.de), Manage SSH-keys next to JUWELS, for each system on its own, with a from= clause of the addresses you log in from: from="192.0.2.42" ssh-ed25519 AAAA… (no trailing wildcards, netmasks of /8 or more). It works within 15 minutes.
+3. At the first login: compare the host key with the fingerprint in JuDoor.
+If you enabled TOTP in JuDoor, the login asks for the code in the login pane."""
+
+[[clusters]]
+name = "juwels-cluster"
+title = "JUWELS Cluster"
+host = "juwels-cluster.fz-juelich.de"
+
+[[clusters]]
+name = "juwels-booster"
+title = "JUWELS Booster"
+host = "juwels-booster.fz-juelich.de"

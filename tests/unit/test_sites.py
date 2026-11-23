@@ -87,3 +87,61 @@ def test_where_the_user_sees_it(check, tmp_path, monkeypatch):
   site = str(OverviewScreen.site(ov, types.SimpleNamespace(name="mycluster", destination="")))
   check("…yours: said", site == "Mine · pack 2026.11.01 (yours)", site)
   check("…no pack: nothing", str(OverviewScreen.site(ov, types.SimpleNamespace(name="elsewhere", destination=""))) == "")
+
+
+def test_the_clusters_of_the_sites(check, tmp_path, monkeypatch):
+  monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+  clusters = {c["id"]: c for c in sites.site_clusters()}
+  daint = clusters.get("cscs-alps/daint", {})
+  check("the built-in clusters: Alps and JSC's", {"cscs-alps/daint", "cscs-alps/eiger", "cscs-alps/santis", "cscs-alps/clariden",
+        "juelich-jureca/jureca", "juelich-juwels/juwels-cluster", "juelich-juwels/juwels-booster", "juelich-jusuf/jusuf",
+        "juelich-jedi/jedi"} <= set(clusters), sorted(clusters))
+  check("…a cluster takes the site's [login]", daint.get("jump") == "{user}@ela.cscs.ch" and daint.get("pre_login") == "cscs-key sign --headless"
+        and daint.get("site") == "CSCS Alps" and daint.get("builtin") and daint.get("version"), daint)
+  fill = sites.login_settings(daint, "me")
+  check("the form's fields, the user filled in (in the jump host too)", fill["jump"] == "me@ela.cscs.ch" and fill["user"] == "me"
+        and fill["identities"] == ["~/.ssh/cscs-key"] and fill["pre_login_fallback"] is True)
+  check("…no user yet: the jump host without one", sites.login_settings(daint)["jump"] == "ela.cscs.ch")
+  check("JEDI's pack applies to its login host too", sites.site_pack("x", "me@login.jedi.fz-juelich.de").get("name") == "JSC JEDI")
+  rules = tmp_path / "slurp" / "rules"
+  rules.mkdir(parents=True)
+  (rules / "lab.toml").write_text('''name = "Lab"
+match = ["lab*"]
+[login]
+jump = "{user}@gw.lab.example:2200"
+identities = ["~/.ssh/lab"]
+[[clusters]]
+name = "lab1"
+host = "lab1.example"
+port = 2222
+jump = ""
+[[clusters]]
+name = "bad host"
+host = "x; rm -rf ~"
+[[clusters]]
+name = "lab2"
+host = "lab2.example"
+pre_login = "a\\nb"
+[[clusters]]
+name = "lab3"
+host = "lab3.example"
+options = ["ProxyCommand"]
+[[clusters]]
+name = "lab4"
+host = "lab4.example"
+identities = ["relative/key"]
+needs = [{ command = "x", install = "http://insecure" }]
+[[clusters]]
+name = "lab5"
+host = "lab5.example"
+port = true
+''')
+  clusters = {c["id"]: c for c in sites.site_clusters()}
+  lab = clusters.get("lab/lab1", {})
+  check("yours: a cluster can say otherwise than [login] (no jump host); its port; the title: its name", lab.get("jump") == ""
+        and lab.get("port") == 2222 and lab.get("title") == "lab1" and not lab.get("builtin"), lab)
+  check("left out: a host that is no host name, a command of two lines, an option without a value, a relative key, an "
+        "install link without https, true as a port", not any(k in clusters for k in ("lab/bad host", "lab/lab2", "lab/lab3", "lab/lab4", "lab/lab5")),
+        sorted(k for k in clusters if k.startswith("lab/")))
+  check("errors say what", any("not a host name" in e for e in sites.login_errors({"name": "a", "host": "x y"}))
+        and sites.login_errors({"name": "a", "host": "h", "port": True}) == ["port: not a number"])
