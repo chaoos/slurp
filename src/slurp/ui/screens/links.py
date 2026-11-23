@@ -13,7 +13,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Markdown, RadioButton, RadioSet, Select, Static, Switch, TabbedContent, TabPane, TextArea
-from .. import icons
+from ...resources import icons
 
 from ...links import share
 from ...links import linux as linhelper

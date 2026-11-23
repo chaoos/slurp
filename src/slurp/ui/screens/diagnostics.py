@@ -13,7 +13,7 @@ from textual.widgets import Button, RadioButton, RadioSet, Static
 
 from ...cluster.details import runtime_diagnostics
 from ...cluster.remote import in_background
-from .. import icons
+from ...resources import icons
 from ..widgets import crumb_title
 from .base import SplitScreen
 

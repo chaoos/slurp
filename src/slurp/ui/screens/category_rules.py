@@ -13,7 +13,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, DataTable, Input, RadioButton, RadioSet, Static
 
 from ...cluster import categories as cat
-from .. import icons
+from ...resources import icons
 
 SCOPE_LABELS = {
   "new": "New jobs only: those submitted from now on",

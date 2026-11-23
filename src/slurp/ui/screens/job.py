@@ -28,7 +28,7 @@ from ...cluster.details import (
   load_details, MEMORY_EVERY, memory_watch, peak_job_memory, record_memory, run_on_nodes, sacct_all
 )
 from ...cluster.paths import job_vars
-from .. import icons
+from ...resources import icons
 from ..widgets import ClickTable, state_text, TimePlot
 from .dialogs import RestartScreen, RunArrayScreen
 from .base import SplitScreen

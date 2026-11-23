@@ -9,7 +9,7 @@ from textual.widgets import (
 
 
 from ...cluster.jobs import array_task_id, is_time, job_id_key, pace_eta, progress_for_job
-from .. import icons
+from ...resources import icons
 from ..widgets import ClickTable
 from .base import SplitScreen
 from ...checks.engine import counts as checks_counts

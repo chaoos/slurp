@@ -1,6 +1,6 @@
 slurp-icons.ttf is made by tools/make_icon_font.py from Symbols Nerd Font Mono
 (Nerd Fonts, https://www.nerdfonts.com/, https://github.com/ryanoasis/nerd-fonts):
-the icons slurp uses (ui/icons.py), scaled to one cell. Its icons are Material
+the icons slurp uses (resources/icons.py), scaled to one cell. Its icons are Material
 Design Icons (https://pictogrammers.com/library/mdi/), under their own license:
 https://github.com/Templarian/MaterialDesign/blob/master/LICENSE
 

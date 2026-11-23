@@ -11,7 +11,7 @@ from textual.containers import Center, Horizontal, Vertical
 from textual.widgets import Button, Static
 
 from ...cluster.remote import in_background
-from .. import icons
+from ...resources import icons
 from ..widgets import open_clicked_url, url_text
 from .base import SplitScreen
 from .clusterinfo import cluster_health, cluster_info, HEALTH_STYLES

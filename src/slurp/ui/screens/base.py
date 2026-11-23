@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Static
-from .. import icons
+from ...resources import icons
 
 
 from ..widgets import ConnectionStatus

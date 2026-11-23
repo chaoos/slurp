@@ -10,7 +10,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Markdown, Static, TextArea, Tree
-from .. import icons
+from ...resources import icons
 
 from ...cluster import categories as cat
 from ...cluster.remote import in_background

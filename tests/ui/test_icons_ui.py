@@ -6,7 +6,7 @@ import shutil
 import pytest
 
 from slurp.config import update_config
-from slurp.ui import icons
+from slurp.resources import icons
 from slurp.ui.app import Slurp
 from slurp.ui.screens.menu import MenuScreen
 

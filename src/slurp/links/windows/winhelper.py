@@ -70,7 +70,7 @@ def setup_script():
   helper = compact(SCRIPT.read_text(encoding="utf-8"))
   launcher = LAUNCHER.read_text(encoding="utf-8")
   import base64
-  from ...ui import logo
+  from ...resources import logo
   from ... import __version__, VERSION_TEXT
   version = (f"$HelperVersion = {windrive.ps_string(__version__)}\n"
              f"$HelperVersionText = {windrive.ps_string(VERSION_TEXT)}\n") # (the helper is versioned with slurp)

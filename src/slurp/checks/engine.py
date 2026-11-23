@@ -13,8 +13,10 @@ import math
 import os
 import re
 import shlex
+import string
 import threading
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 
 ERROR, WARNING, INFO = "error", "warning", "info"
@@ -60,8 +62,16 @@ class Rule:
 
   @property
   def anchor(self):
-    from textual._slug import slug
     return slug(self.heading)
+
+# The anchor of a heading as Textual's Markdown viewer makes it (goto_anchor): a copy of Textual's slug function (Textual 8,
+# MIT; private there), so the checks import no Textual. tests/unit/test_slug.py compares the two.
+_SLUG_STRIP = re.compile("[" + string.punctuation.replace("-", "").replace("_", "") + r"\U000024C2-\U0001F251\U00002702-\U000027B0"
+                         r"\U0001F1E0-\U0001F1FF\U0001F300-\U0001F5FF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF\U0001F900-\U0001F9FF\u200D\u2640-\u2642]+")
+
+def slug(text):
+  """GitHub-flavoured Markdown's slug of a heading, as Textual makes it"""
+  return urllib.parse.quote(re.sub(r"\s", "-", _SLUG_STRIP.sub("", text.strip().lower())))
 
 RULES = {}
 

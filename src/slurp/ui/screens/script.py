@@ -11,7 +11,7 @@ from textual.app import SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Static, TextArea
-from .. import icons
+from ...resources import icons
 from textual.worker import get_current_worker
 
 from ...checks import engine as checks

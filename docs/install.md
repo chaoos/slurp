@@ -73,7 +73,7 @@ Your terminal's font stays: the terminal takes only the icons from slurp's font.
 copy installed on its machine updates it at the start and says so (restart the terminal then); a copy on another
 machine (your own, with slurp on a cluster) is updated by `slurp --install-font` there.
 Without slurp installed on that machine, download
-[slurp-icons.ttf](https://github.com/chaoos/slurp/raw/main/src/slurp/ui/fonts/slurp-icons.ttf) and install it like any
+[slurp-icons.ttf](https://github.com/chaoos/slurp/raw/main/src/slurp/resources/fonts/slurp-icons.ttf) and install it like any
 font. A terminal with a [Nerd Font](https://www.nerdfonts.com/) shows the icons too, and a browser has them already.
 Without the font the icons are boxes; **Options** → **Icons** switches them off (see [Settings](guide/settings.md#icons)).
 

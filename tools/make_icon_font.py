@@ -1,5 +1,5 @@
-"""Make slurp's icon font, src/slurp/ui/fonts/slurp-icons.ttf, from Symbols Nerd Font Mono: only the icons slurp
-uses (ui/icons.py), each scaled to fit one cell of a monospace font (0.6 em wide, as DejaVu Sans Mono and Roboto
+"""Make slurp's icon font, src/slurp/resources/fonts/slurp-icons.ttf, from Symbols Nerd Font Mono: only the icons slurp
+uses (resources/icons.py), each scaled to fit one cell of a monospace font (0.6 em wide, as DejaVu Sans Mono and Roboto
 Mono; narrower ones such as Ubuntu Sans Mono's 0.56 em hold the icon too). Nerd Fonts' own Mono icons are a whole em
 wide: a terminal draws them over the next cell or two.
 
@@ -19,9 +19,9 @@ from fontTools.ttLib import TTFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
-from slurp.ui.icons import ICONS # noqa: E402
+from slurp.resources.icons import ICONS # noqa: E402
 
-OUT = os.path.join(ROOT, "src", "slurp", "ui", "fonts", "slurp-icons.ttf")
+OUT = os.path.join(ROOT, "src", "slurp", "resources", "fonts", "slurp-icons.ttf")
 ADVANCE = 0.6 # em: one cell
 INK = 0.535   # em: the width of an icon (its square), centred in the cell
 MIDDLE = 0.36 # em above the baseline: the middle of capitals, where the icon's centre goes

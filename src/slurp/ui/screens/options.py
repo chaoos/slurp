@@ -11,7 +11,7 @@ from textual.widgets.selection_list import Selection
 from ...checks import engine as checks
 from ...config import config_path, load_config, update_config
 from ...state import PROGRESS_SETTINGS
-from .. import icons
+from ...resources import icons
 
 ICON_CHOICES = [("icons (slurp's icon font or a Nerd Font)", ""), ("Unicode symbols (uneven in most fonts)", "symbols"),
                 ("none", "none")]

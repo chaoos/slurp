@@ -35,47 +35,32 @@ import termios
 import time
 
 from .. import __version__
+from ..cluster.ctty import CTTY
 from ..launch import slurp_command
+from ..resources import icons, logo
 
 log = logging.getLogger("slurp.holder")
 
-CTTY = "import fcntl, os, sys, termios; fcntl.ioctl(0, termios.TIOCSCTTY, 0); os.execvp(sys.argv[1], sys.argv[1:])"
 RESET_TERMINAL = ("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?1004l\x1b[?2004l\x1b[<u\x1b[0m"
                   "\x1b[?25h\x1b[?1049l")
 ALT_MODES = (47, 1047, 1049)
 
 def _logo_lines():
-  """The logo in 5 rows of terminal output (see ui/logo.py; the holder does not import the app, logo.py is small)"""
-  try:
-    from ..ui import logo
-  except ImportError:
-    import logo
+  """The logo in 5 rows of terminal output (see resources/logo.py; the holder does not import the app)"""
   return logo.ansi_lines()
 
 def _page_brand():
   """The tab of the web view: slurp's logo and name"""
-  try:
-    from ..ui import logo
-  except ImportError:
-    import logo
   return f'<title>slurp</title><link rel="icon" href="{logo.svg_data_url()}">'
 
 def _intro_brand():
   """The start screen of the web view (until the first output): the logo, the name, what it is"""
-  try:
-    from ..ui import logo
-  except ImportError:
-    import logo
   return (f'{logo.svg(size=72, boxed=True)}<div><div style="font-size:28px;font-weight:700;color:#e8eef4">slurp</div>'
           f'<div style="font-size:13px;opacity:.7;margin-top:6px">{logo.TAGLINE}</div></div>')
 
 def icon_font_path():
-  """slurp's icon font (ui/fonts/slurp-icons.ttf)"""
-  try:
-    from ..ui import icons
-    return icons.FONT
-  except ImportError:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "slurp-icons.ttf")
+  """slurp's icon font (resources/fonts/slurp-icons.ttf)"""
+  return icons.FONT
 
 # The terminal of the web page draws in Roboto Mono; slurp's icons (codepoints of Nerd Fonts' Material Design icons)
 # come from slurp's icon font, one cell wide, under the same name: the browser takes it for those codepoints only.

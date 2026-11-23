@@ -22,7 +22,7 @@ from ...cluster.remote import HEALTH_STYLES, connection_health, in_background
 from ...transfer import endpoints as E, model as M, plan as P, rsync as R, runner as RN
 from ...transfer.host import Host
 from ...transfer.manager import client_side, site_of
-from .. import icons
+from ...resources import icons
 from ..widgets import ClickTable, TimePlot
 from .base import SplitScreen
 from .dialogs import ConfirmScreen, copy_text

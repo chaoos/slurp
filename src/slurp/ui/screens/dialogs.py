@@ -1310,7 +1310,7 @@ class UpdateScreen(ModalScreen):
 
 
 def icons_label(icon, text):
-  from .. import icons
+  from ...resources import icons
   return icons.label(icon, text)
 
 

@@ -53,7 +53,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from ..state import log
-from ..ui.terminal import CTTY
+from ..cluster.ctty import CTTY
 
 try:
   import asyncssh

@@ -30,7 +30,7 @@ def helper_script():
 
 def setup_script():
   """The shell script that sets the helper up (or updates it) on the user's machine"""
-  from ...ui import logo
+  from ...resources import logo
   from ... import VERSION_TEXT
   alias, fingerprint = share.host_alias(), share.host_fingerprint()
   return f"""#!/bin/sh

@@ -15,7 +15,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
 from ...transfer import endpoints as E, model as M, rclone as RC, secrets as S
-from .. import icons
+from ...resources import icons
 
 # (the settings of a kind, as its form names them; the others: their names)
 LABELS = {

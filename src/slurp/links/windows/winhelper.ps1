@@ -220,7 +220,7 @@ function Parse-Link([string]$url) {
   return $link
 }
 
-# ---- the tray icon: slurp's logo (slurp.ico, written by the setup from slurp/ui/logo.py)
+# ---- the tray icon: slurp's logo (slurp.ico, written by the setup from slurp/resources/logo.py)
 $Icon = $null
 try { $Icon = New-Object Drawing.Icon((Join-Path $SlurpHelperDir 'slurp.ico'), 32, 32) } catch { }
 if (-not $Icon) { $Icon = [Drawing.SystemIcons]::Application }

@@ -35,7 +35,7 @@ from ..cluster.jobs import (
 )
 from ..cluster.details import current_memory_usage, MEMORY, record_memory
 from ..cluster.paths import job_vars
-from . import icons
+from ..resources import icons
 from .widgets import ClickTable, err_text, SPINNING, STATE_STYLES, state_text, url_text
 from .terminal import SWITCH_KEY, TerminalSession, TerminalView
 from .screens.dialogs import ConfirmScreen, InteractiveJobScreen
@@ -382,7 +382,7 @@ class Slurp(TransfersTab, App):
     from .. import update
     if update.enabled():
       in_background(self, update.latest_version, self.version_found, group="update", connection=None)
-    from . import icons
+    from ..resources import icons
     if icons.style() == "nerd": # (an icon font installed by an older slurp: this one's, so that new icons are no boxes)
       in_background(self, icons.update_installed_font, self.icon_font_updated, group="icon-font", connection=None)
     self.view_kind = "web" if self.is_web else "terminal" # (under the session holder: of the active view)
@@ -1569,7 +1569,7 @@ class Slurp(TransfersTab, App):
   def format_title(self, title, sub_title):
     """The header: the logo's mark (in the theme's colours), then the title as Textual shows it"""
     from textual.content import Content
-    from . import logo
+    from ..resources import logo
     from .. import VERSION_TEXT
     return Content.assemble(logo.mark(), " ", App.format_title(self, title, sub_title), (f"  {VERSION_TEXT}", "dim"))
 
@@ -1711,7 +1711,7 @@ class Slurp(TransfersTab, App):
                   title="Check for updates", timeout=6)
 
   def icon_font_updated(self, path):
-    from .icons import RESTART
+    from ..resources.icons import RESTART
     if path:
       self.notify(f"slurp's icon font, installed in {os.path.dirname(path)}, is updated to this version's: {RESTART} "
                   "to see all the icons in it", title="icons", timeout=15)

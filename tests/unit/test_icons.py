@@ -2,7 +2,7 @@
 each name, and none at all when switched off"""
 from rich.cells import cell_len
 
-from slurp.ui import icons
+from slurp.resources import icons
 
 
 def test_icons_are_one_cell_wide(check):

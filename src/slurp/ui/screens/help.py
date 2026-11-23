@@ -5,7 +5,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
-from .. import icons
+from ...resources import icons
 
 EVERYWHERE = """
 Tabs at the top are clusters (`+` adds one, `✕` closes one), and, while there are transfers, **Transfers** at their
@@ -840,7 +840,7 @@ class ViewHelpScreen(ModalScreen):
   def compose(self):
     from .checks import DocViewer
     from rich.text import Text
-    from .. import logo
+    from ...resources import logo
     with Vertical(id="vh-dialog"):
       with Horizontal(id="vh-brand"):
         yield Static(Text("\n").join(logo.half_blocks()), id="vh-logo")

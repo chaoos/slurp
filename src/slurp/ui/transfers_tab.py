@@ -12,7 +12,7 @@ from rich.text import Text
 from ..config import load_config
 from ..state import View, log
 from ..transfer.manager import Manager, client_side
-from . import icons
+from ..resources import icons
 
 TRANSFERS_MODE = "transfers"
 ENDPOINTS_MODE = "transfer-endpoints"

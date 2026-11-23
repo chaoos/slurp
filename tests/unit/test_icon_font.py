@@ -1,6 +1,6 @@
 """slurp's icon font: every icon is in it; an installed copy of an older slurp is made the same as this one's (icons
 added since were boxes in the terminal), one that is the same or none installed: left alone"""
-from slurp.ui import icons
+from slurp.resources import icons
 
 
 def test_every_icon_in_the_font(check):

@@ -70,12 +70,12 @@ def install_font():
   """Copy slurp's icon font where this user's fonts are; the terminals take its icons from it (their font stays)"""
   import shutil
   import subprocess
-  from .ui.icons import FONT
+  from .resources.icons import FONT
   if sys.platform == "win32":
     os.startfile(FONT) # (the font viewer, with Install)
     print(f"opened {FONT}: Install there, then restart the terminal (all its windows)")
     return 0
-  from .ui.icons import RESTART, font_folder
+  from .resources.icons import RESTART, font_folder
   folder = font_folder()
   try:
     os.makedirs(folder, exist_ok=True)

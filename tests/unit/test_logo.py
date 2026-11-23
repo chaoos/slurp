@@ -3,7 +3,7 @@ import os
 import re
 import struct
 import xml.dom.minidom
-from slurp.ui import logo
+from slurp.resources import logo
 from slurp.links.windows import winhelper
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -25,7 +25,7 @@ from ...cluster.remote import (
 from ...cluster.paths import is_binary, resolve_path
 from ...cluster.storage import drive_dirs
 from ...cluster.listing import can_read, can_write, listing, local_listing, matches_name, mode_text, search, short_acl
-from .. import icons
+from ...resources import icons
 from ..widgets import clean, ClickTable, crumb_title, PathArea
 from .base import SplitScreen
 

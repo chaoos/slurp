@@ -107,7 +107,7 @@ class View:
   kind: str                   # "job", "window" or "shell"
   key: str = ""               # identifies what it shows (e.g. the job), to show it again instead of opening it twice
   session: object | None = None # TerminalSession of a shell
-  icon: str = ""              # the concept of its icon (ui/icons.py): shell, folder, file, script, …
+  icon: str = ""              # the concept of its icon (resources/icons.py): shell, folder, file, script, …
   kept: dict | None = None    # what it shows, as kept for the next start (ui/restore.py)
   pending: bool = False       # a placeholder: kept from the last run, opened when its tab is connected
 

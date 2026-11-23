@@ -102,7 +102,7 @@ The screenshots are slurp against the lab of the tests (a fake Slurm cluster wit
 
 The *prompt meter*: a shell prompt whose cursor became a load meter. It is drawn on the terminal grid (a pixel is one
 column wide and half a row high), so the TUI shows it exactly with block characters: `❯▂▄█` in the header (in the
-theme's colours), five rows of `▀▄█` in the help windows and on the lock screen of a view. `src/slurp/ui/logo.py` holds
+theme's colours), five rows of `▀▄█` in the help windows and on the lock screen of a view. `src/slurp/resources/logo.py` holds
 the pixel map and makes every other form from it: the favicon and the start screen of the web view, the icons of the
 slurp helper, and the files in `docs/images/` (`logo.svg`, `logo-plain.svg`, `logo-wordmark.svg`, `logo-256.png`,
 `logo.ico`; `python tools/make_logo_files.py` writes them again).
