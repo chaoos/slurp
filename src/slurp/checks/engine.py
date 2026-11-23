@@ -204,14 +204,13 @@ class Script:
 
   @staticmethod
   def depth_after(text, depth):
-    words = re.findall(r"(?:^|[;\s(])(for|while|until|done)(?=[\s;]|$)", text)
-    for w in words:
+    for w in loop_words(text):
       depth += -1 if w == "done" else 1
     return max(depth, 0)
 
   def add_command(self, line, text, depth):
     # a loop header on the same line ("for f in *; do srun ...; done") counts as inside the loop
-    inline_loop = re.match(r"\s*(for|while|until)\b.*\bdo\b(.*)", text)
+    inline_loop = re.search(r"(?:^|[;&|({]|\b(?:then|else|do)\b|!)\s*(for|while|until)\b.*\bdo\b(.*)", code_only(text))
     self.commands.append(Command(line, text, depth + (1 if inline_loop and inline_loop.group(2).strip() else 0)))
 
   def add_directive(self, line, stripped, ignored):
@@ -271,6 +270,17 @@ class Script:
       for m in re.finditer(r"(?:^|[\s;&|(`])(srun|mpirun|mpiexec|mpiexec\.hydra|aprun)(?=\s|$)", t):
         yield line, t[m.start(1):], m.group(1)
         break
+
+def code_only(text):
+  """The command without its comment, its quoted strings blanked ("…" and '…' as ""), to look for shell words"""
+  return re.sub(r"\"(?:[^\"\\]|\\.)*\"|'[^']*'", '""', strip_comment(text))
+
+# a loop's words where a command starts (not in a comment or a string, not an argument: echo done, "wait for it")
+LOOP_WORD = re.compile(r"(?:^|[;&|({]|\b(?:do|then|else|elif)\b|!)\s*(for|while|until|done)(?=[\s;)]|$)")
+
+def loop_words(text):
+  """for, while, until and done of a command line, in order"""
+  return LOOP_WORD.findall(code_only(text))
 
 def strip_comment(text):
   """The command without a trailing # comment (not inside quotes, not ${#...} or $#)"""

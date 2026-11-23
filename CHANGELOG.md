@@ -6,6 +6,12 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Checks, B14 (srun in a loop): `for`,
+  `while`, `until` and `done` count only where a command starts, not in a
+  comment (`# threads for the solver`), a string (`echo "wait for it"`) or
+  as an argument (`echo done`). Before, such a word made every line after
+  it "inside a loop". A loop that starts in the middle of a line
+  (`cd x; for …; do srun …; done`) now counts too.
 - Script window: the script is shown as soon as it is read (Reload too),
   its findings as soon as the script and its paths are checked; the quota
   where it writes and its environment follow. Before, nothing was shown
