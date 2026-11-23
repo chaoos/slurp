@@ -6,6 +6,12 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Script window: the script is shown as soon as it is read (Reload too),
+  its findings as soon as the script and its paths are checked; the quota
+  where it writes and its environment follow. Before, nothing was shown
+  until all of it was done, so a slow step (e.g. `lfs quota` hanging)
+  kept it at "checking …" for minutes. The step that runs is said
+  ("checking the script: its paths and programs on the cluster (12) …").
 - New check P10: an argument of a program the job runs that looks like a
   path (`srun ./binary --flag a/b/c`, `--in=input.dat`, a python script's
   arguments, `mpirun ./app $SCRATCH/in.h5`) but is not there where that

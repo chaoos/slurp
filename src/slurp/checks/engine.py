@@ -1250,19 +1250,28 @@ def check_script_text(text, path="", facts=None, probes=None, job=None, **kw):
   ctx = make_context(text, path, job=job, facts=facts, probes=probes, **kw)
   return run_rules(ctx), ctx
 
-def check_file(path, with_probe=True, text=None):
+def check_file(path, with_probe=True, text=None, quota=True, progress=None):
   """Findings of a script file on the cluster of the current tab (worker): the script, the facts, the probe, the quota.
-  text: check this text as the content of path (an edited, unsaved version) instead of reading the file."""
+  text: check this text as the content of path (an edited, unsaved version) instead of reading the file. quota=False:
+  without the quota (the caller asks for it after: cached_quota, then run_rules). progress(what): the step that starts
+  (each may take a while on a slow cluster: said, so that a step that hangs is seen)"""
   from ..cluster.paths import read_text
+  say = progress or (lambda what: None)
   if text is None:
+    say("reading it")
     text = read_text(path)
+  say("the cluster's partitions, accounts and settings")
   facts = gather_facts()
   ctx = make_context(text, path, facts=facts)
   ctx.script_dir = os.path.dirname(path)
   ctx.count_files = True
   if with_probe:
-    ctx.probes = run_probe([f"{k}:{p}" for k, p in interesting_paths(ctx)])
-    ctx.quota = cached_quota()
+    wanted = interesting_paths(ctx)
+    say(f"its paths and programs on the cluster ({len(wanted)})")
+    ctx.probes = run_probe([f"{k}:{p}" for k, p in wanted])
+    if quota:
+      say("the quota where it writes")
+      ctx.quota = cached_quota()
   return run_rules(ctx), ctx
 
 _quota, _quota_lock = {}, threading.Lock()

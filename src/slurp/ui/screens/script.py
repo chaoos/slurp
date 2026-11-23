@@ -71,6 +71,7 @@ class ScriptScreen(SplitScreen):
     self.editing = False
     self.saved_text = ""   # the text as it is in the file (while editing)
     self.live_timer = None
+    self.first_shown = False
 
   def compose_left(self):
     with Horizontal(id="script-bar"):
@@ -106,6 +107,7 @@ class ScriptScreen(SplitScreen):
     """All checks: first those of the script, its paths and the quota (shown at once), then its environment (the setup
     replayed on the login node after a fresh login: seconds), added when done"""
     self.query_one("#sc-findings", FindingsView).busy(Text("checking the script …", style="dim"))
+    self.first_shown = False # (until the findings of this check's first phase are shown)
     if self.live_timer is not None: # (this check covers what the as-you-type one would)
       self.live_timer.stop()
       self.live_timer = None
@@ -115,23 +117,60 @@ class ScriptScreen(SplitScreen):
 
   @cluster_work("check")
   def check_worker(self, text=None):
-    """text: the edited version (while editing: checked as it is, saved or not), else the file"""
+    """text: the edited version (while editing: checked as it is, saved or not), else the file. The file's text is
+    shown as soon as it is read; then the checks of the script and its paths; then the quota and its environment
+    (each step said while it runs: on a slow cluster one may take long, the text is there meanwhile)"""
+    worker = get_current_worker()
+    def progress(what):
+      if not worker.is_cancelled:
+        self.app.call_from_thread(self.checking, what)
     try:
       mtime = fs_stat(self.path).st_mtime if text is None else self.mtime
     except OSError:
       mtime = None
-    findings, ctx = checks.check_file(self.path, text=text)
-    worker = get_current_worker()
+    if text is None:
+      progress("reading it")
+      from ...cluster.paths import read_text
+      text = read_text(self.path)
+      if worker.is_cancelled:
+        return
+      self.app.call_from_thread(self.text_read, text)
+      findings, ctx = checks.check_file(self.path, text=text, quota=False, progress=progress)
+    else: # (the edited version: the file is not read)
+      findings, ctx = checks.check_file(self.path, text=text, quota=False, progress=progress)
     if worker.is_cancelled:
       return
     self.app.call_from_thread(self.checked, findings, ctx, mtime, ctx.script is not None)
     if ctx.script is None:
       return
+    if ctx.probes is not None:
+      progress("the quota where it writes")
+      ctx.quota = checks.cached_quota()
     from ...checks.environment import replay_environment
+    progress("its environment, replayed on the login node")
     ctx.replay = replay_environment(ctx)
     findings = checks.run_rules(ctx)
     if not worker.is_cancelled:
       self.app.call_from_thread(self.environment_checked, findings, ctx)
+
+  def text_read(self, text):
+    """The file's text, read: shown at once (the checks follow)"""
+    if self.editing:
+      return # (the editor has the user's text; the check takes the file's when it is done)
+    self.text = text
+    if not self.explaining or self.ctx is None:
+      self.show_text()
+
+  def checking(self, what):
+    """The step of the check that runs now (said under the findings, and in the status until the first findings)"""
+    view = self.query_one("#sc-findings", FindingsView)
+    if not self.first_shown:
+      view.busy(Text(f"checking the script: {what} …", style="dim"))
+    else: # (the findings of the script and its paths are there: the step after them, in their note)
+      unsaved = " of the edited, unsaved version" if self.unsaved() else ""
+      view.show(self.findings, f"(checks{unsaved}; checking {what} …)")
+    if self.ctx is None:
+      self.query_one("#script-status", Static).update(Text.assemble((self.path, "bold"), (f" · checking: {what} …", "dim")))
 
   def environment_checked(self, findings, ctx):
     if ctx is not self.ctx or (self.editing and self.current_text() != ctx.script.text):
@@ -155,7 +194,8 @@ class ScriptScreen(SplitScreen):
         self.show_text()
     view = self.query_one("#sc-findings", FindingsView)
     unsaved = " of the edited, unsaved version" if self.unsaved() else ""
-    view.show(findings, (f"(checks{unsaved}; checking the environment on the login node …)" if environment_follows
+    self.first_shown = True
+    view.show(findings, (f"(checks{unsaved}; the quota and the environment on the login node follow …)" if environment_follows
                          else f"(checks{unsaved})" if unsaved else ""))
     self.show_status()
 
@@ -363,6 +403,8 @@ class ScriptScreen(SplitScreen):
         except Exception:
           pass
         area.focus()
+      else: # (shown at once: the checks follow)
+        self.text_read(text)
       self.check()
       self.notify(f"reloaded {os.path.basename(self.path)}", timeout=3)
     in_background(self, read, loaded, group="reload", name=f"reading {self.path}")
