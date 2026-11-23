@@ -8,6 +8,7 @@ status = "https://status.jsc.fz-juelich.de/"
 
 # How to log in (apps.fz-juelich.de/jsc/hps/juwels/access.html): directly, with a key uploaded in JuDoor (with from=…).
 [login]
+required = ["user"]
 user_label = "your JSC user (as in JuDoor)"
 identities = ["~/.ssh/id_ed25519_jsc"]
 setup = """Once, before the first login:

@@ -14,6 +14,9 @@ version may need the helper of the same version).
   you fill in your user. The form says how the site logs in, whether what it
   needs is installed here, and what to do once (make a key; at JSC upload it in
   JuDoor). All of it stays to see and change before Add.
+  The fields the site needs from you (your user) have a yellow border until
+  filled in; Add or Test without them turns them red, with what to fill in
+  below each (a pack names them in `required`).
 - Site packs can describe how their clusters log in: `[login]` for all of the
   site's clusters, `[[clusters]]` for each (name, host, jump host, keys, ssh
   options, the command before the login, programs it needs, what to do once).

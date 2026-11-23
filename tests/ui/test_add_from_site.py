@@ -67,3 +67,50 @@ def test_from_a_site(check, monkeypatch, tmp_path):
       await pilot.press("escape"); await pilot.pause(0.2)
       await pilot.press("q")
   asyncio.run(main())
+
+
+def test_fields_to_fill_in(check, monkeypatch):
+  monkeypatch.setattr(Slurp, "activate_cluster", lambda app, index, **kw: setattr(app, "cluster_index", index))
+  pushed = []
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(140, 50)) as pilot:
+      await started(pilot, app)
+      got = []
+      app.push_screen(AddClusterScreen(), got.append); await pilot.pause(0.4)
+      dlg = app.screen
+      user, hint = dlg.query_one("#ssh-user"), dlg.query_one("#ssh-user-hint")
+      from textual.color import Color
+      color = lambda w: w.styles.border_top[1]
+      theme = lambda name: Color.parse({"warning": "ansi_yellow", "error": "ansi_red"}[name]) # (the terminal's, in every theme)
+      plain = color(user)
+      dlg.query_one("#cluster-site").value = "cscs-alps/daint"; await pilot.pause(0.4)
+      check("a site's cluster: the user (required by its pack) has a yellow border, no hint yet", user.has_class("-required")
+            and not user.has_class("-missing") and color(user) == theme("warning") and not hint.display,
+            (user.classes, color(user)))
+      check("…the other fields: as usual", not dlg.query_one("#ssh-host").has_class("-required") and not dlg.query_one("#ssh-jump").has_class("-required"))
+      check("…its row is high enough for the border", dlg.query_one("#ssh-user-row").region.height == 3, dlg.query_one("#ssh-user-row").region)
+      monkeypatch.setattr(app, "push_screen", lambda screen, *a, **k: pushed.append(type(screen).__name__))
+      dlg.query_one("#cluster-check-button").press(); await pilot.pause(0.3)
+      check("Test without it: no check; red, the hint below it, said", not pushed and user.has_class("-missing")
+            and color(user) == theme("error") and hint.display
+            and str(hint.render()) == "↑ fill in your CSCS username: CSCS Alps needs it"
+            and any("Test: fill in the user first" in str(n.message) for n in app._notifications), (pushed, str(hint.render())))
+      dlg.query_one("#cluster-full").collapsed = True; await pilot.pause(0.2)
+      dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.3)
+      check("Add without it: not added; the settings open again, the user focused", not got and app.screen is dlg
+            and not dlg.query_one("#cluster-full").collapsed and app.focused is user)
+      user.value = "rgruber"; await pilot.pause(0.2)
+      check("filled in: the mark and the hint are gone", not user.has_class("-required") and not user.has_class("-missing")
+            and not hint.display and color(user) == plain, (user.classes, color(user)))
+      user.value = ""; await pilot.pause(0.2)
+      check("emptied again: yellow (red only after Add or Test)", user.has_class("-required") and not user.has_class("-missing") and not hint.display)
+      dlg.query_one("#cluster-site").clear(); await pilot.pause(0.3)
+      check("(none) chosen: no marks", not user.has_class("-required") and not dlg.query_one("#cluster-site-info").display)
+      user.value = "rgruber"
+      dlg.query_one("#cluster-site").value = "cscs-alps/daint"; await pilot.pause(0.3)
+      check("a user already there: no mark", not user.has_class("-required"))
+      dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.3)
+      check("…Add: added", got and got[0]["ssh"]["user"] == "rgruber", got)
+      await pilot.press("q")
+  asyncio.run(main())

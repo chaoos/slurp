@@ -83,7 +83,9 @@ files too (`ssh -J` alone would give them only to the cluster). Its buttons are 
 packs: CSCS Alps (Daint, Santis, Clariden, Eiger) and JSC's JURECA, JUWELS (Cluster, Booster), JUSUF and JEDI. One
 fills in the form: its name, the full settings (the host; at CSCS the jump host `ela.cscs.ch` and the key
 `~/.ssh/cscs-key`), and the command before the login (at CSCS `cscs-key sign --headless`, only when a login without
-it fails: a signed key is valid for a day). You fill in your user (at CSCS the jump host takes it too). Below the
+it fails: a signed key is valid for a day). You fill in your user (at CSCS the jump host takes it too): the
+fields the site needs from you have a yellow border until they are filled in, and **Add** or **Test** without them
+turns them red, with what to fill in below each (a pack names them in `required`). Below the
 choice the form says how the site logs in, whether what it needs is installed on this machine (`cscs-key`; if not,
 where to get it), and what to do once before the first login (make a key; at JSC, upload it in JuDoor with a
 `from=` clause). Nothing of it is used until **Add**, and all of it can be changed first. slurp never writes your

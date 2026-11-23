@@ -42,6 +42,7 @@ and change before Add; nothing is used without the form. [login] is how all of t
 can say otherwise for its own:
   [login]
   user_label = "your CSCS username" # what the user is (the form asks for it)
+  required = ["user"]              # the fields the user must fill in (of REQUIRABLE): marked in the form, Add and Test wait
   jump = "{user}@ela.cscs.ch"      # a jump host; {user}: the user filled in
   identities = ["~/.ssh/cscs-key"] # private keys (the jump host is offered them too)
   options = ["AddressFamily=inet"] # more ssh options, Key=Value
@@ -107,7 +108,8 @@ def load_packs():
       packs.append(pack)
   return packs
 
-LOGIN_KEYS = ("user_label", "host", "port", "jump", "identities", "options", "pre_login", "pre_login_fallback", "needs", "setup")
+LOGIN_KEYS = ("user_label", "required", "host", "port", "jump", "identities", "options", "pre_login", "pre_login_fallback", "needs", "setup")
+REQUIRABLE = ("user", "host", "port", "jump", "identities", "pre_login") # (the fields of the form a pack can leave to the user)
 HOST = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?")
 JUMP_HOST = re.compile(r"(?:(?:\{user\}|[A-Za-z0-9._-]+)@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d{1,5})?")
 OPTION = re.compile(r"[A-Za-z][A-Za-z0-9]*\s*(=|\s)\s*\S.*")
@@ -123,7 +125,7 @@ def login_errors(entry):
     kind(key, str, "text")
   kind("port", int, "a number")
   kind("pre_login_fallback", bool, "true or false")
-  for key in ("identities", "options", "needs"):
+  for key in ("identities", "options", "needs", "required"):
     kind(key, list, "a list")
   if errors:
     return errors
@@ -139,6 +141,8 @@ def login_errors(entry):
     errors.append("identities: paths (~/… or /…)")
   if not all(isinstance(o, str) and OPTION.fullmatch(o) for o in entry.get("options", [])):
     errors.append("options: Key=Value")
+  if not all(field in REQUIRABLE for field in entry.get("required", [])):
+    errors.append(f"required: of {', '.join(REQUIRABLE)}")
   if "\n" in entry.get("pre_login", ""):
     errors.append("pre_login: one line")
   for need in entry.get("needs", []):

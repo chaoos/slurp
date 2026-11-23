@@ -143,5 +143,8 @@ port = true
   check("left out: a host that is no host name, a command of two lines, an option without a value, a relative key, an "
         "install link without https, true as a port", not any(k in clusters for k in ("lab/bad host", "lab/lab2", "lab/lab3", "lab/lab4", "lab/lab5")),
         sorted(k for k in clusters if k.startswith("lab/")))
+  check("required: the built-in clusters need the user", all(c.get("required") == ["user"] for c in sites.site_clusters() if c["builtin"]))
+  check("…only fields of the form", sites.login_errors({"name": "a", "host": "h", "required": ["user", "password"]})
+        == ["required: of user, host, port, jump, identities, pre_login"])
   check("errors say what", any("not a host name" in e for e in sites.login_errors({"name": "a", "host": "x y"}))
         and sites.login_errors({"name": "a", "host": "h", "port": True}) == ["port: not a number"])

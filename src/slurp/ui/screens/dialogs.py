@@ -621,6 +621,10 @@ class SshCheckScreen(ModalScreen):
     self.dismiss()
 
 
+def sites_requirable():
+  from ...sites import REQUIRABLE
+  return REQUIRABLE
+
 def sshsetup_label(settings):
   from ...cluster import sshsetup
   return sshsetup.label(settings)
@@ -647,6 +651,12 @@ class AddClusterScreen(ModalScreen):
   #cluster-site-info { height: auto; margin: 1 0 0 18; padding: 0 1; border-left: wide $accent; }
   #cluster-full { height: auto; margin-bottom: 1; }
   .ssh-row { height: 1; margin-bottom: 1; }
+  .ssh-row.-required { height: 3; margin-bottom: 0; } /* (a field to fill in: with its border) */
+  /* a field to fill in: yellow, red after Add or Test without it; the terminal's yellow and red, in every theme ($warning
+     is a red in some) and when focused too (the cursor is often there) */
+  #cluster-dialog Input.-required, #cluster-dialog Input.-required:focus { border: round ansi_yellow; }
+  #cluster-dialog Input.-missing, #cluster-dialog Input.-missing:focus { border: round ansi_red; }
+  .required-hint { height: auto; color: ansi_red; margin: 0 0 1 16; }
   .ssh-row Label { width: 16; padding: 0 1 0 0; }
   .ssh-row Input { width: 1fr; }
   #ssh-port { width: 12; }
@@ -693,9 +703,10 @@ class AddClusterScreen(ModalScreen):
                                           ("Port", "port", "22"),
                                           ("Jump hosts", "jump", "ProxyJump: user@gateway[:port], more separated by commas"),
                                           ("Identity files", "identities", "private keys, e.g. ~/.ssh/cscs-key (more: commas)")):
-            with Horizontal(classes="ssh-row"):
+            with Horizontal(classes="ssh-row", id=f"ssh-{key}-row"):
               yield Label(label)
               yield Input(placeholder=placeholder, id=f"ssh-{key}", compact=True)
+            yield Static(id=f"ssh-{key}-hint", classes="required-hint", markup=False)
           yield Label("More ssh options, one per line: Key=Value (e.g. ForwardAgent=yes, ServerAliveInterval=30, "
                       "UserKnownHostsFile=…, PreferredAuthentications=…, ProxyCommand=…)")
           yield TextArea(id="ssh-options", soft_wrap=False)
@@ -704,6 +715,7 @@ class AddClusterScreen(ModalScreen):
           yield Input(placeholder="(optional) a command here before every login, e.g. one that signs your key (cscs-keygen, step ssh login …)",
                       id="ssh-pre-login", tooltip="it runs in the login pane: answer it there (a password, a code); then the login follows. "
                       "What it exports (eval $(ssh-agent): SSH_AUTH_SOCK, …) is there for the login")
+        yield Static(id="ssh-pre-login-hint", classes="required-hint", markup=False)
         yield Checkbox("only when the login fails without it (first a login without it: a key or certificate that is still "
                        "valid is not made anew)", id="ssh-pre-login-fallback", compact=True)
         if self.cluster is not None:
@@ -732,6 +744,8 @@ class AddClusterScreen(ModalScreen):
     self.query_one("#cluster-name", Input).focus()
     if self.query("#cluster-site-info"):
       self.query_one("#cluster-site-info").display = False
+    for hint in self.query(".required-hint"):
+      hint.display = False
     cluster = self.cluster
     if cluster is None:
       return
@@ -763,6 +777,7 @@ class AddClusterScreen(ModalScreen):
     self.site = entry
     info = self.query_one("#cluster-site-info", Static)
     info.display = entry is not None
+    self.mark_required()
     if entry is None:
       return
     user = self.query_one("#ssh-user", Input).value.strip()
@@ -779,8 +794,10 @@ class AddClusterScreen(ModalScreen):
     field = self.query_one("#ssh-user", Input)
     field.placeholder = entry.get("user_label") or "your user there"
     info.update(self.site_text(entry))
-    if not user:
-      field.focus()
+    self.mark_required()
+    first = next((key for key in entry.get("required", []) if not self.field_value(key)), None)
+    if first:
+      self.query_one(f"#ssh-{first.replace('_', '-')}", Input).focus()
 
   def site_text(self, entry):
     """What the site's login is, what it needs here (found or not), what to do once; where it comes from"""
@@ -805,7 +822,61 @@ class AddClusterScreen(ModalScreen):
       out.append("From your own pack: check what it fills in (the command runs on this machine).\n", style="yellow")
     return out
 
+  REQUIRED_LABELS = {"user": "the user", "host": "the host", "port": "the port", "jump": "the jump host",
+                     "identities": "the identity files", "pre_login": "the command before the login"}
+
+  def field_value(self, key):
+    return self.query_one(f"#ssh-{key.replace('_', '-')}", Input).value.strip()
+
+  def required_fields(self):
+    """The fields the chosen site's cluster needs filled in (its pack's required)"""
+    return list((self.site or {}).get("required", []))
+
+  def mark_required(self, pressed=False):
+    """The fields to fill in: a yellow border while empty; pressed (Add, Test): the empty ones red, each with what
+    to fill in below it. The fields not required (or no site chosen): as usual. [the empty required ones]"""
+    required, missing = self.required_fields(), []
+    for key in sites_requirable():
+      field, hint = self.query_one(f"#ssh-{key.replace('_', '-')}", Input), self.query_one(f"#ssh-{key.replace('_', '-')}-hint", Static)
+      empty = key in required and not field.value.strip()
+      if empty:
+        missing.append(key)
+      if not hasattr(field, "_was_compact"):
+        field._was_compact = field.compact
+      field.compact = field._was_compact and not empty # (a compact input has no border, whatever the CSS says)
+      field.set_class(empty, "-required")
+      field.set_class(empty and (pressed or field.has_class("-missing")), "-missing")
+      row = self.query(f"#ssh-{key}-row")
+      if row:
+        row.first().set_class(empty, "-required")
+      if not empty:
+        hint.display = False
+      elif field.has_class("-missing"):
+        what = (self.site or {}).get("user_label") if key == "user" else ""
+        hint.update(f"↑ fill in {what or self.REQUIRED_LABELS[key]}: {(self.site or {}).get('site', 'the site')} needs it")
+        hint.display = True
+    return missing
+
+  def missing_refused(self, action):
+    """Add or Test with required fields empty: they turn red, said; True (then nothing happens)"""
+    missing = self.mark_required(pressed=True)
+    if not missing:
+      return False
+    if missing[0] != "pre_login":
+      self.query_one("#cluster-full", Collapsible).collapsed = False
+    self.query_one(f"#ssh-{missing[0].replace('_', '-')}", Input).focus()
+    self.notify(f"{action}: fill in " + ", ".join(self.REQUIRED_LABELS[k] for k in missing) + " first (marked red)", severity="error")
+    return True
+
   config_timer = None
+
+  @on(Input.Changed, "#ssh-user, #ssh-host, #ssh-port, #ssh-jump, #ssh-identities, #ssh-pre-login")
+  def required_changed(self, event):
+    """(a required field filled in: its mark goes; emptied again: yellow, red only after the next Add or Test)"""
+    if self.site is not None:
+      if not event.value.strip():
+        event.input.remove_class("-missing")
+      self.mark_required()
 
   @on(Input.Changed, "#ssh-user")
   def site_user_changed(self, event):
@@ -895,6 +966,8 @@ class AddClusterScreen(ModalScreen):
     if errors:
       self.notify("; ".join(errors), severity="error")
       return
+    if self.missing_refused("Test"):
+      return
     if not destination and not settings:
       self.notify("this machine: nothing to check (no SSH)", timeout=4)
       return
@@ -917,6 +990,8 @@ class AddClusterScreen(ModalScreen):
       errors.append(f"a tab is called {name} already")
     if errors:
       self.notify("; ".join(errors), severity="error")
+      return
+    if self.missing_refused("Add"):
       return
     self.dismiss(self.result())
 

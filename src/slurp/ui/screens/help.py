@@ -639,7 +639,9 @@ cluster's user, jump hosts and keys (suggested as you type; ssh, scp and your ot
 **From a site** (a new tab): a cluster slurp knows how to log in to (CSCS Alps: Daint, Santis, Clariden, Eiger; JSC:
 JURECA, JUWELS, JUSUF, JEDI). It fills in the form: the name, the full settings (host, jump host, key), the command
 before the login; fill in your user. Below it: how the site logs in, what it needs on this machine (✔ found, ✖ not,
-and where to get it), what to do once. Everything stays to see and change before **Add**.
+and where to get it), what to do once. Everything stays to see and change before **Add**. The fields the site needs
+from you (your user) have a yellow border until filled in; **Add** or **Test** without them turns them red, with what
+to fill in below each.
 
 The fallback, **Full SSH settings**: host, user, port, jump hosts (ProxyJump), identity files (only these are tried),
 and more ssh options, one `Key=Value` per line. They are kept with the tab.
