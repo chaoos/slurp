@@ -12,8 +12,17 @@ def test_settings_to_ssh_options(check):
   check("clean: empty ones left out, spaces gone", settings == {"host": "daint.alps.cscs.ch", "user": "me", "port": "2222",
         "jump": "me@ela.cscs.ch", "identities": ["~/.ssh/cscs-key"], "options": ["ForwardAgent=yes", "ServerAliveInterval 30"]}, settings)
   args = s.ssh_args(settings)
-  check("ssh's options: -l -p -J -i (only that key) -o", args == ["-l", "me", "-p", "2222", "-J", "me@ela.cscs.ch",
-        "-i", os.path.expanduser("~/.ssh/cscs-key"), "-o", "IdentitiesOnly=yes", "-o", "ForwardAgent=yes", "-o", "ServerAliveInterval=30"], args)
+  key = os.path.expanduser("~/.ssh/cscs-key")
+  check("ssh's options: -l -p, the jump host with the key too (ssh -J would not give it -i), -i (only that key) -o",
+        args == ["-l", "me", "-p", "2222", "-o", f"ProxyCommand=ssh -i {key} -o IdentitiesOnly=yes -W %h:%p me@ela.cscs.ch",
+                 "-i", key, "-o", "IdentitiesOnly=yes", "-o", "ForwardAgent=yes", "-o", "ServerAliveInterval=30"], args)
+  check("no identity files: -J", s.ssh_args({"host": "h", "jump": "me@j:2200"}) == ["-J", "me@j:2200"])
+  check("more jump hosts: -J as it is", "-J" in s.ssh_args({"host": "h", "jump": "a,b", "identities": ["~/k"]}))
+  check("a ProxyCommand or ProxyJump of your own: -J, yours stays", "-J" in s.ssh_args({"host": "h", "jump": "j", "identities": ["~/k"],
+                                                                                   "options": ["ProxyJump=x"]}))
+  odd = s.jump_command("j:2200", ["~/my keys/100%.key"])
+  check("a port; a path with a space and a % (quoted, %% for ssh)", odd == "ssh -i '" + os.path.expanduser("~/my keys/100%%.key")
+        + "' -o IdentitiesOnly=yes -p 2200 -W %h:%p j", odd)
   check("the tab's name: user@host:port, or its own", s.label(settings) == "me@daint.alps.cscs.ch:2222"
         and s.label({**settings, "name": "daint"}) == "daint" and s.label({"host": "h", "port": "22"}) == "h")
   check("no host: no settings", s.clean({"user": "me"}) is None and s.ssh_args(None) == [])
@@ -91,3 +100,24 @@ def test_the_blocks_of_ssh_config_for_a_destination(check, tmp_path):
   texts = [t.splitlines()[0] for _, _, t in s.config_blocks("x.cscs.ch", str(tmp_path / "config"))]
   check("wildcards match, a negated pattern excludes", "Host *.cscs.ch !ela.cscs.ch" in texts
         and "Host *.cscs.ch !ela.cscs.ch" not in [t.splitlines()[0] for _, _, t in s.config_blocks("ela.cscs.ch", str(tmp_path / "config"))], texts)
+
+
+def test_a_jump_host_that_wants_the_key(check, tmp_path, sshd, monkeypatch):
+  """Through a jump host (here the same sshd) that only lets the tab's key in: the login goes through (with ssh -J
+  the jump host was not offered the key)"""
+  import subprocess
+  key = tmp_path / "tabkey"
+  subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+  (sshd.dir / "authorized_keys").write_text(key.with_suffix(".pub").read_text())
+  bin_dir = tmp_path / "bin" # (no config, agent or known hosts of yours: for the jump host's ssh too)
+  bin_dir.mkdir()
+  import shutil
+  (bin_dir / "ssh").write_text(f'#!/bin/sh\nexec {shutil.which("ssh")} -F /dev/null -o IdentityAgent=none -o StrictHostKeyChecking=no '
+                               f'-o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$@"\n')
+  (bin_dir / "ssh").chmod(0o755)
+  monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+  settings = {"host": "localhost", "port": str(sshd.port), "jump": f"127.0.0.1:{sshd.port}", "identities": [str(key)],
+              "options": ["BatchMode=yes"]}
+  out = subprocess.run(["ssh", *s.ssh_args(settings), "localhost", "echo through"], capture_output=True, text=True, timeout=30)
+  check("the login through the jump host, with the tab's key there too", out.returncode == 0 and out.stdout.strip() == "through",
+        (out.returncode, out.stderr[-300:]))

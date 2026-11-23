@@ -32,6 +32,22 @@ def clean(settings):
   return out
 
 
+JUMP = re.compile(r"(?:([^@\s:,\[\]]+)@)?([^@\s:,\[\]]+)(?::(\d{1,5}))?")
+
+def jump_command(jump, identities):
+  """A ProxyCommand for one jump host that logs in there with the identity files of the tab too, or None (more jump
+  hosts, or an address ssh's -J has to read). ssh -J gives the options of its command line (-i, IdentitiesOnly) to the
+  destination only, not to the jump host: a key that the jump host wants as well (CSCS: ~/.ssh/cscs-key for ela) was
+  not offered there."""
+  m = JUMP.fullmatch(jump)
+  if not m or not identities:
+    return None
+  user, host, port = m.groups()
+  quote = lambda word: shlex.quote(word).replace("%", "%%") # (ssh expands %h, %p in it: a % of a path doubled)
+  words = ["ssh"] + [w for path in identities for w in ("-i", quote(os.path.expanduser(path)))] + ["-o", "IdentitiesOnly=yes"]
+  words += (["-p", port] if port else []) + ["-W", "%h:%p", quote(f"{user}@{host}" if user else host)]
+  return " ".join(words)
+
 def ssh_args(settings):
   """ssh's options for the full settings of a tab (before the destination)"""
   if not settings:
@@ -42,7 +58,9 @@ def ssh_args(settings):
   if settings.get("port"):
     args += ["-p", str(settings["port"])]
   if settings.get("jump"):
-    args += ["-J", settings["jump"]]
+    own = any(re.match(r"\s*proxy(command|jump)\b", o, re.I) for o in settings.get("options") or [])
+    proxy = None if own else jump_command(settings["jump"], settings.get("identities") or [])
+    args += ["-o", f"ProxyCommand={proxy}"] if proxy else ["-J", settings["jump"]]
   for identity in settings.get("identities") or []:
     args += ["-i", os.path.expanduser(identity)]
   if settings.get("identities"):

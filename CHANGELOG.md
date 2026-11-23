@@ -6,6 +6,12 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- SSH connections with full settings: a jump host is offered the tab's identity
+  files too. With `ssh -J` the options of the command line (`-i`) reach only the
+  destination, so a jump host that wants the same key (CSCS: `ela.cscs.ch` with
+  `~/.ssh/cscs-key`) refused the login. One jump host with identity files now
+  goes through a `ProxyCommand` with them; several, or your own `ProxyCommand`
+  or `ProxyJump`, stay as they were.
 - Site packs (what slurp knows about CSCS Alps, JSC's clusters, …) are
   versioned on their own: each has a `schema` (its format; a pack of a newer
   schema than slurp reads is left out) and a `version` (the date of its

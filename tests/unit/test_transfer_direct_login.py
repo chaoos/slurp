@@ -5,7 +5,6 @@ through it, Disconnect (a run then: refused, said). And what these build: the fo
 import os
 import pty
 import shutil
-import socket
 import subprocess
 import time
 import types
@@ -58,31 +57,6 @@ def test_what_it_builds(check):
   check("the login of a transfer: own, key, you; an older one with temp_key: the key",
         M.login_of(M.Transfer("a", "x", {}, {}, options={"temp_key": True})) == "key"
         and M.login_of(M.Transfer("a", "x", {}, {}, options={"login": "you"})) == "you" and M.login_of(M.Transfer("a", "x", {}, {})) == "own")
-
-
-@pytest.fixture
-def sshd(tmp_path):
-  """An sshd of the test on 127.0.0.1 (keys only, no forced command of its own), its authorized_keys in tmp_path"""
-  if not (SSHD and shutil.which("ssh") and shutil.which("rsync")):
-    pytest.skip("needs sshd, ssh and rsync")
-  d = tmp_path / "sshd"
-  d.mkdir()
-  subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(d / "hostkey")], check=True)
-  with socket.socket() as s:
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-  (d / "authorized_keys").write_text("")
-  (d / "sshd_config").write_text(f"Port {port}\nListenAddress 127.0.0.1\nHostKey {d}/hostkey\nAuthorizedKeysFile {d}/authorized_keys\n"
-                                 f"PidFile {d}/sshd.pid\nUsePAM no\nStrictModes no\nPasswordAuthentication no\n"
-                                 "KbdInteractiveAuthentication no\nPubkeyAuthentication yes\n")
-  proc = subprocess.Popen([SSHD, "-D", "-f", str(d / "sshd_config"), "-E", str(d / "sshd.log")])
-  try:
-    if not until(lambda: socket.socket().connect_ex(("127.0.0.1", port)) == 0, 10):
-      pytest.skip(f"the sshd of the test did not start: {(d / 'sshd.log').read_text()[-300:]}")
-    known = f"[127.0.0.1]:{port} {(d / 'hostkey.pub').read_text().split()[0]} {(d / 'hostkey.pub').read_text().split()[1]}\n"
-    yield types.SimpleNamespace(port=port, dir=d, known=known, target={"host": "127.0.0.1", "port": str(port)})
-  finally:
-    proc.kill()
 
 
 def run_direct(end, t, sshd, folder, **how):
