@@ -1112,13 +1112,17 @@ class AddClusterScreen(ModalScreen):
 
   @on(Input.Changed, "#ssh-user")
   def site_user_changed(self, event):
-    """(a site's jump host that wants the user too: it follows the user filled in)"""
-    if self.site is None or "{user}@" not in (self.site.get("jump") or ""):
+    """(a site's jump host or command before the login that wants the user too: it follows the user filled in, unless
+    you changed it yourself)"""
+    if self.site is None:
       return
     from ... import sites
-    jump = self.query_one("#ssh-jump", Input)
-    if jump.value in (sites.login_settings(self.site, u)["jump"] for u in ("", getattr(self, "site_user", ""))):
-      jump.value = sites.login_settings(self.site, event.value.strip())["jump"] # (not if you changed it yourself)
+    for key, field_id, wants in (("jump", "#ssh-jump", "{user}@"), ("pre_login", "#ssh-pre-login", "{user}")):
+      if wants not in (self.site.get(key) or ""):
+        continue
+      field = self.query_one(field_id, Input)
+      if field.value in (sites.login_settings(self.site, u)[key] for u in ("", getattr(self, "site_user", ""))):
+        field.value = sites.login_settings(self.site, event.value.strip())[key]
     self.site_user = event.value.strip()
 
   @on(Input.Changed)

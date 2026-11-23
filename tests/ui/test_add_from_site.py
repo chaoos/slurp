@@ -217,3 +217,29 @@ def test_identity_files(check, monkeypatch, home):
       check("…added, with that key", got and got[0]["ssh"]["identities"] == ["~/.ssh/later-key"], got)
       await pilot.press("q")
   asyncio.run(main())
+
+
+def test_the_user_in_the_command_before_the_login(check, monkeypatch, home, tmp_path):
+  import os
+  rules = os.path.join(os.environ["XDG_CONFIG_HOME"], "slurp", "rules")
+  os.makedirs(rules, exist_ok=True)
+  with open(os.path.join(rules, "proxy.toml"), "w") as f:
+    f.write('name = "Proxy site"\nmatch = ["proxy*"]\n[login]\nrequired = ["user"]\npre_login = "sshproxy.sh -u {user}"\n'
+            '[[clusters]]\nname = "proxy1"\nhost = "login.proxy.example"\n')
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(140, 50)) as pilot:
+      await started(pilot, app)
+      app.push_screen(AddClusterScreen()); await pilot.pause(0.4)
+      dlg = app.screen
+      dlg.site_chosen("proxy/proxy1"); await pilot.pause(0.3)
+      pre = dlg.query_one("#ssh-pre-login")
+      check("a command with {user}: shown so, until the user is there", pre.value == "sshproxy.sh -u {user}", pre.value)
+      dlg.query_one("#ssh-user").value = "me"; await pilot.pause(0.2)
+      check("…the user filled in: in the command", pre.value == "sshproxy.sh -u me", pre.value)
+      dlg.query_one("#ssh-user").value = "me2"; await pilot.pause(0.2)
+      check("…it follows the user", pre.value == "sshproxy.sh -u me2", pre.value)
+      pre.value = "sshproxy.sh -u me2 -c other"; await pilot.pause(0.1)
+      dlg.query_one("#ssh-user").value = "me3"; await pilot.pause(0.2)
+      check("…not when you changed it yourself", pre.value == "sshproxy.sh -u me2 -c other", pre.value)
+  asyncio.run(main())

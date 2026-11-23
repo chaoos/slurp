@@ -47,7 +47,8 @@ can say otherwise for its own:
   identities = ["~/.ssh/cscs-key"] # private keys (the jump host is offered them too)
   options = ["AddressFamily=inet"] # more ssh options, Key=Value
   port = 22
-  pre_login = "cscs-key sign --headless" # a command here before the login (in the login pane: answer it there)
+  pre_login = "cscs-key sign --headless" # a command here before the login (in the login pane: answer it there);
+                                   # {user}: the user filled in, quoted (e.g. "sshproxy.sh -u {user}")
   pre_login_fallback = true        # …only when a login without it fails (a key still valid is not signed anew)
   needs = [{ command = "cscs-key", install = "https://…" }] # programs here that the login needs, and how to get them
   setup = "…"                      # what to do once, before the first login (plain text, shown in the form)
@@ -66,6 +67,7 @@ import functools
 import os
 import pathlib
 import re
+import shlex
 from importlib import resources
 
 try:
@@ -182,9 +184,11 @@ def login_settings(entry, user=""):
   "jump", "identities", "options", "pre_login", "pre_login_fallback"}"""
   jump = entry.get("jump", "")
   jump = jump.replace("{user}@", f"{user}@" if user else "") # (no user yet: the jump host as ssh's default makes it)
+  # (the command before the login: the user as one word of the shell, quoted; none yet: {user} stays, to be seen)
+  pre_login = entry.get("pre_login", "").replace("{user}", shlex.quote(user) if user else "{user}")
   return {"name": entry["name"], "host": entry["host"], "user": user, "port": str(entry.get("port") or ""), "jump": jump,
           "identities": list(entry.get("identities", [])), "options": list(entry.get("options", [])),
-          "pre_login": entry.get("pre_login", ""), "pre_login_fallback": bool(entry.get("pre_login_fallback"))}
+          "pre_login": pre_login, "pre_login_fallback": bool(entry.get("pre_login_fallback"))}
 
 def pack_text(pack):
   """What a pack is, for the rule catalogue: its name, version, and where it is from ("" without a pack)"""

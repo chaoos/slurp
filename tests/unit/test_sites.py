@@ -109,6 +109,10 @@ def test_the_clusters_of_the_sites(check, tmp_path, monkeypatch):
   check("the form's fields, the user filled in (in the jump host too)", fill["jump"] == "me@ela.cscs.ch" and fill["user"] == "me"
         and fill["identities"] == ["~/.ssh/cscs-key"] and fill["pre_login_fallback"] is True)
   check("…no user yet: the jump host without one", sites.login_settings(daint)["jump"] == "ela.cscs.ch")
+  proxy = {"name": "p", "host": "h.example", "pre_login": "sshproxy.sh -u {user}"}
+  check("{user} in the command before the login: the user, quoted (one word of the shell); none yet: {user} stays",
+        [sites.login_settings(proxy, u)["pre_login"] for u in ("me", "a b;rm -rf ~", "")]
+        == ["sshproxy.sh -u me", "sshproxy.sh -u 'a b;rm -rf ~'", "sshproxy.sh -u {user}"])
   check("JEDI's pack applies to its login host too", sites.site_pack("x", "me@login.jedi.fz-juelich.de").get("name") == "JSC JEDI")
   rules = tmp_path / "slurp" / "rules"
   rules.mkdir(parents=True)

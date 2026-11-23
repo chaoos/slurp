@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Site packs: the command before the login (`pre_login`) can name the user
+  (`sshproxy.sh -u {user}`): the form fills in the user you type, quoted,
+  and follows it (not when you changed the command yourself).
 - New SSH connection, **From a site**: **Choose…** opens a window to search
   the clusters of all site packs (every word must match the cluster, its
   site, its host or the pack; `↑` `↓` while typing, `Enter` takes it), with
