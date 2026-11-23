@@ -291,8 +291,9 @@ class FilePickScreen(ModalScreen[str | None]):
     self.go(self.path)
     table.focus()
 
-  def go(self, path):
-    """List a directory (in the background); a file: its directory, the file under the cursor"""
+  def go(self, path, select=""):
+    """List a directory (in the background); a file: its directory, the file under the cursor; select: the entry to
+    put the cursor on (a file or a directory of it)"""
     self.query_one("#fp-status", Static).update(Text(f"listing {path} …", style="dim"))
     isdir, isfile, lister = (os.path.isdir, os.path.isfile, local_listing) if self.local else (fs_isdir, fs_isfile, listing)
     def work():
@@ -301,7 +302,7 @@ class FilePickScreen(ModalScreen[str | None]):
           if isfile(path):
             return os.path.dirname(path) or "/", lister(os.path.dirname(path) or "/", DIR_LIMIT)[1], os.path.basename(path)
           raise OSError(f"{path}: no such directory")
-        return path, lister(path, DIR_LIMIT)[1], ""
+        return path, lister(path, DIR_LIMIT)[1], select
       except OSError as e:
         return None, None, str(e)
     def listed(result):
@@ -438,12 +439,13 @@ class FilePickScreen(ModalScreen[str | None]):
 
   @on(Button.Pressed, "#fp-reload")
   def action_reload(self, event=None):
-    """The directory shown, listed again (new files, ones gone); the cursor stays on its file if it is still there"""
+    """The directory shown, listed again (new files, ones gone); the cursor stays on its entry (a file or a directory)
+    if it is still there"""
     if event is not None:
       event.stop()
     entry = self.current()
     self.previewed = None # (the file under the cursor: read again too, it may have grown)
-    self.go(self.path if entry is None else os.path.join(self.path, entry["name"]))
+    self.go(self.path, select=entry["name"] if entry else "") # (the directory shown, not the one highlighted)
 
   @on(Button.Pressed, "#fp-ok")
   def ok(self, event):

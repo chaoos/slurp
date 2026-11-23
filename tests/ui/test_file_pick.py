@@ -1,5 +1,5 @@
-"""The file window (FilePickScreen): Reload (the button, r) lists the directory shown again: a new file is there, one
-gone is not, the cursor stays on its file"""
+"""The file window (FilePickScreen): Reload (the button, r) lists the directory shown again (also with a directory
+highlighted: not that one): a new file is there, one gone is not, the cursor stays on its entry"""
 import asyncio
 
 from slurp.ui.app import Slurp
@@ -38,4 +38,16 @@ def test_reload(check, tmp_path):
       await pilot.press("r")
       ok = await until(pilot, lambda: "d.log" in names())
       check("r: the same", ok, names())
+      (tmp_path / "sub").mkdir()
+      (tmp_path / "sub" / "inner.log").write_text("i")
+      await pilot.click("#fp-reload")
+      await until(pilot, lambda: "sub" in names())
+      table = picker.query_one("#fp-list")
+      table.move_cursor(row=table.get_row_index("sub")); await pilot.pause(0.1)
+      check("…a directory highlighted", (picker.current() or {}).get("name") == "sub", picker.current())
+      (tmp_path / "e.log").write_text("e")
+      await pilot.click("#fp-reload")
+      ok = await until(pilot, lambda: "e.log" in names())
+      check("Reload with a directory highlighted: the directory shown again, not the highlighted one; the cursor stays on it",
+            ok and picker.path == str(tmp_path) and (picker.current() or {}).get("name") == "sub", (picker.path, names(), picker.current()))
   asyncio.run(main())

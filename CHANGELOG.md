@@ -61,8 +61,8 @@ version may need the helper of the same version).
   `cd` to a place slurp cannot know (`cd -`, `popd`, an unknown variable),
   relative paths are not checked until the next known `cd`.
 - The file window (choosing a job's progress file, Browse… for an identity
-  file) has **Reload** (`r`): the directory shown is listed again, the cursor
-  stays on its file.
+  file) has **Reload** (`r`): the directory shown is listed again (also with
+  a directory highlighted: not that one), the cursor stays on its entry.
 - Job list: the countdown of the automatic refresh no longer stays at
   **⟳ 0:00** when the refresh is due but cannot start; it says why
   (**⟳ connecting**, **⟳ loading**, **⟳ not loaded**) and counts down again
