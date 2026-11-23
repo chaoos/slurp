@@ -1,0 +1,32 @@
+# LUMI (CSC, Kajaani, EuroHPC): LUMI-G (4 AMD MI250X, 8 GCDs, per node), LUMI-C (2x 64-core AMD EPYC per node).
+# Logins: lumi.csc.fi (one of four login nodes, lumi-uan01 to lumi-uan04.csc.fi).
+schema = 1
+version = "2026.11.23"
+name = "LUMI"
+match = ["lumi*", "lumi.csc.fi", "lumi-uan*.csc.fi"]
+docs = "https://docs.lumi-supercomputer.eu"
+status = "https://lumi-supercomputer.eu/lumi-service-status/"
+# home, project, scratch (LUMI-P) and flash (LUMI-F) are all Lustre: environments of many small files are slow there
+parallel_fs = ["/users", "/project", "/scratch", "/flash", "/pfs"]
+
+# How to log in (docs.lumi-supercomputer.eu/firststeps/loggingin, …/SSH-keys): directly, with a key registered in
+# MyAccessID (or MyCSC for Finnish allocations); EuroHPC Federation Platform projects use certificates instead.
+[login]
+required = ["user"]
+user_label = "your LUMI username (from the email of your account)"
+identities = ["~/.ssh/id_ed25519_lumi"]
+setup = """Once, before the first login:
+1. A key with a passphrase (LUMI requires one; ed25519 or RSA 4096): ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_lumi
+2. Register its public half (~/.ssh/id_ed25519_lumi.pub): in your MyAccessID profile (mms.myaccessid.org, Settings, SSH keys), or for a Finnish allocation in MyCSC (my.csc.fi, Profile, SSH public keys). It can take a couple of hours to reach LUMI.
+3. At the first login: compare the host key with the fingerprints on docs.lumi-supercomputer.eu (Logging in).
+A project of the EuroHPC Federation Platform logs in with an SSH certificate instead: see docs.my-eurohpc.eu."""
+
+[[clusters]]
+name = "lumi"
+title = "LUMI"
+host = "lumi.csc.fi"
+
+[[advice]]
+pattern = "conda\\s+(activate|create)|source\\s+activate|pip\\s+install"
+text = "On LUMI, Conda and pip environments are many small files on Lustre (slow, and they fill the file quota): use the LUMI container wrapper or cotainr, see docs.lumi-supercomputer.eu (Python packages)"
+severity = "info"

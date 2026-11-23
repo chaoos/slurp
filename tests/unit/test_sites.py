@@ -10,7 +10,7 @@ from slurp.checks import engine as c
 
 def test_the_builtin_packs(check):
   packs = [p for p in sites.load_packs() if p["_builtin"]]
-  check("the built-in packs are there", {p["name"] for p in packs} >= {"CSCS Alps", "JSC JEDI", "JSC JURECA", "JSC JUSUF", "JSC JUWELS"},
+  check("the built-in packs are there", {p["name"] for p in packs} >= {"CSCS Alps", "JSC JEDI", "JSC JURECA", "JSC JUSUF", "JSC JUWELS", "LUMI", "CINECA Leonardo"},
         [p.get("name") for p in packs])
   for p in packs:
     file = p["_path"].rsplit("/", 1)[-1]
@@ -73,7 +73,7 @@ def test_where_the_user_sees_it(check, tmp_path, monkeypatch):
   check("…slurp check --version too", "site packs" in out and "CSCS Alps" in out, out)
   line = sites.packs_line()
   check("About slurp, its version section: the packs in one line, the built-in ones and yours",
-        f"built in: CSCS Alps {alps['version']}" in line and "yours (" in line and "Mine 2026.11.01" in line, line)
+        line.startswith("built in: ") and f"CSCS Alps {alps['version']}" in line.split(";")[0] and "yours (" in line and "Mine 2026.11.01" in line, line)
   cluster = types.SimpleNamespace(name="daint", destination="me@daint.alps.cscs.ch", connection=None)
   app = types.SimpleNamespace(clusters=[cluster], cluster=cluster, is_web=False, size=types.SimpleNamespace(width=100, height=30), view_kind="terminal")
   monkeypatch.setattr("slurp.links.holder.under_holder", lambda: False)
@@ -95,7 +95,14 @@ def test_the_clusters_of_the_sites(check, tmp_path, monkeypatch):
   daint = clusters.get("cscs-alps/daint", {})
   check("the built-in clusters: Alps and JSC's", {"cscs-alps/daint", "cscs-alps/eiger", "cscs-alps/santis", "cscs-alps/clariden",
         "juelich-jureca/jureca", "juelich-juwels/juwels-cluster", "juelich-juwels/juwels-booster", "juelich-jusuf/jusuf",
-        "juelich-jedi/jedi"} <= set(clusters), sorted(clusters))
+        "juelich-jedi/jedi", "lumi/lumi", "cineca-leonardo/leonardo"} <= set(clusters), sorted(clusters))
+  lumi, leonardo = clusters.get("lumi/lumi", {}), clusters.get("cineca-leonardo/leonardo", {})
+  check("LUMI: directly to lumi.csc.fi, with a key of its own", lumi.get("host") == "lumi.csc.fi" and not lumi.get("jump")
+        and lumi.get("identities") == ["~/.ssh/id_ed25519_lumi"] and not lumi.get("pre_login"), lumi)
+  check("Leonardo: a step certificate (in the agent: no key file), only when a login without it fails",
+        leonardo.get("host") == "login.leonardo.cineca.it" and leonardo.get("pre_login") == "step ssh login --provisioner cineca-hpc"
+        and leonardo.get("pre_login_fallback") is True and not leonardo.get("identities")
+        and [n["command"] for n in leonardo.get("needs", [])] == ["step"], leonardo)
   check("…a cluster takes the site's [login]", daint.get("jump") == "{user}@ela.cscs.ch" and daint.get("pre_login") == "cscs-key sign --headless"
         and daint.get("site") == "CSCS Alps" and daint.get("builtin") and daint.get("version"), daint)
   fill = sites.login_settings(daint, "me")

@@ -6,6 +6,14 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Site packs for LUMI (CSC; `lumi.csc.fi` with a key of your own registered
+  in MyAccessID or MyCSC; Lustre everywhere, container wrapper advice for
+  Conda and pip) and CINECA's Leonardo (`login.leonardo.cineca.it`; 2FA with
+  a certificate from smallstep's `step ssh login --provisioner cineca-hpc`,
+  run in the login pane when a login without it fails; scratch purged after
+  40 days; the data movers and the serial partition for transfers; A100,
+  sm_80). Both are in **From a site** of a new SSH connection. Taken from
+  the sites' documentation (docs.lumi-supercomputer.eu, docs.hpc.cineca.it).
 - Checks, B14 (srun in a loop): `for`,
   `while`, `until` and `done` count only where a command starts, not in a
   comment (`# threads for the solver`), a string (`echo "wait for it"`) or

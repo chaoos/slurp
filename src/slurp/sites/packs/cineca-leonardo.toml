@@ -1,0 +1,33 @@
+# CINECA Leonardo (Bologna, EuroHPC): Booster (4 NVIDIA A100 64 GB, 32 Ice Lake cores per node), DCGP (112 Sapphire
+# Rapids cores per node). Logins: login.leonardo.cineca.it (login01-ext, 02, 05, 07); data movers: data.leonardo.cineca.it.
+schema = 1
+version = "2026.11.23"
+name = "CINECA Leonardo"
+match = ["leonardo*", "*.leonardo.cineca.it"]
+docs = "https://docs.hpc.cineca.it/hpc/leonardo.html"
+status = "https://www.hpc.cineca.it/user-support/"
+scratch_purge_days = 40 # ($CINECA_SCRATCH: files not accessed for 40 days are deleted, daily; a log in $HOME)
+parallel_fs = ["/leonardo", "/leonardo_work", "/leonardo_scratch"]
+cuda_arch = "sm_80"
+transfer_partition = "lrd_all_serial" # (no budget, 4 h at most)
+transfer_hosts = ["data.leonardo.cineca.it"]
+login_node_limits = "10 minutes of CPU time per process on the login nodes (large transfers: the data movers, data.leonardo.cineca.it, or the serial partition)"
+
+# How to log in (docs.hpc.cineca.it/general/access.html): 2FA, an SSH certificate from step (smallstep) in your
+# ssh-agent, valid for 12 hours; then ssh needs no key file.
+[login]
+required = ["user"]
+user_label = "your CINECA username (as in UserDB)"
+pre_login = "step ssh login --provisioner cineca-hpc" # (a browser opens: your CINECA password and the OTP code)
+pre_login_fallback = true                            # (a certificate in the agent is valid for 12 hours)
+needs = [{ command = "step", install = "https://smallstep.com/docs/step-cli/installation/" }]
+setup = """Once, before the first login:
+1. Register in UserDB, then log in at sso.hpc.cineca.it: verify your email, set a password, pair an OTP app (FreeOTP, Google Authenticator) and keep the recovery codes.
+2. The program step (smallstep's step-cli, not the Ubuntu package called step) on this machine, then: step ca bootstrap --ca-url=https://sshproxy.hpc.cineca.it --fingerprint 2ae1543202304d3f434bdc1a2c92eff2cd2b02110206ef06317e70c1c1735ecd
+3. An ssh-agent running (the certificate is kept there): most desktops have one; otherwise eval $(ssh-agent) before starting slurp.
+Then each login: when the certificate has expired (after 12 hours, or a reboot), slurp runs step ssh login --provisioner cineca-hpc in the login pane first: a browser opens, log in there (password and OTP code). If step asks for your identity, change the command to step ssh login 'your email' --provisioner cineca-hpc (the email of your CINECA account)."""
+
+[[clusters]]
+name = "leonardo"
+title = "Leonardo"
+host = "login.leonardo.cineca.it"
