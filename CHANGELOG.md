@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Progress of a job: no more "progress failed" now and then, when the latest
+  `n/N` line of the output is alike in structure to the ones before but not
+  the same (a word more).
 - Job list: an array is one row from two tasks in the list on (was ten),
   e.g. the pending tasks `5439288_[9-33:8]` (four tasks); one task alone
   keeps its own row.

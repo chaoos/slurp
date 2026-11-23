@@ -765,7 +765,9 @@ def progress_lines(found, shape="", total=None):
       if not any(same(i, k) for k in kinds):
         kinds.append((shapes[i], found[i][2]))
     count = {k: len(lines_of(k)) for k in kinds}
-    if count[latest] >= 2 or (kept is None and max(count.values()) < 2):
+    # (the latest line's kind is not always one of kinds: a line before it alike in structure, not the same, stands
+    # for it there; counted by itself)
+    if len(lines_of(latest)) >= 2 or (kept is None and max(count.values()) < 2):
       kind = latest
     else:
       best = max(kinds, key=lambda k: (count[k], lines_of(k)[-1]))

@@ -86,3 +86,17 @@ def test_the_pace_keeps_its_n(check, monkeypatch):
     tail = "\n".join([f"step {i}/100" for i in range(1, n + 1)] + ([stray] if stray else []))
     p = J.record_progress(j, J.output_progress("x", tail=tail, job=j))
   check("a stray other N between the reads: not counted, 0.5/s", abs(p.estimate["recent"][0] - 0.5) < 1e-9 and p.total == 100, (p.text, p.estimate))
+
+
+def test_a_latest_line_alike_but_not_the_same(check):
+  """The latest line alike in structure to the ones before, not the same (a word more): its kind is the one of those
+  before (it was missing from the counts: a KeyError, "progress failed: ('[#-#-#T#] Evaluating inversion …', 1024)")"""
+  line = "[2026-11-23T10:00:{s:02d}] Evaluating inversion (type=multigrid-coarse/L2,src=wall,sidx=3) {n}/1024"
+  tail = "\n".join([line.format(s=1, n=5), line.format(s=2, n=6), line.format(s=3, n=7) + " done"])
+  try:
+    p = J.output_progress("x", tail=tail)
+  except KeyError as e:
+    p, error = None, e
+  else:
+    error = None
+  check("no error; the progress: the latest line", error is None and p and p.current == 7 and p.total == 1024, (error, p and p.text))
