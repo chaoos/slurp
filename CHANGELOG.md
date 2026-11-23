@@ -8,7 +8,9 @@ version may need the helper of the same version).
 
 - SSH connections, identity files: a file that is not on this machine, a
   directory, or the `.pub` half instead of the private key is marked red at
-  once, with what is wrong below it; Add and Test wait until it is right.
+  once, with what is wrong below it. Add and Test say so first and become
+  Add anyway and Test anyway (red): pressed again, they go on (the command
+  before the login may make the key).
   **Browse…** next to the field chooses a key on this machine (from `~/.ssh`;
   its content is not read or shown). The file window can now list this
   machine and leave out its preview.
@@ -22,7 +24,8 @@ version may need the helper of the same version).
   JuDoor). All of it stays to see and change before Add.
   The fields the site needs from you (your user) have a yellow border until
   filled in; Add or Test without them turns them red, with what to fill in
-  below each (a pack names them in `required`).
+  below each (a pack names them in `required`), then Add anyway and Test
+  anyway go on.
 - Site packs can describe how their clusters log in: `[login]` for all of the
   site's clusters, `[[clusters]]` for each (name, host, jump host, keys, ssh
   options, the command before the login, programs it needs, what to do once).

@@ -888,18 +888,35 @@ class AddClusterScreen(ModalScreen):
         hint.display = True
       else:
         hint.display = False
+    if not missing and self.anyway:
+      self.set_anyway(False)
     return missing
 
+  anyway = False # (Add and Test were pressed with marked fields: they say "… anyway", the next press goes on)
+
+  def set_anyway(self, on):
+    """Add and Test as "Add anyway", "Test anyway" (red): the marks are only advice (the command before the login may
+    make the key, the user may come from ~/.ssh/config, …), the next press goes on; off: as they were"""
+    self.anyway = on
+    for button, label, variant in (("#cluster-check-button", "Test", "default"), ("#cluster-confirm", "Save" if self.cluster else "Add", "primary")):
+      b = self.query_one(button, Button)
+      b.label, b.variant = (f"{label} anyway", "error") if on else (label, variant)
+
   def missing_refused(self, action):
-    """Add or Test with required fields empty: they turn red, said; True (then nothing happens)"""
+    """Add or Test with fields marked (empty required ones, identity files that are not there): they turn red, said,
+    and the buttons say "… anyway": True (nothing happens yet). Pressed again: False (it goes on)"""
     missing = self.mark_required(pressed=True)
     if not missing:
+      self.set_anyway(False)
+      return False
+    if self.anyway:
       return False
     if missing[0] != "pre_login":
       self.query_one("#cluster-full", Collapsible).collapsed = False
     self.query_one(f"#ssh-{missing[0].replace('_', '-')}", Input).focus()
     said = [self.field_problem(k) or f"fill in {self.REQUIRED_LABELS[k]}" for k in missing]
-    self.notify(f"{action}: " + "; ".join(said) + " (marked red)", severity="error")
+    self.set_anyway(True)
+    self.notify(f"{action}: " + "; ".join(said) + f" (marked red). {action} anyway: press it again", severity="error")
     return True
 
   config_timer = None

@@ -110,18 +110,23 @@ def test_fields_to_fill_in(check, monkeypatch, home):
       check("Test without it: no check; red, the hint below it, said", not pushed and user.has_class("-missing")
             and color(user) == theme("error") and user.region.height == 1 and hint.display
             and str(hint.render()) == "↑ fill in your CSCS username: CSCS Alps needs it"
-            and any("Test: fill in the user (marked red)" in str(n.message) for n in app._notifications), (pushed, str(hint.render())))
+            and any("Test: fill in the user (marked red). Test anyway: press it again" in str(n.message) for n in app._notifications), (pushed, str(hint.render())))
+      buttons = lambda: [(str(b.label), b.variant) for b in (dlg.query_one("#cluster-check-button"), dlg.query_one("#cluster-confirm"))]
+      check("…the buttons: Test anyway, Add anyway, red", buttons() == [("Test anyway", "error"), ("Add anyway", "error")], buttons())
       dlg.query_one("#cluster-full").collapsed = True; await pilot.pause(0.2)
-      dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.3)
-      check("Add without it: not added; the settings open again, the user focused", not got and app.screen is dlg
-            and not dlg.query_one("#cluster-full").collapsed and app.focused is user)
+      dlg.query_one("#cluster-check-button").press(); await pilot.pause(0.3)
+      check("Test anyway: the check (the command before the login may make what is missing)", pushed == ["SshCheckScreen"], pushed)
       user.value = "rgruber"; await pilot.pause(0.2)
-      check("filled in: the mark and the hint are gone", not user.has_class("-required") and not user.has_class("-missing")
-            and not hint.display and color(user) == plain, (user.classes, color(user)))
+      check("filled in: the mark and the hint are gone, the buttons as they were", not user.has_class("-required") and not user.has_class("-missing")
+            and not hint.display and color(user) == plain and buttons() == [("Test", "default"), ("Add", "primary")], (user.classes, color(user), buttons()))
       user.value = ""; await pilot.pause(0.2)
       check("emptied again: yellow (red only after Add or Test)", user.has_class("-required") and not user.has_class("-missing") and not hint.display)
+      dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.3)
+      check("Add without it: not added yet; the settings open again, the user focused; Add anyway", not got and app.screen is dlg
+            and not dlg.query_one("#cluster-full").collapsed and app.focused is user and buttons()[1] == ("Add anyway", "error"))
       dlg.query_one("#cluster-site").clear(); await pilot.pause(0.3)
-      check("(none) chosen: no marks", not user.has_class("-required") and not dlg.query_one("#cluster-site-info").display)
+      check("(none) chosen: no marks, the buttons as they were", not user.has_class("-required") and not dlg.query_one("#cluster-site-info").display
+            and buttons() == [("Test", "default"), ("Add", "primary")], buttons())
       user.value = "rgruber"
       dlg.query_one("#cluster-site").value = "cscs-alps/daint"; await pilot.pause(0.3)
       check("a user already there: no mark", not user.has_class("-required"))
@@ -132,8 +137,9 @@ def test_fields_to_fill_in(check, monkeypatch, home):
 
 
 def test_identity_files(check, monkeypatch, home):
-  """An identity file must be on this machine: one that is not there (or a directory, or the .pub half) is red at
-  once, said below it; Add and Test refuse it. Browse…: a private key of this machine, its content not shown"""
+  """An identity file should be on this machine: one that is not there (or a directory, or the .pub half) is red at
+  once, said below it; Add and Test say so first, then Add anyway. Browse…: a private key of this machine, its
+  content not shown"""
   monkeypatch.setattr(Slurp, "activate_cluster", lambda app, index, **kw: setattr(app, "cluster_index", index))
   ssh = home / ".ssh"
   read = []
@@ -154,7 +160,8 @@ def test_identity_files(check, monkeypatch, home):
             field.has_class("-missing") and field.region.height == 1 and hint.display
             and str(hint.render()) == "↑ ~/.ssh/nokey does not exist (here, on this machine)", str(hint.render()))
       dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.3)
-      check("…Add: refused, said", not got and any("~/.ssh/nokey does not exist" in str(n.message) for n in app._notifications))
+      check("…Add: not yet, said; Add anyway", not got and any("~/.ssh/nokey does not exist" in str(n.message) for n in app._notifications)
+            and str(dlg.query_one("#cluster-confirm").label) == "Add anyway")
       field.value = "~/.ssh/cscs-key.pub"; await pilot.pause(0.3)
       check("the .pub half: red, the private key named", field.has_class("-missing") and "choose the private key (~/.ssh/cscs-key)" in str(hint.render()))
       field.value = "~/.ssh"; await pilot.pause(0.3)
@@ -177,8 +184,11 @@ def test_identity_files(check, monkeypatch, home):
       app.screen.query_one("#fp-list").move_cursor(row=names.index("cscs-key.pub")); await pilot.pause(0.2)
       app.screen.query_one("#fp-ok").press(); await pilot.pause(0.4)
       check("another: added (more keys: commas); the .pub: red", field.value == "~/.ssh/cscs-key, ~/.ssh/cscs-key.pub" and field.has_class("-missing"), field.value)
-      field.value = "~/.ssh/cscs-key"; await pilot.pause(0.2)
+      field.value = "~/.ssh/later-key"; await pilot.pause(0.2)
       dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.3)
-      check("Add: with that key", got and got[0]["ssh"]["identities"] == ["~/.ssh/cscs-key"], got)
+      check("a key that is not there yet (the command before the login may make it): Add, then Add anyway",
+            not got and str(dlg.query_one("#cluster-confirm").label) == "Add anyway")
+      dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.3)
+      check("…added, with that key", got and got[0]["ssh"]["identities"] == ["~/.ssh/later-key"], got)
       await pilot.press("q")
   asyncio.run(main())

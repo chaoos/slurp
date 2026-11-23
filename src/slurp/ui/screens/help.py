@@ -642,11 +642,13 @@ before the login; fill in your user. Below it: how the site logs in, what it nee
 and where to get it), what to do once. Everything stays to see and change before **Add**. The fields the site needs
 from you (your user) have a yellow border until filled in; **Add** or **Test** without them turns them red, with what
 to fill in below each.
+**Add** and **Test** with fields marked: they turn red, the buttons become **Add anyway** and **Test anyway**
+(red), and pressed again they go on: the marks are advice (the command before the login may make the key).
 
 The fallback, **Full SSH settings**: host, user, port, jump hosts (ProxyJump), identity files (only these are tried),
 and more ssh options, one `Key=Value` per line. They are kept with the tab. An identity file must be a private key on
-this machine: one that is not there, a directory or a `.pub` file is marked red at once, said below it, and **Add**
-and **Test** wait. **Browse…** chooses one on this machine (from `~/.ssh`; its content is not read or shown).
+this machine: one that is not there, a directory or a `.pub` file is marked red at once, said below it (Add and Test:
+**… anyway**, as above). **Browse…** chooses one on this machine (from `~/.ssh`; its content is not read or shown).
 
 **Run before login** (both ways): a command on this machine before every login of the tab, e.g. one that signs your
 key for the day (`cscs-keygen`, `step ssh login`, `tsh login`). It runs in the login pane: answer it there (a
