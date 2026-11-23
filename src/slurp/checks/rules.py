@@ -864,6 +864,43 @@ def quota_state(e):
       out.append((used / limit, what, used, limit))
   return max(out) if out else None
 
+@rule("P10", WARNING, "Arguments naming paths that do not exist",
+      "An argument of a program the job runs (srun ./sim --input data/run1.h5, mpirun ./app conf/a.yaml, python run.py "
+      "-c cfg/x.toml) looks like a path, but there is no such file or directory where that line runs (--chdir or where "
+      "sbatch runs, then the script's cd, srun --chdir). A path the script names earlier (made or written there) is not "
+      "checked; one an output option names (-o, --output, --save, --log, --prefix, …) only needs its directory. Scripts "
+      "and jobs that wait (one that runs or ran: its inputs may be gone since).",
+      "The program stops at once (cannot open file), or worse goes on without its input, with a default, and the job "
+      "runs for hours on the wrong data. A file it writes into a directory that is not there fails at the end, after "
+      "the whole run.",
+      "Fix the path (a typo? relative from the wrong directory?), create the directory first (mkdir -p) or make the "
+      "input before the step that reads it. A file the program writes itself: fine, mute it (# slurp: ignore P10).",
+      "cd /scratch/me/run\nsrun ./sim --input data/run1.h5      # /scratch/me/run/data/run1.h5: not there\n"
+      "srun ./sim --output results/a.h5             # results/ not there: mkdir -p results first",
+      needs="probe")
+def p10(ctx):
+  if ctx.job is not None and not (ctx.job.rec.get("State") or "").startswith("PENDING"): # (one that runs or ran: its inputs
+    return # may be gone since, its outputs are being written)
+  for kind, path, line in referenced_paths(ctx):
+    if kind != "a":
+      continue
+    info = ctx.probe("a", path)
+    if info is None or info.exists:
+      continue
+    arg = ctx.arguments.get(path, {})
+    word, flag = arg.get("word", path), arg.get("flag")
+    said = (flag if flag and flag.endswith("=") else f"{flag} " if flag else "") + word + (f" ({path})" if word != path else "")
+    folder = os.path.dirname(path)
+    parent = ctx.probe("d", folder)
+    guessed = path in ctx.uncertain
+    note = " (relative: checked from the script's directory; Slurm runs it from where you submit)" if guessed else ""
+    severity = INFO if guessed else ""
+    if parent is not None and not parent.exists:
+      yield F("P10", f"{said}: neither it nor its directory {folder} exists{note}", line, severity,
+              snippet=f"mkdir -p {shlex.quote(folder)}" if arg.get("output") else "")
+    elif not arg.get("output"):
+      yield F("P10", f"{said} does not exist{note} (written by the program itself? then fine)", line, severity)
+
 @rule("Q01", ERROR, "Writing where the quota is (almost) full",
       "The job writes (its logs, its working directory) to a filesystem where your quota of space or of files is "
       "full or nearly full.",

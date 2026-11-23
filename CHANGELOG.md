@@ -6,6 +6,16 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- New check P10: an argument of a program the job runs that looks like a
+  path (`srun ./binary --flag a/b/c`, `--in=input.dat`, a python script's
+  arguments, `mpirun ./app $SCRATCH/in.h5`) but is not there where that
+  line runs (`--chdir`, the script's `cd`, `srun --chdir`). An output
+  option's path (`-o`, `--output`, `--save…`, `--log…`, `--prefix`, …) only
+  needs its directory. Not checked: paths an earlier line made or named
+  (`mkdir`, a step that writes them, `cp … dir/`), options, URLs,
+  `host:path`, globs, fractions, `/tmp` and `/dev` (other on the nodes),
+  shell commands such as `cp` or `rm`. Scripts and jobs that wait only:
+  a job that ran may have removed its inputs since.
 - Checks of paths and programs (P02, P03 and the others): a relative path is
   checked where its line runs: after the script's `cd` or `pushd`, and for
   `srun --chdir`/`-D` and `mpirun -wdir` from that directory. Before, it was

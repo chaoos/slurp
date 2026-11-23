@@ -677,6 +677,7 @@ class Context:
   submit_line: str = ""
   count_files: bool = False                   # probe the number of files in the working directory (Q06)
   uncertain: set = field(default_factory=set) # paths resolved from a guessed directory (no job, relative)
+  arguments: dict = field(default_factory=dict) # argument paths of programs (P10): abspath -> {word, flag, output}
   submit_env: dict | None = None              # the environment the job was submitted with (sacct --env-vars)
   script_dir: str = ""                        # the directory of the script file (a job: from its submit line)
   env: dict = field(default_factory=dict)     # for $VARS in paths
@@ -844,6 +845,8 @@ def interesting_paths(ctx):
     out += [("c", d) for d, _, _ in core_dirs(ctx)]
   for kind, path, _line in referenced_paths(ctx):
     out.append((kind, path))
+    if kind == "a": # (P10: its directory too, a file the program writes needs one)
+      out.append(("d", os.path.dirname(path)))
   submit, other = alternative_bases(ctx)
   if other and not ctx.opt("chdir"): # (G18: does it exist from the script's directory instead?)
     uses, anchored, _ = relative_uses(ctx)
@@ -984,6 +987,36 @@ def launcher_dir(words):
       return w[2:]
   return None
 
+# a program's argument that names a path (P10): a/b/c, ./in, ../data, ~/x, $SCRATCH/y, input.dat; not options, URLs,
+# host:path or gpu:1, globs, lists (a,b), fractions (1/2), node-local places (/tmp, /dev, …: other on the nodes)
+NODE_LOCAL = ("/tmp", "/dev", "/proc", "/sys", "/run", "/var/tmp")
+OUTPUT_FLAG = re.compile(r"-{1,2}(?:o|(?:out|output|save|write|log|dump|result|dest|chk|checkpoint|ckpt|tmp|scratch|cache)[\w-]*|"
+                         r"target|prefix|odir|outdir|wd|work[\w-]*dir|[\w-]*[-_]out)", re.I)
+ARGUMENTS_CHECKED = 60 # argument paths probed at most
+
+def path_argument(value):
+  """Whether a program's argument looks like the path of a file or directory"""
+  if not value or value.startswith("-") or "://" in value or any(ch in value for ch in "*?[]{},:;<>|'\"` \t=@") or is_placeholder(value):
+    return False
+  if re.fullmatch(r"[\d./]+", value) and not value.startswith(("./", "../")): # (1/2, 0.5, 10/20/30)
+    return False
+  return "/" in value or value.lower().endswith(DATA_EXT)
+
+def argument_words(args):
+  """(flag, value) of a program's arguments: --in=a/b ("--in="), --in a/b ("--in"), positional ones (flag None)"""
+  flag = None
+  for w in args:
+    if w.startswith("-") and len(w) > 1:
+      name, eq, value = w.partition("=")
+      if eq:
+        yield name + "=", value
+        flag = None
+      else:
+        flag = w
+      continue
+    yield flag, w
+    flag = None
+
 def resolve_in(ctx, word, base):
   """word (a path of the script: $VARS, ~) as an absolute path from the directory base; None if not known"""
   if not word or is_placeholder(word):
@@ -1013,7 +1046,10 @@ def referenced_paths(ctx):
   if not submit_dir and ctx.job is None:
     submit_dir = ctx.script_dir or (os.path.dirname(s.path) if s.path else "")
   cwd = ctx.workdir() or None
-  ctx.uncertain = set()
+  ctx.uncertain, ctx.arguments = set(), {}
+  seen = set() # (paths an earlier line names: made or written there, maybe; their arguments are not checked again)
+  def known(p):
+    return p in seen or p in made or any(p.startswith(d.rstrip("/") + "/") for d in made | seen)
   def add(kind, word, line, base=None):
     base = cwd if base is None else base
     p = resolve_in(ctx, word, base)
@@ -1079,15 +1115,36 @@ def referenced_paths(ctx):
         prog, args = cmd, words[1:]
       if not prog:
         continue
+      checked = None # (the arguments of the program, to check as paths: P10)
       if prog in ("python", "python3") or re.fullmatch(r"python3(\.\d+)?", prog or ""):
         script = next((a for a in args if not a.startswith("-")), None)
         if script and script.endswith(".py"):
           add("f", script, line, base or "")
-        continue
-      if "/" in prog and prog not in SKIP_PROGRAMS:
-        add("x", prog, line, base or "")
-      for m in re.finditer(r"(?<![<>])<\s*([^\s<>&|;]+)", part): # input redirections (the shell's: from the script's directory)
-        add("f", m.group(1), line)
+          if not any(a in ("-c", "-m") for a in args[:args.index(script)]):
+            checked = args[args.index(script) + 1:]
+      else:
+        if "/" in prog and prog not in SKIP_PROGRAMS:
+          add("x", prog, line, base or "")
+        if (cmd in LAUNCHERS or "/" in prog) and prog not in SKIP_PROGRAMS:
+          checked = args
+        for m in re.finditer(r"(?<![<>])<\s*([^\s<>&|;]+)", part): # input redirections (the shell's: from the script's directory)
+          add("f", m.group(1), line)
+      for flag, value in argument_words(checked or []):
+        if not path_argument(value) or len(ctx.arguments) >= ARGUMENTS_CHECKED:
+          continue
+        p = resolve_in(ctx, value, base or "")
+        if not p or p.startswith(NODE_LOCAL) or known(p) or p in ctx.arguments:
+          continue
+        out.append(("a", p, line))
+        ctx.arguments[p] = {"word": value, "flag": flag, "output": bool(flag and OUTPUT_FLAG.fullmatch(flag.rstrip("=")))}
+        if guessing and not os.path.isabs(ctx.expand(value) or value):
+          ctx.uncertain.add(p)
+      line_paths = [w.partition("=")[2] if w.startswith("-") else w for w in words[1:]]
+      line_paths += re.findall(r"[<>]{1,2}\s*([^\s<>&|;]+)", part)
+      for w in line_paths: # (named here: maybe made or written here, for the lines after)
+        p = resolve_in(ctx, w, base or "") if w and path_argument(w) else None
+        if p and not (base and (p == base or base.startswith(p.rstrip("/") + "/"))): # (not ./ or ..: all below would be known)
+          seen.add(p)
   return out
 
 # ---------------------------------------------------------------------------
