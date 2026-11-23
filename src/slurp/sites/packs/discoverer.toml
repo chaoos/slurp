@@ -12,7 +12,7 @@ login_node_limits = "Per user on login.discoverer.bg: 200% CPU (2 logical thread
 
 # How to log in (https://docs.discoverer.bg/login_nodes.html): ssh with a pre-registered key only (no passwords).
 [login]
-required = ["user"]
+required = ["user", "identities"] # (it logs in with a key only)
 user_label = "your Discoverer username"
 setup = """Once, before the first login:
 1. Create a key pair protected by a strong passphrase (different from your login password), e.g.

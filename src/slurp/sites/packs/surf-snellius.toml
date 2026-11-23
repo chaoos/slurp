@@ -16,7 +16,7 @@ login_node_limits = "processes on the login nodes that use too much CPU time or 
 # whitelisted IP range (Dutch academic networks), with a key uploaded to the CUA portal (keys in authorized_keys are
 # no longer used since the maintenance of October 2026).
 [login]
-required = ["user"]
+required = ["user", "identities"] # (it logs in with a key only)
 user_label = "your SURF (CUA) login"
 setup = """Once, before the first login:
 1. Accept the Usage Agreement and change your initial password at portal.cua.surf.nl.

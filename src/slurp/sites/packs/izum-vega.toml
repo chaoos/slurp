@@ -11,7 +11,7 @@ cuda_arch = "sm_80"
 
 # How to log in (https://en-doc.vega.izum.si/login/): ssh with a registered key, plus two-factor authentication.
 [login]
-required = ["user"]
+required = ["user", "identities"] # (it logs in with a key only)
 user_label = "your SLING / Vega username"
 setup = """Once, before the first login:
 1. Create a key pair with a passphrase: ssh-keygen -t ed25519 (Vega allows login only with an SSH key).

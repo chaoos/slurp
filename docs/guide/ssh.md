@@ -93,7 +93,8 @@ Vega, Discoverer, Deucalion), LRZ SuperMUC-NG, DKRZ Levante, MPCDF Raven and Vip
 Stampede3 and NCSA Delta (a password and a one-time code, asked in the login pane). One
 fills in the form: its name, the full settings (the host; at CSCS the jump host `ela.cscs.ch` and the key
 `~/.ssh/cscs-key`), and the command before the login (at CSCS `cscs-key sign --headless`, only when a login without
-it fails: a signed key is valid for a day). You fill in your user (at CSCS the jump host takes it too): the
+it fails: a signed key is valid for a day). You fill in your user (at CSCS the jump host takes it too), and at a site
+that logs in with a key only, the key (if the site names none, e.g. Karolina): the
 fields the site needs from you have a yellow border until they are filled in, and **Add** or **Test** without them
 turns them red, with what to fill in below each (a pack names them in `required`); then **Add anyway** and **Test
 anyway** go on without them. Below the

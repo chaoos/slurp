@@ -15,7 +15,7 @@ options = ["uenv", "view"]
 
 # How to log in (docs.cscs.ch/access/ssh): through ela.cscs.ch, with ~/.ssh/cscs-key signed by cscs-key (a day).
 [login]
-required = ["user"]
+required = ["user", "identities"] # (it logs in with a key only)
 user_label = "your CSCS username"
 jump = "{user}@ela.cscs.ch"
 identities = ["~/.ssh/cscs-key"]

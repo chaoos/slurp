@@ -11,7 +11,7 @@ cuda_arch = "sm_80"
 
 # How to log in (https://docs.deucalion.acnca.pt/deuc_supercomp/connecting/): ssh with a key registered in the user portal.
 [login]
-required = ["user"]
+required = ["user", "identities"] # (it logs in with a key only)
 user_label = "your Deucalion portal username"
 setup = """Once, before the first login:
 1. Register at https://portal.deucalion.acnca.pt/user/register/ and finish the account setup from the e-mail you get (the link is valid for 14 days); add a TOTP app in the Security section (2FA is required for the web portals).

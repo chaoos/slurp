@@ -12,7 +12,7 @@ parallel_fs = ["/scratch"]
 
 # How to log in (https://docs.it4i.cz/en/docs/general/access-services/accessing-the-clusters/shell-and-data-access): ssh with a registered key.
 [login]
-required = ["user"]
+required = ["user", "identities"] # (it logs in with a key only)
 user_label = "your IT4I username (it4i-... prefix) or e-INFRA CZ login"
 setup = """Once, before the first login:
 1. Create a key pair with a strong passphrase (IT4I accepts only RSA or ED25519 keys), e.g.

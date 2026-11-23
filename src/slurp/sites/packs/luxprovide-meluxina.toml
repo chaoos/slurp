@@ -13,7 +13,7 @@ login_node_limits = "Applications or long running tasks must not be run on the l
 
 # How to log in (https://docs.lxp.lu/first-steps/connecting/): ssh -p 8822 with a dedicated Ed25519 key.
 [login]
-required = ["user"]
+required = ["user", "identities"] # (it logs in with a key only)
 user_label = "your MeluXina user ID (from the welcome email)"
 port = 8822
 identities = ["~/.ssh/id_ed25519_mlux"]

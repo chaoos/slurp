@@ -244,3 +244,30 @@ def test_the_user_in_the_command_before_the_login(check, monkeypatch, home, tmp_
       dlg.query_one("#ssh-user").value = "me3"; await pilot.pause(0.2)
       check("…not when you changed it yourself", pre.value == "sshproxy.sh -u me2 -c other", pre.value)
   asyncio.run(main())
+
+
+def test_a_key_to_fill_in(check, monkeypatch, home):
+  """A site that logs in with a key only (required identities) and names none (Karolina): the identity files have a
+  yellow bar while empty, red with what to do after Test; a key that is there: no mark"""
+  monkeypatch.setattr(Slurp, "activate_cluster", lambda app, index, **kw: setattr(app, "cluster_index", index))
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(140, 50)) as pilot:
+      await started(pilot, app)
+      app.push_screen(AddClusterScreen()); await pilot.pause(0.4)
+      dlg = app.screen
+      dlg.site_chosen("it4i-karolina/karolina"); await pilot.pause(0.3)
+      keys, hint = dlg.query_one("#ssh-identities"), dlg.query_one("#ssh-identities-hint")
+      check("no key named by the site: empty, yellow (to fill in), no hint yet", keys.value == "" and keys.has_class("-required")
+            and not keys.has_class("-missing") and not hint.display, keys.classes)
+      dlg.query_one("#ssh-user").value = "me"
+      dlg.query_one("#cluster-check-button").press(); await pilot.pause(0.3)
+      check("Test without it: red, which key and where to find it below",
+            keys.has_class("-missing") and hint.display and "private key whose public half you registered at IT4I Karolina" in str(hint.render()),
+            str(hint.render()))
+      keys.value = "~/.ssh/cscs-key"; await pilot.pause(0.2)
+      check("a key that is there: no mark", not keys.has_class("-required") and not keys.has_class("-missing") and not hint.display)
+      dlg.site_chosen("cineca-leonardo/leonardo"); await pilot.pause(0.3)
+      keys.value = ""; await pilot.pause(0.2)
+      check("a site with a certificate in the agent (Leonardo): no key to fill in", not keys.has_class("-required"))
+  asyncio.run(main())

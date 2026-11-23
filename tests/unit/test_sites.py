@@ -154,7 +154,12 @@ port = true
   check("left out: a host that is no host name, a command of two lines, an option without a value, a relative key, an "
         "install link without https, true as a port", not any(k in clusters for k in ("lab/bad host", "lab/lab2", "lab/lab3", "lab/lab4", "lab/lab5")),
         sorted(k for k in clusters if k.startswith("lab/")))
-  check("required: the built-in clusters need the user", all(c.get("required") == ["user"] for c in sites.site_clusters() if c["builtin"]))
+  builtin = [c for c in sites.site_clusters() if c["builtin"]]
+  check("required: the built-in clusters need the user", all("user" in c.get("required", []) for c in builtin))
+  keys_only = {c["id"] for c in builtin if "identities" in c.get("required", [])}
+  check("…the sites that log in with a key only: the key too (CSCS, JSC, LUMI, Karolina, …); not those with a "
+        "certificate, a password or a code", {"cscs-alps/daint", "juelich-jureca/jureca", "lumi/lumi", "it4i-karolina/karolina"} <= keys_only
+        and not keys_only & {"cineca-leonardo/leonardo", "nersc-perlmutter/perlmutter", "olcf-frontier/frontier", "mpcdf/mpcdf-raven"}, sorted(keys_only))
   check("…only fields of the form", sites.login_errors({"name": "a", "host": "h", "required": ["user", "password"]})
         == ["required: of user, host, port, jump, identities, pre_login"])
   check("errors say what", any("not a host name" in e for e in sites.login_errors({"name": "a", "host": "x y"}))

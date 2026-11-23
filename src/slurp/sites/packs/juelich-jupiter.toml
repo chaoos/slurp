@@ -17,7 +17,7 @@ login_node_limits = "per user at most 20 parallel processes and 25% of the node'
 # How to log in (apps.fz-juelich.de/jsc/hps/jupiter/access.html): directly, with a key uploaded in JuDoor (with from=…);
 # no password logins; optional TOTP after the key.
 [login]
-required = ["user"]
+required = ["user", "identities"] # (it logs in with a key only)
 user_label = "your JSC user (as in JuDoor)"
 identities = ["~/.ssh/id_ed25519_jsc"]
 setup = """Once, before the first login:

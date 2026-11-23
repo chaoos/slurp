@@ -6,6 +6,12 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- New SSH connection from a site that logs in with a key only (CSCS, JSC,
+  LUMI, Karolina, MeluXina, Vega, Discoverer, Deucalion, Snellius): the
+  identity files have a yellow border while empty, as the user has; Add or
+  Test without one turns it red, with which key to fill in (Browse… finds
+  it). Sites with a certificate, a password or a one-time code do not ask
+  for one.
 - More site packs, from each site's documentation: JSC JUPITER; the EuroHPC
   systems MareNostrum 5 (BSC), Karolina (IT4I), MeluXina, Vega, Discoverer
   and Deucalion; LRZ SuperMUC-NG, DKRZ Levante, MPCDF Raven and Viper

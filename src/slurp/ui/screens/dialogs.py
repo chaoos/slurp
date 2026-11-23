@@ -1043,8 +1043,13 @@ class AddClusterScreen(ModalScreen):
         hint.update(f"↑ {problem}")
         hint.display = True
       elif empty and field.has_class("-missing"):
-        what = (self.site or {}).get("user_label") if key == "user" else ""
-        hint.update(f"↑ fill in {what or self.REQUIRED_LABELS[key]}: {(self.site or {}).get('site', 'the site')} needs it")
+        site = (self.site or {}).get("site", "the site")
+        if key == "identities": # (a site that takes keys only: which one, and where to find it)
+          hint.update(f"↑ fill in the private key whose public half you registered at {site} (Browse… finds it): "
+                      "it logs in with a key only")
+        else:
+          what = (self.site or {}).get("user_label") if key == "user" else ""
+          hint.update(f"↑ fill in {what or self.REQUIRED_LABELS[key]}: {site} needs it")
         hint.display = True
       else:
         hint.display = False
