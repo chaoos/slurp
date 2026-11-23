@@ -510,9 +510,11 @@ The reason is kept with the job, on the cluster (next to the categories): the jo
 show it, with the other job as a link, and the categories window has a column for it.
 """),
   "FilePickScreen": ("Choose a file", """
-A directory of the cluster, to choose a file from (the progress file of a job, …). Enter or a click goes into a
+A directory of the cluster, to choose a file from (the progress file of a job, …), or of this machine (an identity
+file of an SSH connection: nothing of it is shown). Enter or a click goes into a
 directory, or chooses the file; `..` or `Backspace` (**↑ Up**) goes up; the path at the top can be typed (Enter goes
-there; `~` is your home); the filter keeps the files whose names contain what you type, or match a pattern
+there; `~` is your home); **Reload** (`r`) lists the directory again (new files, ones gone; the cursor stays on its
+file); the filter keeps the files whose names contain what you type, or match a pattern
 (`run_123*.log`, `step_??.out`, `*.[oe]*`); directories stay listed, and the filter stays when you change directory. Under the list: the end of the
 file under the cursor, and (the progress file) whether slurp finds progress in it (`n/N` or `M%`). `Esc` cancels.
 """),

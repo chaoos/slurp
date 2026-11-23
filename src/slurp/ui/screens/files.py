@@ -250,6 +250,7 @@ class FilePickScreen(ModalScreen[str | None]):
   #fp-bar { height: auto; margin: 1 0 0 0; }
   #fp-up { margin-right: 1; }
   #fp-path { width: 1fr; }
+  #fp-reload { margin-left: 1; }
   #fp-filter { margin: 1 0 0 0; }
   #fp-list { height: 1fr; margin: 1 0 0 0; }
   #fp-status { height: auto; color: $text-muted; }
@@ -257,7 +258,8 @@ class FilePickScreen(ModalScreen[str | None]):
   #fp-buttons { height: auto; align-horizontal: right; margin-top: 1; }
   #fp-buttons Button { margin-left: 1; }
   """
-  BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("backspace", "up", "Up", show=False)]
+  BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("backspace", "up", "Up", show=False),
+              Binding("r", "reload", "Reload")]
   PREVIEW_BYTES = 4096
 
   def __init__(self, title, start, describe=None, chosen="", local=False, preview=True):
@@ -273,6 +275,7 @@ class FilePickScreen(ModalScreen[str | None]):
       with Horizontal(id="fp-bar"):
         yield Button("↑ Up", id="fp-up", compact=True, tooltip="the directory above (Backspace)")
         yield Input(self.path, id="fp-path", tooltip="a directory or a file: Enter goes there (~: your home)")
+        yield Button(icons.label("reload", "Reload"), id="fp-reload", compact=True, tooltip="list the directory shown again (r)")
       yield Input(id="fp-filter", placeholder="filter the files: a part of the name, or a pattern: run_123*.log, step_??.out, *.[oe]*")
       yield ClickTable(id="fp-list", cursor_type="row", zebra_stripes=True)
       yield Static(id="fp-status")
@@ -432,6 +435,15 @@ class FilePickScreen(ModalScreen[str | None]):
       return # (Backspace while typing)
     if self.path != "/":
       self.go(os.path.dirname(self.path.rstrip("/")) or "/")
+
+  @on(Button.Pressed, "#fp-reload")
+  def action_reload(self, event=None):
+    """The directory shown, listed again (new files, ones gone); the cursor stays on its file if it is still there"""
+    if event is not None:
+      event.stop()
+    entry = self.current()
+    self.previewed = None # (the file under the cursor: read again too, it may have grown)
+    self.go(self.path if entry is None else os.path.join(self.path, entry["name"]))
 
   @on(Button.Pressed, "#fp-ok")
   def ok(self, event):

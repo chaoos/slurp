@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The file window (choosing a job's progress file, Browse… for an identity
+  file) has **Reload** (`r`): the directory shown is listed again, the cursor
+  stays on its file.
 - Job list: the countdown of the automatic refresh no longer stays at
   **⟳ 0:00** when the refresh is due but cannot start; it says why
   (**⟳ connecting**, **⟳ loading**, **⟳ not loaded**) and counts down again
