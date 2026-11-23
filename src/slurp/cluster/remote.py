@@ -15,6 +15,7 @@ from datetime import datetime
 
 
 from ..state import collector, log
+from .workers import Scheduler
 
 ssh_connection = None # RemoteSSH of the active tab, None: the local machine
 
@@ -46,17 +47,32 @@ def check_cancelled():
 
 CURRENT = object() # start_worker(connection=CURRENT): the connection of the active tab
 
-def start_worker(node, fn, group, exclusive=True, connection=CURRENT, name=""):
-  """Run fn() in a thread worker of node. The worker keeps the connection of the tab that was active when it was
-  started (or the given one), so switching tabs does not redirect its commands; worker.abort stops the command it
-  is waiting for; an error is logged and shown instead of ending the app."""
+# The receiver of a worker is a Scheduler (cluster/workers.py), or a frontend's object that an adapter makes one of:
+# register_scheduler(type, make) (ui/workers.py: a Textual widget or app). This module knows no frontend.
+_adapters = []
+
+def register_scheduler(kind, make):
+  """Receivers of this type (isinstance) get the scheduler make(receiver)"""
+  _adapters.append((kind, make))
+
+def scheduler_of(target):
+  if isinstance(target, Scheduler):
+    return target
+  for kind, make in _adapters:
+    if isinstance(target, kind):
+      return make(target)
+  raise TypeError(f"no scheduler for {type(target).__name__} (register_scheduler)")
+
+def start_worker(target, fn, group, exclusive=True, connection=CURRENT, name=""):
+  """Run fn() in a thread worker of target (a Scheduler, or a receiver with an adapter, e.g. a Textual widget). The
+  worker keeps the connection of the tab that was active when it was started (or the given one), so switching tabs
+  does not redirect its commands; worker.abort stops the command it is waiting for; an error is logged and shown
+  instead of ending the app."""
+  sched = scheduler_of(target)
   bound = ssh_connection if connection is CURRENT else connection
   abort = threading.Event()
-  app = node.app
   if exclusive:
-    for w in list(app.workers):
-      if w.node is node and w.group == group and hasattr(w, "abort"):
-        w.abort.set()
+    sched.cancel_group(group)
   def body():
     _thread.conn, _thread.cancel = bound, abort
     try:
@@ -66,36 +82,36 @@ def start_worker(node, fn, group, exclusive=True, connection=CURRENT, name=""):
     except Exception as e:
       log.exception(f"{name or group} failed")
       if not abort.is_set():
-        app.call_from_thread(app.notify, f"{name or group} failed: {e}", title=tab_name(), severity="error", timeout=10)
+        tab, message = tab_name(), f"{name or group} failed: {e}"
+        sched.call_soon(lambda: sched.notify_error(tab, message))
       return None
     finally:
       del _thread.conn, _thread.cancel
-  worker = node.run_worker(body, thread=True, group=group, exclusive=exclusive, exit_on_error=False, name=name or group)
+  worker = sched.submit(body, group, exclusive, name or group)
   worker.abort = abort
   return worker
 
-def in_background(node, work, done, group="io", name="", connection=CURRENT):
+def in_background(target, work, done, group="io", name="", connection=CURRENT):
   """Run work() in a worker (remote file access and commands never run on the UI thread), then done(result) on the
-  UI thread, if node is still there; result is None if work() failed (the error is shown)"""
-  app = node.app
+  UI thread, if target is still there; result is None if work() failed (the error is shown)"""
+  sched = scheduler_of(target)
   def body():
     try:
       result = work()
     except Exception as e:
       log.exception(f"{name or group} failed")
-      app.call_from_thread(app.notify, f"{name or group} failed: {e}", title=tab_name(), severity="error", timeout=10)
+      tab, message = tab_name(), f"{name or group} failed: {e}"
+      sched.call_soon(lambda: sched.notify_error(tab, message))
       result = None
     tab = tab_name()
     def show():
-      if not (node is app or node.is_attached):
-        return
       try:
         done(result)
       except Exception as e: # showing a result must not end the app
         log.exception(f"showing the result of {name or group} failed")
-        app.notify(f"showing {name or group} failed: {e}", title=tab, severity="error", timeout=10)
-    app.call_from_thread(show)
-  return start_worker(node, body, group, exclusive=False, connection=connection, name=name)
+        sched.notify_error(tab, f"showing {name or group} failed: {e}")
+    sched.deliver(show)
+  return start_worker(sched, body, group, exclusive=False, connection=connection, name=name)
 
 def cluster_work(group, exclusive=True):
   """Decorator for methods that run as start_worker() workers, like @work(thread=True)"""
