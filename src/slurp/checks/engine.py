@@ -968,15 +968,60 @@ def launched_program(words):
     return w, words[i + 1:]
   return None, []
 
+SUBMIT_DIR = re.compile(r"^\$(?:SLURM_SUBMIT_DIR\b|\{SLURM_SUBMIT_DIR\})")
+# the working directory of a launcher's tasks: srun --chdir/-D, mpirun -wdir/-wd/--wdir (relative: to the script's)
+LAUNCHER_DIR_OPTIONS = {"--chdir", "-D", "-wdir", "--wdir", "-wd"}
+
+def launcher_dir(words):
+  """The working directory a launcher line gives its tasks (srun --chdir=x, -D x, -Dx; mpirun -wdir x), or None"""
+  for i, w in enumerate(words[1:], 1):
+    if not w.startswith("-"):
+      return None # (the program: its own options are not the launcher's)
+    name, eq, value = w.partition("=")
+    if name in LAUNCHER_DIR_OPTIONS:
+      return value if eq else (words[i + 1] if i + 1 < len(words) else None)
+    if w.startswith("-D") and not w.startswith("--") and len(w) > 2:
+      return w[2:]
+  return None
+
+def resolve_in(ctx, word, base):
+  """word (a path of the script: $VARS, ~) as an absolute path from the directory base; None if not known"""
+  if not word or is_placeholder(word):
+    return None
+  p = ctx.expand(word)
+  if p is None:
+    return None
+  if not os.path.isabs(p):
+    if not base:
+      return None
+    p = os.path.join(base, p)
+  return os.path.normpath(p)
+
 def referenced_paths(ctx):
-  """[(kind, abspath, line)]: programs run (x), sourced files and redirected inputs (f), cd targets (d)"""
+  """[(kind, abspath, line)]: programs run (x), sourced files and redirected inputs (f), cd targets (d). Relative
+  paths are resolved from where each line runs: --chdir (or where sbatch runs), then the script's cd and pushd, and a
+  launcher's --chdir for its program; after a cd to a place not known (cd -, popd, an unknown $VAR), relative paths
+  are not checked until the next cd to a known one"""
   s = ctx.script
   out = []
   made = set()
+  home = (ctx.facts.env.get("HOME") if ctx.facts else None) or ctx.env.get("HOME") or ctx.expand("$HOME")
   # without a job, relative paths are relative to where it will be submitted (unknown): the script's directory is a
   # guess until the script changes to an absolute directory
   guessing = ctx.job is None and not ctx.opt("chdir")
+  submit_dir = ctx.env.get("SLURM_SUBMIT_DIR") or (ctx.job.rec.get("WorkDir") if ctx.job is not None and not ctx.opt("chdir") else "")
+  if not submit_dir and ctx.job is None:
+    submit_dir = ctx.script_dir or (os.path.dirname(s.path) if s.path else "")
+  cwd = ctx.workdir() or None
   ctx.uncertain = set()
+  def add(kind, word, line, base=None):
+    base = cwd if base is None else base
+    p = resolve_in(ctx, word, base)
+    if p:
+      out.append((kind, p, line))
+      if guessing and not os.path.isabs(ctx.expand(word) or word):
+        ctx.uncertain.add(p)
+    return p
   for line, t in s.code_lines():
     for part in re.split(r"\s*(?:&&|\|\||;|\|)\s*", t):
       try:
@@ -993,27 +1038,43 @@ def referenced_paths(ctx):
       if cmd == "mkdir":
         for w in words[1:]:
           if not w.startswith("-"):
-            p = ctx.abspath(w)
+            p = resolve_in(ctx, w, cwd)
             if p:
               made.add(p)
         continue
-      if cmd == "cd" and len(words) > 1 and words[1] != "-":
-        p = ctx.abspath(words[1])
+      if cmd in ("cd", "pushd"):
+        args = [w for w in words[1:] if not w.startswith("-") or w == "-"]
+        target = args[0] if args else "~"
+        if target == "-" or (cmd == "pushd" and not args):
+          cwd = None # (the directory before: not followed)
+          continue
+        if target in ("~", "$HOME", "${HOME}"):
+          cwd, guessing = home or None, False
+          continue
+        raw = target
+        if SUBMIT_DIR.match(target) and ctx.expand(target) is None and submit_dir:
+          target = submit_dir + target[SUBMIT_DIR.match(target).end():]
+        else:
+          guessing = guessing and not os.path.isabs(ctx.expand(target) or target)
+        p = resolve_in(ctx, target, cwd)
         if p and p not in made and not any(p.startswith(m + "/") for m in made):
           out.append(("d", p, line))
-          if guessing and not os.path.isabs(ctx.expand(words[1]) or words[1]):
+          if guessing and not os.path.isabs(ctx.expand(raw) or raw):
             ctx.uncertain.add(p)
-        expanded = ctx.expand(words[1])
-        if expanded and os.path.isabs(expanded) or words[1].startswith(("$SLURM_SUBMIT_DIR", '"$SLURM_SUBMIT_DIR')):
-          guessing = guessing and words[1].startswith(("$SLURM_SUBMIT_DIR", '"$SLURM_SUBMIT_DIR'))
+        cwd = p # (None: a place not known)
+        continue
+      if cmd == "popd":
+        cwd = None
         continue
       if cmd in ("source", ".") and len(words) > 1:
-        p = ctx.abspath(words[1])
-        if p:
-          out.append(("f", p, line))
+        add("f", words[1], line)
         continue
+      base = cwd
       if cmd in LAUNCHERS or cmd == "exec" or cmd == "time" or cmd == "nohup":
         prog, args = launched_program(words) if cmd in LAUNCHERS else (words[1] if len(words) > 1 else None, words[2:])
+        launched = launcher_dir(words) if cmd in LAUNCHERS else None
+        if launched: # (srun --chdir: its program and arguments from there)
+          base = resolve_in(ctx, launched, cwd)
       else:
         prog, args = cmd, words[1:]
       if not prog:
@@ -1021,24 +1082,12 @@ def referenced_paths(ctx):
       if prog in ("python", "python3") or re.fullmatch(r"python3(\.\d+)?", prog or ""):
         script = next((a for a in args if not a.startswith("-")), None)
         if script and script.endswith(".py"):
-          p = ctx.abspath(script)
-          if p:
-            out.append(("f", p, line))
-            if guessing and not os.path.isabs(ctx.expand(script) or script):
-              ctx.uncertain.add(p)
+          add("f", script, line, base or "")
         continue
       if "/" in prog and prog not in SKIP_PROGRAMS:
-        p = ctx.abspath(prog)
-        if p:
-          out.append(("x", p, line))
-          if guessing and not os.path.isabs(ctx.expand(prog) or prog):
-            ctx.uncertain.add(p)
-      for m in re.finditer(r"(?<![<>])<\s*([^\s<>&|;]+)", part): # input redirections
-        p = ctx.abspath(m.group(1))
-        if p:
-          out.append(("f", p, line))
-          if guessing and not os.path.isabs(ctx.expand(m.group(1)) or m.group(1)):
-            ctx.uncertain.add(p)
+        add("x", prog, line, base or "")
+      for m in re.finditer(r"(?<![<>])<\s*([^\s<>&|;]+)", part): # input redirections (the shell's: from the script's directory)
+        add("f", m.group(1), line)
   return out
 
 # ---------------------------------------------------------------------------

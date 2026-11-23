@@ -6,6 +6,13 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Checks of paths and programs (P02, P03 and the others): a relative path is
+  checked where its line runs: after the script's `cd` or `pushd`, and for
+  `srun --chdir`/`-D` and `mpirun -wdir` from that directory. Before, it was
+  checked from `--chdir` (or where sbatch runs) whatever the script did, so
+  `cd /run && srun ./sim` said `./sim` did not exist when it did. After a
+  `cd` to a place slurp cannot know (`cd -`, `popd`, an unknown variable),
+  relative paths are not checked until the next known `cd`.
 - The file window (choosing a job's progress file, Browse… for an identity
   file) has **Reload** (`r`): the directory shown is listed again, the cursor
   stays on its file.
