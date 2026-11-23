@@ -6,6 +6,9 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Job list: an array is one row from two tasks in the list on (was ten),
+  e.g. the pending tasks `5439288_[9-33:8]` (four tasks); one task alone
+  keeps its own row.
 - Site packs for some 30 more sites, from each site's documentation:
   HLRS Hunter and Vulcan (PBS), the NHR centres (GWDG Emmy and Grete, ZIB
   Lise, KIT HoreKa, Paderborn Noctua 2 and Otus, TU Dresden, FAU Fritz,

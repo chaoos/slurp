@@ -2157,6 +2157,7 @@ async def t_array_sort(app, pilot):
   for jid in ("500_3", "500_1", "400_2", "600"):
     j = copy.deepcopy(base); j.rec["JobID"] = jid; app.cluster.jobs[jid] = j
   app.sort_column, app.sort_reverse = "jobid", True
+  grouped, app.cluster.collapse_arrays = app.cluster.collapse_arrays, False # (the order of the tasks themselves)
   app.populate()
   order = lambda: [str(t.get_row_at(i)[0]) for i in range(t.row_count)]
   header = lambda: "".join(sg.text for sg in t.render_line(0))
@@ -2170,6 +2171,7 @@ async def t_array_sort(app, pilot):
     ["500_3", "400_2", "500_1", "600"], ["600", "500_3", "500_1", "400_2"]], seen)
   check("marks: ▼ ▲ for the job id, △ ▽ for the array index", [h for _, h in seen] == ["Job ID ▼", "Job ID ▲", "Job ID △ array",
         "Job ID ▽ array", "Job ID ▼"], [h for _, h in seen])
+  app.cluster.collapse_arrays = grouped
   app.cluster.jobs.clear(); app.cluster.jobs.update(saved); app.populate()
 
 async def t_conn_health(app, pilot):
@@ -2311,7 +2313,10 @@ async def t_since(app, pilot):
 
 async def open_job(app, pilot, jid):
   app.show_view(None); await pilot.pause(0.3)
-  t = app.main.query_one("#jobs"); t.focus(); t.move_cursor(row=t.get_row_index(jid)); await pilot.press("enter")
+  t = app.main.query_one("#jobs")
+  if jid not in t.rows and "_" in jid: # (a task of an array in one row: the row opened first, as ▸ does)
+    app.cluster.expanded.add(jid.partition("_")[0]); app.populate(); await pilot.pause(0.3)
+  t.focus(); t.move_cursor(row=t.get_row_index(jid)); await pilot.press("enter")
   await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.details["files"], 10)
   return app.screen
 
@@ -2762,13 +2767,15 @@ async def t_array_progress(app, pilot):
 
 async def t_collapse(app, pilot):
   arrays(True)
+  app.cluster.expanded.clear() # (all arrays closed: open_job opens one it opens a task of)
   await reload(app, pilot)
   t = app.main.query_one("#jobs")
   keys = lambda: [str(t.coordinate_to_cell_key(Coordinate(i, 0)).row_key.value) for i in range(t.row_count)]
   groups = [k for k in keys() if k.startswith("group|")]
   cell = lambda key, c: t.get_row_at(t.get_row_index(key))[c]
-  check("a big array is one row; a small one (6 tasks) is not collapsed", sorted(groups) == ["group|9600", "group|9700"]
-        and "9500_1" in keys() and not any(k.startswith("9600_") for k in keys()), groups)
+  check("an array is one row, a small one (6 tasks) too", sorted(groups) == ["group|9500", "group|9600", "group|9700"]
+        and "9500_1" not in keys() and not any(k.startswith(("9500_", "9600_")) for k in keys()), groups)
+  check("…the small one: its tasks and their count", str(cell("group|9500", 0)) == "9500_[1-6] ▸ 6 tasks", str(cell("group|9500", 0)))
   state = cell("group|9600", 2)
   check("the row: which tasks, how many, and the mix of states (Slurm's codes, coloured)", str(cell("group|9600", 0)) == "9600_[1-150] ▸ 150 tasks"
         and str(state) == "30R 10PD 100CD 10F" and [str(sp.style) for sp in state.spans][:4] == ["bold green", "blue", "green", "red"],
@@ -2778,7 +2785,7 @@ async def t_collapse(app, pilot):
   check("Space opens it: every task below the row", t.row_count == rows_before + 150 and "9600_17" in keys()
         and str(cell("group|9600", 0)).endswith("▾ 150 tasks") and isinstance(app.screen, MainScreen), t.row_count)
   check("the tasks of an opened array are indented, other jobs not", str(cell("9600_17", 0)) == "  9600_17"
-        and str(cell("9500_1", 0)) == "9500_1" and str(cell("9001", 0)) == "9001", (str(cell("9600_17", 0)), str(cell("9500_1", 0))))
+        and str(cell("9001", 0)) == "9001", (str(cell("9600_17", 0)), str(cell("9001", 0))))
   await reload(app, pilot)
   check("it stays open after a reload", "9600_17" in keys())
   t.move_cursor(row=t.get_row_index("group|9600")); await pilot.press("space"); await pilot.pause(0.3)
@@ -2786,12 +2793,12 @@ async def t_collapse(app, pilot):
   cb = app.main.query_one("#collapse-arrays")
   cb.value = False; await pilot.pause(0.3)
   check("group arrays off: every task individually", not any(k.startswith("group|") for k in keys()) and "9600_77" in keys()
-        and t.row_count == rows_before + 160, t.row_count)
+        and t.row_count == rows_before + 165, t.row_count) # (149 + 11 + 5 more rows: 9600, 9700, 9500)
   t.focus(); await pilot.press("g"); await pilot.pause(0.3)
   check("g switches back", cb.value and "group|9600" in keys() and t.row_count == rows_before)
-  t.move_cursor(row=t.get_row_index("9500_1")); await pilot.press("enter")
+  t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter")
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10)
-  check("other rows open their job as before", ok and app.screen.job.jid == "9500_1")
+  check("other rows open their job as before", ok and app.screen.job.jid == "9001")
   for v in list(app.cluster.views): app.close_view(v)
   arrays(False)
   await reload(app, pilot)

@@ -2250,7 +2250,7 @@ class Slurp(TransfersTab, App):
       self.notify("loading aborted: the list is the one loaded before", timeout=4)
     self.refresh_status()
 
-  COLLAPSE_MIN = 10 # tasks of one array in one state from which they are shown as one row
+  COLLAPSE_MIN = 2 # tasks of one array in the list from which they are shown as one row (one alone: its own row)
 
   def collapse(self, ordered, cluster):
     """The rows of the job list: jobs, and for each array with many tasks a row (array id, tasks) where its first
