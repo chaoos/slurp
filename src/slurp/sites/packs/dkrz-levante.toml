@@ -1,0 +1,30 @@
+# DKRZ Levante (Hamburg): CPU nodes (2x AMD EPYC 7763, 128 cores), GPU nodes (4 NVIDIA A100, 40 or 80 GB, per node).
+# Logins: levante.dkrz.de (login nodes levante0 to levante6).
+schema = 1
+version = "2026.11.23"
+name = "DKRZ Levante"
+match = ["levante*"]
+docs = "https://docs.dkrz.de/doc/levante/index.html"
+status = "https://status.dkrz.de/"
+scratch_purge_days = 14 # (/scratch: files are deleted 14 days after their last access)
+# WORK and SCRATCH are Lustre (HOME and SHARED are VAST, not listed)
+parallel_fs = ["/work", "/scratch"]
+cuda_arch = "sm_80"
+globus = "https://docs.dkrz.de/doc/levante/data-transfer/globus.html"
+login_node_limits = "one user may use at most 10% of a login node's memory, processes above it are killed"
+
+# How to log in (docs.dkrz.de/doc/levante/access-and-environment.html): directly, with the DKRZ password or (recommended)
+# an ed25519 key uploaded at luv.dkrz.de/pubkeys, valid six weeks (365 days for a hardware-token ed25519-sk key).
+[login]
+required = ["user"]
+user_label = "your DKRZ user ID"
+setup = """Once, before the first login:
+1. A key with a strong passphrase (DKRZ recommends ed25519): ssh-keygen -t ed25519 (or ssh-keygen -t ed25519-sk with a FIDO/U2F token, OpenSSH 8.2 or newer).
+2. Upload its public half (the .pub file) at luv.dkrz.de/pubkeys: Add key, Register key, then your LDAP password to activate it (leave the UFTP option unchecked).
+The key works for six weeks (a token key: 365 days); DKRZ mails you a day before it expires. A renewed key must be a newly created one: the old key is blocked.
+Without a key, the login asks for your DKRZ password."""
+
+[[clusters]]
+name = "levante"
+title = "Levante"
+host = "levante.dkrz.de"

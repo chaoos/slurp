@@ -1,0 +1,27 @@
+# IT4Innovations Karolina (Ostrava, EuroHPC): 720 CPU nodes (2x AMD EPYC 7H12, 128 cores), 72 GPU nodes (8 NVIDIA A100,
+# 2x AMD EPYC 7763), 1 data analytics node (qfat, 768 cores), 2 visualization nodes (qviz, Quadro RTX 6000).
+# Logins: karolina.it4i.cz (round robin over login1-4.karolina.it4i.cz), SSH key only.
+schema = 1
+version = "2026.11.23"
+name = "IT4I Karolina"
+match = ["karolina", "karolina-*", "karolina.it4i.cz", "*.karolina.it4i.cz"]
+docs = "https://docs.it4i.cz/en/docs/clusters/karolina/introduction"
+status = "https://status.it4i.cz/status/it4i"
+scratch_purge_days = 90 # (/scratch: files not accessed for more than 90 days are automatically deleted)
+parallel_fs = ["/scratch"]
+
+# How to log in (https://docs.it4i.cz/en/docs/general/access-services/accessing-the-clusters/shell-and-data-access): ssh with a registered key.
+[login]
+required = ["user"]
+user_label = "your IT4I username (it4i-... prefix) or e-INFRA CZ login"
+setup = """Once, before the first login:
+1. Create a key pair with a strong passphrase (IT4I accepts only RSA or ED25519 keys), e.g.
+   ssh-keygen -t ed25519
+2. Register the PUBLIC key (*.pub) on your account: IT4I accounts at https://extranet.it4i.cz/ssp/?action=changesshkey, e-INFRA CZ accounts in the e-INFRA CZ profile settings (or send it with your account request). Never send the private key.
+3. At the first login, check the host key: ED25519 SHA256:zKEtQMi2KRsxzzgo/sHcog+NFZqQ9tIyvJ7BVxOfzgI (the same on all Karolina login nodes).
+Then each login: ssh to karolina.it4i.cz with your key; no password is used for the clusters (it is only for the information systems)."""
+
+[[clusters]]
+name = "karolina"
+title = "Karolina"
+host = "karolina.it4i.cz"

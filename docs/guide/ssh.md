@@ -86,8 +86,11 @@ go on (the command before the login may make the key, for example). **Browse…*
 **From a site**, at the top of a new connection: **Choose…** opens a window with the clusters slurp knows how to log
 in to, to search (every word you type must match the cluster, its site, its host or the pack: `juwels booster`,
 `cscs`, `lumi`; `↑` `↓` while typing, `Enter` takes it; below the list, how the highlighted one logs in), and
-**Clear** takes the choice back. They come from its site packs: CSCS Alps (Daint, Santis, Clariden, Eiger), JSC's JURECA, JUWELS (Cluster, Booster), JUSUF and JEDI, LUMI
-(a key registered in MyAccessID or MyCSC) and CINECA's Leonardo (a 12-hour certificate from `step ssh login`). One
+**Clear** takes the choice back. They come from its site packs: CSCS Alps (Daint, Santis, Clariden, Eiger), JSC (JURECA, JUWELS, JUSUF, JEDI, JUPITER), LUMI, CINECA
+Leonardo (a 12-hour certificate from `step ssh login`), the other EuroHPC systems (MareNostrum 5, Karolina, MeluXina,
+Vega, Discoverer, Deucalion), LRZ SuperMUC-NG, DKRZ Levante, MPCDF Raven and Viper (through the gateway
+`gate1.mpcdf.mpg.de`), SURF Snellius, NERSC Perlmutter (a 24-hour key from `sshproxy`), OLCF Frontier, TACC
+Stampede3 and NCSA Delta (a password and a one-time code, asked in the login pane). One
 fills in the form: its name, the full settings (the host; at CSCS the jump host `ela.cscs.ch` and the key
 `~/.ssh/cscs-key`), and the command before the login (at CSCS `cscs-key sign --headless`, only when a login without
 it fails: a signed key is valid for a day). You fill in your user (at CSCS the jump host takes it too): the

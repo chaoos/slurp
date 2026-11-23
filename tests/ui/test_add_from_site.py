@@ -52,7 +52,8 @@ def test_from_a_site(check, monkeypatch, tmp_path, home):
       await pilot.press(*"jülich")
       await pilot.pause(0.2)
       ids = [c["id"] for c in win.shown]
-      check("a search: by the site (jülich, as juelich or julich too)", ids and all(i.startswith("juelich-") for i in ids) and len(ids) == 5, ids)
+      jsc = [c["id"] for c in win.clusters if c["id"].startswith("juelich-")]
+      check("a search: by the site (jülich, as juelich or julich too)", len(jsc) >= 5 and sorted(ids) == sorted(jsc), ids)
       win.query_one("#sc-search").value = "booster juwels"; await pilot.pause(0.2)
       check("…every word must match, in any order", [c["id"] for c in win.shown] == ["juelich-juwels/juwels-booster"], [c["id"] for c in win.shown])
       win.query_one("#sc-search").value = "alps.cscs"; await pilot.pause(0.2)

@@ -1,0 +1,44 @@
+# Discoverer (Sofia Tech Park, EuroHPC): CPU cluster with 1110 nodes (2x AMD EPYC 7H12, 128 cores, 256 GB) and 18 fat
+# nodes (1 TB); Discoverer+ GPU cluster with DGX H200 nodes (8 NVIDIA H200 each). Logins: login.discoverer.bg (CPU,
+# VPN needed), login.bg.discoverer.bg port 2222 (CPU, only from Bulgarian academic networks), login-plus.discoverer.bg (GPU).
+schema = 1
+version = "2026.11.23"
+name = "Discoverer"
+match = ["discoverer*", "*.discoverer.bg"]
+docs = "https://docs.discoverer.bg/"
+parallel_fs = ["/valhalla", "/weka"]
+cuda_arch = "sm_90"
+login_node_limits = "Per user on login.discoverer.bg: 200% CPU (2 logical threads), 4 GB soft memory limit (throttled above), 5000 tasks and 10 MB/s local disk I/O; at most 4 concurrent SSH/SCP/SFTP sessions"
+
+# How to log in (https://docs.discoverer.bg/login_nodes.html): ssh with a pre-registered key only (no passwords).
+[login]
+required = ["user"]
+user_label = "your Discoverer username"
+setup = """Once, before the first login:
+1. Create a key pair protected by a strong passphrase (different from your login password), e.g.
+   ssh-keygen -t ecdsa -b 521 -f ~/.ssh/id_ecdsa
+2. When the Discoverer onboarding team asks for it by e-mail, send the content of the PUBLIC key (~/.ssh/id_ecdsa.pub) only; they register it on your account.
+3. For login.discoverer.bg (CPU cluster): install and configure the Discoverer VPN client (GlobalProtect; see https://docs.discoverer.bg/vpn.html). Not needed for login-plus, nor for login.bg.discoverer.bg from Bulgarian academic networks.
+4. At the first login, compare the host key with the published list (https://docs.discoverer.bg/ssh_key_fingeprint.html and ssh_key_fingeprint_plus.html), e.g. login.discoverer.bg ED25519 SHA256:ZCs7jgx3C9N8elFO+SLyBucNKHNG/P4MqqblfVSPk7s; if it is not listed, answer no and report it.
+Then each login: (CPU cluster: bring up the VPN first) ssh-add your key, then ssh."""
+
+[[clusters]]
+name = "discoverer"
+title = "Discoverer (CPU, via VPN)"
+host = "login.discoverer.bg"
+
+[[clusters]]
+name = "discoverer-bg"
+title = "Discoverer (CPU, BG academic networks)"
+host = "login.bg.discoverer.bg"
+port = 2222
+
+[[clusters]]
+name = "discoverer-plus"
+title = "Discoverer+ (GPU)"
+host = "login-plus.discoverer.bg"
+
+[[advice]]
+pattern = "(--partition[= ]|-p\\s*)ALL\\b"
+text = "On Discoverer, use the cn partition for CPU jobs (common on Discoverer+): jobs in the ALL partition may be terminated by the administrators at any time."
+severity = "warning"

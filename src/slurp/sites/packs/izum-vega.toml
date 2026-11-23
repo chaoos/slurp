@@ -1,0 +1,32 @@
+# IZUM Vega (Maribor, EuroHPC): 960 CPU nodes (2x AMD EPYC 7H12, 128 cores; 192 of them with 1 TB: largemem),
+# 60 GPU nodes (4 NVIDIA A100 40 GB each). Logins: login.vega.izum.si (8 login nodes), logincpu.vega.izum.si (4 CPU
+# login nodes), logingpu.vega.izum.si (4 GPU login nodes). SSH key + 2FA.
+schema = 1
+version = "2026.11.23"
+name = "IZUM Vega"
+match = ["vega", "vega-*", "*.vega.izum.si", "vglogin*"]
+docs = "https://en-doc.vega.izum.si/"
+parallel_fs = ["/exa5"]
+cuda_arch = "sm_80"
+
+# How to log in (https://en-doc.vega.izum.si/login/): ssh with a registered key, plus two-factor authentication.
+[login]
+required = ["user"]
+user_label = "your SLING / Vega username"
+setup = """Once, before the first login:
+1. Create a key pair with a passphrase: ssh-keygen -t ed25519 (Vega allows login only with an SSH key).
+2. Register the PUBLIC key (~/.ssh/id_ed25519.pub, never the private key):
+   - SLING users: at https://fido.sling.si (Settings > Account Settings > SSH public keys > Add, Set Key, Save); it is active after a few minutes.
+   - EuroHPC users: send the public key to support@sling.si (also to change it later).
+3. Set up two-factor authentication as described in the instructions IZUM emails to active users.
+Then each login: ssh to the login node with your key and answer the 2FA prompt."""
+
+[[clusters]]
+name = "vega-cpu"
+title = "Vega (CPU login)"
+host = "logincpu.vega.izum.si"
+
+[[clusters]]
+name = "vega-gpu"
+title = "Vega (GPU login)"
+host = "logingpu.vega.izum.si"

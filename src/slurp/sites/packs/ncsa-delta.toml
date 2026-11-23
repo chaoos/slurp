@@ -1,0 +1,32 @@
+# NCSA Delta (Illinois): CPU nodes (2 AMD EPYC 7763, 128 cores), GPU nodes with 4 A40, 4 or 8 A100, 8 H200, and one
+# MI100/MI210 node. Logins: login.delta.ncsa.illinois.edu (round-robin on dt-login01-04).
+schema = 1
+version = "2026.11.23"
+name = "NCSA Delta"
+match = ["delta", "*.delta.ncsa.illinois.edu", "dt-login*"]
+docs = "https://docs.ncsa.illinois.edu/systems/delta/en/latest/"
+status = "https://support.access-ci.org/outages"
+parallel_fs = ["/projects", "/work", "/taiga"]
+login_node_limits = "Per user (cgroups): effectively 16 cores, 37 GB (high) / 62 GB (max) of memory, no swap; processes that look like applications are stopped automatically"
+
+# How to log in (https://docs.ncsa.illinois.edu/systems/delta/en/latest/user_guide/login.html): ssh with your NCSA
+# username, NCSA (Kerberos) password, then NCSA Duo (1 for a push, or the 6-digit passcode). SSH keys are disabled.
+[login]
+required = ["user"]
+user_label = "your NCSA username (ACCESS users: see \"Resource Provider Site Usernames\" in your ACCESS profile)"
+setup = """Once, before the first login:
+1. Set up NCSA Duo (separate from a University of Illinois Duo): https://wiki.ncsa.illinois.edu/display/cybersec/Duo+at+NCSA
+2. On the first connection, check the host key: login.delta.ncsa.illinois.edu
+   ED25519 SHA256:mIv7OqNSuuWnu1tlY//wG4gWAn4z0mbE11KkBXDAY/g (all keys on the login page of the Delta docs).
+Then each login: enter your NCSA password, then at the Duo prompt "1" for a push or the 6-digit passcode from the Duo app.
+SSH key pairs are not allowed for logins (except Gateway allocations)."""
+
+[[clusters]]
+name = "delta"
+title = "Delta"
+host = "login.delta.ncsa.illinois.edu"
+
+[[advice]]
+pattern = "conda\\s+activate"
+text = "On Delta, NCSA says to submit a batch job from within your custom conda environment and not to put conda activate in the job script: the job inherits the environment."
+severity = "info"

@@ -1,0 +1,33 @@
+# MACC/CNCA Deucalion (Guimaraes, EuroHPC): ARM partition (1632 nodes, Fujitsu A64FX, 48 cores, 32 GB), x86 partition
+# (500 nodes, 2x AMD EPYC 7742, 128 cores), GPU nodes (17 with 4 NVIDIA A100 40 GB, 16 with 4 A100 80 GB).
+# Login: login.deucalion.acnca.pt (one of 4 login nodes; formerly login.deucalion.macc.fccn.pt), ed25519 or RSA-4096 key.
+schema = 1
+version = "2026.11.23"
+name = "Deucalion"
+match = ["deucalion*", "*.deucalion.acnca.pt", "*.deucalion.macc.fccn.pt"]
+docs = "https://docs.deucalion.acnca.pt/"
+parallel_fs = ["/projects", "/share"]
+cuda_arch = "sm_80"
+
+# How to log in (https://docs.deucalion.acnca.pt/deuc_supercomp/connecting/): ssh with a key registered in the user portal.
+[login]
+required = ["user"]
+user_label = "your Deucalion portal username"
+setup = """Once, before the first login:
+1. Register at https://portal.deucalion.acnca.pt/user/register/ and finish the account setup from the e-mail you get (the link is valid for 14 days); add a TOTP app in the Security section (2FA is required for the web portals).
+2. Create a key pair (only ed25519 or 4096-bit RSA keys are allowed) with a passphrase of at least 8 (better 12) characters; never leave it empty:
+   ssh-keygen -t ed25519
+3. In https://portal.deucalion.acnca.pt/user/settings/ > Security, paste the PUBLIC key (~/.ssh/id_ed25519.pub) and Save. SSH access may take up to 30 minutes to work.
+4. At the first login, check the host key: ED25519 SHA256:AMzlfN8g69jQGN26hYJqtag20d2CYG2Xg16VXmJv5V0.
+Access is only allowed from Europe; connections from elsewhere are blocked.
+Then each login: ssh with your key (you are asked for its passphrase)."""
+
+[[clusters]]
+name = "deucalion"
+title = "Deucalion"
+host = "login.deucalion.acnca.pt"
+
+[[advice]]
+pattern = "conda\\s+(activate|create)"
+text = "On Deucalion, keep conda environments under /projects/<project> (envs_dirs and pkgs_dirs in ~/.condarc, or CONDA_ENVS_PATH and CONDA_PKGS_DIRS in the script), not in the small, slower home; build them on the architecture (x86 or ARM) they run on."
+severity = "info"

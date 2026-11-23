@@ -1,0 +1,45 @@
+# LRZ SuperMUC-NG (Garching): Phase 1 (Intel Skylake CPU nodes), Phase 2 (4 Intel Data Center GPU Max 1550 per node,
+# whole nodes only). Logins: skx.supermuc.lrz.de (IPv6: skx6), skx-arch.supermuc.lrz.de (tape archive), pvc.supermuc.lrz.de.
+schema = 1
+version = "2026.11.23"
+name = "LRZ SuperMUC-NG"
+match = ["supermuc*", "*.supermuc.lrz.de"]
+docs = "https://doku.lrz.de/high-performance-computing-10613431.html"
+status = "https://doku.lrz.de/high-performance-computing-10613431.html"
+# HOME, WORK, SCRATCH and DSS are IBM Spectrum Scale (GPFS) on Lenovo DSS-G. SCRATCH is cleaned by a high watermark
+# deletion ("usually 3-4 weeks", may be only days when the file system is full): no fixed day count, so no purge key.
+parallel_fs = ["/hppfs", "/dss"]
+globus = "https://doku.lrz.de/data-transfer-options-on-supermuc-ng-10747319.html"
+
+# How to log in (doku.lrz.de/access-and-login-to-supermuc-ng-11482471.html, …/two-factor-authentication-on-supermuc-ng-10746550.html):
+# directly from a whitelisted static IP, with the LRZ password (or a key, on port 2222) and a second factor (Token_Response).
+[login]
+required = ["user"]
+user_label = "your LRZ user ID (e.g. xxyyyzz)"
+setup = """Once, before the first login:
+1. Set your password and accept the usage regulations in the LRZ Identity Management Portal (idmportal2.lrz.de), with the start password your project manager received.
+2. Your public static IP must be enabled in the SuperMUC-NG firewall: only the master user (PI/PC) of your project can request it (Servicedesk). Dynamic and private addresses (10.x, 192.168.x) are not accepted.
+3. Two-factor authentication is required: log in to the SIM-MFA portal (simmfa.sim.lrz.de) with the same LRZ user ID and enrol a token (TOTP app such as privacyIDEA Authenticator, or a YubiKey), and a printed TAN list as a backup; a token on a second device is mandatory.
+4. Add LRZ's list of SuperMUC-NG host key fingerprints (doku.lrz.de, "List of ssh key fingerprints for SuperMUC-NG") to your known_hosts, or compare them at the first login.
+Each login: your LRZ password, then the second factor at "Token_Response:" (a TOTP code; for a push token press Enter and accept it in the app).
+Key login is discouraged by LRZ: it uses port 2222 (set Port 2222 in the form), an ECDSA-521 or ed25519 key with a passphrase (keys without one get you barred), and the second factor is still asked."""
+
+[[clusters]]
+name = "supermuc-ng"
+title = "SuperMUC-NG Phase 1 (CPU)"
+host = "skx.supermuc.lrz.de"
+
+[[clusters]]
+name = "supermuc-ng-arch"
+title = "SuperMUC-NG archive login (tape access)"
+host = "skx-arch.supermuc.lrz.de"
+
+[[clusters]]
+name = "supermuc-ng-pvc"
+title = "SuperMUC-NG Phase 2 (Intel GPU)"
+host = "pvc.supermuc.lrz.de"
+
+[[advice]]
+pattern = "\\btar\\s+-?(?![A-Za-z]*m)[A-Za-z]*x"
+text = "On SuperMUC-NG, files unpacked with tar -x keep their old dates and are among the first that the SCRATCH high watermark deletion removes: unpack with tar -xm (doku.lrz.de, File Systems of SuperMUC-NG)"
+severity = "info"

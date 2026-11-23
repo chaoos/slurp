@@ -1,0 +1,32 @@
+# BSC MareNostrum 5 (Barcelona, EuroHPC): GPP (general purpose, 112 cores per node) and ACC (accelerated, 80 cores and
+# 4 NVIDIA Hopper GPUs per node). Logins: glogin1/2.bsc.es (GPP), alogin1/2.bsc.es (ACC); transfer1-4.bsc.es (Storage 5).
+# NOTE: the BSC docs (bsc.es/supportkc) block automated readers; values below come from search-engine excerpts of the
+# official pages only (see NOTES.md).
+schema = 1
+version = "2026.11.23"
+name = "BSC MareNostrum 5"
+match = ["mn5*", "marenostrum5*", "[ga]login[12].bsc.es", "*.mn5.bsc.es"] # (not glogin1 alone: other sites name login nodes so)
+docs = "https://www.bsc.es/supportkc/docs/MareNostrum5/intro/"
+parallel_fs = ["/gpfs"]
+cuda_arch = "sm_90"
+transfer_hosts = ["transfer1.bsc.es", "transfer2.bsc.es", "transfer3.bsc.es", "transfer4.bsc.es"]
+login_node_limits = "5 minutes of CPU time per execution on the login nodes (longer runs are killed); the transfer nodes have no CPU time limit"
+
+# How to log in (https://www.bsc.es/supportkc/docs/MareNostrum5/logins/): ssh with the BSC password or an SSH key.
+[login]
+required = ["user"]
+user_label = "your BSC username (bscXXXXXX)"
+setup = """Once, before the first login:
+1. Change the initial password: ssh to transfer1.bsc.es with the username and password you received and run passwd (it does not work on the login nodes); the new password is active after about 5 minutes.
+2. Optionally (recommended by BSC), create a key pair with a passphrase (ssh-keygen) and install the PUBLIC key with ssh-copy-id to transfer1.bsc.es.
+Then each login: ssh to glogin1/glogin2 (GPP) or alogin1/alogin2 (ACC) with your key or password. No connections from the cluster to the outside are allowed: run transfers from your own machine to transfer1-4.bsc.es."""
+
+[[clusters]]
+name = "mn5-gpp"
+title = "MareNostrum 5 GPP"
+host = "glogin1.bsc.es"
+
+[[clusters]]
+name = "mn5-acc"
+title = "MareNostrum 5 ACC"
+host = "alogin1.bsc.es"

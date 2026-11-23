@@ -159,3 +159,24 @@ port = true
         == ["required: of user, host, port, jump, identities, pre_login"])
   check("errors say what", any("not a host name" in e for e in sites.login_errors({"name": "a", "host": "x y"}))
         and sites.login_errors({"name": "a", "host": "h", "port": True}) == ["port: not a number"])
+
+
+def test_every_builtin_cluster(check, tmp_path, monkeypatch):
+  """Every cluster of a built-in pack is offered (none left out as not right), and its host and name are its own
+  pack's (no pack's match patterns catch another site's cluster)"""
+  monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+  packs = [p for p in sites.load_packs() if p["_builtin"]]
+  written = sum(len(p.get("clusters", [])) for p in packs)
+  offered = [c for c in sites.site_clusters(packs) if c["builtin"]]
+  check("all the clusters of the built-in packs offered", len(offered) == written and written >= 30, (len(offered), written))
+  wrong = []
+  for entry in offered:
+    for tab, destination, host in ((entry["name"], "", ""), ("x", f"me@{entry['host']}", ""), ("x", "", entry["host"].split(".")[0] if "." in entry["host"] else "")):
+      if not (tab or destination or host):
+        continue
+      pack = sites.pack_for(tab, destination, c.Facts(env={"HOSTNAME": host} if host else {}))
+      if pack and pack.get("name") != entry["site"]:
+        wrong.append((entry["id"], tab, destination, host, pack.get("name")))
+  check("…each its own pack's, by the tab's name, the destination, the login node's name", not wrong, wrong)
+  check("…each says how to log in once (setup) and where the docs are", all(p.get("docs") for p in packs)
+        and all(c.get("setup") for c in offered), [c["id"] for c in offered if not c.get("setup")])

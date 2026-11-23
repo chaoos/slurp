@@ -647,7 +647,7 @@ cluster's user, jump hosts and keys (suggested as you type; ssh, scp and your ot
 `user@host`; blank: this machine.
 
 **From a site** (a new tab): **Choose…** opens a window with the clusters slurp knows how to log in to (from its site
-packs: CSCS Alps, JSC, LUMI, CINECA Leonardo, and yours), to search; **Clear** takes the choice back. It fills in the form: the name, the full settings (host, jump host, key), the command
+packs: CSCS Alps, JSC, LUMI, CINECA, BSC, LRZ, NERSC, OLCF, … and yours), to search; **Clear** takes the choice back. It fills in the form: the name, the full settings (host, jump host, key), the command
 before the login; fill in your user. Below it: how the site logs in, what it needs on this machine (✔ found, ✖ not,
 and where to get it), what to do once. Everything stays to see and change before **Add**. The fields the site needs
 from you (your user) have a yellow border until filled in; **Add** or **Test** without them turns them red, with what

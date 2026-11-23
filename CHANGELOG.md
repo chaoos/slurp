@@ -6,6 +6,15 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- More site packs, from each site's documentation: JSC JUPITER; the EuroHPC
+  systems MareNostrum 5 (BSC), Karolina (IT4I), MeluXina, Vega, Discoverer
+  and Deucalion; LRZ SuperMUC-NG, DKRZ Levante, MPCDF Raven and Viper
+  (through `gate1.mpcdf.mpg.de`) and SURF Snellius; NERSC Perlmutter
+  (`sshproxy -u {user}` for a 24-hour key, when a login without it fails),
+  OLCF Frontier, TACC Stampede3 and NCSA Delta. Their clusters are in
+  **From a site**; the checks know their scratch purge, parallel
+  filesystems, GPUs, transfer hosts and login node limits where the docs
+  say them.
 - Site packs: the command before the login (`pre_login`) can name the user
   (`sshproxy.sh -u {user}`): the form fills in the user you type, quoted,
   and follows it (not when you changed the command yourself).
