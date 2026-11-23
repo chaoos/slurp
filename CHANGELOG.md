@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Transfers, Browse…: a path typed while the start folder was still being
+  listed is no longer replaced by that folder when its listing comes later.
 - Progress of a job: no more "progress failed" now and then, when the latest
   `n/N` line of the output is alike in structure to the ones before but not
   the same (a word more).

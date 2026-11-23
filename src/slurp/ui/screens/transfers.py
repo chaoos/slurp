@@ -430,6 +430,8 @@ class PickPathsScreen(ModalScreen):
   def go(self, path, keep=False):
     """List path (keep: the same folder again, its marks and the cursor kept where they still are)"""
     self.query_one("#pp-status", Static).update(Text(f"listing {path} …", style="dim"))
+    self.asked = asked = object() # (only the latest listing is shown: an earlier one that comes later, e.g. the start
+    # folder after a path typed, is dropped)
     def work():
       try:
         if self.lister is not None:
@@ -444,7 +446,7 @@ class PickPathsScreen(ModalScreen):
       except Exception as e: # (Globus)
         return None, None, getattr(e, "words", None) or str(e)
     def listed(result):
-      if result is None:
+      if result is None or self.asked is not asked:
         return
       where, entries, error = result
       if where is None:

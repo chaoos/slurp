@@ -652,7 +652,7 @@ def test_pattern_source(check, tmp_path):
       check("Browse…: the picker", isinstance(picker, PickPathsScreen))
       picker.query_one("#pp-path").value = str(data)
       await pilot.click("#pp-path"); await pilot.press("enter")
-      await until(pilot, lambda: picker.entries, 10)
+      await until(pilot, lambda: picker.path == str(data) and picker.entries, 10) # (not the start folder's listing)
       picker.query_one("#pp-pattern").value = "*.h5"; await pilot.pause(0.3)
       table = picker.query_one("#pp-list")
       check("a pattern: the list shows its matches", table.row_count == 2 and "2 matches" in str(picker.query_one("#pp-status").render()),
