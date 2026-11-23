@@ -76,7 +76,10 @@ the **Abort** button, which replaces **Reload** meanwhile) stops it.
 tab's name; empty: the destination), then best an **SSH destination**, a Host of your
 `~/.ssh/config` (suggested as you type), or `user@host`; as a fallback the **Full SSH settings** (host, user,
 port, jump hosts, identity files, more `ssh` options), kept with the tab. A jump host is offered the tab's identity
-files too (`ssh -J` alone would give them only to the cluster). Its buttons are **Test**, **Cancel** and
+files too (`ssh -J` alone would give them only to the cluster). An identity file must be a private key on this
+machine: one that is not there, a directory or a `.pub` file gets a red mark at once, with what is wrong below it,
+and **Add** and **Test** wait until it is right. **Browse…** next to it chooses a key on this machine (it starts in
+`~/.ssh`; slurp does not read or show its content). Its buttons are **Test**, **Cancel** and
 **Add**, as the endpoints' forms.
 
 **From a site**, at the top of a new connection, lists the clusters slurp knows how to log in to, from its site

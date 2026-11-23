@@ -663,6 +663,7 @@ class AddClusterScreen(ModalScreen):
   .required-hint { height: auto; color: ansi_red; margin: 0 0 1 16; }
   .ssh-row Label { width: 16; padding: 0 1 0 0; }
   .ssh-row Input { width: 1fr; }
+  #ssh-identities-browse { margin-left: 1; }
   #ssh-port { width: 12; }
   #ssh-options { height: 5; }
   #cluster-config { height: auto; margin-bottom: 1; }
@@ -710,6 +711,9 @@ class AddClusterScreen(ModalScreen):
             with Horizontal(classes="ssh-row", id=f"ssh-{key}-row"):
               yield Label(label)
               yield Input(placeholder=placeholder, id=f"ssh-{key}", compact=True)
+              if key == "identities":
+                yield Button("Browse…", id="ssh-identities-browse", compact=True,
+                             tooltip="choose a private key on this machine (its content is not read or shown)")
             yield Static(id=f"ssh-{key}-hint", classes="required-hint", markup=False)
           yield Label("More ssh options, one per line: Key=Value (e.g. ForwardAgent=yes, ServerAliveInterval=30, "
                       "UserKnownHostsFile=…, PreferredAuthentications=…, ProxyCommand=…)")
@@ -766,6 +770,7 @@ class AddClusterScreen(ModalScreen):
       if settings.get("name"):
         self.query_one("#cluster-name", Input).value = settings["name"]
       self.query_one("#ssh-identities", Input).value = ", ".join(settings.get("identities") or [])
+      self.call_after_refresh(self.mark_required)
       self.query_one("#ssh-options", TextArea).load_text("\n".join(settings.get("options") or []))
       self.query_one("#ssh-host", Input).focus()
     else:
@@ -836,29 +841,53 @@ class AddClusterScreen(ModalScreen):
     """The fields the chosen site's cluster needs filled in (its pack's required)"""
     return list((self.site or {}).get("required", []))
 
+  def field_problem(self, key):
+    """What is wrong with a filled-in field, "" if nothing: the identity files must be on this machine, files (not
+    directories), and private keys (not the .pub half). Only whether they are there: none is read"""
+    if key != "identities":
+      return ""
+    problems = []
+    for path in (p.strip() for p in self.field_value("identities").split(",")):
+      full = os.path.expanduser(path)
+      if not path:
+        continue
+      if not os.path.exists(full):
+        problems.append(f"{path} does not exist (here, on this machine)")
+      elif os.path.isdir(full):
+        problems.append(f"{path} is a directory, not a key")
+      elif path.endswith(".pub"):
+        problems.append(f"{path} is the public half: choose the private key ({path[:-4]})")
+    return "; ".join(problems)
+
   def mark_required(self, pressed=False):
-    """The fields to fill in: a yellow border while empty; pressed (Add, Test): the empty ones red, each with what
-    to fill in below it. The fields not required (or no site chosen): as usual. [the empty required ones]"""
+    """The fields to fill in: a yellow bar (border) while empty; pressed (Add, Test): the empty ones red, each with
+    what to fill in below it. A field that is wrong (an identity file that is not there): red at once, what is wrong
+    below it. The others (or no site chosen): as usual. [the empty required ones and the wrong ones]"""
     required, missing = self.required_fields(), []
     for key in sites_requirable():
       field, hint = self.query_one(f"#ssh-{key.replace('_', '-')}", Input), self.query_one(f"#ssh-{key.replace('_', '-')}-hint", Static)
       empty = key in required and not field.value.strip()
-      if empty:
+      problem = self.field_problem(key)
+      marked = empty or bool(problem)
+      if marked:
         missing.append(key)
       if not hasattr(field, "_was_compact"):
         field._was_compact = field.compact
-      field.compact = field._was_compact and not empty # (a compact input has no border, whatever the CSS says)
-      field.set_class(empty, "-required")
-      field.set_class(empty and (pressed or field.has_class("-missing")), "-missing")
+      field.compact = field._was_compact and not marked # (a compact input has no border, whatever the CSS says)
+      field.set_class(marked, "-required")
+      field.set_class(bool(problem) or empty and (pressed or field.has_class("-missing")), "-missing")
       row = self.query(f"#ssh-{key}-row")
       if row:
-        row.first().set_class(empty, "-required")
-      if not empty:
-        hint.display = False
-      elif field.has_class("-missing"):
+        row.first().set_class(marked, "-required")
+      if problem:
+        hint.update(f"↑ {problem}")
+        hint.display = True
+      elif empty and field.has_class("-missing"):
         what = (self.site or {}).get("user_label") if key == "user" else ""
         hint.update(f"↑ fill in {what or self.REQUIRED_LABELS[key]}: {(self.site or {}).get('site', 'the site')} needs it")
         hint.display = True
+      else:
+        hint.display = False
     return missing
 
   def missing_refused(self, action):
@@ -869,18 +898,40 @@ class AddClusterScreen(ModalScreen):
     if missing[0] != "pre_login":
       self.query_one("#cluster-full", Collapsible).collapsed = False
     self.query_one(f"#ssh-{missing[0].replace('_', '-')}", Input).focus()
-    self.notify(f"{action}: fill in " + ", ".join(self.REQUIRED_LABELS[k] for k in missing) + " first (marked red)", severity="error")
+    said = [self.field_problem(k) or f"fill in {self.REQUIRED_LABELS[k]}" for k in missing]
+    self.notify(f"{action}: " + "; ".join(said) + " (marked red)", severity="error")
     return True
 
   config_timer = None
 
   @on(Input.Changed, "#ssh-user, #ssh-host, #ssh-port, #ssh-jump, #ssh-identities, #ssh-pre-login")
   def required_changed(self, event):
-    """(a required field filled in: its mark goes; emptied again: yellow, red only after the next Add or Test)"""
-    if self.site is not None:
+    """(a required field filled in: its mark goes; emptied again: yellow, red only after the next Add or Test; an
+    identity file: red at once while it is not there, with or without a site)"""
+    if self.site is not None or event.input.id == "ssh-identities":
       if not event.value.strip():
         event.input.remove_class("-missing")
       self.mark_required()
+
+  @on(Button.Pressed, "#ssh-identities-browse")
+  def browse_identity(self, event):
+    """A private key on this machine to choose (nothing of it read or shown): it replaces the field's last file if
+    that is not there, else it is added (more keys: commas)"""
+    event.stop()
+    from .files import FilePickScreen
+    field = self.query_one("#ssh-identities", Input)
+    paths = [p.strip() for p in field.value.split(",") if p.strip()]
+    current = os.path.expanduser(paths[-1]) if paths else ""
+    ssh_dir = os.path.expanduser("~/.ssh")
+    start = os.path.dirname(current) if current and os.path.isdir(os.path.dirname(current)) else ssh_dir if os.path.isdir(ssh_dir) else os.path.expanduser("~")
+    def chosen(path):
+      if not path:
+        return
+      home = os.path.expanduser("~")
+      short = "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
+      field.value = ", ".join(paths[:-1] + [short]) if paths and not os.path.exists(current) else ", ".join(paths + [short]) if paths else short
+      field.focus()
+    self.app.push_screen(FilePickScreen("An identity file (a private key) on this machine", start, chosen=current, local=True, preview=False), chosen)
 
   @on(Input.Changed, "#ssh-user")
   def site_user_changed(self, event):

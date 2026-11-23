@@ -6,6 +6,12 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- SSH connections, identity files: a file that is not on this machine, a
+  directory, or the `.pub` half instead of the private key is marked red at
+  once, with what is wrong below it; Add and Test wait until it is right.
+  **Browse…** next to the field chooses a key on this machine (from `~/.ssh`;
+  its content is not read or shown). The file window can now list this
+  machine and leave out its preview.
 - A new SSH connection **from a site**: the form lists the clusters slurp knows
   how to log in to (CSCS Alps: Daint, Santis, Clariden, Eiger; JSC: JURECA,
   JUWELS Cluster and Booster, JUSUF, JEDI). One fills in the form (the name, the

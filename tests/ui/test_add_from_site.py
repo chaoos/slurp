@@ -3,8 +3,21 @@ jump host with the user filled in, the key, the command before the login), says 
 and what to do once; all of it stays to see and change; Add: those settings. Editing a tab: no such list"""
 import asyncio
 
+import pytest
+
 from slurp.ui.app import Slurp
 from slurp.ui.screens.dialogs import AddClusterScreen
+
+
+@pytest.fixture
+def home(monkeypatch, tmp_path):
+  """A home of the test with ~/.ssh/cscs-key (the key the CSCS clusters name: it must be there)"""
+  ssh = tmp_path / "home" / ".ssh"
+  ssh.mkdir(parents=True)
+  (ssh / "cscs-key").write_text("PRIVATE KEY CONTENT")
+  (ssh / "cscs-key.pub").write_text("ssh-ed25519 AAAA")
+  monkeypatch.setenv("HOME", str(tmp_path / "home"))
+  return tmp_path / "home"
 
 
 async def started(pilot, app):
@@ -14,7 +27,7 @@ async def started(pilot, app):
     await pilot.pause(0.05)
 
 
-def test_from_a_site(check, monkeypatch, tmp_path):
+def test_from_a_site(check, monkeypatch, tmp_path, home):
   bin_dir = tmp_path / "bin" # (here: cscs-key not installed; a PATH without it)
   bin_dir.mkdir()
   monkeypatch.setenv("PATH", str(bin_dir))
@@ -69,7 +82,7 @@ def test_from_a_site(check, monkeypatch, tmp_path):
   asyncio.run(main())
 
 
-def test_fields_to_fill_in(check, monkeypatch):
+def test_fields_to_fill_in(check, monkeypatch, home):
   monkeypatch.setattr(Slurp, "activate_cluster", lambda app, index, **kw: setattr(app, "cluster_index", index))
   pushed = []
   async def main():
@@ -97,7 +110,7 @@ def test_fields_to_fill_in(check, monkeypatch):
       check("Test without it: no check; red, the hint below it, said", not pushed and user.has_class("-missing")
             and color(user) == theme("error") and user.region.height == 1 and hint.display
             and str(hint.render()) == "↑ fill in your CSCS username: CSCS Alps needs it"
-            and any("Test: fill in the user first" in str(n.message) for n in app._notifications), (pushed, str(hint.render())))
+            and any("Test: fill in the user (marked red)" in str(n.message) for n in app._notifications), (pushed, str(hint.render())))
       dlg.query_one("#cluster-full").collapsed = True; await pilot.pause(0.2)
       dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.3)
       check("Add without it: not added; the settings open again, the user focused", not got and app.screen is dlg
@@ -114,5 +127,58 @@ def test_fields_to_fill_in(check, monkeypatch):
       check("a user already there: no mark", not user.has_class("-required"))
       dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.3)
       check("…Add: added", got and got[0]["ssh"]["user"] == "rgruber", got)
+      await pilot.press("q")
+  asyncio.run(main())
+
+
+def test_identity_files(check, monkeypatch, home):
+  """An identity file must be on this machine: one that is not there (or a directory, or the .pub half) is red at
+  once, said below it; Add and Test refuse it. Browse…: a private key of this machine, its content not shown"""
+  monkeypatch.setattr(Slurp, "activate_cluster", lambda app, index, **kw: setattr(app, "cluster_index", index))
+  ssh = home / ".ssh"
+  read = []
+  import slurp.ui.screens.files as F
+  monkeypatch.setattr(F, "fs_read", lambda *a, **k: read.append(a) or b"")
+  async def main():
+    app = Slurp()
+    async with app.run_test(size=(140, 50)) as pilot:
+      await started(pilot, app)
+      got = []
+      app.push_screen(AddClusterScreen(), got.append); await pilot.pause(0.4)
+      dlg = app.screen
+      dlg.query_one("#cluster-full").collapsed = False
+      dlg.query_one("#ssh-host").value = "h.example"
+      field, hint = dlg.query_one("#ssh-identities"), dlg.query_one("#ssh-identities-hint")
+      field.value = "~/.ssh/nokey"; await pilot.pause(0.3)
+      check("an identity file that is not there: red at once (no site needed), one line high, said below it",
+            field.has_class("-missing") and field.region.height == 1 and hint.display
+            and str(hint.render()) == "↑ ~/.ssh/nokey does not exist (here, on this machine)", str(hint.render()))
+      dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.3)
+      check("…Add: refused, said", not got and any("~/.ssh/nokey does not exist" in str(n.message) for n in app._notifications))
+      field.value = "~/.ssh/cscs-key.pub"; await pilot.pause(0.3)
+      check("the .pub half: red, the private key named", field.has_class("-missing") and "choose the private key (~/.ssh/cscs-key)" in str(hint.render()))
+      field.value = "~/.ssh"; await pilot.pause(0.3)
+      check("a directory: red", field.has_class("-missing") and "is a directory" in str(hint.render()))
+      field.value = "~/.ssh/cscs-key"; await pilot.pause(0.3)
+      check("there: no mark", not field.has_class("-missing") and not field.has_class("-required") and not hint.display)
+      field.value = "~/.ssh/nokey"; await pilot.pause(0.2)
+      dlg.query_one("#ssh-identities-browse").press(); await pilot.pause(0.8)
+      picker = app.screen
+      check("Browse…: this machine's files, in ~/.ssh", isinstance(picker, F.FilePickScreen) and picker.local and picker.path == str(ssh), getattr(picker, "path", None))
+      names = [str(r[0]) for r in (picker.query_one("#fp-list").get_row_at(i) for i in range(picker.query_one("#fp-list").row_count))]
+      check("…its files listed", "cscs-key" in names and "cscs-key.pub" in names, names)
+      picker.query_one("#fp-list").move_cursor(row=names.index("cscs-key")); await pilot.pause(0.4)
+      box = str(picker.query_one("#fp-preview").render())
+      check("…the key's content: not read, not shown", "PRIVATE" not in box and "not shown" in box and not read, (box, read))
+      picker.query_one("#fp-ok").press(); await pilot.pause(0.4)
+      check("chosen: it replaces the file that was not there (~ for home); the mark goes", app.screen is dlg and field.value == "~/.ssh/cscs-key"
+            and not field.has_class("-missing"), field.value)
+      dlg.query_one("#ssh-identities-browse").press(); await pilot.pause(0.8)
+      app.screen.query_one("#fp-list").move_cursor(row=names.index("cscs-key.pub")); await pilot.pause(0.2)
+      app.screen.query_one("#fp-ok").press(); await pilot.pause(0.4)
+      check("another: added (more keys: commas); the .pub: red", field.value == "~/.ssh/cscs-key, ~/.ssh/cscs-key.pub" and field.has_class("-missing"), field.value)
+      field.value = "~/.ssh/cscs-key"; await pilot.pause(0.2)
+      dlg.query_one("#cluster-confirm").press(); await pilot.pause(0.3)
+      check("Add: with that key", got and got[0]["ssh"]["identities"] == ["~/.ssh/cscs-key"], got)
       await pilot.press("q")
   asyncio.run(main())

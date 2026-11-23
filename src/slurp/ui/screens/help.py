@@ -644,7 +644,9 @@ from you (your user) have a yellow border until filled in; **Add** or **Test** w
 to fill in below each.
 
 The fallback, **Full SSH settings**: host, user, port, jump hosts (ProxyJump), identity files (only these are tried),
-and more ssh options, one `Key=Value` per line. They are kept with the tab.
+and more ssh options, one `Key=Value` per line. They are kept with the tab. An identity file must be a private key on
+this machine: one that is not there, a directory or a `.pub` file is marked red at once, said below it, and **Add**
+and **Test** wait. **Browse…** chooses one on this machine (from `~/.ssh`; its content is not read or shown).
 
 **Run before login** (both ways): a command on this machine before every login of the tab, e.g. one that signs your
 key for the day (`cscs-keygen`, `step ssh login`, `tsh login`). It runs in the login pane: answer it there (a

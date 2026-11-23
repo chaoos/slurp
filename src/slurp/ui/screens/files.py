@@ -24,7 +24,7 @@ from ...cluster.remote import (
 )
 from ...cluster.paths import is_binary, resolve_path
 from ...cluster.storage import drive_dirs
-from ...cluster.listing import can_read, can_write, listing, matches_name, mode_text, search, short_acl
+from ...cluster.listing import can_read, can_write, listing, local_listing, matches_name, mode_text, search, short_acl
 from .. import icons
 from ..widgets import clean, ClickTable, crumb_title, PathArea
 from .base import SplitScreen
@@ -241,7 +241,8 @@ DIR_COLUMNS = [("name", "Name"), ("size", "Size"), ("mtime", "Modified"), ("mode
 class FilePickScreen(ModalScreen[str | None]):
   """A window to choose a file of the cluster: a directory listing (Enter or a click: into a directory, or the file),
   the path to type, a filter, and for the file under the cursor its end (and what describe(path, tail) says of it);
-  dismissed with the path, or None"""
+  dismissed with the path, or None. local: a file of this machine (slurp's), not of the tab's cluster; preview=False:
+  nothing of the file is read (a private key: its content is never shown)"""
   DEFAULT_CSS = """
   FilePickScreen { align: center middle; }
   #fp-dialog { width: 120; max-width: 95%; height: 90%; border: thick $accent; background: $surface; padding: 1 2; }
@@ -259,9 +260,10 @@ class FilePickScreen(ModalScreen[str | None]):
   BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("backspace", "up", "Up", show=False)]
   PREVIEW_BYTES = 4096
 
-  def __init__(self, title, start, describe=None, chosen=""):
+  def __init__(self, title, start, describe=None, chosen="", local=False, preview=True):
     super().__init__()
     self.title_text, self.path, self.describe, self.chosen = title, start or "/", describe, chosen
+    self.local, self.show_preview = local, preview
     self.entries = []
     self.previewed = None
 
@@ -289,13 +291,14 @@ class FilePickScreen(ModalScreen[str | None]):
   def go(self, path):
     """List a directory (in the background); a file: its directory, the file under the cursor"""
     self.query_one("#fp-status", Static).update(Text(f"listing {path} …", style="dim"))
+    isdir, isfile, lister = (os.path.isdir, os.path.isfile, local_listing) if self.local else (fs_isdir, fs_isfile, listing)
     def work():
       try:
-        if not fs_isdir(path):
-          if fs_isfile(path):
-            return os.path.dirname(path) or "/", listing(os.path.dirname(path) or "/", DIR_LIMIT)[1], os.path.basename(path)
+        if not isdir(path):
+          if isfile(path):
+            return os.path.dirname(path) or "/", lister(os.path.dirname(path) or "/", DIR_LIMIT)[1], os.path.basename(path)
           raise OSError(f"{path}: no such directory")
-        return path, listing(path, DIR_LIMIT)[1], ""
+        return path, lister(path, DIR_LIMIT)[1], ""
       except OSError as e:
         return None, None, str(e)
     def listed(result):
@@ -360,6 +363,9 @@ class FilePickScreen(ModalScreen[str | None]):
       box.update(Text("a directory: Enter goes into it" if entry else "", style="dim"))
       return
     path = os.path.join(self.path, entry["name"])
+    if not self.show_preview:
+      box.update(Text("(its content is not shown)", style="dim"))
+      return
     if path == self.previewed:
       return
     self.previewed = path
@@ -414,7 +420,8 @@ class FilePickScreen(ModalScreen[str | None]):
   def path_submitted(self, event):
     text = event.value.strip()
     if text:
-      self.go(expand_path(text, (home_of(self.app.cluster) if self.app.clusters else os.path.expanduser("~")) or "/"))
+      home = os.path.expanduser("~") if self.local or not self.app.clusters else home_of(self.app.cluster)
+      self.go(expand_path(text, home or "/"))
     self.query_one("#fp-list", ClickTable).focus()
 
   @on(Button.Pressed, "#fp-up")
