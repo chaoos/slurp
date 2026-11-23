@@ -81,7 +81,7 @@ def test_fields_to_fill_in(check, monkeypatch):
       dlg = app.screen
       user, hint = dlg.query_one("#ssh-user"), dlg.query_one("#ssh-user-hint")
       from textual.color import Color
-      color = lambda w: w.styles.border_top[1]
+      color = lambda w: w.styles.border_left[1]
       theme = lambda name: Color.parse({"warning": "ansi_yellow", "error": "ansi_red"}[name]) # (the terminal's, in every theme)
       plain = color(user)
       dlg.query_one("#cluster-site").value = "cscs-alps/daint"; await pilot.pause(0.4)
@@ -89,11 +89,13 @@ def test_fields_to_fill_in(check, monkeypatch):
             and not user.has_class("-missing") and color(user) == theme("warning") and not hint.display,
             (user.classes, color(user)))
       check("…the other fields: as usual", not dlg.query_one("#ssh-host").has_class("-required") and not dlg.query_one("#ssh-jump").has_class("-required"))
-      check("…its row is high enough for the border", dlg.query_one("#ssh-user-row").region.height == 3, dlg.query_one("#ssh-user-row").region)
+      check("…as high as without it (a bar at each end, no lines above and below), its text where it was",
+            user.region.height == 1 and dlg.query_one("#ssh-user-row").region.height == 1 and user.region.x == dlg.query_one("#ssh-host").region.x
+            and user.styles.border_left[1] == theme("warning") and user.styles.border_right[1] == theme("warning"), (user.region, dlg.query_one("#ssh-host").region))
       monkeypatch.setattr(app, "push_screen", lambda screen, *a, **k: pushed.append(type(screen).__name__))
       dlg.query_one("#cluster-check-button").press(); await pilot.pause(0.3)
       check("Test without it: no check; red, the hint below it, said", not pushed and user.has_class("-missing")
-            and color(user) == theme("error") and hint.display
+            and color(user) == theme("error") and user.region.height == 1 and hint.display
             and str(hint.render()) == "↑ fill in your CSCS username: CSCS Alps needs it"
             and any("Test: fill in the user first" in str(n.message) for n in app._notifications), (pushed, str(hint.render())))
       dlg.query_one("#cluster-full").collapsed = True; await pilot.pause(0.2)

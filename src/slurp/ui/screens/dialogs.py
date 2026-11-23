@@ -651,11 +651,15 @@ class AddClusterScreen(ModalScreen):
   #cluster-site-info { height: auto; margin: 1 0 0 18; padding: 0 1; border-left: wide $accent; }
   #cluster-full { height: auto; margin-bottom: 1; }
   .ssh-row { height: 1; margin-bottom: 1; }
-  .ssh-row.-required { height: 3; margin-bottom: 0; } /* (a field to fill in: with its border) */
   /* a field to fill in: yellow, red after Add or Test without it; the terminal's yellow and red, in every theme ($warning
-     is a red in some) and when focused too (the cursor is often there) */
+     is a red in some) and when focused too (the cursor is often there). The one-line fields: a bar at each end, no
+     lines above and below (they stay one line high); the others have a border anyway: its colour */
   #cluster-dialog Input.-required, #cluster-dialog Input.-required:focus { border: round ansi_yellow; }
   #cluster-dialog Input.-missing, #cluster-dialog Input.-missing:focus { border: round ansi_red; }
+  #cluster-dialog .ssh-row Input.-required, #cluster-dialog .ssh-row Input.-required:focus {
+    height: 1; padding: 0; border: none; border-left: outer ansi_yellow; border-right: outer ansi_yellow; }
+  #cluster-dialog .ssh-row Input.-missing, #cluster-dialog .ssh-row Input.-missing:focus {
+    border-left: outer ansi_red; border-right: outer ansi_red; }
   .required-hint { height: auto; color: ansi_red; margin: 0 0 1 16; }
   .ssh-row Label { width: 16; padding: 0 1 0 0; }
   .ssh-row Input { width: 1fr; }
