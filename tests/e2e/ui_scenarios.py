@@ -4139,7 +4139,7 @@ async def t_transfer_job_queued(app, pilot):
     app.transfers.run_now(t)
     check("the first run: done", await until(pilot, lambda: t.state == "done", 90), (t.state, t.message))
     open(os.path.join(davroot, "run1", "b.txt"), "w").write("b")
-    open(queue, "w").write("8")
+    open(queue, "w").write("15") # (it waits in the queue that long: the checks below come about 8 s after this, after other tests later)
     app.transfers.run_now(t)
     check("the second: submitted", await until(pilot, lambda: t.run.get("job") and t.state in ("queued", "running"), 30), (t.state, t.message))
     folder = t.run.get("folder", "")
