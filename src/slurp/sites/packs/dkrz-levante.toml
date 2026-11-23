@@ -3,6 +3,7 @@
 schema = 1
 version = "2026.11.23"
 name = "DKRZ Levante"
+scheduler = "slurm"
 match = ["levante*"]
 docs = "https://docs.dkrz.de/doc/levante/index.html"
 status = "https://status.dkrz.de/"

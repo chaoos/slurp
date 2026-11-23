@@ -3,6 +3,7 @@
 schema = 1
 version = "2026.11.23"
 name = "LRZ SuperMUC-NG"
+scheduler = "slurm"
 match = ["supermuc*", "*.supermuc.lrz.de"]
 docs = "https://doku.lrz.de/high-performance-computing-10613431.html"
 status = "https://doku.lrz.de/high-performance-computing-10613431.html"

@@ -3,6 +3,7 @@
 schema = 1
 version = "2026.11.23"
 name = "OLCF Frontier"
+scheduler = "slurm"
 match = ["frontier*", "*.frontier.olcf.ornl.gov", "frontier.olcf.ornl.gov", "login*.frontier"]
 docs = "https://docs.olcf.ornl.gov/systems/frontier_user_guide.html"
 status = "https://my.olcf.ornl.gov/center-status"

@@ -3,6 +3,7 @@
 schema = 1
 version = "2026.11.23"
 name = "LUMI"
+scheduler = "slurm"
 match = ["lumi*", "lumi.csc.fi", "lumi-uan*.csc.fi"]
 docs = "https://docs.lumi-supercomputer.eu"
 status = "https://lumi-supercomputer.eu/lumi-service-status/"

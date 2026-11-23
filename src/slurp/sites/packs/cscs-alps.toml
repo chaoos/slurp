@@ -2,6 +2,7 @@
 schema = 1
 version = "2026.11.23"
 name = "CSCS Alps"
+scheduler = "slurm"
 match = ["daint*", "clariden*", "santis*", "eiger*", "*.cscs.ch", "*.alps.cscs.ch"]
 docs = "https://docs.cscs.ch"
 status = "https://status.cscs.ch"

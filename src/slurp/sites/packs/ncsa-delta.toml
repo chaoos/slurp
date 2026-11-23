@@ -3,6 +3,7 @@
 schema = 1
 version = "2026.11.23"
 name = "NCSA Delta"
+scheduler = "slurm"
 match = ["delta", "*.delta.ncsa.illinois.edu", "dt-login*"]
 docs = "https://docs.ncsa.illinois.edu/systems/delta/en/latest/"
 status = "https://support.access-ci.org/outages"

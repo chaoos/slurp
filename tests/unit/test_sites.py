@@ -185,3 +185,22 @@ def test_every_builtin_cluster(check, tmp_path, monkeypatch):
   check("…each its own pack's, by the tab's name, the destination, the login node's name", not wrong, wrong)
   check("…each says how to log in once (setup) and where the docs are", all(p.get("docs") for p in packs)
         and all(c.get("setup") for c in offered), [c["id"] for c in offered if not c.get("setup")])
+
+
+def test_the_batch_system(check, tmp_path, monkeypatch):
+  """A pack says its site's batch system (scheduler): slurm without it or with one slurp does not know; another one is
+  said where the clusters are chosen (no job list there)"""
+  from slurp.ui.screens.dialogs import site_cluster_words, site_login_text, site_login_way
+  monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+  rules = tmp_path / "slurp" / "rules"
+  rules.mkdir(parents=True)
+  (rules / "pbs.toml").write_text('name = "PBS site"\nscheduler = "pbs"\nmatch = ["pbsy*"]\n[[clusters]]\nname = "pbsy"\nhost = "pbsy.example"\n')
+  (rules / "odd.toml").write_text('name = "Odd site"\nscheduler = "nonsense"\nmatch = ["oddy*"]\n[[clusters]]\nname = "oddy"\nhost = "oddy.example"\n')
+  clusters = {c["id"]: c for c in sites.site_clusters()}
+  check("built in: Slurm (said in each pack)", all(c["scheduler"] == "slurm" for c in clusters.values() if c["builtin"])
+        and all(p.get("scheduler") for p in sites.load_packs() if p["_builtin"]))
+  pbs, odd = clusters["pbs/pbsy"], clusters["odd/oddy"]
+  check("another one: kept; one slurp does not know: Slurm", pbs["scheduler"] == "pbs" and odd["scheduler"] == "slurm", (pbs, odd))
+  check("…said in the list (Login), in what the form says, and found by a search", "no Slurm: PBS" in site_login_way(pbs)
+        and "Its batch system is PBS, not Slurm" in str(site_login_text(pbs)) and "pbs" in site_cluster_words(pbs)
+        and "Slurm" not in site_login_way(clusters["cscs-alps/daint"]), site_login_way(pbs))

@@ -3,6 +3,7 @@
 schema = 1
 version = "2026.11.23"
 name = "TACC Stampede3"
+scheduler = "slurm"
 match = ["stampede3*", "*.stampede3.tacc.utexas.edu", "stampede3.tacc.utexas.edu", "login*.stampede3"]
 docs = "https://docs.tacc.utexas.edu/hpc/stampede3/"
 status = "https://tacc.utexas.edu/news/user-updates/"

@@ -2,6 +2,7 @@
 schema = 1
 version = "2026.11.23"
 name = "JSC JURECA"
+scheduler = "slurm"
 match = ["jureca*"]
 docs = "https://apps.fz-juelich.de/jsc/hps/jureca/index.html"
 status = "https://status.jsc.fz-juelich.de/"

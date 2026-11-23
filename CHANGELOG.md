@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Site packs say their site's batch system (`scheduler`: slurm, pbs, tcs,
+  sge, lsf, flux, other). A cluster without Slurm says so in the search of
+  **From a site** and in the form: slurp logs in there and has its files,
+  shells and transfers, but no job list and no checks of job scripts.
 - The categories subtab is called **Categories**, capitalised as the
   other tabs (also in its breadcrumbs).
 - New SSH connection from a site that logs in with a key only (CSCS, JSC,

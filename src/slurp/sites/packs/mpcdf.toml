@@ -5,6 +5,7 @@
 schema = 1
 version = "2026.11.23"
 name = "MPCDF"
+scheduler = "slurm"
 match = ["mpcdf*", "raven[0-9][0-9]i*", "viper[0-9][0-9]i*", "*.mpcdf.mpg.de"]
 docs = "https://docs.mpcdf.mpg.de/"
 status = "https://status.mpcdf.mpg.de/"

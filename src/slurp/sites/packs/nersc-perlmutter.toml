@@ -3,6 +3,7 @@
 schema = 1
 version = "2026.11.23"
 name = "NERSC Perlmutter"
+scheduler = "slurm"
 match = ["perlmutter*", "perlmutter*.nersc.gov", "saul.nersc.gov", "saul*.nersc.gov"]
 docs = "https://docs.nersc.gov/systems/perlmutter/"
 status = "https://www.nersc.gov/live-status/motd/"

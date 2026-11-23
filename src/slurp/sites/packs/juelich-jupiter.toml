@@ -4,6 +4,7 @@
 schema = 1
 version = "2026.11.23"
 name = "JSC JUPITER"
+scheduler = "slurm"
 match = ["jupiter", "jupiter.fz-juelich.de", "*.jupiter.fz-juelich.de"]
 docs = "https://apps.fz-juelich.de/jsc/hps/jupiter/index.html"
 status = "https://status.jsc.fz-juelich.de/"

@@ -3,6 +3,7 @@
 schema = 1
 version = "2026.11.23"
 name = "CINECA Leonardo"
+scheduler = "slurm"
 match = ["leonardo*", "*.leonardo.cineca.it"]
 docs = "https://docs.hpc.cineca.it/hpc/leonardo.html"
 status = "https://www.hpc.cineca.it/user-support/"

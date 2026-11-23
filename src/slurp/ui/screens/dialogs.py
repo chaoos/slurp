@@ -641,6 +641,10 @@ def site_login_text(entry):
     out.append(f"; first {entry['pre_login']} here, in the login pane"
                + (" (when a login without it fails)" if entry.get("pre_login_fallback") else " (before every login)"))
   out.append(". Fill in " + (entry.get("user_label") or "your user there") + " (User).\n")
+  if entry.get("scheduler", "slurm") != "slurm":
+    from ... import sites
+    out.append(f"Its batch system is {sites.SCHEDULERS.get(entry['scheduler'], entry['scheduler'])}, not Slurm: slurp logs in and has "
+               "its files, shells and transfers, but no job list and no checks of job scripts there.\n", style="yellow")
   for need in entry.get("needs", []):
     found = shutil.which(need["command"])
     out.append(f"✔ {need['command']}: {found}\n" if found else f"✖ {need['command']} is not installed here: ", style="green" if found else "red")
@@ -659,12 +663,15 @@ def site_login_way(entry):
     parts.append(entry["pre_login"].split()[0])
   elif entry.get("identities"):
     parts.append("key")
+  if entry.get("scheduler", "slurm") != "slurm": # (no job list there: said in the list already)
+    from ... import sites
+    parts.append(f"no Slurm: {sites.SCHEDULERS.get(entry['scheduler'], entry['scheduler'])}")
   return ", ".join(parts)
 
 def site_cluster_words(entry):
   """What a search of the sites' clusters looks in: the cluster, its site, its host and jump host, the pack (its file)"""
   words = [entry.get("title", ""), entry.get("name", ""), entry.get("site", ""), entry.get("host", ""), entry.get("id", ""),
-           entry.get("jump", "").replace("{user}@", "")]
+           entry.get("jump", "").replace("{user}@", ""), entry.get("scheduler", "slurm")]
   return " ".join(words).lower()
 
 class SiteClusterScreen(ModalScreen[str | None]):

@@ -5,6 +5,7 @@
 schema = 1
 version = "2026.11.23"
 name = "BSC MareNostrum 5"
+scheduler = "slurm"
 match = ["mn5*", "marenostrum5*", "[ga]login[12].bsc.es", "*.mn5.bsc.es"] # (not glogin1 alone: other sites name login nodes so)
 docs = "https://www.bsc.es/supportkc/docs/MareNostrum5/intro/"
 parallel_fs = ["/gpfs"]

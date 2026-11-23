@@ -3,6 +3,7 @@
 schema = 1
 version = "2026.11.23"
 name = "SURF Snellius"
+scheduler = "slurm"
 match = ["snellius*", "*.snellius.surf.nl"]
 docs = "https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/30660265/Snellius+FAQ"
 status = "https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/9798134/Service+status"

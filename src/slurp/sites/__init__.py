@@ -16,6 +16,8 @@ Keys (all optional):
   version = "2026.11.20"           # the version of the content (see above)
   match = ["daint*", "*.cscs.ch"]
   name = "CSCS Alps"
+  scheduler = "slurm"              # the batch system: slurm (the default), pbs, tcs (Fujitsu, pjsub), sge, lsf, flux,
+                                   # other; without Slurm slurp logs in, has files, shells, transfers, no job list
   scratch_purge_days = 30          # Q04, Q05
   parallel_fs = ["/capstor"]       # P07: environments there are slow
   numa_domains = 4                 # N01: NUMA domains per node
@@ -176,7 +178,7 @@ def site_clusters(packs=None):
       seen.add(ident)
       out.append({**{k: entry[k] for k in ("name", *LOGIN_KEYS) if k in entry}, "id": ident, "site": pack_name(pack),
                   "title": entry.get("title") or entry["name"], "version": str(pack.get("version") or ""),
-                  "builtin": bool(pack.get("_builtin"))})
+                  "builtin": bool(pack.get("_builtin")), "scheduler": pack_scheduler(pack)})
   return out
 
 def login_settings(entry, user=""):
@@ -197,6 +199,14 @@ def pack_text(pack):
   version = str(pack.get("version") or "")
   where = "built in" if pack.get("_builtin") else f"yours: {pack.get('_path', '')}"
   return f"{pack_name(pack)}" + (f", version {version}" if version else "") + f" ({where})"
+
+SCHEDULERS = {"slurm": "Slurm", "pbs": "PBS", "tcs": "Fujitsu TCS (pjsub)", "sge": "Grid Engine", "lsf": "LSF",
+              "flux": "Flux", "other": "another batch system"}
+
+def pack_scheduler(pack):
+  """The batch system of a pack's site (SCHEDULERS; "slurm" if it does not say, or says something unknown)"""
+  value = str(pack.get("scheduler") or "slurm").lower()
+  return value if value in SCHEDULERS else "slurm"
 
 def pack_name(pack):
   return str(pack.get("name") or os.path.basename(pack.get("_path", "")).removesuffix(".toml") or "a site pack")

@@ -4,6 +4,7 @@
 schema = 1
 version = "2026.11.23"
 name = "IT4I Karolina"
+scheduler = "slurm"
 match = ["karolina", "karolina-*", "karolina.it4i.cz", "*.karolina.it4i.cz"]
 docs = "https://docs.it4i.cz/en/docs/clusters/karolina/introduction"
 status = "https://status.it4i.cz/status/it4i"

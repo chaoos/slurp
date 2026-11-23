@@ -4,6 +4,7 @@
 schema = 1
 version = "2026.11.23"
 name = "Discoverer"
+scheduler = "slurm"
 match = ["discoverer*", "*.discoverer.bg"]
 docs = "https://docs.discoverer.bg/"
 parallel_fs = ["/valhalla", "/weka"]

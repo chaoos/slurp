@@ -4,6 +4,7 @@
 schema = 1
 version = "2026.11.23"
 name = "IZUM Vega"
+scheduler = "slurm"
 match = ["vega", "vega-*", "*.vega.izum.si", "vglogin*"]
 docs = "https://en-doc.vega.izum.si/"
 parallel_fs = ["/exa5"]
