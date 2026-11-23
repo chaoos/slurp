@@ -13,7 +13,10 @@ gets to the end: **Done: current pace** (at the rate of the last few `n/N` lines
 [job window](job-window.md) also estimates it at the average rate since the job started).
 The job list, the job window and the array window refresh by themselves every 60 seconds
 (`"refresh_seconds"` in the config); **⟳ 0:42** in the title bar counts down to the next refresh, and a
-click on it switches automatic refreshing off (**⟳ off**) and on again (kept for the next start).
+click on it switches automatic refreshing off (**⟳ off**) and on again (kept for the next start). When the job
+list's refresh is due but cannot start yet, it says why instead of 0:00: **⟳ connecting** (the tab is not connected
+yet, e.g. at the start with the list from the last time), **⟳ loading** (a load still runs) or **⟳ not loaded** (the
+first load has not ended; `r` loads it); the refresh starts as soon as it can.
 
 The list shows as soon as Slurm answers; the command, error file and progress of
 each job (files on the cluster) follow, with spinners in those cells for jobs

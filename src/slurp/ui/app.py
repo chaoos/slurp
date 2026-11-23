@@ -366,7 +366,8 @@ class Slurp(TransfersTab, App):
         screen.last_refresh = time.time()
       screen.auto_reload()
       left = every if settable else 0
-    text = f"⟳ {max(left, 0) // 60}:{max(left, 0) % 60:02d}" if on else "⟳ off"
+    waits = screen.refresh_waits() if on and left <= 0 and hasattr(screen, "refresh_waits") else None
+    text = "⟳ off" if not on else f"⟳ {waits}" if waits else f"⟳ {max(left, 0) // 60}:{max(left, 0) % 60:02d}"
     for timer in timers:
       timer.display = True
       if str(timer.label) != text:

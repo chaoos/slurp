@@ -6,6 +6,10 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Job list: the countdown of the automatic refresh no longer stays at
+  **⟳ 0:00** when the refresh is due but cannot start; it says why
+  (**⟳ connecting**, **⟳ loading**, **⟳ not loaded**) and counts down again
+  after the next load.
 - SSH connections, identity files: a file that is not on this machine, a
   directory, or the `.pub` half instead of the private key is marked red at
   once, with what is wrong below it. Add and Test say so first and become

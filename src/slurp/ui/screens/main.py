@@ -52,12 +52,23 @@ class MainScreen(SplitScreen):
     import time
     return self.__dict__.setdefault("_shown_at", time.time()) # (never loaded yet: from when it was shown)
 
-  def auto_reload(self):
+  def refresh_waits(self):
+    """Why the refresh that is due does not start (the countdown says it instead of 0:00): "loading" (a load runs),
+    "connecting" (the tab is not connected yet), "not loaded" (the first load has not ended); None: it can start"""
     cluster = self.app.cluster if self.app.clusters else None
-    if cluster is None or cluster.loader is not None or not cluster.loaded or (cluster.destination and not (
-       cluster.connection and cluster.connection.ready)):
-      return
-    self.app.reload_cluster(cluster)
+    if cluster is None:
+      return "no tab"
+    if cluster.loader is not None:
+      return "loading"
+    if cluster.destination and not (cluster.connection and cluster.connection.ready):
+      return "connecting"
+    if not cluster.loaded:
+      return "not loaded"
+    return None
+
+  def auto_reload(self):
+    if self.refresh_waits() is None:
+      self.app.reload_cluster(self.app.cluster)
 
   """The job table"""
   SHOW_NOTABS = True
