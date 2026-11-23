@@ -2030,6 +2030,7 @@ async def t_progress(app, pilot):
     for k, minutes in ((10, 40), (20, 30), (30, 20), (40, 10)):
       f.write(f"{(now - timedelta(minutes=minutes)).isoformat()} INFO iteration {k}/100\n")
   js = app.screen
+  js.query_one("#progress-file").scroll_visible(animate=False); await pilot.pause(0.3) # (the window may be scrolled elsewhere)
   await pilot.click("#progress-file")
   ok = await until(pilot, lambda: isinstance(app.screen, FilePickScreen) and app.screen.entries, 10)
   ds = app.screen
@@ -2074,6 +2075,7 @@ async def t_progress(app, pilot):
   check("job list: done on current pace", cur not in ("", "-"), cur)
   t = app.screen.query_one("#jobs"); t.focus(); t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter")
   await until(pilot, lambda: isinstance(app.screen, JobScreen) and "55/100" in line(), 10)
+  app.screen.query_one("#progress-stdout").scroll_visible(animate=False); await pilot.pause(0.3) # (the window may be scrolled elsewhere)
   await pilot.click("#progress-stdout")
   ok = await until(pilot, lambda: "slurm-9001.out" in line(), 10)
   check("Use stdout goes back to the output file", ok, line())
