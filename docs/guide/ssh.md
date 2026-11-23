@@ -75,8 +75,20 @@ the **Abort** button, which replaces **Reload** meanwhile) stops it.
 **Shell on the cluster** (in the menu, or `t`) opens a login shell on the cluster of the tab in a subtab. The **+** tab button adds another local or remote connection, in a form like the endpoints': its **Name** first (the
 tab's name; empty: the destination), then best an **SSH destination**, a Host of your
 `~/.ssh/config` (suggested as you type), or `user@host`; as a fallback the **Full SSH settings** (host, user,
-port, jump hosts, identity files, more `ssh` options), kept with the tab. Its buttons are **Test**, **Cancel** and
-**Add**, as the endpoints' forms. **Test** tries the
+port, jump hosts, identity files, more `ssh` options), kept with the tab. A jump host is offered the tab's identity
+files too (`ssh -J` alone would give them only to the cluster). Its buttons are **Test**, **Cancel** and
+**Add**, as the endpoints' forms.
+
+**From a site**, at the top of a new connection, lists the clusters slurp knows how to log in to, from its site
+packs: CSCS Alps (Daint, Santis, Clariden, Eiger) and JSC's JURECA, JUWELS (Cluster, Booster), JUSUF and JEDI. One
+fills in the form: its name, the full settings (the host; at CSCS the jump host `ela.cscs.ch` and the key
+`~/.ssh/cscs-key`), and the command before the login (at CSCS `cscs-key sign --headless`, only when a login without
+it fails: a signed key is valid for a day). You fill in your user (at CSCS the jump host takes it too). Below the
+choice the form says how the site logs in, whether what it needs is installed on this machine (`cscs-key`; if not,
+where to get it), and what to do once before the first login (make a key; at JSC, upload it in JuDoor with a
+`from=` clause). Nothing of it is used until **Add**, and all of it can be changed first. slurp never writes your
+`~/.ssh/config`. A site pack of your own can offer clusters too (`[login]` and `[[clusters]]`, see
+`src/slurp/sites/__init__.py`). **Test** tries the
 connection in a window with a terminal, as the tab's login goes: what needs no login (what ssh makes of it, the
 keys, the name, the port, the server), the command before the login if there is one, and the login itself, where
 you answer what it asks (a host key, a passphrase, a password, a one-time code). Then it says whether it works,

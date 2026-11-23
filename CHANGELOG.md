@@ -6,6 +6,14 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- A new SSH connection **from a site**: the form lists the clusters slurp knows
+  how to log in to (CSCS Alps: Daint, Santis, Clariden, Eiger; JSC: JURECA,
+  JUWELS Cluster and Booster, JUSUF, JEDI). One fills in the form (the name, the
+  host, at CSCS the jump host `ela.cscs.ch`, the key `~/.ssh/cscs-key` and
+  `cscs-key sign --headless` before the login when a login without it fails);
+  you fill in your user. The form says how the site logs in, whether what it
+  needs is installed here, and what to do once (make a key; at JSC upload it in
+  JuDoor). All of it stays to see and change before Add.
 - Site packs can describe how their clusters log in: `[login]` for all of the
   site's clusters, `[[clusters]]` for each (name, host, jump host, keys, ssh
   options, the command before the login, programs it needs, what to do once).

@@ -636,6 +636,11 @@ tabs with one name). The best way to reach it: an **SSH destination**, a Host of
 cluster's user, jump hosts and keys (suggested as you type; ssh, scp and your other tools use it too), or
 `user@host`; blank: this machine.
 
+**From a site** (a new tab): a cluster slurp knows how to log in to (CSCS Alps: Daint, Santis, Clariden, Eiger; JSC:
+JURECA, JUWELS, JUSUF, JEDI). It fills in the form: the name, the full settings (host, jump host, key), the command
+before the login; fill in your user. Below it: how the site logs in, what it needs on this machine (✔ found, ✖ not,
+and where to get it), what to do once. Everything stays to see and change before **Add**.
+
 The fallback, **Full SSH settings**: host, user, port, jump hosts (ProxyJump), identity files (only these are tried),
 and more ssh options, one `Key=Value` per line. They are kept with the tab.
 

@@ -643,6 +643,8 @@ class AddClusterScreen(ModalScreen):
   .cluster-row Label { width: 18; }
   .cluster-row Input { width: 1fr; }
   #cluster-hint { height: auto; color: $text-muted; margin: 0 0 1 18; }
+  #cluster-site { width: 1fr; }
+  #cluster-site-info { height: auto; margin: 1 0 0 18; padding: 0 1; border-left: wide $accent; }
   #cluster-full { height: auto; margin-bottom: 1; }
   .ssh-row { height: 1; margin-bottom: 1; }
   .ssh-row Label { width: 16; padding: 0 1 0 0; }
@@ -667,6 +669,14 @@ class AddClusterScreen(ModalScreen):
         yield Static(f"The SSH connection {self.cluster.name}" if self.cluster else "A new SSH connection", id="cluster-title", markup=False)
         yield Static("A cluster (or this machine) as a tab: its jobs, files, shells; and an endpoint of transfers.",
                      classes="cluster-note", markup=False)
+        sites = self.site_choices()
+        if sites:
+          with Horizontal(classes="cluster-row"):
+            yield Label("From a site")
+            yield Select([(f"{c['site']} · {c['title']}", c["id"]) for c in sites], prompt="(none: fill in yourself)",
+                         id="cluster-site", compact=True, tooltip="a cluster slurp knows how to log in to: fills in the fields "
+                         "below (see and change them before Add)")
+          yield Static(id="cluster-site-info")
         with Horizontal(classes="cluster-row"):
           yield Label("Name")
           yield Input(placeholder="the tab's name, shown everywhere (default: the destination)", id="cluster-name")
@@ -706,8 +716,22 @@ class AddClusterScreen(ModalScreen):
                      tooltip="the tab takes these settings (the next login uses them)" if self.cluster else
                      "add the tab (checked or not); it logs in")
 
+  site = None # (the site's cluster chosen in From a site: its entry of sites.site_clusters())
+
+  def site_choices(self):
+    """The clusters of the site packs (a new tab only: editing one keeps its own settings)"""
+    if self.cluster is not None:
+      return []
+    from ... import sites
+    try:
+      return sites.site_clusters()
+    except Exception: # (a pack that cannot be read must not keep the form from opening)
+      return []
+
   def on_mount(self):
     self.query_one("#cluster-name", Input).focus()
+    if self.query("#cluster-site-info"):
+      self.query_one("#cluster-site-info").display = False
     cluster = self.cluster
     if cluster is None:
       return
@@ -730,7 +754,69 @@ class AddClusterScreen(ModalScreen):
       self.query_one("#cluster-destination", Input).value = cluster.destination or ""
     self.show_config()
 
+  @on(Select.Changed, "#cluster-site")
+  def site_chosen(self, event):
+    """A site's cluster: its login fills in the form (the full settings, the command before the login), and what it
+    needs and what to do once is said; (none): the form as it was filled in"""
+    from ... import sites
+    entry = next((c for c in self.site_choices() if c["id"] == event.value), None)
+    self.site = entry
+    info = self.query_one("#cluster-site-info", Static)
+    info.display = entry is not None
+    if entry is None:
+      return
+    user = self.query_one("#ssh-user", Input).value.strip()
+    fill = sites.login_settings(entry, user)
+    self.query_one("#cluster-name", Input).value = fill["name"]
+    self.query_one("#cluster-destination", Input).value = ""
+    self.query_one("#cluster-full", Collapsible).collapsed = False
+    for key in ("host", "port", "jump"):
+      self.query_one(f"#ssh-{key}", Input).value = fill[key]
+    self.query_one("#ssh-identities", Input).value = ", ".join(fill["identities"])
+    self.query_one("#ssh-options", TextArea).load_text("\n".join(fill["options"]))
+    self.query_one("#ssh-pre-login", Input).value = fill["pre_login"]
+    self.query_one("#ssh-pre-login-fallback", Checkbox).value = fill["pre_login_fallback"]
+    field = self.query_one("#ssh-user", Input)
+    field.placeholder = entry.get("user_label") or "your user there"
+    info.update(self.site_text(entry))
+    if not user:
+      field.focus()
+
+  def site_text(self, entry):
+    """What the site's login is, what it needs here (found or not), what to do once; where it comes from"""
+    out = Text()
+    out.append(f"{entry['site']}", style="bold")
+    out.append(f" (site pack {entry['version'] or 'without version'}, {'built in' if entry['builtin'] else 'yours'}): ", style="dim")
+    how = [f"through the jump host {entry['jump'].replace('{user}@', '')}" if entry.get("jump") else "directly",
+           f"with {', '.join(entry.get('identities', []))}" if entry.get("identities") else ""]
+    out.append("logs in " + " ".join(h for h in how if h))
+    if entry.get("pre_login"):
+      out.append(f"; first {entry['pre_login']} here, in the login pane"
+                 + (" (when a login without it fails)" if entry.get("pre_login_fallback") else " (before every login)"))
+    out.append(". Fill in " + (entry.get("user_label") or "your user there") + " (User).\n")
+    for need in entry.get("needs", []):
+      found = shutil.which(need["command"])
+      out.append(f"✔ {need['command']}: {found}\n" if found else f"✖ {need['command']} is not installed here: ", style="green" if found else "red")
+      if not found:
+        out.append(need.get("install", "") + "\n")
+    if entry.get("setup"):
+      out.append(entry["setup"].strip() + "\n")
+    if not entry["builtin"]:
+      out.append("From your own pack: check what it fills in (the command runs on this machine).\n", style="yellow")
+    return out
+
   config_timer = None
+
+  @on(Input.Changed, "#ssh-user")
+  def site_user_changed(self, event):
+    """(a site's jump host that wants the user too: it follows the user filled in)"""
+    if self.site is None or "{user}@" not in (self.site.get("jump") or ""):
+      return
+    from ... import sites
+    jump = self.query_one("#ssh-jump", Input)
+    if jump.value in (sites.login_settings(self.site, u)["jump"] for u in ("", getattr(self, "site_user", ""))):
+      jump.value = sites.login_settings(self.site, event.value.strip())["jump"] # (not if you changed it yourself)
+    self.site_user = event.value.strip()
 
   @on(Input.Changed)
   def destination_changed(self, event):
