@@ -679,7 +679,7 @@ async def t_checks_ui(app, pilot):
   environment.replay_environment = slow_replay
   try:
     await pilot.click("#sc-check")
-    ok1 = await until(pilot, lambda: sc.ctx is not None and sc.ctx.replay is None and "checking the environment" in str(sc.query_one("#sc-findings").query_one(".fv-summary").render()), 10)
+    ok1 = await until(pilot, lambda: sc.ctx is not None and sc.ctx.replay is None and "checking its environment" in str(sc.query_one("#sc-findings").query_one(".fv-summary").render()), 10)
     check("Check shows the quick results at once, saying the environment check follows", ok1)
     await pilot.pause(0.4) # (the entries of the quick results drawn: what a person could click)
     first = sc.query("#sc-findings Collapsible").first(); first.collapsed = False; key = first.finding_key
