@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- The categories subtab is called **Categories**, capitalised as the
+  other tabs (also in its breadcrumbs).
 - New SSH connection from a site that logs in with a key only (CSCS, JSC,
   LUMI, Karolina, MeluXina, Vega, Discoverer, Deucalion, Snellius): the
   identity files have a yellow border while empty, as the user has; Add or

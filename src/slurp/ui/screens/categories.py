@@ -299,7 +299,7 @@ class CategoriesScreen(SplitScreen):
 
   def __init__(self, path=""):
     super().__init__()
-    self.crumbs = ["Jobs", "categories"]
+    self.crumbs = ["Jobs", "Categories"]
     self.path = path           # the category shown ("": all of them)
     self.known = {}            # job id -> [Job] (an array: its tasks), as Slurm reported them
     self.asked = set()         # job ids asked from Slurm (also those it no longer knows)
@@ -341,7 +341,7 @@ class CategoriesScreen(SplitScreen):
         yield ClickTable(id="cat-jobs", cursor_type="row", zebra_stripes=True)
 
   def on_mount(self):
-    self.sub_title = "categories"
+    self.sub_title = "Categories"
     table = self.query_one("#cat-jobs", ClickTable)
     for key, label in self.COLUMNS:
       table.add_column(label, key=key)
@@ -673,7 +673,7 @@ class CategoriesScreen(SplitScreen):
   @on(Markdown.LinkClicked, "#cat-notes")
   def note_link(self, event):
     event.stop()
-    open_link(self, event.href, ["Jobs", "categories"], self.note_bases())
+    open_link(self, event.href, ["Jobs", "Categories"], self.note_bases())
 
   @on(Button.Pressed, "#cat-notes-edit")
   def action_notes(self, event=None):

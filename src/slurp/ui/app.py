@@ -2759,7 +2759,7 @@ class Slurp(TransfersTab, App):
     if self.cluster.categories is None:
       self.notify("the categories are read with the job list: load it first (r)", severity="warning")
       return
-    self.open_view("categories", CategoriesScreen, key="categories", icon="categories")
+    self.open_view("Categories", CategoriesScreen, key="categories", icon="categories")
 
   def open_category(self, path):
     """The categories window at one category, in a subtab of its own (one per category: shown again if it is open)"""

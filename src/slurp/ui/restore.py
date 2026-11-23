@@ -103,7 +103,7 @@ def spec_title(spec):
     return os.path.basename(path.rstrip("/")) or path, "file"
   if kind == "categories":
     key = spec.get("key") or "categories"
-    return key, "categories"
+    return ("Categories" if key == "categories" else key), "categories" # (the key stays as it was saved)
   if kind == "rules":
     return "Rule catalogue", "rules"
   if kind == "guides":
