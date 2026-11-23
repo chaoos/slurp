@@ -1,0 +1,31 @@
+# NSF NCAR Derecho (HPE Cray EX): 2,488 CPU nodes (128 AMD Milan cores, 256 GB), 82 GPU nodes (4 NVIDIA
+# A100 40 GB, 64 Milan cores). Batch system: PBS (qsub, qstat), not Slurm. Logins: derecho.hpc.ucar.edu (6 login nodes).
+schema = 1
+version = "2026.11.23"
+name = "NCAR Derecho"
+scheduler = "pbs"
+match = ["derecho*", "*.derecho.hpc.ucar.edu", "derecho.hpc.ucar.edu"]
+docs = "https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/"
+status = "https://arc.ucar.edu/system_status"
+scratch_purge_days = 180 # (/glade/derecho/scratch: files not accessed in more than 180 days are deleted)
+parallel_fs = ["/glade"]
+login_node_limits = "Only short, non-memory-intensive processes: processes using excessive CPU time, more than a few GB of memory or excessive I/O (also several together) are terminated automatically"
+
+# How to log in (https://ncar-hpc-docs.readthedocs.io/en/latest/getting-started/accounts/duo/): ssh, your CIT password
+# at the token prompt, then approve the Duo push on your phone.
+[login]
+required = ["user"]
+user_label = "your NCAR username"
+setup = """Once, before the first login:
+1. Ask the NSF NCAR Research Computing help desk for Duo enrollment (and a CIT password if you have none); CISL sends
+   you a link to set up Duo; install the Duo Mobile app on your phone or tablet.
+Then each login: enter your CIT password where a token response is requested and approve the Duo push. Instead of a
+push: your CIT password and a passcode from the Duo app separated by a comma (password,passcode), or password,phone
+for a phone call.
+Never run sudo on NCAR systems (it sends a security alert). For transfers CISL recommends Globus: collections
+"NCAR GLADE" and "NCAR Campaign Storage"."""
+
+[[clusters]]
+name = "derecho"
+title = "Derecho (PBS)"
+host = "derecho.hpc.ucar.edu"

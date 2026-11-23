@@ -1,0 +1,52 @@
+# NHR@Paderborn PC2: Noctua 2 (Atos BullSequana XH2000; 990 nodes 2x AMD Milan 7763, 128 cores; 32 nodes 4 NVIDIA A100
+# 40 GB; FPGA nodes with Xilinx Alveo U280 or Intel Stratix 10) and its successor Otus (AMD EPYC Turin; NVIDIA H100
+# 94 GB and A40 nodes). Logins go through a load-balancing jump host: fe.noctua2.pc2.uni-paderborn.de to
+# n2login1..6.ab2021.pc2.uni-paderborn.de, fe.otus.pc2.uni-paderborn.de to login1..2.ln2025.pc2.uni-paderborn.de.
+# Export servers (CIFS/NFS, university network only): export.noctua2.pc2.uni-paderborn.de,
+# export.otus.pc2.uni-paderborn.de. Each cluster's login nodes mount the other's /scratch (/scratch-otus, /scratch-n2).
+schema = 1
+version = "2026.11.23"
+name = "NHR@Paderborn PC2 Noctua 2 and Otus"
+scheduler = "slurm"
+match = ["*.pc2.uni-paderborn.de", "noctua2*", "n2login*", "otus"]
+docs = "https://upb-pc2.atlassian.net/wiki/spaces/PC2DOK/overview"
+status = "https://upb-pc2.atlassian.net/wiki/spaces/PC2DOK/overview" # "Current Issues and Upcoming System Events"; also https://portal.pc2.uni-paderborn.de/
+parallel_fs = ["/scratch", "/scratch-n2", "/scratch-otus"] # $PC2PFS (Lustre on Noctua 2), not purged
+transfer_hosts = ["export.noctua2.pc2.uni-paderborn.de", "export.otus.pc2.uni-paderborn.de"]
+
+# How to log in (https://upb-pc2.atlassian.net/wiki/spaces/PC2DOK/pages/1903514/Access+and+Login,
+# https://upb-pc2.atlassian.net/wiki/spaces/PC2DOK/pages/1902225): ssh via the cluster's jump host to a login node,
+# from the Paderborn University network or its VPN; external users with an SSH key only.
+[login]
+required = ["user"]
+user_label = "your PC2 username (lowercase)"
+jump = "{user}@fe.noctua2.pc2.uni-paderborn.de"
+setup = """Once, before the first login:
+1. Be a member of an active PC2 compute-time project.
+2. Off campus you need the university network: external users connect the Paderborn University OpenVPN (>= 2.6)
+   with the group "HPC Gaeste - ID: 595" and a personal network certificate (see the PC2 VPN page);
+   Paderborn University members use the regular university VPN.
+3. Create an SSH key with a passphrase on your own machine (ssh-keygen -t ed25519 -C "pc2-cluster-access") and
+   upload only the PUBLIC key in the PC2 user portal: https://portal.pc2.uni-paderborn.de/settings#sshkey.
+   External users can log in only with a key; Paderborn University members may also use their password.
+4. Check the host keys at the first login: jump host fe.noctua2 ED25519
+   SHA256:Scg7CjcYz3YY9hSnOsrJrRp4ySkIvkbPTiw2Hb6MJ/k, login nodes n2login[1-6] ED25519
+   SHA256:4gTiXhOnWltfAIMl+XyO5W4sda0dJq+Srrv/DED4qiQ.
+Then each login: your key's passphrase, asked for the jump host and then the login node. /scratch is not mounted
+on the jump host: transfers go to a login node through it."""
+
+[[clusters]]
+name = "noctua2"
+title = "Noctua 2 (n2login1)"
+host = "n2login1.ab2021.pc2.uni-paderborn.de"
+
+[[clusters]]
+name = "noctua2-login2"
+title = "Noctua 2 (n2login2)"
+host = "n2login2.ab2021.pc2.uni-paderborn.de"
+
+[[clusters]]
+name = "otus"
+title = "Otus (login1)"
+host = "login1.ln2025.pc2.uni-paderborn.de"
+jump = "{user}@fe.otus.pc2.uni-paderborn.de"

@@ -1,0 +1,26 @@
+# NCI Gadi (Canberra, Australia): batch system PBS Pro (queues such as normal and copyq; copyq is the only one with
+# internet access). Logins: gadi.nci.org.au (gadi-login-01..10); data movers: gadi-dm.nci.org.au.
+schema = 1
+version = "2026.11.23"
+name = "NCI Gadi"
+scheduler = "pbs"
+match = ["gadi", "gadi-login-*", "gadi-dm*", "*.nci.org.au"]
+docs = "https://opus.nci.org.au/spaces/Help/pages/236880325/Gadi+User+Guide"
+status = "https://nci.org.au/our-systems/status"
+scratch_purge_days = 100 # (/scratch: files not accessed for 100 days are quarantined, then deleted after 14 more days)
+parallel_fs = ["/scratch", "/g/data"]
+transfer_hosts = ["gadi-dm.nci.org.au"]
+login_node_limits = "Processes over 30 minutes of CPU time or 4 GiB of memory on a login node are killed; put large transfers (about 500 GiB and more) in the copyq queue."
+
+# How to log in (https://opus.nci.org.au/spaces/Help/pages/12583143/How+to+login+to+Gadi): ssh to gadi.nci.org.au
+# with your NCI username and password.
+[login]
+required = ["user"]
+user_label = "your NCI username (e.g. abc123, see https://my.nci.org.au/)"
+setup = """Once, before the first login: you need an NCI account (registered through MyNCI) that is a member of an active compute project; otherwise the login is refused. Forgotten passwords are reset at https://my.nci.org.au/mancini/reset/password/.
+Each login: enter your NCI password at the prompt. NCI asks you not to set up passwordless ssh to Gadi; if you use SSH keys, protect them with a passphrase and use an ssh agent."""
+
+[[clusters]]
+name = "gadi"
+title = "Gadi (PBS)"
+host = "gadi.nci.org.au"

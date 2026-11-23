@@ -1,0 +1,45 @@
+# NHR@Göttingen / GWDG, Unified HPC System: Emmy (CPU; Phase 2 Cascade Lake, Phase 3 Sapphire Rapids, Phase 4 being
+# built), Grete (GPU; Phase 1 V100, Phase 2 A100, Phase 3 H100). Logins: glogin-p3.hpc.gwdg.de (Emmy Phase 3, also for
+# SCC users), glogin-p2.hpc.gwdg.de (Emmy Phase 2), glogin-gpu.hpc.gwdg.de (Grete, KISSKI); data transfer:
+# gwdg-storage.hpc.gwdg.de. Use the login node of the island whose compute nodes you use: other islands see other
+# Lustre filesystems.
+schema = 1
+version = "2026.11.23"
+name = "NHR@Göttingen Emmy and Grete"
+scheduler = "slurm"
+match = ["*.hpc.gwdg.de", "glogin-p2*", "glogin-p3*", "glogin-gpu*", "gwdg-storage*"]
+docs = "https://docs.hpc.gwdg.de/"
+status = "https://status.gwdg.de/"
+# Lustre RZG (Grete, Emmy Phase 3) and Lustre MDC (Emmy Phase 2); /scratch links to the island's own one
+parallel_fs = ["/mnt/lustre-grete", "/scratch-grete", "/mnt/lustre-mdc", "/scratch"]
+transfer_hosts = ["gwdg-storage.hpc.gwdg.de"]
+
+# How to log in (https://docs.hpc.gwdg.de/start_here/connecting/index.html): SSH key only (no passwords), the public
+# key uploaded to Academic Cloud; the username is the Project Portal one, uXXXXX.
+[login]
+required = ["user", "identities"] # (it logs in with a key only)
+user_label = "your Project Portal username (u12345; one per project)"
+setup = """Once, before the first login:
+1. On your own machine create an SSH key protected by a passphrase: ssh-keygen -t ed25519 (or ed25519-sk with a
+   FIDO2 security key, or a 4096-bit rsa key).
+2. Upload only the PUBLIC key (the .pub file) to Academic Cloud: Profile, SECURITY, SSH PUBLIC KEYS, ADD. All your
+   Project Portal usernames (u12345) inherit it; it can take a few minutes to reach the systems. Legacy NHR/HLRN
+   and SCC usernames no longer work: migrate to the Project Portal.
+3. Check the host key at the first login: ed25519 SHA256:PPK0aO2QZ/k4duUx18Pp5AOKG/gFEBHgw/bl8vg9oJk (rsa
+   SHA256:EJyZLROEobVuCm2hSeEhcAIEB80PbZ85U4u4XNnvM4k), the same for all glogin nodes and gwdg-storage.
+Then each login: your key's passphrase (or a touch of the security key). Password logins are not supported."""
+
+[[clusters]]
+name = "emmy-p3"
+title = "Emmy Phase 3 (CPU, Sapphire Rapids)"
+host = "glogin-p3.hpc.gwdg.de"
+
+[[clusters]]
+name = "emmy-p2"
+title = "Emmy Phase 2 (CPU, Cascade Lake)"
+host = "glogin-p2.hpc.gwdg.de"
+
+[[clusters]]
+name = "grete"
+title = "Grete (GPU)"
+host = "glogin-gpu.hpc.gwdg.de"

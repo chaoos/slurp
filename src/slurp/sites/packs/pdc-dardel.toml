@@ -1,0 +1,39 @@
+# PDC Dardel (KTH, Stockholm, Sweden; NAISS): HPE Cray EX with CPU nodes (thin/large/huge/giant), AMD GPU nodes
+# (partition gpu) and NVIDIA Grace Hopper nodes (partition gpugh). Each job must give a partition with -p.
+# Login: dardel.pdc.kth.se with an SSH key registered (with allowed IPs and an expiry date) in the PDC login portal,
+# or with Kerberos. Large transfers: dardel-ftn01.pdc.kth.se.
+schema = 1
+version = "2026.11.23"
+name = "PDC Dardel"
+scheduler = "slurm"
+match = ["dardel*", "*.pdc.kth.se"]
+docs = "https://support.pdc.kth.se/doc/"
+status = "https://support.pdc.kth.se/doc/external/system_status.html"
+scratch_purge_days = 30 # (/cfs/klemming/scratch: files not changed in 30 days are removed)
+parallel_fs = ["/cfs/klemming"]
+transfer_hosts = ["dardel-ftn01.pdc.kth.se"]
+
+# How to log in (https://support.pdc.kth.se/doc/login/ssh_login/): SSH key uploaded in the PDC login portal (via
+# SUPR), valid only from the IP ranges you register and until its expiry date.
+[login]
+required = ["user"]
+user_label = "your PDC username"
+host = "dardel.pdc.kth.se"
+setup = """Once, before the first login (your PDC account must be linked to your SUPR account, with a valid allocation):
+1. On your own machine create an SSH key pair with a passphrase (ed25519 recommended; rsa also supported).
+2. Open the PDC login portal https://loginportal.pdc.kth.se/, log in through SUPR (SUPR password or SWAMID;
+   PIs, staff and administrators also need a TOTP code), click 'Prove My Identity to PDC', then 'Add new key' and
+   upload the PUBLIC key (.pub). Register the IP address (or a /24-/32 range or a domain-based range) you connect
+   from and choose an expiry date. The key works only from those addresses and until it expires: come back to the
+   portal to renew it or to add addresses.
+3. At the first connection check the host key fingerprint (SHA256): ED25519
+   mFOhdtbmDt7lT8kAtx5KJvYzUrJzyg5dbytsMODF0EE, ECDSA qisSXP26ai1ZJuTywX+6eZia7W9RgqFhrnvRSx1fyLg,
+   RSA 7sysEJ5Gbbjjr3ITLxNZR8IUXfxTqmJ+Y3p0gDhpyCI.
+Without a SUPR account, Kerberos is the supported login instead: kinit -f <username>@NADA.KTH.SE on your machine,
+then ssh with -o GSSAPIAuthentication=yes.
+Each login: your key passphrase (or ssh-agent)."""
+
+[[clusters]]
+name = "dardel"
+title = "Dardel"
+host = "dardel.pdc.kth.se"

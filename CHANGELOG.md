@@ -6,6 +6,17 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+- Site packs for some 30 more sites, from each site's documentation:
+  HLRS Hunter and Vulcan (PBS), the NHR centres (GWDG Emmy and Grete, ZIB
+  Lise, KIT HoreKa, Paderborn Noctua 2 and Otus, TU Dresden, FAU Fritz,
+  Alex and Helma, RWTH CLAIX); IDRIS Jean Zay, CINES Adastra, TGCC Irene
+  (checks only: its login hosts are not public), CSC Roihu, PDC Dardel,
+  Sigma2 Betzy, Saga and Olivia, Isambard-AI and Isambard 3 (`clifton
+  auth`), EPCC Cirrus, Cambridge CSD3; TACC Vista and Lonestar6, PSC
+  Bridges-2, SDSC Expanse, Purdue Anvil, NCAR Derecho (PBS); ALCF Aurora and
+  Polaris (PBS), RIKEN Fugaku (Fujitsu TCS), ABCI 3.0 (PBS), TSUBAME4.0
+  (Grid Engine), Pawsey Setonix, NCI Gadi (PBS). Those without Slurm say
+  so in **From a site**.
 - Site packs say their site's batch system (`scheduler`: slurm, pbs, tcs,
   sge, lsf, flux, other). A cluster without Slurm says so in the search of
   **From a site** and in the form: slurp logs in there and has its files,

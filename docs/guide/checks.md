@@ -110,10 +110,9 @@ the tab's cluster.
 **Site rule packs** add what Slurm does not tell: scratch purge days, parallel
 filesystems, NUMA domains per node, the GPU architecture, site plugin options
 of `sbatch`, the software stacks (`stacks`, if not found), rules that do not apply, and site advice. A pack is a TOML file
-in `src/slurp/sites/packs/` (included: CSCS Alps; JSC's JURECA, JUWELS, JUSUF, JEDI and
-JUPITER; LUMI; CINECA Leonardo; BSC MareNostrum 5; IT4I Karolina; MeluXina; Vega;
-Discoverer; Deucalion; LRZ SuperMUC-NG; DKRZ Levante; MPCDF Raven and Viper; SURF
-Snellius; NERSC Perlmutter; OLCF Frontier; TACC Stampede3; NCSA Delta;
+in `src/slurp/sites/packs/` (included: some 50 sites in Europe, the US, Japan and
+Australia, among them CSCS Alps, JSC, LRZ, HLRS, the NHR centres, LUMI, Leonardo,
+MareNostrum 5, Jean Zay, NERSC, OLCF, ALCF, TACC, Fugaku and Setonix;
 `slurp --version` lists them with their versions) or in
 `~/.config/slurp/rules/`; it applies when one of its `match` patterns matches
 the tab, its SSH destination or the login node's host name. It can also name

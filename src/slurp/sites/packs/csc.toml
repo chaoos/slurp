@@ -1,0 +1,52 @@
+# CSC Roihu (Kajaani, Finland): Roihu-CPU (486 nodes, 2x 192-core AMD Turin per node, x86) and Roihu-GPU (132 nodes,
+# 4 NVIDIA GH200 per node, ARM), with separate login nodes roihu-cpu.csc.fi and roihu-gpu.csc.fi. Roihu replaced the
+# retired Puhti and Mahti in 2026. LUMI has its own pack. SSH needs a key registered in MyCSC plus a 24-hour SSH
+# certificate signed in MyCSC.
+schema = 1
+version = "2026.11.23"
+name = "CSC Roihu"
+scheduler = "slurm"
+match = ["roihu*", "roihu-*.csc.fi"]
+docs = "https://docs.csc.fi/"
+status = "https://research.csc.fi/service-breaks/"
+scratch_purge_days = 180 # (/scratch: files not accessed for 180 days are removed; 90 days for projects with 5 TiB or more of scratch quota)
+parallel_fs = ["/users", "/projappl", "/scratch", "/dataset"]
+login_node_limits = "Only light tasks on the login nodes (one core, minutes, under 1 GiB of memory); other programs are terminated without warning"
+
+# How to log in (https://docs.csc.fi/supercomputing/connecting/ and
+# https://docs.csc.fi/supercomputing/connecting/ssh-keys/): SSH key added in MyCSC plus a 24-hour SSH certificate,
+# obtained with CSC's certificate helper csc_cert.py (or downloaded from MyCSC).
+[login]
+required = ["user"]
+user_label = "your CSC username"
+pre_login = "csc_cert.py -u {user}"
+pre_login_fallback = true
+needs = [{ command = "csc_cert.py", install = "https://github.com/CSCfi/certificate-helper-tool/releases" }]
+setup = """Once, before the first login:
+1. On your own machine create an SSH key pair with a passphrase (Ed25519 recommended; RSA 4096+ also accepted),
+   e.g. ssh-keygen -t ed25519 (saved as ~/.ssh/id_ed25519).
+2. Log in to MyCSC (https://my.csc.fi), Profile > SSH PUBLIC KEYS > Add key, and upload the PUBLIC key
+   (~/.ssh/id_ed25519.pub). Keys in ~/.ssh/authorized_keys on Roihu and passwords do not work.
+3. Install CSC's certificate helper (csc_cert.py, Python 3.8+, from the GitHub releases) somewhere in your PATH.
+4. At the first connection check the host key fingerprint (SHA256): ED25519
+   YNdesHbXhxN0hKD4mWvYGQONebjRqY+CGXDqPiZyByQ, ECDSA h3YVzmNucpxTXcxag8D2TaC21jH8/6LGNNCCOgRDaTU,
+   RSA cXJ5h3Z9fgu0wVpC2kDIpjdsrFsJF/bfyWegQXsfQpU.
+Each login (at most once per 24 hours): csc_cert.py -u <user> shows a login URL; authenticate there, type the 6-digit
+code and your key passphrase in the terminal; the certificate is saved as ~/.ssh/id_ed25519-cert.pub and added to
+your ssh-agent. (Instead you can sign the key in MyCSC, "Sign and download SSH certificate", and save it as
+~/.ssh/id_ed25519-cert.pub.) For a key other than ~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub, add its .pub path."""
+
+[[clusters]]
+name = "roihu-cpu"
+title = "Roihu CPU"
+host = "roihu-cpu.csc.fi"
+
+[[clusters]]
+name = "roihu-gpu"
+title = "Roihu GPU"
+host = "roihu-gpu.csc.fi"
+
+[[advice]]
+pattern = "conda\\s+(activate|create)"
+text = "CSC has deprecated direct Conda installations on Roihu: Conda environments must be installed in a container, e.g. with the Tykky wrapper (see the CSC Conda best practices)."
+severity = "warning"

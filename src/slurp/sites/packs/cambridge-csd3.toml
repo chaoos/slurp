@@ -1,0 +1,44 @@
+# Cambridge CSD3 (University of Cambridge Research Computing Services, UK): CPU partitions cclake, icelake, sapphire
+# (and -himem variants), NVIDIA A100 GPU partition ampere (Wilkes3, --gres=gpu:N) and Intel PVC GPU nodes.
+# Logins: login-cpu.hpc.cam.ac.uk (all login nodes), login-icelake.hpc.cam.ac.uk (icelake, sapphire, ampere),
+# login-cascadelake.hpc.cam.ac.uk (cclake). Password or SSH key plus mandatory TOTP.
+schema = 1
+version = "2026.11.23"
+name = "Cambridge CSD3"
+scheduler = "slurm"
+match = ["csd3*", "*.hpc.cam.ac.uk"]
+docs = "https://docs.hpc.cam.ac.uk/hpc/index.html"
+parallel_fs = ["/rds"]
+login_node_limits = "Large or long-lasting processes on the login nodes are liable to be terminated by an automatic watchdog script"
+
+# How to log in (https://docs.hpc.cam.ac.uk/hpc/user-guide/connecting.html and
+# https://docs.hpc.cam.ac.uk/hpc/user-guide/mfa.html): password (UIS password for Cambridge users) or SSH key, plus a
+# TOTP code set up once on multi.hpc.cam.ac.uk.
+[login]
+required = ["user"]
+user_label = "your CSD3 username (CRSid for University of Cambridge users)"
+setup = """Once, before the first login:
+1. Internal users must have submitted the HPC Account Application form first (https://www.hpc.cam.ac.uk/rcs-application).
+2. Set up the SSH TOTP: in a terminal run ssh <username>@multi.hpc.cam.ac.uk (password - the UIS password for
+   Cambridge users - or SSH key), scan the QR code with an authenticator app (entry "CSD3: SSH Login"), confirm with
+   a code, and keep the emergency one-time passcodes safe.
+3. Optionally create an SSH key pair on your own machine, always with a passphrase.
+4. At the first connection check the host key fingerprint (SHA256; the same for all login*.hpc.cam.ac.uk and
+   multi.hpc.cam.ac.uk): ED25519 nFVSXK+VRGCaUupQEdhXzO6kp01m2fzzmbgPr0sc2so,
+   RSA 2rl+MXd9rsrDzFZwEItmhhiHTlLTIqN0d3TSGLTgjTI. Answer "yes" (not "y") only if it matches.
+Each login: password or key passphrase, then the TOTP code, in the terminal pane."""
+
+[[clusters]]
+name = "csd3"
+title = "CSD3 (all login nodes)"
+host = "login-cpu.hpc.cam.ac.uk"
+
+[[clusters]]
+name = "csd3-icelake"
+title = "CSD3 Ice Lake / Sapphire Rapids / Ampere GPU"
+host = "login-icelake.hpc.cam.ac.uk"
+
+[[clusters]]
+name = "csd3-cascadelake"
+title = "CSD3 Cascade Lake (cclake)"
+host = "login-cascadelake.hpc.cam.ac.uk"

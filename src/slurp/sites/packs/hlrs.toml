@@ -1,0 +1,46 @@
+# HLRS (Stuttgart, Gauss Centre for Supercomputing): Hunter (HPE Cray EX4000, APU nodes; the GPU cores must be
+# used), Vulcan (NEC cluster, CPU and GPU node types). Both run PBSPro, not Slurm. Logins: hunter.hww.hlrs.de
+# (round robin over hunter-login03..05), vulcan.hww.hlrs.de (cl3fr3, cl3fr4). No dedicated data movers: scp/rsync to
+# the login nodes, always started from your own machine.
+schema = 1
+version = "2026.11.23"
+name = "HLRS Hunter and Vulcan"
+scheduler = "pbs"
+match = ["*.hww.hlrs.de", "hunter-login*", "hunter6-login*", "cl3fr3*", "cl3fr4*"]
+docs = "https://kb.hlrs.de/platforms/index.php/Main_Page"
+status = "https://websrv.hlrs.de/cgi-bin/hwwweather"
+parallel_fs = ["/lustre/hpe/ws12", "/lustre/hpe/ws13"] # Hunter workspaces (Lustre); workspaces expire after 60 days (3 extensions)
+login_node_limits = "No interactive runs with high load on the login nodes; prefix heavy commands (compiling, large tar or copies) with nice -+19."
+
+# How to log in (https://kb.hlrs.de/platforms/index.php/Reactivating_Your_HLRS_User_Account,
+# https://kb.hlrs.de/platforms/index.php/Secure_Shell_ssh): SSH key registered by your project manager, from a
+# registered IP address, plus a TOTP code; passwords are disabled.
+[login]
+required = ["user", "identities"]
+user_label = "your HLRS login"
+setup = """Once, before the first login:
+1. On your own machine create a dedicated ed25519 key with a strong, unique passphrase, e.g.
+   ssh-keygen -t ed25519 -C "HLRS Compute Server" -f ~/.ssh/HLRS_cs_YYYYMMDD
+   (YYYYMMDD = today's date) and put the private key's path in the identity files field.
+2. Give only the PUBLIC key (HLRS_cs_YYYYMMDD.pub) and the static source IP address you connect from to your
+   project manager, who registers both in the HLRS project management portal. SSH access works only from
+   registered IP addresses; the key is activated on the systems the next day.
+3. Log in once to initial.hww.hlrs.de with that key (ed25519 host key SHA256:TxOjHXBKHBNqmYPAfB1ctO89//bPl3RTrbnSUlHwcsg)
+   and run generate_2fa_otp.sh; enter the secret into an authenticator app on a different device than the one
+   holding your private key. The TOTP can take up to 1 hour to become active; initial.hww.hlrs.de then refuses
+   further logins.
+4. Check the host key at the first login: Hunter ED25519 SHA256:dJnEmGknqP1RBiZoiKV5x6Kbg/L2z2jMYeHiyTaxYYI,
+   Vulcan ED25519 SHA256:sYzk22ebsj0nStj/gy4mf0APxZXDJWTHzUJKqQyv14c.
+Then each login: your key's passphrase and a TOTP code. The code stays valid for 1 hour per login node; since
+hunter.hww.hlrs.de and vulcan.hww.hlrs.de pick a login node at random, you may be asked again on another node.
+Outgoing ssh from the HLRS nodes is blocked, so start all transfers from your own machine."""
+
+[[clusters]]
+name = "hunter"
+title = "Hunter (PBS)"
+host = "hunter.hww.hlrs.de"
+
+[[clusters]]
+name = "vulcan"
+title = "Vulcan (PBS)"
+host = "vulcan.hww.hlrs.de"

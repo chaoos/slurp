@@ -86,11 +86,14 @@ go on (the command before the login may make the key, for example). **Browse…*
 **From a site**, at the top of a new connection: **Choose…** opens a window with the clusters slurp knows how to log
 in to, to search (every word you type must match the cluster, its site, its host or the pack: `juwels booster`,
 `cscs`, `lumi`; `↑` `↓` while typing, `Enter` takes it; below the list, how the highlighted one logs in), and
-**Clear** takes the choice back. They come from its site packs: CSCS Alps (Daint, Santis, Clariden, Eiger), JSC (JURECA, JUWELS, JUSUF, JEDI, JUPITER), LUMI, CINECA
-Leonardo (a 12-hour certificate from `step ssh login`), the other EuroHPC systems (MareNostrum 5, Karolina, MeluXina,
-Vega, Discoverer, Deucalion), LRZ SuperMUC-NG, DKRZ Levante, MPCDF Raven and Viper (through the gateway
-`gate1.mpcdf.mpg.de`), SURF Snellius, NERSC Perlmutter (a 24-hour key from `sshproxy`), OLCF Frontier, TACC
-Stampede3 and NCSA Delta (a password and a one-time code, asked in the login pane). One
+**Clear** takes the choice back. They come from its site packs, some 50 sites: CSCS Alps, JSC (JURECA, JUWELS, JUSUF, JEDI,
+JUPITER), LRZ, HLRS, the German NHR centres (Göttingen, ZIB, KIT, Paderborn, Dresden, Erlangen, Aachen), MPCDF, DKRZ,
+the EuroHPC systems (LUMI, Leonardo, MareNostrum 5, Karolina, MeluXina, Vega, Discoverer, Deucalion), Jean Zay,
+Adastra, CSC, Dardel, Sigma2, Snellius, Isambard, Cirrus, CSD3, NERSC Perlmutter, OLCF Frontier, ALCF Aurora and
+Polaris, TACC, NCSA Delta, SDSC Expanse, PSC Bridges-2, Purdue Anvil, NCAR Derecho, RIKEN Fugaku, ABCI, TSUBAME,
+Pawsey Setonix and NCI Gadi (`slurp --version` lists them all). A cluster without Slurm (PBS: Aurora, Derecho, Gadi,
+HLRS; Fugaku's own; Grid Engine: TSUBAME) says so: slurp logs in there and has files, shells and transfers, but no job
+list. One
 fills in the form: its name, the full settings (the host; at CSCS the jump host `ela.cscs.ch` and the key
 `~/.ssh/cscs-key`), and the command before the login (at CSCS `cscs-key sign --headless`, only when a login without
 it fails: a signed key is valid for a day). You fill in your user (at CSCS the jump host takes it too), and at a site

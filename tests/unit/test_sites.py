@@ -197,8 +197,11 @@ def test_the_batch_system(check, tmp_path, monkeypatch):
   (rules / "pbs.toml").write_text('name = "PBS site"\nscheduler = "pbs"\nmatch = ["pbsy*"]\n[[clusters]]\nname = "pbsy"\nhost = "pbsy.example"\n')
   (rules / "odd.toml").write_text('name = "Odd site"\nscheduler = "nonsense"\nmatch = ["oddy*"]\n[[clusters]]\nname = "oddy"\nhost = "oddy.example"\n')
   clusters = {c["id"]: c for c in sites.site_clusters()}
-  check("built in: Slurm (said in each pack)", all(c["scheduler"] == "slurm" for c in clusters.values() if c["builtin"])
-        and all(p.get("scheduler") for p in sites.load_packs() if p["_builtin"]))
+  check("built in: each pack says its batch system, one slurp knows", all(p.get("scheduler") in sites.SCHEDULERS
+        for p in sites.load_packs() if p["_builtin"]), [p["name"] for p in sites.load_packs() if p["_builtin"] and p.get("scheduler") not in sites.SCHEDULERS])
+  check("…the ones without Slurm: Fugaku (TCS), Aurora (PBS), TSUBAME (Grid Engine); Daint: Slurm",
+        clusters["riken-fugaku/fugaku"]["scheduler"] == "tcs" and clusters["alcf/aurora"]["scheduler"] == "pbs"
+        and clusters["tsubame4/tsubame4"]["scheduler"] == "sge" and clusters["cscs-alps/daint"]["scheduler"] == "slurm")
   pbs, odd = clusters["pbs/pbsy"], clusters["odd/oddy"]
   check("another one: kept; one slurp does not know: Slurm", pbs["scheduler"] == "pbs" and odd["scheduler"] == "slurm", (pbs, odd))
   check("…said in the list (Login), in what the form says, and found by a search", "no Slurm: PBS" in site_login_way(pbs)

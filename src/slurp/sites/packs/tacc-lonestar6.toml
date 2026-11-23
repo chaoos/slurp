@@ -1,0 +1,41 @@
+# TACC Lonestar6 (Austin): CPU nodes (128 AMD EPYC 7763 Milan cores), GPU nodes with 3 NVIDIA A100 40 GB (gpu-a100,
+# gpu-a100-dev, gpu-a100-small queues) or 2 NVIDIA H100 80 GB (96 Genoa cores, gpu-h100 queue), vm-small virtual nodes
+# (16 cores). Logins: ls6.tacc.utexas.edu (login1 to login3).
+schema = 1
+version = "2026.11.23"
+name = "TACC Lonestar6"
+scheduler = "slurm"
+match = ["ls6", "ls6-*", "lonestar6*", "*.ls6.tacc.utexas.edu", "ls6.tacc.utexas.edu"]
+docs = "https://docs.tacc.utexas.edu/hpc/lonestar6/"
+status = "https://tacc.utexas.edu/news/user-updates/"
+scratch_purge_days = 10 # ($SCRATCH: files whose access time is more than 10 days old are subject to purge)
+parallel_fs = ["/scratch", "/work"]
+gpus_implicit = true
+login_node_limits = "Limits are enforced on memory usage and number of processes; use the login nodes only for file management, compilation and data movement"
+
+# How to log in (https://docs.tacc.utexas.edu/hpc/lonestar6/): ssh, your TACC password, then the "TACC Token Code"
+# from your paired MFA device. Only possible once you are on a Lonestar6 allocation.
+[login]
+required = ["user"]
+user_label = "your TACC username"
+setup = """Once, before the first login:
+1. Pair an MFA device: log in to the TACC Accounts Portal, https://accounts.tacc.utexas.edu, select "Multi-Factor Auth",
+   then an authenticator app or SMS.
+2. Make sure you are added to a Lonestar6 allocation, otherwise you cannot log in.
+Then each login: enter your TACC password at "Password:", then the current code at "TACC Token Code:".
+Do not run ssh-keygen on Lonestar6 (it interferes with the batch system's own key pair)."""
+
+[[clusters]]
+name = "ls6"
+title = "Lonestar6"
+host = "ls6.tacc.utexas.edu"
+
+[[advice]]
+pattern = "#SBATCH\\s+(--gres|--gpus-per-task)\\b"
+text = "Lonestar6 does not support --gres or --gpus-per-task: Slurm rejects any script with them. GPU nodes are requested by queue (-p gpu-a100, gpu-a100-dev, gpu-a100-small or gpu-h100)."
+severity = "warning"
+
+[[advice]]
+pattern = "\\$\\{?(WORK|STOCKYARD)\\b"
+text = "On Lonestar6, $WORK (Stockyard, shared by every TACC system) is not intended for high-intensity file operations or jobs with very large files: run job I/O from $SCRATCH."
+severity = "info"

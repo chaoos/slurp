@@ -1,0 +1,32 @@
+# ALCF (Argonne Leadership Computing Facility, USA): Aurora (10,624 HPE Cray EX nodes, 2 Intel Xeon CPU Max and
+# 6 Intel Data Center GPU Max 1550 per node), Polaris (560 HPE Apollo nodes, 1 AMD EPYC Milan 7543P and 4 NVIDIA
+# A100 per node). Batch system: PBS Pro. Logins: aurora.alcf.anl.gov, polaris.alcf.anl.gov.
+schema = 1
+version = "2026.11.23"
+name = "ALCF"
+scheduler = "pbs"
+match = ["aurora", "aurora-uan-*", "polaris", "polaris-login-*", "*.alcf.anl.gov"]
+docs = "https://docs.alcf.anl.gov/"
+status = "https://status.alcf.anl.gov/"
+parallel_fs = ["/home", "/lus", "/flare", "/eagle", "/grand"]
+globus = "https://docs.alcf.anl.gov/data-management/data-transfer/using-globus/"
+
+# How to log in (https://docs.alcf.anl.gov/account-project-management/accounts-and-access/logging-in-with-tokens/):
+# multi-factor authentication with a one-time passcode from a MobilePASS+ (or physical) token at the password prompt.
+[login]
+required = ["user"]
+user_label = "your ALCF username"
+setup = """Once, before the first login:
+1. Obtain an ALCF token: the SafeNet MobilePASS+ app on your phone (or a physical hardware token), see https://docs.alcf.anl.gov/account-project-management/accounts-and-access/obtaining-a-token/.
+2. A physical token asks you to change its initial PIN at the first login (at least four characters, digits only).
+Each login: when ssh asks for a password, open MobilePASS+, tap the token name, enter your PIN in the app, and type the passcode the app shows as the password (not the PIN). With a physical token, type your PIN followed immediately by the passcode it shows."""
+
+[[clusters]]
+name = "aurora"
+title = "Aurora (PBS)"
+host = "aurora.alcf.anl.gov"
+
+[[clusters]]
+name = "polaris"
+title = "Polaris (PBS)"
+host = "polaris.alcf.anl.gov"
