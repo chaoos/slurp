@@ -60,9 +60,13 @@ def test_a_large_file_like_less(check, home):
       ok = await until(pilot, lambda: a.document.line_count > rows and not f.reading)
       check("past the end shown: the next part is read", ok and len(f.chunks) == 2, f.chunks)
       check("the line numbers stay the file's", number_at_cursor(f)[0] == number_at_cursor(f)[1], number_at_cursor(f))
-      for _ in range(6): # (on and on: the window stays bounded, the first parts go)
-        a.move_cursor((a.document.line_count - 1, 0)); a.scroll_end(animate=False)
-        await until(pilot, lambda: not f.reading); await pilot.pause(0.1)
+      for _ in range(6): # (on and on: the window stays bounded, the first parts go; each move waits for its part, read
+        # in the background: a move while a part is read, or before the read began, reads nothing more)
+        pos = f.file_pos
+        for _ in range(20 if pos < f.file_size else 0):
+          a.move_cursor((a.document.line_count - 1, 0)); a.scroll_end(animate=False)
+          if await until(pilot, lambda: f.file_pos > pos and not f.reading, 0.5):
+            break
       check("a bounded window: the parts before went", f.file_pos - f.start_pos <= files.WINDOW and f.start_pos > 0, (f.start_pos, f.file_pos))
       check("and the numbers still fit", number_at_cursor(f)[0] == number_at_cursor(f)[1] and f.first_line > 1, (number_at_cursor(f), f.first_line))
       # G: the end, the numbers counted (wc -l of what comes before)
@@ -95,7 +99,8 @@ def test_a_large_file_like_less(check, home):
       # / searches the whole file, not only what is shown
       await pilot.press("g"); await until(pilot, lambda: f.start_pos == 0 and not f.reading); await pilot.pause(0.2)
       await pilot.press("slash"); f.query_one("#search").value = "NEEDLE"; await pilot.press("enter")
-      ok = await until(pilot, lambda: number_at_cursor(f)[1] == 45678 and a.selected_text.lower() == "needle" and not f.reading, 15)
+      ok = await until(pilot, lambda: number_at_cursor(f)[1] == 45678 and a.selected_text.lower() == "needle" and not f.reading
+                       and f.first_line is not None, 15) # (the lines before it are counted in the background)
       check("/ a term far below what is shown: found in the file, shown and selected", ok, (number_at_cursor(f), a.selected_text))
       check("numbered", number_at_cursor(f)[0] == 45678, number_at_cursor(f))
       await pilot.press("G"); await until(pilot, lambda: f.file_pos == f.file_size and not f.reading); await pilot.pause(0.2)
