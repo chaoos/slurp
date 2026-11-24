@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Static
-from .. import icons
+from ...resources import icons
 
 
 from ..widgets import ConnectionStatus
@@ -32,8 +32,11 @@ class SplitScreen(Screen):
                    tooltip="a web link ends soon: when it takes no more logins, or its relay ends (click: the link)")
       yield Button("?", id="view-help", compact=True, tooltip="about this window: what it shows, what it can do, its keys (?)")
     with Horizontal(id="cluster-tabs"):
+      if self.app.transfers_tab_wanted(): # (the Transfers tab: there while transfers or endpoints exist)
+        yield Button(self.app.transfers_tab_label(), id="transfers-tab", classes="transfers-tab", compact=True,
+                     variant="primary" if self.app.in_transfers else "default", tooltip="the transfers of data between the tabs")
       for index, cluster in enumerate(self.app.clusters):
-        variant = "primary" if index == self.app.cluster_index else "default"
+        variant = "primary" if index == self.app.cluster_index and not self.app.in_transfers else "default"
         yield Button(self.app.tab_label(cluster), id=f"cluster-tab-{index}", classes="cluster-tab", variant=variant, compact=True)
         yield Button("✕", id=f"cluster-close-{index}", classes="cluster-close", compact=True, tooltip="close the tab")
       yield Button("+", id="cluster-add", tooltip="Add a local or SSH cluster", compact=True)
@@ -63,6 +66,14 @@ class SplitScreen(Screen):
     if event.button.id == "cluster-add":
       event.stop()
       self.app.push_screen(AddClusterScreen(), self.app.add_cluster)
+      return
+    if event.button.id == "transfers-tab":
+      event.stop()
+      self.app.show_transfers()
+      return
+    if event.button.id in ("view-transfers", "view-endpoints") or (event.button.id or "").startswith(("xfer-tab-", "xfer-close-")):
+      event.stop()
+      self.app.transfer_subtab_pressed(event.button.id)
       return
     if event.button.id and event.button.id.startswith("cluster-tab-"):
       event.stop()
@@ -107,7 +118,7 @@ class SplitScreen(Screen):
     if event.button.id and event.button.id.startswith(("view-tab-", "view-close-")):
       event.stop()
       vid = int(event.button.id.rsplit("-", 1)[1])
-      view = next((v for v in self.app.cluster.views if v.id == vid), None)
+      view = next((v for v in self.app.cluster.view.views if v.id == vid), None)
       if view is not None:
         (self.app.show_view if event.button.id.startswith("view-tab-") else self.app.request_close_view)(view)
       return

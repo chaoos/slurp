@@ -1,0 +1,44 @@
+# MPCDF (Max Planck Computing and Data Facility, Garching): Raven (2x 36-core Intel per node, GPU nodes with 4 NVIDIA
+# A100), Viper-CPU (AMD EPYC, 8 NUMA domains per node), Viper-GPU (2 AMD Instinct MI300A APUs per node).
+# Logins: raven01i-04i, viper01i-06i, viper11i-13i (.mpcdf.mpg.de); from outside MPG networks via gate1/gate2.mpcdf.mpg.de.
+# The legacy aliases raven, raven-i, viper are withdrawn in late 2026 (Bits & Bytes 221): specific login nodes here.
+schema = 1
+version = "2026.11.23"
+name = "MPCDF"
+scheduler = "slurm"
+match = ["mpcdf*", "raven[0-9][0-9]i*", "viper[0-9][0-9]i*", "*.mpcdf.mpg.de"]
+docs = "https://docs.mpcdf.mpg.de/"
+status = "https://status.mpcdf.mpg.de/"
+# /ptmp: files not accessed for more than 12 weeks are removed (may be reduced with prior notice)
+scratch_purge_days = 84
+# Raven: /u and /ptmp (links to /raven/u, /raven/ptmp) are GPFS. On Viper they link to /viper/u1|u2, /viper/ptmp1|ptmp2;
+# their type is not documented, so /viper is not listed.
+parallel_fs = ["/u", "/ptmp", "/raven"]
+login_node_limits = "per user on raven01i/02i, viper01i/02i and viper11i/12i: two physical cores, 10% of the memory, 768 tasks (raven03i/04i, viper03i-06i, viper13i: six cores, 20%, 1536 tasks); no parallel programs on login nodes"
+
+# How to log in (docs.mpcdf.mpg.de/doc/computing/gateways.html, docs.mpcdf.mpg.de/faq/connecting.html): via the gateway
+# gate1.mpcdf.mpg.de (outside MPG networks), password and OTP on the gateway and on the login node; no SSH keys.
+[login]
+required = ["user"]
+user_label = "your MPCDF username"
+jump = "{user}@gate1.mpcdf.mpg.de"
+setup = """Once, before the first login:
+1. Two-factor authentication is mandatory: log in to selfservice.mpcdf.mpg.de, Configure 2FA, enter your password and enrol a token (an OTP app is recommended), then validate it with a code.
+2. At the first login: compare the gateway's host key with the fingerprints on docs.mpcdf.mpg.de (Gateway machines): gate1 ED25519 SHA256:mkNYGVYvBOMAUSZ+KBOcEKRY1kFYy336cAH0MKelwLA.
+Each login: your MPCDF password and an OTP on the gateway, then again on the login node (SSH keys are not accepted anywhere). From within certain MPG networks you can log in directly: clear the jump host.
+The gateways reboot weekly (gate1 Tuesdays, gate2 Saturdays, 3:45 German time); gate2.mpcdf.mpg.de is the other gateway."""
+
+[[clusters]]
+name = "mpcdf-raven"
+title = "Raven"
+host = "raven01i.mpcdf.mpg.de"
+
+[[clusters]]
+name = "mpcdf-viper"
+title = "Viper-CPU"
+host = "viper01i.mpcdf.mpg.de"
+
+[[clusters]]
+name = "mpcdf-viper-gpu"
+title = "Viper-GPU"
+host = "viper11i.mpcdf.mpg.de"

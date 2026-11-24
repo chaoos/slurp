@@ -21,12 +21,17 @@ slurp runs as an installed package.
 ```
 src/slurp/            the package (installed with pip; `slurp` is slurp.cli:main)
   cli.py launch.py      the command line, how slurp starts itself again
-  config.py state.py    settings kept between runs; logging and the data of the tabs
-  cluster/              Slurm here or over SSH: the connection, jobs, their files, storage, categories
-  checks/               the checks of batch scripts: engine, rules, site rule packs (packs/*.toml), fixes, guides
+  config.py state.py    settings kept between runs; logging and the data of the tabs (ClusterState; the app's ViewState)
+  headless.py           the core without a frontend: tabs, job lists as data, transfers, changes pushed to subscribers
+  cluster/              Slurm here or over SSH: the connection, jobs, their files, storage, categories; workers.py:
+                        how work on threads reaches a frontend (Scheduler)
+  transfer/             transfers between tabs, endpoints (rclone, Globus) and their runs
+  checks/               the checks of batch scripts: engine, rules, fixes, guides
+  sites/                the site packs (packs/*.toml): what slurp knows about a site that Slurm does not tell
   links/                shells, drives and web views on your own machine, the session holder, sshfs;
                         windows/ and linux/: the slurp helper
-  ui/                   the Textual app, its widgets, terminals and logo; screens/: the windows
+  resources/            the logo, the icons and their font (every frontend, the session holder)
+  ui/                   the Textual app, its widgets and terminals; screens/: the windows
   scripts/              shell scripts slurp runs on the nodes of a job
 tests/                pytest: unit/ (no app), ui/ (Textual windows), e2e/ (slurp against lab/: a fake Slurm behind a local sshd)
 docs/                 this site (mkdocs.yml: its pages and settings) and its images
@@ -52,6 +57,18 @@ pre-commit run --all-files             # the lint (ruff) and file checks
     - One test: `python -m pytest tests/e2e/test_ui_arrays.py -k collapse`.
 - The tests use the installed slurp and stop if it is not this checkout's (another checkout or worktree: install that
   one, or `PYTHONPATH=src`). See `tests/conftest.py` and `tests/e2e/conftest.py`.
+
+## Without a frontend
+
+`cluster/`, `transfer/`, `links/` and `checks/` import no Textual, nor anything of `ui/`. Work on threads reaches a
+frontend through a `Scheduler` (`cluster/workers.py`): the app's is `ui/workers.py`, `ThreadScheduler` is the one of
+no frontend. `slurp/headless.py` is the core as data, for tests and a second frontend:
+
+```bash
+python -m slurp.headless --jobs user@cluster   # the job list as JSON (--cached: the one kept by the last load)
+```
+
+`tests/e2e/test_headless.py` runs it against the lab with Textual blocked.
 
 ## Continuous integration
 
@@ -101,7 +118,7 @@ The screenshots are slurp against the lab of the tests (a fake Slurm cluster wit
 
 The *prompt meter*: a shell prompt whose cursor became a load meter. It is drawn on the terminal grid (a pixel is one
 column wide and half a row high), so the TUI shows it exactly with block characters: `❯▂▄█` in the header (in the
-theme's colours), five rows of `▀▄█` in the help windows and on the lock screen of a view. `src/slurp/ui/logo.py` holds
+theme's colours), five rows of `▀▄█` in the help windows and on the lock screen of a view. `src/slurp/resources/logo.py` holds
 the pixel map and makes every other form from it: the favicon and the start screen of the web view, the icons of the
 slurp helper, and the files in `docs/images/` (`logo.svg`, `logo-plain.svg`, `logo-wordmark.svg`, `logo-256.png`,
 `logo.ico`; `python tools/make_logo_files.py` writes them again).

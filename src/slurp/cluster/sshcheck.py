@@ -22,6 +22,8 @@ DONE = "slurp-check: logged in"
 def main(argv=None):
   args = json.loads((argv or sys.argv[1:])[0])
   destination, settings, pre_login = args.get("destination") or "", sshsetup.clean(args.get("ssh")), args.get("pre_login") or ""
+  fallback = bool(args.get("pre_login_fallback")) and bool(pre_login)
+  env = dict(os.environ)
   out = Console(force_terminal=True, highlight=False, soft_wrap=True)
   out.print(Text("1. what needs no login", style="bold"))
   start = time.monotonic()
@@ -35,17 +37,29 @@ def main(argv=None):
     finish(out, result, shown)
     return 1
   dest, _host = found
+  if fallback: # (as slurp's login: first without the command, asking nothing; only if that fails the command)
+    out.print(Text("\n2. a login without the command before it (it asks nothing)", style="bold"))
+    plain = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ControlMaster=no", "-o", "ControlPath=none",
+                            *sshsetup.ssh_args(settings), dest, "true"], stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    if plain.returncode == 0:
+      out.print(Text("it works: the command is not run (its key or certificate is still valid)", style="green"))
+      pre_login = ""
+    else:
+      said = (plain.stderr or "").strip().splitlines()
+      out.print(Text("it did not work" + (f" ({said[-1]})" if said else "") + ": the command runs", style="yellow"))
   if pre_login:
-    out.print(Text(f"\n2. the command before the login: {pre_login}", style="bold"))
-    code = subprocess.run(["/bin/sh", "-c", pre_login]).returncode
-    out.print(Text(f"it ended with {code}" + (" (the login follows all the same)" if code else ""), style="yellow" if code else "dim"))
-  out.print(Text(f"\n{3 if pre_login else 2}. the login (as slurp's, here you answer what it asks)", style="bold"))
+    out.print(Text(f"\n{3 if fallback else 2}. the command before the login: {pre_login}", style="bold"))
+    code, env = run_before(pre_login)
+    changed = sorted(k for k in env if os.environ.get(k) != env[k])
+    out.print(Text(f"it ended with {code}" + (" (the login follows all the same)" if code else "")
+                   + (f"; it set {', '.join(changed)} for the login" if changed else ""), style="yellow" if code else "dim"))
+  out.print(Text(f"\n{2 + bool(pre_login) + fallback}. the login (as slurp's, here you answer what it asks)", style="bold"))
   with tempfile.NamedTemporaryFile(prefix="slurp-sshcheck-", suffix=".log", delete=False) as f:
     log_path = f.name
   try:
     argv = ["ssh", "-v", "-E", log_path, "-T", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ConnectTimeout=15",
             *sshsetup.ssh_args(settings), dest, f'echo "{DONE} as $(id -un) on $(hostname), home $HOME"']
-    code = subprocess.run(argv).returncode
+    code = subprocess.run(argv, env=env).returncode
     log = open(log_path, errors="replace").read()
   finally:
     try:
@@ -57,6 +71,26 @@ def main(argv=None):
   result.seconds = time.monotonic() - start
   finish(out, result, shown)
   return 0 if result.verdict != "error" else 1
+
+
+def run_before(command):
+  """Run the command before the login: (its exit code, the environment it leaves for the login: what it exported)"""
+  fd, path = tempfile.mkstemp(prefix="slurp-env-")
+  os.close(fd)
+  try:
+    code = subprocess.run(["/bin/sh", "-c", "trap 'env -0 > \"$SLURP_PRE_LOGIN_ENV\"' EXIT\n" + command],
+                          env=dict(os.environ, SLURP_PRE_LOGIN_ENV=path)).returncode
+    with open(path, "rb") as f:
+      data = f.read()
+  finally:
+    os.unlink(path)
+  env = dict(os.environ)
+  for item in data.split(b"\0"):
+    key, eq, value = item.partition(b"=")
+    key = key.decode(errors="replace")
+    if eq and key not in ("_", "SHLVL", "PWD", "OLDPWD", "SLURP_PRE_LOGIN_ENV"):
+      env[key] = os.fsdecode(value)
+  return code, env
 
 
 def finish(out, result, shown):

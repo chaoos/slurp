@@ -1,0 +1,41 @@
+# NHR@KIT HoreKa 2 / HAICORE 3.0 (Karlsruhe): Onyx CPU (AMD EPYC 9655, partitions cpu, dev-cpu), Blue large memory
+# (large), Teal (4 H100: gpu-h100, dev-gpu-h100; 8 H200: gpu-h200-8), Ruby (4 H200: gpu-h200), Jade (GB200 NVL4,
+# gpu-b200; from December 2026). Logins: hk2-x86.scc.kit.edu (round robin over hk2-x86-login1/2); the ARM logins
+# hk2-a64.scc.kit.edu are not available yet. No data movers: transfers go through the login nodes.
+# HoreKa (legacy, hk.scc.kit.edu): from December 2026 only for logins and access to its file systems (/hkfs), to
+# move data to HoreKa 2; decommissioned 2026-12-31.
+schema = 1
+version = "2026.11.23"
+name = "NHR@KIT HoreKa 2"
+scheduler = "slurm"
+match = ["hk2-x86*", "hk2-a64*", "horeka*", "hk-login*"]
+docs = "https://docs.nhr.kit.edu/"
+status = "https://docs.nhr.kit.edu/support/maintenance/"
+parallel_fs = ["/hfs2"] # HoreKa 2 Storage Scale (GPFS) home and work
+login_node_limits = "Only editing, Slurm commands, compiling small to medium codes and short pre/post-processing on a few cores; anything using cores for more than a few minutes, and interactive AI agents, are not allowed."
+
+# How to log in (https://docs.nhr.kit.edu/usage/login/, https://docs.nhr.kit.edu/usage/login/sshkeys/): TOTP code
+# then service password, both managed in FeLS; an SSH key registered in FeLS is unlocked for 1 hour after each such
+# 2-factor login. Only from German academic networks (or a VPN to your home institution).
+[login]
+required = ["user"]
+user_label = "your HoreKa 2 username (FeLS, Registry info; e.g. ka_ab1234)"
+setup = """Once, before the first login:
+1. Register for the service HoreKa 2 in FeLS (https://fels.scc.kit.edu) and set your service password there.
+2. Register a TOTP token in FeLS under Overview, My Tokens (KIT users: my.scc.kit.edu/token), on another device
+   than the one you log in from.
+3. Optional, an SSH key: create one with a strong passphrase (ssh-keygen -t ed25519, or ed25519-sk with a FIDO2
+   security key), add only the PUBLIC key in FeLS (Overview, My SSH Pubkeys, Add SSH Key) and bind it to HoreKa 2
+   as an interactive key (Set SSH Key). ~/.ssh/authorized_keys is ignored. Keys are valid for six months.
+4. Access works only from KIT, Baden-Württemberg universities, Helmholtz centres, NHR centres and many German
+   academic networks (some only via IPv6); elsewhere use a VPN to your institution, or send your IP addresses
+   (wieistmeineip.scc.kit.edu) to support.
+5. Check the host key at the first login: HoreKa 2 ED25519 SHA256:ly/kqxhDa8/Y8m21KQNItEZ2v8nNFIhfhm5czXfBqM4;
+   HoreKa legacy ED25519 SHA256:yEe5nJ5hZZ1YbgieWr+phqRZKYbrV7zRe8OR3X03cn0.
+Then each login: "Your OTP:" (a TOTP code), then "Password:" (the service password). An interactive SSH key then
+works without them for one hour; with an ed25519-sk security key no TOTP is needed at all."""
+
+[[clusters]]
+name = "horeka2"
+title = "HoreKa 2 (x86)"
+host = "hk2-x86.scc.kit.edu"

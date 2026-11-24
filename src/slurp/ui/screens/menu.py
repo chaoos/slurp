@@ -9,9 +9,9 @@ from textual.screen import ModalScreen
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
-from .. import icons
+from ...resources import icons
 
-# (action of the app, label, key shown, icon (ui/icons.py)); None: a line between groups
+# (action of the app, label, key shown, icon (resources/icons.py)); None: a line between groups
 ITEMS = [
   ("job_list", "Job list", "j", "jobs"),
   ("cluster_info", "Health", "C", "health"),
@@ -21,6 +21,8 @@ ITEMS = [
   ("cluster_shell", "Shell on the cluster", "t", "shell"),
   ("login_dir", "Open a directory…", "d", "folder"),
   ("cluster_drive", "Map a directory…", "F", "drive"),
+  ("transfer_data", "Transfer data…", "T", "transfer"),
+  ("endpoints", "Endpoints…", "", "connect"),
   ("interactive_job", "Interactive job", "i", "interactive"),
   ("new_script", "New job script", "n", "new_script"),
   None,
@@ -30,6 +32,7 @@ ITEMS = [
   ("guides", "Guides", "F1", "docs"),
   ("rule_catalogue", "Rule catalogue", "F2", "rules"),
   ("options", "Options", "F3", "options"),
+  ("check_updates", "Check for updates", "", "reload"),
   ("about", "About slurp", "", "about"),
   None,
   ("quit", "Quit", "q", "quit"),

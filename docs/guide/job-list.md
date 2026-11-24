@@ -13,13 +13,16 @@ gets to the end: **Done: current pace** (at the rate of the last few `n/N` lines
 [job window](job-window.md) also estimates it at the average rate since the job started).
 The job list, the job window and the array window refresh by themselves every 60 seconds
 (`"refresh_seconds"` in the config); **⟳ 0:42** in the title bar counts down to the next refresh, and a
-click on it switches automatic refreshing off (**⟳ off**) and on again (kept for the next start).
+click on it switches automatic refreshing off (**⟳ off**) and on again (kept for the next start). When the job
+list's refresh is due but cannot start yet, it says why instead of 0:00: **⟳ connecting** (the tab is not connected
+yet, e.g. at the start with the list from the last time), **⟳ loading** (a load still runs) or **⟳ not loaded** (the
+first load has not ended; `r` loads it); the refresh starts as soon as it can.
 
 The list shows as soon as Slurm answers; the command, error file and progress of
 each job (files on the cluster) follow, with spinners in those cells for jobs
 not seen before (the others keep their values meanwhile). The sizes of the error
 files of ended jobs are kept, and asked in one `stat` for many files; the progress
-of all running jobs is read by one command that sends back only the `n/N` and `M%` lines. An array with ten or more tasks in the list is
+of all running jobs is read by one command that sends back only the `n/N` and `M%` lines. An array with two or more tasks in the list is
 one row (`9600_[1-150] ▸ 150 tasks`) whose state is the mix of its tasks' states
 in Slurm's short codes, coloured: `30R 10PD 100CD 10F` (running, pending,
 completed, failed; CA cancelled, TO timeout, …); clicking ▸ (or Space) lists
@@ -76,11 +79,50 @@ category, with their numbers: `c` there (or on any job of the window) puts
 the job selected in a category.
 **New** (`n`), **Rename** (`e`: another path moves it with all it has, into an
 existing category they merge), **Delete** (`Del`: its jobs go to the category
-it is in), **Categorize…** (`c`) and **Take job out** (`x`) for the job
-selected, **In the job list** (`l`) and **Reload** (`r`). **Notes…** (`o`)
+it is in), **Categorize…** (`c`) and **Take job out** (`x`) for the marked
+jobs or else the one selected (`m` marks a job and moves on, `M` marks all of
+them or none, as in the job list), **In the job list** (`l`) and **Reload** (`r`). **Notes…** (`o`)
 annotates the category selected in Markdown (what it is for, how its runs
 differ, links); the window shows the notes rendered under its numbers, a
 rename takes them along.
+
+### Hidden categories
+
+**Hide jobs in this category in the job list** (`h`, under the numbers of the
+category selected) leaves the jobs of a category you are not interested in
+out of the job list, with those of the categories in it. The status line says
+how many it leaves out (*3 hidden jobs (in noise …)*), the tree marks the
+category *hidden*, and its details say so; a category in a hidden one says
+it is hidden with it. **Show jobs in this category in the job list** brings
+them back. `cat:noise` in the job list's filter shows them all the same. The
+hidden categories are kept with the categories on the cluster.
+
+### Rules: jobs into a category by their name
+
+**Rules…** (`u` in the categories window) puts jobs in a category by
+themselves, when the job list loads. A rule has a pattern of job names, a
+regular expression for the whole name (`ci-[0-9]+` takes `ci-1234`, not
+`ci-1234-b`; `ci-.*` takes all that start with `ci-`), and the category they go
+into (`CI`). Which jobs it takes:
+
+- **New jobs only**: those submitted from now on; the jobs of the job list now
+  are left as they are.
+- **Jobs in no category**: those of the job list now, and the new ones.
+- **All jobs**: also moved out of another category.
+
+The form shows, as you type, how many jobs of the job list the pattern matches
+and a few of their names. The rules window lists every rule with how many jobs
+of the job list it **matches now** (and how many of them are not in its
+category yet); the categories window names the rules of the category selected.
+**Apply now…** (`a`) applies the rule selected to all the jobs of the job list
+at once: the ones in no category, or also those in another one.
+
+A rule looks at each job once: a job you take out of its category by hand is
+not put back. Of several rules, the first that matches a job has it. A changed
+pattern, category or scope looks at the jobs again; `Space` turns a rule off
+and on. The rules are kept with the categories on the cluster; a rename of a
+category takes its rules along, a delete removes them. slurp says when a rule
+has put jobs in a category.
 
 The categories are kept on the cluster, in `~/.config/slurp/categories.json`
 in your home there, so slurp on your own machine and slurp on the login node

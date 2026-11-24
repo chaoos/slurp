@@ -1,0 +1,30 @@
+# RIKEN R-CCS Fugaku (Kobe, Japan): Fujitsu A64FX compute nodes, Fujitsu Technical Computing Suite (pjsub, pjstat).
+# Logins: login.fugaku.r-ccs.riken.jp (Intel login nodes; the Arm login node arm1 is reached from there);
+# cloud storage gateway (data transfer, HPCI shared storage): csgw.fugaku.r-ccs.riken.jp.
+schema = 1
+version = "2026.11.23"
+name = "RIKEN Fugaku"
+scheduler = "tcs"
+match = ["fugaku*", "*.fugaku.r-ccs.riken.jp"]
+docs = "https://www.r-ccs.riken.jp/en/fugaku/user-guide/"
+status = "https://www.r-ccs.riken.jp/en/fugaku/opp-status/"
+parallel_fs = ["/home", "/data", "/share", "/2ndfs"]
+transfer_hosts = ["csgw.fugaku.r-ccs.riken.jp"]
+login_node_limits = "At most 8 threads and 12 GB of memory per user on the login nodes; processes over these limits are terminated by the system."
+
+# How to log in (Seminar for New Users of Supercomputer Fugaku, 2025-11, "How to Log in to Fugaku"): SSH version 2
+# with public key authentication only; the public key is registered on the Fugaku website (client certificate needed).
+[login]
+required = ["user", "identities"]
+user_label = "your Fugaku local account name (as issued through FAAS)"
+setup = """Once, before the first login:
+1. Install the client certificate "<your account>.p12" (sent by e-mail after your account is issued, with its passphrase) in your web browser; it is needed for the Fugaku website (https://www.fugaku.r-ccs.riken.jp/en).
+2. Create an SSH key pair on your own machine. Accepted types: Ed25519 or ECDSA (NIST P-521); RSA only under the conditions of the announcement https://www.fugaku.r-ccs.riken.jp/en/operation/20230210_01. Use a strong passphrase (more than 15 characters).
+3. On the Fugaku website (User Portal), register the PUBLIC key (the .pub file). Never paste the private key: the account is suspended temporarily if a private key is pasted there.
+4. Put the private key path in the identities field.
+Each login: ssh to login.fugaku.r-ccs.riken.jp (the Intel login nodes) and enter your key passphrase. Do not put your private key on the login nodes; use SSH agent forwarding to reach outside systems."""
+
+[[clusters]]
+name = "fugaku"
+title = "Fugaku (TCS)"
+host = "login.fugaku.r-ccs.riken.jp"

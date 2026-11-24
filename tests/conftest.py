@@ -38,6 +38,36 @@ def isolated_xdg(request, tmp_path_factory, monkeypatch):
   base = tmp_path_factory.mktemp("xdg")
   for name in XDG:
     monkeypatch.setenv(name, str(base / name.lower()))
+  try: # (no test reads or writes the user's keyring: one in memory, empty for each test)
+    import keyring
+    previous = keyring.get_keyring()
+    keyring.set_keyring(MemoryKeyring())
+    request.addfinalizer(lambda: keyring.set_keyring(previous))
+  except ImportError:
+    pass
+
+
+try:
+  from keyring.backend import KeyringBackend
+
+  class MemoryKeyring(KeyringBackend):
+    """A keyring in memory, for the tests"""
+    priority = 1
+
+    def __init__(self):
+      super().__init__()
+      self.secrets = {}
+
+    def get_password(self, service, username):
+      return self.secrets.get((service, username))
+
+    def set_password(self, service, username, password):
+      self.secrets[(service, username)] = password
+
+    def delete_password(self, service, username):
+      self.secrets.pop((service, username), None)
+except ImportError:
+  MemoryKeyring = None
 
 
 class Checks:

@@ -6,7 +6,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
-from .. import icons
+from ...resources import icons
 
 from ...cluster.remote import cluster_work
 from ...cluster.details import run_script_on_nodes

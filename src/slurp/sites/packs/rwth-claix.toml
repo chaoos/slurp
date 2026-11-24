@@ -1,0 +1,56 @@
+# RWTH Aachen IT Center, CLAIX: CLAIX-2023 (logins login23-1/2/4, Xeon 8468; GPU development login23-g-1 with 4 H100;
+# FastX desktops login23-x-1/2) and CLAIX-2025 (logins login25-1/2/3, AMD EPYC 9654 Genoa; GPU development login25-g-1
+# with 4 H100; FastX login25-x-1; currently only for NHR and WestAI computing time projects). File transfer nodes
+# copy23-1/2 (no jobs, no modules). All hosts end in .hpc.itc.rwth-aachen.de.
+schema = 1
+version = "2026.11.23"
+name = "RWTH Aachen CLAIX"
+scheduler = "slurm"
+match = ["*.hpc.itc.rwth-aachen.de", "login23-*", "login25-*", "copy23-*", "claix*"]
+docs = "https://help.itc.rwth-aachen.de/en/service/rhr4fjjutttf/"
+status = "https://maintenance.itc.rwth-aachen.de/ticket/status/messages/463"
+parallel_fs = ["/hpcwork"] # $HPCWORK, the high-performance storage system (separate from $HOME and $WORK)
+transfer_hosts = ["copy23-1.hpc.itc.rwth-aachen.de", "copy23-2.hpc.itc.rwth-aachen.de"]
+login_node_limits = "Up to 4 CPU cores and 25% of the node's memory per user; processes using significant CPU for more than 20 minutes may be killed, GPU use is limited to 30 minutes per process; login nodes reboot every Monday at 6:00."
+
+# How to log in (https://help.itc.rwth-aachen.de/en/service/rhr4fjjutttf/article/fb61d6c86ae245b5b7bba8c0cb7db6eb/,
+# https://help.itc.rwth-aachen.de/en/service/rhr4fjjutttf/article/14e38a2d1975405d9fbf623a2237e552/): HPC password
+# then a second factor (MFA set up in the RegApp); with an SSH key registered in the RegApp, password and second
+# factor are needed only once per 10 hours per host. From the RWTH network, DFN networks or a VPN.
+[login]
+required = ["user"]
+user_label = "your HPC username"
+setup = """Once, before the first login:
+1. Set up multi-factor authentication in the RWTH RegApp (https://regapp.itc.rwth-aachen.de), e.g. a smartphone
+   token and a TAN list as backup.
+2. Network: the cluster is reachable from the RWTH network, DFN-connected networks and some partner universities.
+   Elsewhere, RWTH members use the RWTH VPN; external users register the service "HPC VPN" in the RegApp and
+   connect Cisco Secure Client to vpn.hpc.rwth-aachen.de (HPC VPN password, then the second factor).
+3. Optional but recommended, an SSH key: create one with a passphrase (ssh-keygen -t ed25519), add only the PUBLIC
+   key in the RegApp (Index, My SSH Pubkeys, Add SSH Key), then Set SSH Key, ADD, usage type "interactive".
+   ~/.ssh/authorized_keys is not used. Keys expire after 12 months and cannot be added again.
+4. Check the host key at the first login (ED25519): login23-1 SHA256:YIuc1gYlVbtRUbi6grM+PWEO4syDQj3Yc7nTHJJiKpc,
+   login25-1 SHA256:L4hMHmutY2OnBichov/7JndWz82oDCx6v5lEjQuXUYM, copy23-1
+   SHA256:6543oxUxbF85l9ik3wj6JrA2en6o2UMGiSKj1SQIrE4 (the other nodes: the Login Nodes pages of the IT Center Help).
+Then each login: HPC password and 2FA code; with a registered key, only your key's passphrase within 10 hours of
+the last password+2FA login on that host. Do not restrict the login to publickey: the password prompt is needed."""
+
+[[clusters]]
+name = "claix2023"
+title = "CLAIX-2023"
+host = "login23-1.hpc.itc.rwth-aachen.de"
+
+[[clusters]]
+name = "claix2023-gpu"
+title = "CLAIX-2023 GPU development (4 H100)"
+host = "login23-g-1.hpc.itc.rwth-aachen.de"
+
+[[clusters]]
+name = "claix2025"
+title = "CLAIX-2025 (NHR and WestAI projects)"
+host = "login25-1.hpc.itc.rwth-aachen.de"
+
+[[clusters]]
+name = "claix2025-gpu"
+title = "CLAIX-2025 GPU development (4 H100)"
+host = "login25-g-1.hpc.itc.rwth-aachen.de"

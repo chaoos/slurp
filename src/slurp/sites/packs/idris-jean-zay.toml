@@ -1,0 +1,48 @@
+# IDRIS Jean Zay (Orsay, France; GENCI/CNRS): CPU partition (720 nodes), GPU partitions with NVIDIA V100 (gpu_p13,
+# gpu_p2), A100 80 GB (gpu_p5) and H100 80 GB (gpu_p6). Logins: jean-zay.idris.fr (5 login nodes);
+# pre/post-processing: jean-zay-pp.idris.fr. SSH only from IP addresses registered with IDRIS.
+schema = 1
+version = "2026.11.23"
+name = "IDRIS Jean Zay"
+scheduler = "slurm"
+match = ["jean-zay*", "*.idris.fr"]
+docs = "http://www.idris.fr/docs/jean-zay/nouvel-utilisateur"
+status = "http://www.idris.fr/docs/statut-machines"
+scratch_purge_days = 30 # ($SCRATCH: files neither read nor modified for 30 days are deleted)
+parallel_fs = ["/lustre/fsn1"]
+transfer_partition = "archive"
+login_node_limits = "1 CPU per user and 30 minutes of CPU time per process on the login nodes"
+
+# How to log in (http://www.idris.fr/docs/jean-zay/gestion-compte/connexion-ssh and
+# http://www.idris.fr/docs/dari/gestion-des-acces-idris): ssh from a registered institutional IP, with the IDRIS
+# password or an SSH key.
+[login]
+required = ["user"]
+user_label = "your IDRIS login"
+host = "jean-zay.idris.fr"
+setup = """Once, before the first login:
+1. Have the IP address of the machine you connect from registered with IDRIS (account management form /
+   extranet, through your laboratory's security officer). Only institutional addresses are accepted, never a
+   home connection: from home or on travel use your institution's VPN (its IP must be registered too) or a jump
+   host of your laboratory whose IP is registered (set it as the jump host here).
+2. Optionally create an SSH key pair with a passphrase on your own machine and add the PUBLIC key to
+   ~/.ssh/authorized_keys on Jean Zay; otherwise you log in with your IDRIS password.
+3. At the first connection check the host key fingerprint (SHA256) against the IDRIS list:
+   jean-zay.idris.fr: ED25519 pIDgjbJzQdOvnKD+63mykz11aS0n7uvJiJjaqY7H6ms,
+   ECDSA 9iT4Gq/m+YpRWXITfJkCXhhVKJRIpXH1Fn3MkQFm5Ts, RSA WvwNGuGDjPJOno4ZV4gRovtPPxmZ0bzXsymjazaonmM;
+   jean-zay-pp.idris.fr: ED25519 5Buosoh5BNrt3Ovk0Iip889vhny+5WCBJOzXXmLaXok,
+   ECDSA MHHu1+VX+n0jdM3dM2po1KGnQxeyZHDJR6L/fkt4oY8, RSA Wn8Lonh4iKIM3J5u/GKIbQvGW1ut9QkwhN8nkcQ0308.
+   If it does not match, do not connect and tell IDRIS support.
+IDRIS is testing SSH certificates made with its idr_keygen tool; its procedure makes the private key on Jean Zay and
+copies it to your machine, which is not safe practice (a private key should never leave the machine it was made on):
+use a key of your own as above. Classic keys and passwords still work. Each login: your key passphrase (or ssh-agent) or your IDRIS password."""
+
+[[clusters]]
+name = "jean-zay"
+title = "Jean Zay"
+host = "jean-zay.idris.fr"
+
+[[clusters]]
+name = "jean-zay-pp"
+title = "Jean Zay pre/post-processing"
+host = "jean-zay-pp.idris.fr"

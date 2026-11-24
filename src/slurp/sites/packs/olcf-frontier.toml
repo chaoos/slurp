@@ -1,0 +1,41 @@
+# OLCF Frontier (Oak Ridge): HPE Cray EX, 1 AMD 64-core "Optimized 3rd Gen EPYC" + 4 AMD MI250X (8 GCDs, seen as
+# 8 GPUs, gfx90a) per node, 512 GB. Logins: frontier.olcf.ornl.gov (login01-17); data transfer nodes: dtn.ccs.ornl.gov.
+schema = 1
+version = "2026.11.23"
+name = "OLCF Frontier"
+scheduler = "slurm"
+match = ["frontier*", "*.frontier.olcf.ornl.gov", "frontier.olcf.ornl.gov", "login*.frontier"]
+docs = "https://docs.olcf.ornl.gov/systems/frontier_user_guide.html"
+status = "https://my.olcf.ornl.gov/center-status"
+scratch_purge_days = 90 # (Orion Lustre /lustre/orion member, project and world work areas: purged after 90 days)
+parallel_fs = ["/lustre/orion"]
+numa_domains = 4
+transfer_hosts = ["dtn.ccs.ornl.gov"]
+login_node_limits = "No numeric limit is documented, but compute-intensive, memory-intensive or disruptive processes on the login nodes may be killed without warning"
+
+# How to log in (https://docs.olcf.ornl.gov/connecting/index.html): ssh with keyboard-interactive, PASSCODE = your PIN
+# followed by the 6-digit tokencode of the OLCF RSA SecurID fob. (OLCF says SSH multiplexing is disabled there: slurp
+# opens its shells and file access over its own connection, if that is refused, each needs a PASSCODE of its own.)
+[login]
+required = ["user"]
+user_label = "your OLCF username"
+setup = """Once, before the first login:
+1. Your OLCF RSA SecurID fob arrives deactivated: return the notarized Notary Token Verification Form (or have your
+   identity verified by OLCF) to have it activated.
+2. ssh username@home.ccs.ornl.gov; at PASSCODE enter the 6-digit code on the fob, answer "Y" to set your PIN, choose a
+   4 to 8 digit PIN, enter it twice, wait for the code to change, then enter PIN + the new 6 digits.
+3. On the first connection, check the host key: frontier.olcf.ornl.gov ED25519 SHA256:ALuNAoAykEUIJzwsExhCaTqwrqhnd4fssvVB4xK87bs
+   (all keys: https://docs.olcf.ornl.gov/connecting/index.html, "OLCF System Hostnames").
+Then each login: at the PASSCODE prompt enter your PIN followed by the current 6 digits on the fob (e.g. 1234000987).
+Never reuse a code: if asked twice, wait for it to change (reuse can lock the account). ORNL staff with the RSA app
+enter its 8-digit code instead."""
+
+[[clusters]]
+name = "frontier"
+title = "Frontier"
+host = "frontier.olcf.ornl.gov"
+
+[[advice]]
+pattern = "conda\\s+create"
+text = "On Frontier, OLCF recommends creating conda environments in Project Home, /ccs/proj/<project_id>/<user_id> (NFS: not purged, shareable in the project), with a name that tells the system, instead of the default in $HOME; load miniforge3 first and do not run conda init."
+severity = "info"

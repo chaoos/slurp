@@ -1,0 +1,40 @@
+# TACC Stampede3 (Austin): SPR (Sapphire Rapids HBM, 112 cores), ICX (80 cores), SKX (48 cores) nodes, GPU nodes in the
+# h100 (4 NVIDIA H100) and pvc (4 Intel Max 1550) queues. Logins: stampede3.tacc.utexas.edu (login1, login2, ...).
+schema = 1
+version = "2026.11.23"
+name = "TACC Stampede3"
+scheduler = "slurm"
+match = ["stampede3*", "*.stampede3.tacc.utexas.edu", "stampede3.tacc.utexas.edu", "login*.stampede3"]
+docs = "https://docs.tacc.utexas.edu/hpc/stampede3/"
+status = "https://tacc.utexas.edu/news/user-updates/"
+scratch_purge_days = 10 # ($SCRATCH: files not accessed for 10 days are subject to purge)
+parallel_fs = ["/work"]
+gpus_implicit = true
+login_node_limits = "No numeric limit is documented: no jobs or intensive computation on the login nodes, memory per process is throttled, and an account may be suspended if it impacts other users"
+
+# How to log in (https://docs.tacc.utexas.edu/hpc/stampede3/#access): ssh, your TACC portal password, then the
+# "TACC Token Code" from your paired MFA app or SMS. Only possible with an allocation on Stampede3.
+[login]
+required = ["user"]
+user_label = "your TACC username"
+setup = """Once, before the first login:
+1. Pair an MFA device: log in to the TACC Accounts Portal, https://accounts.tacc.utexas.edu, select "Multi-Factor Auth",
+   then an authenticator app (scan the QR code, type the token shown) or SMS (not for international users).
+2. Make sure you have an allocation on Stampede3, otherwise your password is rejected.
+Then each login: enter your TACC password at "Password:", then the current 6-digit code at "TACC Token Code:".
+Do not run ssh-keygen on Stampede3 (it breaks the batch system's own key pair)."""
+
+[[clusters]]
+name = "stampede3"
+title = "Stampede3"
+host = "stampede3.tacc.utexas.edu"
+
+[[advice]]
+pattern = "#SBATCH\\s+(--gres|--gpus-per-task)\\b"
+text = "Stampede3 does not support --gres or --gpus-per-task: Slurm rejects any script with them. GPU nodes are requested by queue (-p h100 or -p pvc) and a whole node is yours."
+severity = "warning"
+
+[[advice]]
+pattern = "\\$\\{?(WORK|STOCKYARD)\\b"
+text = "On Stampede3, run job I/O from $SCRATCH, not $WORK: $WORK (Stockyard) is shared by every TACC system, so compute nodes should only use it to stage data in or out before or after a job."
+severity = "info"

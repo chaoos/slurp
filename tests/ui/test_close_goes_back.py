@@ -39,7 +39,7 @@ def test_closing_goes_back_to_the_one_shown_before(check, home):
       for name in ("a", "b", "c"):
         open_path(app, ["Local"], str(home / name))
         await until(pilot, lambda: isinstance(app.screen, DirScreen) and app.screen.path == str(home / name))
-        views[name] = app.cluster.views[-1]
+        views[name] = app.cluster.view.views[-1]
       shown = lambda: next((n for n, v in views.items() if app.current_mode == v.mode), app.current_mode)
 
       app.show_view(views["b"]); await pilot.pause(0.1)

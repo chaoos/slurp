@@ -17,7 +17,7 @@ from textual.widgets import DataTable, Static, TextArea
 
 
 from ..cluster.paths import word_at
-from . import icons
+from ..resources import icons
 
 # ---------------------------------------------------------------------------
 # widgets and screens

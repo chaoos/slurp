@@ -11,6 +11,8 @@ middle, a few lines about the cluster and the ways on.
 - **Its health**: healthy (green), degraded (yellow) or unhealthy (red), and why: nodes down, drained or in
   maintenance, a maintenance soon.
 - **The SSH session**, as the status at the bottom right shows it: who you are logged in as and the round trip.
+- **Transfers** from or to the tab that run, wait or are scheduled, how far they are (a click: the
+  [Transfers](transfers.md) tab).
 - **Jobs** opens the [job list](job-list.md) as a subtab (`j`); its label says how many of your jobs run and wait.
   Where there is no Slurm, *No Slurm available* stands there instead.
 - **Quota** (`Q`) and **Health** (`C`: health with the reasons, reservations, occupancy, partitions, node
@@ -20,7 +22,9 @@ middle, a few lines about the cluster and the ways on.
 Not connected, the overview shows **Connect** in its middle, with what happened to the connection (never connected,
 closed, lost and why); while logging in, the login is in the pane on the right. slurp does not log in by itself at the
 start: a cluster tab waits for Connect (a tab added with `+` logs in right away). Connected, **Disconnect** ends the
-session. Below it, for a tab of a cluster, **SSH settings…** shows how the tab logs in:
+session. While it connects or reconnects (the session does not answer yet), it is not shown as connected: no Jobs
+and no health, the state of the login with what ssh printed last (a host key that changed is said plainly: ask the
+site before you remove the old key), and **Abort** gives up the login (Connect tries again). Below it, for a tab of a cluster, **SSH settings…** shows how the tab logs in:
 its destination, or its full SSH settings (host, user, port, jump hosts, identity
 files, more options), the blocks of your `~/.ssh/config` that apply (with file and
 line) and what ssh makes of it all (`ssh -G`), with **Check** (as when adding a

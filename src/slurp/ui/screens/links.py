@@ -13,7 +13,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Markdown, RadioButton, RadioSet, Select, Static, Switch, TabbedContent, TabPane, TextArea
-from .. import icons
+from ...resources import icons
 
 from ...links import share
 from ...links import linux as linhelper
@@ -224,7 +224,7 @@ def extend_link(screen, link, done=None):
   screen.app.push_screen(ExtendScreen(link), chosen)
 
 class WebEndingScreen(ModalScreen):
-  """A web link ends in a few minutes: it takes no more logins then (Extend lifetime…), or its relay ends its tunnel
+  """A web link ends in a few minutes: it ends then, with its browsers (Extend lifetime…), or its relay ends its tunnel
   (pinggy's free hour: the web view gets a new address; nothing to extend)"""
   DEFAULT_CSS = """
   WebEndingScreen { align: center middle; }
@@ -245,8 +245,8 @@ class WebEndingScreen(ModalScreen):
     with Vertical(id="we-dialog"):
       if self.what == "expiry":
         yield Static(f"The web link {self.link.id} ends in {minutes} min", id="we-title", markup=False)
-        yield Static(f"\"{self.link.title}\" takes no more logins then. A browser that is open goes on; reloading the page "
-                     "or a new browser needs a login, which it will not take. Extend it to keep it usable.", id="we-text", markup=False)
+        yield Static(f"\"{self.link.title}\" ends then: a browser that is open loses slurp at once, a reload or a new browser "
+                     "gets nothing. Extend it to keep it usable.", id="we-text", markup=False)
       else:
         yield Static(f"The relay of the web link {self.link.id} ends its tunnel in {minutes} min", id="we-title", markup=False)
         yield Static(f"The free {self.link.relay_type} relay keeps a tunnel for an hour. slurp opens a new one at once, but "
@@ -1049,14 +1049,13 @@ class DriveScreen(ModalScreen):
       with_places(self, self.cluster, self.show_places)
 
   places = ()
-  setting = False # (the list is set by the program: no event of the user)
 
   def show_places(self, places):
     """The places of the tab (home, $SCRATCH, $PROJECT, …) in the list; the path shown picks its entry"""
     self.places = [(label, path) for label, path in places if path] or [("Home", self.home)]
-    self.setting = True
-    self.query_one("#drive-place", Select).set_options([*self.places, (OTHER_PLACE, OTHER_PLACE)])
-    self.call_after_refresh(self.match_place)
+    with self.prevent(Select.Changed): # (set by the program: no choice of the user, the path stays)
+      self.query_one("#drive-place", Select).set_options([*self.places, (OTHER_PLACE, OTHER_PLACE)])
+    self.match_place()
 
   def match_place(self):
     """The list shows the place of the path typed in, or Other"""
@@ -1065,14 +1064,11 @@ class DriveScreen(ModalScreen):
     select = self.query_one("#drive-place", Select)
     value = remote if remote in paths else OTHER_PLACE
     if select.value != value:
-      self.setting = True
-      select.value = value
-    self.call_after_refresh(lambda: setattr(self, "setting", False))
+      with self.prevent(Select.Changed): # (only what the user chooses changes the path; a flag cleared after the
+        select.value = value             # next refreshes dropped a choice made before them)
 
   @on(Select.Changed, "#drive-place")
   def place_chosen(self, event):
-    if self.setting:
-      return
     if event.value == OTHER_PLACE:
       self.query_one("#drive-remote", Input).focus()
     elif event.value != Select.BLANK:

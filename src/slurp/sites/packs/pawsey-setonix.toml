@@ -1,0 +1,41 @@
+# Pawsey Setonix (Perth, Australia): HPE Cray EX; CPU nodes (2 AMD EPYC Milan, 128 cores, 256 GB), GPU nodes
+# (1 AMD EPYC Trento, 64 cores, 4 AMD MI250X = 8 logical GPUs). Logins: setonix.pawsey.org.au (setonix-01..06);
+# workflow nodes: setonix-workflow.pawsey.org.au (setonix-07, -08); data movers: data-mover.pawsey.org.au.
+schema = 1
+version = "2026.11.23"
+name = "Pawsey Setonix"
+scheduler = "slurm"
+match = ["setonix*", "*.pawsey.org.au"]
+docs = "https://pawsey.atlassian.net/wiki/spaces/US/pages/51925434/Setonix+User+Guide"
+status = "https://status.pawsey.org.au/"
+scratch_purge_days = 21 # (/scratch: files not accessed, read or modified, for 21 days are deleted automatically)
+parallel_fs = ["/scratch"]
+transfer_partition = "copy"
+transfer_hosts = ["data-mover.pawsey.org.au"]
+login_node_limits = "No programs or builds taking more than a few minutes on the login nodes; do I/O-heavy work and large copies on data-mover.pawsey.org.au or in the copy partition."
+
+# How to log in (https://pawsey.atlassian.net/wiki/spaces/US/pages/51926034/How+to+log+into+Setonix): ssh with your
+# Pawsey username and password; Pawsey recommends an SSH key (Use of SSH Keys for Authentication, page 51925870).
+[login]
+required = ["user"]
+user_label = "your Pawsey username"
+identities = ["~/.ssh/pawsey_ed25519_key"]
+setup = """Once, before the first login (recommended; the Pawsey password works too):
+1. Create a key with a passphrase (not your Pawsey password): ssh-keygen -t ed25519 -f ~/.ssh/pawsey_ed25519_key
+2. Put the PUBLIC key on Setonix: ssh-copy-id -i ~/.ssh/pawsey_ed25519_key.pub <username>@setonix.pawsey.org.au (you log in once with your Pawsey password). /home is shared by all Pawsey systems, so this covers the data movers too.
+Each login: your key passphrase (or the agent), otherwise your Pawsey password."""
+
+[[clusters]]
+name = "setonix"
+title = "Setonix"
+host = "setonix.pawsey.org.au"
+
+[[clusters]]
+name = "setonix-workflow"
+title = "Setonix workflow nodes"
+host = "setonix-workflow.pawsey.org.au"
+
+[[advice]]
+pattern = "(-p|--partition)[= ]?\\s*gpu"
+text = "On Setonix, jobs in the GPU partitions need your project code with the -gpu suffix in --account (e.g. --account=project1234-gpu)."
+severity = "info"

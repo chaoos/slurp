@@ -577,7 +577,7 @@ async def lab_part(check, mgr, events, S, KNOWN):
   ok = ok and await client.read_until(r"REACH-42", 10)
   check("sshreach: the link's own command logs in at the fixed port", ok and "-J" not in cmd, (cmd, client.out[-300:]))
   client.send("exit\r"); await blocking(client.wait, 10)
-  mgr.shutdown(); await runner.cleanup()
+  await mgr.stopped(); await runner.cleanup()
 
 
 

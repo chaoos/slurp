@@ -24,8 +24,8 @@ from ...cluster.remote import (
 )
 from ...cluster.paths import is_binary, resolve_path
 from ...cluster.storage import drive_dirs
-from ...cluster.listing import can_read, can_write, listing, matches_name, mode_text, search, short_acl
-from .. import icons
+from ...cluster.listing import can_read, can_write, listing, local_listing, matches_name, mode_text, search, short_acl
+from ...resources import icons
 from ..widgets import clean, ClickTable, crumb_title, PathArea
 from .base import SplitScreen
 
@@ -241,7 +241,8 @@ DIR_COLUMNS = [("name", "Name"), ("size", "Size"), ("mtime", "Modified"), ("mode
 class FilePickScreen(ModalScreen[str | None]):
   """A window to choose a file of the cluster: a directory listing (Enter or a click: into a directory, or the file),
   the path to type, a filter, and for the file under the cursor its end (and what describe(path, tail) says of it);
-  dismissed with the path, or None"""
+  dismissed with the path, or None. local: a file of this machine (slurp's), not of the tab's cluster; preview=False:
+  nothing of the file is read (a private key: its content is never shown)"""
   DEFAULT_CSS = """
   FilePickScreen { align: center middle; }
   #fp-dialog { width: 120; max-width: 95%; height: 90%; border: thick $accent; background: $surface; padding: 1 2; }
@@ -249,6 +250,7 @@ class FilePickScreen(ModalScreen[str | None]):
   #fp-bar { height: auto; margin: 1 0 0 0; }
   #fp-up { margin-right: 1; }
   #fp-path { width: 1fr; }
+  #fp-reload { margin-left: 1; }
   #fp-filter { margin: 1 0 0 0; }
   #fp-list { height: 1fr; margin: 1 0 0 0; }
   #fp-status { height: auto; color: $text-muted; }
@@ -256,12 +258,14 @@ class FilePickScreen(ModalScreen[str | None]):
   #fp-buttons { height: auto; align-horizontal: right; margin-top: 1; }
   #fp-buttons Button { margin-left: 1; }
   """
-  BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("backspace", "up", "Up", show=False)]
+  BINDINGS = [Binding("escape", "cancel", "Cancel"), Binding("backspace", "up", "Up", show=False),
+              Binding("r", "reload", "Reload")]
   PREVIEW_BYTES = 4096
 
-  def __init__(self, title, start, describe=None, chosen=""):
+  def __init__(self, title, start, describe=None, chosen="", local=False, preview=True):
     super().__init__()
     self.title_text, self.path, self.describe, self.chosen = title, start or "/", describe, chosen
+    self.local, self.show_preview = local, preview
     self.entries = []
     self.previewed = None
 
@@ -271,6 +275,7 @@ class FilePickScreen(ModalScreen[str | None]):
       with Horizontal(id="fp-bar"):
         yield Button("↑ Up", id="fp-up", compact=True, tooltip="the directory above (Backspace)")
         yield Input(self.path, id="fp-path", tooltip="a directory or a file: Enter goes there (~: your home)")
+        yield Button(icons.label("reload", "Reload"), id="fp-reload", compact=True, tooltip="list the directory shown again (r)")
       yield Input(id="fp-filter", placeholder="filter the files: a part of the name, or a pattern: run_123*.log, step_??.out, *.[oe]*")
       yield ClickTable(id="fp-list", cursor_type="row", zebra_stripes=True)
       yield Static(id="fp-status")
@@ -286,16 +291,18 @@ class FilePickScreen(ModalScreen[str | None]):
     self.go(self.path)
     table.focus()
 
-  def go(self, path):
-    """List a directory (in the background); a file: its directory, the file under the cursor"""
+  def go(self, path, select=""):
+    """List a directory (in the background); a file: its directory, the file under the cursor; select: the entry to
+    put the cursor on (a file or a directory of it)"""
     self.query_one("#fp-status", Static).update(Text(f"listing {path} …", style="dim"))
+    isdir, isfile, lister = (os.path.isdir, os.path.isfile, local_listing) if self.local else (fs_isdir, fs_isfile, listing)
     def work():
       try:
-        if not fs_isdir(path):
-          if fs_isfile(path):
-            return os.path.dirname(path) or "/", listing(os.path.dirname(path) or "/", DIR_LIMIT)[1], os.path.basename(path)
+        if not isdir(path):
+          if isfile(path):
+            return os.path.dirname(path) or "/", lister(os.path.dirname(path) or "/", DIR_LIMIT)[1], os.path.basename(path)
           raise OSError(f"{path}: no such directory")
-        return path, listing(path, DIR_LIMIT)[1], ""
+        return path, lister(path, DIR_LIMIT)[1], select
       except OSError as e:
         return None, None, str(e)
     def listed(result):
@@ -360,6 +367,9 @@ class FilePickScreen(ModalScreen[str | None]):
       box.update(Text("a directory: Enter goes into it" if entry else "", style="dim"))
       return
     path = os.path.join(self.path, entry["name"])
+    if not self.show_preview:
+      box.update(Text("(its content is not shown)", style="dim"))
+      return
     if path == self.previewed:
       return
     self.previewed = path
@@ -414,7 +424,8 @@ class FilePickScreen(ModalScreen[str | None]):
   def path_submitted(self, event):
     text = event.value.strip()
     if text:
-      self.go(expand_path(text, (home_of(self.app.cluster) if self.app.clusters else os.path.expanduser("~")) or "/"))
+      home = os.path.expanduser("~") if self.local or not self.app.clusters else home_of(self.app.cluster)
+      self.go(expand_path(text, home or "/"))
     self.query_one("#fp-list", ClickTable).focus()
 
   @on(Button.Pressed, "#fp-up")
@@ -425,6 +436,16 @@ class FilePickScreen(ModalScreen[str | None]):
       return # (Backspace while typing)
     if self.path != "/":
       self.go(os.path.dirname(self.path.rstrip("/")) or "/")
+
+  @on(Button.Pressed, "#fp-reload")
+  def action_reload(self, event=None):
+    """The directory shown, listed again (new files, ones gone); the cursor stays on its entry (a file or a directory)
+    if it is still there"""
+    if event is not None:
+      event.stop()
+    entry = self.current()
+    self.previewed = None # (the file under the cursor: read again too, it may have grown)
+    self.go(self.path, select=entry["name"] if entry else "") # (the directory shown, not the one highlighted)
 
   @on(Button.Pressed, "#fp-ok")
   def ok(self, event):
@@ -450,6 +471,10 @@ def access_text(entry):
 DIR_LIMIT = 20000 # entries listed at most
 SEARCH_LIMIT = 5000 # matches of a search in the subdirectories at most
 
+def shell_in(path):
+  """The command of a shell that starts in a directory: there, then the user's login shell (its $SHELL)"""
+  return ["sh", "-c", 'cd -- "$1" || exit 1; exec "${SHELL:-/bin/sh}" -l', "sh", path]
+
 class DirScreen(SplitScreen):
   """Directory browser: click (or Enter) a subdirectory to enter it, a file to open it"""
   SHOW_BACK = True
@@ -462,11 +487,13 @@ class DirScreen(SplitScreen):
     Binding("f", "follow", "Follow"),
     Binding("r", "reload", "Reload"),
     Binding("full_stop", "hidden", "Hidden files"),
+    Binding("s", "shell_here", "Shell here"),
   ]
 
-  def __init__(self, crumbs, path, bases=(), env=None):
+  def __init__(self, crumbs, path, bases=(), env=None, search=""):
     super().__init__()
     self.path = os.path.normpath(path)
+    self.initial_search = search # (shown with its search open on these names: a part of them, or a pattern, *.log)
     self.base_crumbs = list(crumbs)
     self.crumbs = [*crumbs, self.path.rstrip("/") + "/"]
     self.bases, self.env = list(bases), env # passed on to the files opened from here (e.g. the job's WorkDir)
@@ -485,6 +512,7 @@ class DirScreen(SplitScreen):
     with Horizontal(id="dbar"):
       yield Input(self.path, id="dpath", tooltip="The directory: edit and Enter to go there (~ is your home)")
       yield Horizontal(id="dplaces")
+      yield Button(icons.label("shell", "Shell here"), id="dshell", compact=True, tooltip="a shell in this directory, in a subtab (s)")
     yield Static(id="dstatus")
     yield ClickTable(id="dir", cursor_type="row", zebra_stripes=True)
     with Horizontal(id="dsearch"):
@@ -498,6 +526,9 @@ class DirScreen(SplitScreen):
     for key, label in DIR_COLUMNS:
       table.add_column(label, key=key)
     self.timer = self.set_interval(2.0, self.action_reload, pause=True)
+    if self.initial_search:
+      self.query_one("#dsearch").add_class("visible")
+      self.query_one("#dfilter", Input).value = self.initial_search
     self.query_one("#dstatus", Static).update("listing …")
     self.action_reload()
     table.focus()
@@ -511,6 +542,18 @@ class DirScreen(SplitScreen):
     bar = self.query_one("#dplaces", Horizontal)
     bar.remove_children()
     bar.mount_all(Button(label, id=f"dplace-{i}", compact=True, tooltip=path) for i, (label, path) in enumerate(places))
+
+  @on(Button.Pressed, "#dshell")
+  def shell_pressed(self, event):
+    event.stop()
+    self.action_shell_here()
+
+  def action_shell_here(self):
+    """A shell in this directory, in a subtab: the login shell of the tab's cluster (or this machine's), started there"""
+    cluster = self.app.cluster
+    name = os.path.basename(self.path.rstrip("/")) or self.path
+    where = (cluster.name if cluster is not None and cluster.destination else "this machine")
+    self.app.open_shell(shell_in(self.path), f"shell in {name} on {where}", focus=True)
 
   @on(Button.Pressed, "#dplaces Button")
   def place_pressed(self, event):

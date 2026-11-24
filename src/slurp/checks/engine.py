@@ -13,8 +13,10 @@ import math
 import os
 import re
 import shlex
+import string
 import threading
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 
 ERROR, WARNING, INFO = "error", "warning", "info"
@@ -60,8 +62,16 @@ class Rule:
 
   @property
   def anchor(self):
-    from textual._slug import slug
     return slug(self.heading)
+
+# The anchor of a heading as Textual's Markdown viewer makes it (goto_anchor): a copy of Textual's slug function (Textual 8,
+# MIT; private there), so the checks import no Textual. tests/unit/test_slug.py compares the two.
+_SLUG_STRIP = re.compile("[" + string.punctuation.replace("-", "").replace("_", "") + r"\U000024C2-\U0001F251\U00002702-\U000027B0"
+                         r"\U0001F1E0-\U0001F1FF\U0001F300-\U0001F5FF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF\U0001F900-\U0001F9FF\u200D\u2640-\u2642]+")
+
+def slug(text):
+  """GitHub-flavoured Markdown's slug of a heading, as Textual makes it"""
+  return urllib.parse.quote(re.sub(r"\s", "-", _SLUG_STRIP.sub("", text.strip().lower())))
 
 RULES = {}
 
@@ -204,14 +214,13 @@ class Script:
 
   @staticmethod
   def depth_after(text, depth):
-    words = re.findall(r"(?:^|[;\s(])(for|while|until|done)(?=[\s;]|$)", text)
-    for w in words:
+    for w in loop_words(text):
       depth += -1 if w == "done" else 1
     return max(depth, 0)
 
   def add_command(self, line, text, depth):
     # a loop header on the same line ("for f in *; do srun ...; done") counts as inside the loop
-    inline_loop = re.match(r"\s*(for|while|until)\b.*\bdo\b(.*)", text)
+    inline_loop = re.search(r"(?:^|[;&|({]|\b(?:then|else|do)\b|!)\s*(for|while|until)\b.*\bdo\b(.*)", code_only(text))
     self.commands.append(Command(line, text, depth + (1 if inline_loop and inline_loop.group(2).strip() else 0)))
 
   def add_directive(self, line, stripped, ignored):
@@ -271,6 +280,17 @@ class Script:
       for m in re.finditer(r"(?:^|[\s;&|(`])(srun|mpirun|mpiexec|mpiexec\.hydra|aprun)(?=\s|$)", t):
         yield line, t[m.start(1):], m.group(1)
         break
+
+def code_only(text):
+  """The command without its comment, its quoted strings blanked ("…" and '…' as ""), to look for shell words"""
+  return re.sub(r"\"(?:[^\"\\]|\\.)*\"|'[^']*'", '""', strip_comment(text))
+
+# a loop's words where a command starts (not in a comment or a string, not an argument: echo done, "wait for it")
+LOOP_WORD = re.compile(r"(?:^|[;&|({]|\b(?:do|then|else|elif)\b|!)\s*(for|while|until|done)(?=[\s;)]|$)")
+
+def loop_words(text):
+  """for, while, until and done of a command line, in order"""
+  return LOOP_WORD.findall(code_only(text))
 
 def strip_comment(text):
   """The command without a trailing # comment (not inside quotes, not ${#...} or $#)"""
@@ -456,6 +476,7 @@ class Facts:
   user: str = ""
   site: dict = field(default_factory=dict)           # the rule pack
   stacks: set = field(default_factory=set)           # the software stacks there: "modules", "uenv" (empty: unknown)
+  core: dict = field(default_factory=dict)           # core files: "soft", "hard" (ulimit -c of a login shell), "pattern" (kernel)
   time: float = 0
 
   def partition(self, name=None):
@@ -507,7 +528,8 @@ def gather_facts(force=False):
           ["sh", "-c", "grep -nE '^[^#]*(module +(load|add|swap)|^ *ml +[A-Za-z]|conda +activate|source +activate|uenv +start)' "
                        "\"$HOME/.bashrc\" \"$HOME/.bash_profile\" 2>/dev/null | head -10"],
           ["sacctmgr", "-nP", "show", "user", user, "format=defaultaccount"],
-          ["sh", "-c", "command -v uenv"]]
+          ["sh", "-c", "command -v uenv"],
+          ["bash", "-lc", CORE_FACTS]]
   res = run_many(cmds, timeout=60)
   f = Facts(time=time.time(), user=user)
   f.partitions = parse_sinfo(res[0].stdout)
@@ -530,12 +552,23 @@ def gather_facts(force=False):
   for line in res[6].stdout.splitlines():
     f.bashrc.append(line.strip())
   f.default_account = res[7].stdout.strip().splitlines()[0].strip() if res[7].stdout.strip() else ""
-  from . import rulepacks
-  f.site = rulepacks.pack_for(key, getattr(conn(), "destination", "") or "", f)
+  from .. import sites
+  f.site = sites.pack_for(key, getattr(conn(), "destination", "") or "", f)
   f.stacks = detect_stacks(f, bool(res[8].stdout.strip()))
+  f.core = parse_core_facts(res[9].stdout if len(res) > 9 else "")
   with _facts_lock:
     _facts[key] = f
   return f
+
+# Core files: the limit of a login shell (Slurm passes the limits of the shell sbatch runs in on to the job:
+# PropagateResourceLimits, ALL by default) and where the kernel writes them (a name: in the working directory of the
+# program; /path: there; |program: handed to a program, systemd-coredump, apport, …; of this node: compute nodes alike)
+CORE_FACTS = 'echo "slurp-core-soft=$(ulimit -Sc)"; echo "slurp-core-hard=$(ulimit -Hc)"; ' \
+             'echo "slurp-core-pattern=$(cat /proc/sys/kernel/core_pattern 2>/dev/null)"'
+
+def parse_core_facts(text):
+  """{"soft", "hard", "pattern"} of CORE_FACTS' output (a login shell may print more: its lines are left out)"""
+  return {m.group(1): m.group(2).strip() for m in re.finditer(r"^slurp-core-(soft|hard|pattern)=(.*)$", text, re.M)}
 
 def detect_stacks(facts, uenv_command=False):
   """The software stacks of a cluster: "modules" (Lmod or environment modules in a login shell), "uenv" (sbatch's
@@ -605,6 +638,7 @@ for a in "$@"; do
     info=""
     if [ "$k" = x ] && [ "$t" = f ]; then info=$(file -L -b -- "$p" 2>/dev/null | head -c 160); fi
     if [ "$k" = n ] && [ "$t" = d ]; then info=$(find "$p" -maxdepth 1 2>/dev/null | head -100001 | wc -l); fi
+    if [ "$k" = c ] && [ "$t" = d ]; then info=$(find "$p" -maxdepth 1 -type f \( -name core -o -name 'core.[0-9]*' \) -printf '%s %T@\n' 2>/dev/null | awk '{n++; s+=$1; if ($2>m) m=$2} END {printf "%d %d %d", n, s, m}'); fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$a" "$t" "$x" "$w" "$s" "$info" "$r"
   else
     printf '%s\t-\n' "$a"
@@ -663,6 +697,7 @@ class Context:
   submit_line: str = ""
   count_files: bool = False                   # probe the number of files in the working directory (Q06)
   uncertain: set = field(default_factory=set) # paths resolved from a guessed directory (no job, relative)
+  arguments: dict = field(default_factory=dict) # argument paths of programs (P10): abspath -> {word, flag, output}
   submit_env: dict | None = None              # the environment the job was submitted with (sacct --env-vars)
   script_dir: str = ""                        # the directory of the script file (a job: from its submit line)
   env: dict = field(default_factory=dict)     # for $VARS in paths
@@ -826,8 +861,12 @@ def interesting_paths(ctx):
     interp = s.shebang[2:].strip().split()
     if interp and interp[0].startswith("/"):
       out.append(("x", interp[0]))
+  if ctx.count_files or ctx.job is None: # (core files there: Q08)
+    out += [("c", d) for d, _, _ in core_dirs(ctx)]
   for kind, path, _line in referenced_paths(ctx):
     out.append((kind, path))
+    if kind == "a": # (P10: its directory too, a file the program writes needs one)
+      out.append(("d", os.path.dirname(path)))
   submit, other = alternative_bases(ctx)
   if other and not ctx.opt("chdir"): # (G18: does it exist from the script's directory instead?)
     uses, anchored, _ = relative_uses(ctx)
@@ -836,6 +875,58 @@ def interesting_paths(ctx):
       if submit:
         out.append(("f", os.path.normpath(os.path.join(submit, word))))
   return list(dict.fromkeys(out))
+
+# Where the programs of a job run: a crash writes its core file into the program's working directory (not where the
+# program or the script is): --chdir or where sbatch was run, then the script's cd, srun --chdir
+CD = re.compile(r"""^\s*cd(?:\s+(?:--\s+)?("[^"]*"|'[^']*'|[^\s;&|]+))?\s*(?:$|&&|\|\||;)""")
+NOT_PROGRAMS = {"cd", "export", "unset", "module", "ml", "echo", "printf", "mkdir", "cp", "mv", "rm", "ln", "touch", "source",
+                ".", "set", "ulimit", "if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case",
+                "esac", "date", "hostname", "sleep", "wait", "exit", "return", "true", "false", "cat", "ls", "pwd", "env",
+                "uenv", "conda", "trap", "shift", "local", "declare", "[", "[[", "test", "{", "}", "tar", "sbatch"}
+LAUNCH_DIR = re.compile(r"\s(?:--chdir[= ]|-D\s*)(\S+)")
+
+def core_dirs(ctx):
+  """[(directory, why the programs run there, line)] of the job's programs, as far as known (a script alone, without
+  --chdir: where it will be submitted is not known; a cd to an unknown place: from there on not known)"""
+  s = ctx.script
+  if s is None:
+    return []
+  home = (ctx.facts.env.get("HOME") if ctx.facts else None) or ctx.env.get("HOME")
+  wd, chdir = ctx.workdir(), ctx.opt("chdir")
+  if chdir:
+    cur = (wd, f"--chdir={chdir}", ctx.directive_line("chdir")) if wd and os.path.isabs(wd) else None
+  elif ctx.job is not None and wd:
+    cur = (wd, "sbatch was run there, without --chdir", None)
+  else:
+    cur = None
+  out = []
+  for line, t in s.code_lines():
+    m = CD.match(t)
+    if m:
+      target = (m.group(1) or "~").strip("\"'")
+      if target in ("~", "$HOME", "${HOME}"):
+        path = home
+      elif target == "-":
+        path = None
+      else:
+        path = ctx.expand(target)
+        if path and not os.path.isabs(path):
+          path = os.path.normpath(os.path.join(cur[0], path)) if cur else None
+      cur = (os.path.normpath(path), f"{t.strip()} (line {line})", line) if path else None
+      continue
+    words = t.split()
+    if not words or "=" in words[0] and not words[0].startswith(("./", "/")) or words[0] in NOT_PROGRAMS:
+      continue
+    launched = LAUNCH_DIR.search(t) if re.match(r"\s*(srun|mpirun|mpiexec)\b", t) else None
+    if launched:
+      path = ctx.expand(launched.group(1).strip("\"'"))
+      entry = (os.path.normpath(os.path.join(cur[0], path) if cur and not os.path.isabs(path) else path),
+               f"its --chdir (line {line})", line) if path and (os.path.isabs(path) or cur) else None
+    else:
+      entry = cur
+    if entry and entry[0] not in [d for d, _, _ in out]:
+      out.append(entry)
+  return out
 
 def output_pattern(value, ctx):
   """An --output pattern with the job's values, %-patterns of unknown values as in a fresh job"""
@@ -900,15 +991,93 @@ def launched_program(words):
     return w, words[i + 1:]
   return None, []
 
+SUBMIT_DIR = re.compile(r"^\$(?:SLURM_SUBMIT_DIR\b|\{SLURM_SUBMIT_DIR\})")
+# the working directory of a launcher's tasks: srun --chdir/-D, mpirun -wdir/-wd/--wdir (relative: to the script's)
+LAUNCHER_DIR_OPTIONS = {"--chdir", "-D", "-wdir", "--wdir", "-wd"}
+
+def launcher_dir(words):
+  """The working directory a launcher line gives its tasks (srun --chdir=x, -D x, -Dx; mpirun -wdir x), or None"""
+  for i, w in enumerate(words[1:], 1):
+    if not w.startswith("-"):
+      return None # (the program: its own options are not the launcher's)
+    name, eq, value = w.partition("=")
+    if name in LAUNCHER_DIR_OPTIONS:
+      return value if eq else (words[i + 1] if i + 1 < len(words) else None)
+    if w.startswith("-D") and not w.startswith("--") and len(w) > 2:
+      return w[2:]
+  return None
+
+# a program's argument that names a path (P10): a/b/c, ./in, ../data, ~/x, $SCRATCH/y, input.dat; not options, URLs,
+# host:path or gpu:1, globs, lists (a,b), fractions (1/2), node-local places (/tmp, /dev, …: other on the nodes)
+NODE_LOCAL = ("/tmp", "/dev", "/proc", "/sys", "/run", "/var/tmp")
+OUTPUT_FLAG = re.compile(r"-{1,2}(?:o|(?:out|output|save|write|log|dump|result|dest|chk|checkpoint|ckpt|tmp|scratch|cache)[\w-]*|"
+                         r"target|prefix|odir|outdir|wd|work[\w-]*dir|[\w-]*[-_]out)", re.I)
+ARGUMENTS_CHECKED = 60 # argument paths probed at most
+
+def path_argument(value):
+  """Whether a program's argument looks like the path of a file or directory"""
+  if not value or value.startswith("-") or "://" in value or any(ch in value for ch in "*?[]{},:;<>|'\"` \t=@") or is_placeholder(value):
+    return False
+  if re.fullmatch(r"[\d./]+", value) and not value.startswith(("./", "../")): # (1/2, 0.5, 10/20/30)
+    return False
+  return "/" in value or value.lower().endswith(DATA_EXT)
+
+def argument_words(args):
+  """(flag, value) of a program's arguments: --in=a/b ("--in="), --in a/b ("--in"), positional ones (flag None)"""
+  flag = None
+  for w in args:
+    if w.startswith("-") and len(w) > 1:
+      name, eq, value = w.partition("=")
+      if eq:
+        yield name + "=", value
+        flag = None
+      else:
+        flag = w
+      continue
+    yield flag, w
+    flag = None
+
+def resolve_in(ctx, word, base):
+  """word (a path of the script: $VARS, ~) as an absolute path from the directory base; None if not known"""
+  if not word or is_placeholder(word):
+    return None
+  p = ctx.expand(word)
+  if p is None:
+    return None
+  if not os.path.isabs(p):
+    if not base:
+      return None
+    p = os.path.join(base, p)
+  return os.path.normpath(p)
+
 def referenced_paths(ctx):
-  """[(kind, abspath, line)]: programs run (x), sourced files and redirected inputs (f), cd targets (d)"""
+  """[(kind, abspath, line)]: programs run (x), sourced files and redirected inputs (f), cd targets (d). Relative
+  paths are resolved from where each line runs: --chdir (or where sbatch runs), then the script's cd and pushd, and a
+  launcher's --chdir for its program; after a cd to a place not known (cd -, popd, an unknown $VAR), relative paths
+  are not checked until the next cd to a known one"""
   s = ctx.script
   out = []
   made = set()
+  home = (ctx.facts.env.get("HOME") if ctx.facts else None) or ctx.env.get("HOME") or ctx.expand("$HOME")
   # without a job, relative paths are relative to where it will be submitted (unknown): the script's directory is a
   # guess until the script changes to an absolute directory
   guessing = ctx.job is None and not ctx.opt("chdir")
-  ctx.uncertain = set()
+  submit_dir = ctx.env.get("SLURM_SUBMIT_DIR") or (ctx.job.rec.get("WorkDir") if ctx.job is not None and not ctx.opt("chdir") else "")
+  if not submit_dir and ctx.job is None:
+    submit_dir = ctx.script_dir or (os.path.dirname(s.path) if s.path else "")
+  cwd = ctx.workdir() or None
+  ctx.uncertain, ctx.arguments = set(), {}
+  seen = set() # (paths an earlier line names: made or written there, maybe; their arguments are not checked again)
+  def known(p):
+    return p in seen or p in made or any(p.startswith(d.rstrip("/") + "/") for d in made | seen)
+  def add(kind, word, line, base=None):
+    base = cwd if base is None else base
+    p = resolve_in(ctx, word, base)
+    if p:
+      out.append((kind, p, line))
+      if guessing and not os.path.isabs(ctx.expand(word) or word):
+        ctx.uncertain.add(p)
+    return p
   for line, t in s.code_lines():
     for part in re.split(r"\s*(?:&&|\|\||;|\|)\s*", t):
       try:
@@ -925,52 +1094,77 @@ def referenced_paths(ctx):
       if cmd == "mkdir":
         for w in words[1:]:
           if not w.startswith("-"):
-            p = ctx.abspath(w)
+            p = resolve_in(ctx, w, cwd)
             if p:
               made.add(p)
         continue
-      if cmd == "cd" and len(words) > 1 and words[1] != "-":
-        p = ctx.abspath(words[1])
+      if cmd in ("cd", "pushd"):
+        args = [w for w in words[1:] if not w.startswith("-") or w == "-"]
+        target = args[0] if args else "~"
+        if target == "-" or (cmd == "pushd" and not args):
+          cwd = None # (the directory before: not followed)
+          continue
+        if target in ("~", "$HOME", "${HOME}"):
+          cwd, guessing = home or None, False
+          continue
+        raw = target
+        if SUBMIT_DIR.match(target) and ctx.expand(target) is None and submit_dir:
+          target = submit_dir + target[SUBMIT_DIR.match(target).end():]
+        else:
+          guessing = guessing and not os.path.isabs(ctx.expand(target) or target)
+        p = resolve_in(ctx, target, cwd)
         if p and p not in made and not any(p.startswith(m + "/") for m in made):
           out.append(("d", p, line))
-          if guessing and not os.path.isabs(ctx.expand(words[1]) or words[1]):
+          if guessing and not os.path.isabs(ctx.expand(raw) or raw):
             ctx.uncertain.add(p)
-        expanded = ctx.expand(words[1])
-        if expanded and os.path.isabs(expanded) or words[1].startswith(("$SLURM_SUBMIT_DIR", '"$SLURM_SUBMIT_DIR')):
-          guessing = guessing and words[1].startswith(("$SLURM_SUBMIT_DIR", '"$SLURM_SUBMIT_DIR'))
+        cwd = p # (None: a place not known)
+        continue
+      if cmd == "popd":
+        cwd = None
         continue
       if cmd in ("source", ".") and len(words) > 1:
-        p = ctx.abspath(words[1])
-        if p:
-          out.append(("f", p, line))
+        add("f", words[1], line)
         continue
+      base = cwd
       if cmd in LAUNCHERS or cmd == "exec" or cmd == "time" or cmd == "nohup":
         prog, args = launched_program(words) if cmd in LAUNCHERS else (words[1] if len(words) > 1 else None, words[2:])
+        launched = launcher_dir(words) if cmd in LAUNCHERS else None
+        if launched: # (srun --chdir: its program and arguments from there)
+          base = resolve_in(ctx, launched, cwd)
       else:
         prog, args = cmd, words[1:]
       if not prog:
         continue
+      checked = None # (the arguments of the program, to check as paths: P10)
       if prog in ("python", "python3") or re.fullmatch(r"python3(\.\d+)?", prog or ""):
         script = next((a for a in args if not a.startswith("-")), None)
         if script and script.endswith(".py"):
-          p = ctx.abspath(script)
-          if p:
-            out.append(("f", p, line))
-            if guessing and not os.path.isabs(ctx.expand(script) or script):
-              ctx.uncertain.add(p)
-        continue
-      if "/" in prog and prog not in SKIP_PROGRAMS:
-        p = ctx.abspath(prog)
-        if p:
-          out.append(("x", p, line))
-          if guessing and not os.path.isabs(ctx.expand(prog) or prog):
-            ctx.uncertain.add(p)
-      for m in re.finditer(r"(?<![<>])<\s*([^\s<>&|;]+)", part): # input redirections
-        p = ctx.abspath(m.group(1))
-        if p:
-          out.append(("f", p, line))
-          if guessing and not os.path.isabs(ctx.expand(m.group(1)) or m.group(1)):
-            ctx.uncertain.add(p)
+          add("f", script, line, base or "")
+          if not any(a in ("-c", "-m") for a in args[:args.index(script)]):
+            checked = args[args.index(script) + 1:]
+      else:
+        if "/" in prog and prog not in SKIP_PROGRAMS:
+          add("x", prog, line, base or "")
+        if (cmd in LAUNCHERS or "/" in prog) and prog not in SKIP_PROGRAMS:
+          checked = args
+        for m in re.finditer(r"(?<![<>])<\s*([^\s<>&|;]+)", part): # input redirections (the shell's: from the script's directory)
+          add("f", m.group(1), line)
+      for flag, value in argument_words(checked or []):
+        if not path_argument(value) or len(ctx.arguments) >= ARGUMENTS_CHECKED:
+          continue
+        p = resolve_in(ctx, value, base or "")
+        if not p or p.startswith(NODE_LOCAL) or known(p) or p in ctx.arguments:
+          continue
+        out.append(("a", p, line))
+        ctx.arguments[p] = {"word": value, "flag": flag, "output": bool(flag and OUTPUT_FLAG.fullmatch(flag.rstrip("=")))}
+        if guessing and not os.path.isabs(ctx.expand(value) or value):
+          ctx.uncertain.add(p)
+      line_paths = [w.partition("=")[2] if w.startswith("-") else w for w in words[1:]]
+      line_paths += re.findall(r"[<>]{1,2}\s*([^\s<>&|;]+)", part)
+      for w in line_paths: # (named here: maybe made or written here, for the lines after)
+        p = resolve_in(ctx, w, base or "") if w and path_argument(w) else None
+        if p and not (base and (p == base or base.startswith(p.rstrip("/") + "/"))): # (not ./ or ..: all below would be known)
+          seen.add(p)
   return out
 
 # ---------------------------------------------------------------------------
@@ -1076,19 +1270,28 @@ def check_script_text(text, path="", facts=None, probes=None, job=None, **kw):
   ctx = make_context(text, path, job=job, facts=facts, probes=probes, **kw)
   return run_rules(ctx), ctx
 
-def check_file(path, with_probe=True, text=None):
+def check_file(path, with_probe=True, text=None, quota=True, progress=None):
   """Findings of a script file on the cluster of the current tab (worker): the script, the facts, the probe, the quota.
-  text: check this text as the content of path (an edited, unsaved version) instead of reading the file."""
+  text: check this text as the content of path (an edited, unsaved version) instead of reading the file. quota=False:
+  without the quota (the caller asks for it after: cached_quota, then run_rules). progress(what): the step that starts
+  (each may take a while on a slow cluster: said, so that a step that hangs is seen)"""
   from ..cluster.paths import read_text
+  say = progress or (lambda what: None)
   if text is None:
+    say("reading it")
     text = read_text(path)
+  say("the cluster's partitions, accounts and settings")
   facts = gather_facts()
   ctx = make_context(text, path, facts=facts)
   ctx.script_dir = os.path.dirname(path)
   ctx.count_files = True
   if with_probe:
-    ctx.probes = run_probe([f"{k}:{p}" for k, p in interesting_paths(ctx)])
-    ctx.quota = cached_quota()
+    wanted = interesting_paths(ctx)
+    say(f"its paths and programs on the cluster ({len(wanted)})")
+    ctx.probes = run_probe([f"{k}:{p}" for k, p in wanted])
+    if quota:
+      say("the quota where it writes")
+      ctx.quota = cached_quota()
   return run_rules(ctx), ctx
 
 _quota, _quota_lock = {}, threading.Lock()
@@ -1227,6 +1430,10 @@ def rules_markdown(facts=None, where="", query=""):
          "Module rules also apply in part to a uenv's modules view (--view=modules). " + stacks_text
          + (" The rules that do not apply there are greyed out." if facts is not None else ""),
          ""]
+  if facts is not None:
+    from ..sites import pack_text
+    site = pack_text(facts.site)
+    out += [f"**Site pack:** {site}." if site else f"**Site pack:** none for {where or 'this cluster'} (only what slurp finds itself).", ""]
   if query.strip():
     count = sum(rule_matches(r, query) for r in RULES.values())
     out += [f"**Search:** {count} of {len(RULES)} rules match “{query.strip()}”" + ("" if count else " (Esc shows all)") + ".", ""]

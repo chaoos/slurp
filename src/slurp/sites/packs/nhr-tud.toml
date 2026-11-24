@@ -1,0 +1,60 @@
+# NHR@TU Dresden (ZIH): Barnard (CPU, 2x Xeon Platinum 8470), Capella (GPU, 4 NVIDIA H100 94 GB), Alpha Centauri
+# (GPU, 8 NVIDIA A100 40 GB), Romeo (CPU, 2x AMD EPYC 7702), Julia (SMP). Each cluster has its own Slurm and its own
+# login nodes (login[1-4].barnard, login[1-2].capella, .alpha, .romeo; julia.hpc.tu-dresden.de); jobs can be
+# submitted only from the cluster's own nodes. Shared filesystems on all clusters. Data transfer: dataport1/2
+# (scp, rsync, sftp only, SSH key only) and the dt* commands (Datamover batch jobs).
+schema = 1
+version = "2026.11.23"
+name = "NHR@TU Dresden (ZIH)"
+scheduler = "slurm"
+match = ["*.hpc.tu-dresden.de", "barnard", "capella"]
+docs = "https://compendium.hpc.tu-dresden.de/"
+# /data/horse, /data/walrus: Lustre (global); /data/cat: WEKAio (Capella only); /data/quokka: Quobyte (Alpha Centauri, Romeo)
+parallel_fs = ["/data/horse", "/data/walrus", "/data/cat", "/data/quokka"]
+transfer_hosts = ["dataport1.hpc.tu-dresden.de", "dataport2.hpc.tu-dresden.de"]
+login_node_limits = "Processes on the login nodes are killed after 600 seconds of CPU time."
+
+# How to log in (https://compendium.hpc.tu-dresden.de/access/ssh_login/,
+# https://compendium.hpc.tu-dresden.de/access/security_restrictions/): ssh with your ZIH login, from the TU Dresden
+# campus network or its VPN; an ed25519 key with a passphrase is recommended (and required for the dataport nodes).
+[login]
+required = ["user"]
+user_label = "your ZIH login"
+setup = """Once, before the first login:
+1. Off campus, connect the TU Dresden VPN first: ssh to the ZIH systems works only from the TU Dresden network
+   (https://tu-dresden.de/zih/dienste/service-katalog/arbeitsumgebung/zugang_datennetz/vpn).
+2. Create an ed25519 key with a non-empty passphrase on your own machine (ssh-keygen -t ed25519) and install only
+   its PUBLIC key with ssh-copy-id to one login node (your ZIH password is asked); /home is shared, so once is
+   enough for all clusters. The dataport nodes accept only keys.
+3. Check the host key at the first login (ED25519): Barnard SHA256:Gn4n5IX9eEvkpOGrtZzs9T9yAfJUB200bgRchchiKAQ,
+   Capella SHA256:zZiM3YZ0HBK6nxBS5VuJUwudmrDn/A7ajU1ec6vgVkU, Alpha Centauri
+   SHA256:QNjH0ulelqykywMkt3UNTG4W1HzRkHqrhu0f6oq302I, Romeo SHA256:Wp6VgZ3MF5BLb/cAVNZ1bHLcIFr+fldoJ0zzuHj0FRc,
+   Julia SHA256:+vn9i5MRBxbh2u41cmZHi90ceQzJ3gqHlEW0tRtt0dY, dataport
+   SHA256:/8v4QqM1jfqL7ZANJS+d26N3xfJYLWuaU8zCGc27GOA (current list: access/key_fingerprints/ in the compendium).
+Then each login: your key's passphrase (or your ZIH password). ssh from the ZIH systems to outside the campus is
+blocked: start transfers from your own machine."""
+
+[[clusters]]
+name = "barnard"
+title = "Barnard (CPU)"
+host = "login1.barnard.hpc.tu-dresden.de"
+
+[[clusters]]
+name = "capella"
+title = "Capella (GPU, H100)"
+host = "login1.capella.hpc.tu-dresden.de"
+
+[[clusters]]
+name = "alpha"
+title = "Alpha Centauri (GPU, A100)"
+host = "login1.alpha.hpc.tu-dresden.de"
+
+[[clusters]]
+name = "romeo"
+title = "Romeo (CPU)"
+host = "login1.romeo.hpc.tu-dresden.de"
+
+[[clusters]]
+name = "julia"
+title = "Julia (SMP)"
+host = "julia.hpc.tu-dresden.de"

@@ -1,0 +1,33 @@
+# Jülich Supercomputing Centre (JSC): JUPITER Booster (EuroHPC exascale; 4 NVIDIA GH200 Grace-Hopper superchips per
+# node, whole nodes only; Early Access phase: one partition, booster). Logins: login.jupiter.fz-juelich.de (login01 to
+# login10), Arm Grace like the compute nodes.
+schema = 1
+version = "2026.11.23"
+name = "JSC JUPITER"
+scheduler = "slurm"
+match = ["jupiter", "jupiter.fz-juelich.de", "*.jupiter.fz-juelich.de"]
+docs = "https://apps.fz-juelich.de/jsc/hps/jupiter/index.html"
+status = "https://status.jsc.fz-juelich.de/"
+scratch_purge_days = 90 # ($SCRATCH: files after 90 days by modification and access date; $FSCRATCH: 30 days)
+# GPFS from EXAJUST (/p: JUST, /e: the exa file systems; use $HOME, $PROJECT, $SCRATCH, $FSCRATCH, $DATA)
+parallel_fs = ["/p", "/e"]
+cuda_arch = "sm_90" # (NVIDIA Hopper)
+gpus_implicit = true # (--gres=gpu:4 is applied to all jobs that do not set gres)
+login_node_limits = "per user at most 20 parallel processes and 25% of the node's memory on the login nodes, above it the processes are ended"
+
+# How to log in (apps.fz-juelich.de/jsc/hps/jupiter/access.html): directly, with a key uploaded in JuDoor (with from=…);
+# no password logins; optional TOTP after the key.
+[login]
+required = ["user", "identities"] # (it logs in with a key only)
+user_label = "your JSC user (as in JuDoor)"
+identities = ["~/.ssh/id_ed25519_jsc"]
+setup = """Once, before the first login:
+1. A key with a strong passphrase (JSC does not allow keys without one): ssh-keygen -a 100 -t ed25519 -f ~/.ssh/id_ed25519_jsc
+2. Upload its public half (~/.ssh/id_ed25519_jsc.pub) in JuDoor (judoor.fz-juelich.de), Manage SSH-keys next to JUPITER, with a from= clause of the addresses you log in from: from="192.0.2.42" ssh-ed25519 AAAA… (no trailing wildcards, netmasks of /8 or more; cover your IPv6 address too, ssh prefers it). It works within 15 minutes.
+3. At the first login: compare the host key with the fingerprint shown in JuDoor next to the upload form.
+If you enabled MFA in JuDoor, the login asks for the 6-digit code ("JSC TOTP Verification code:") after the key (not for FIDO keys or EuroHPC SSH certificates). Many connections in a short time get your address blocked at the FZJ firewall."""
+
+[[clusters]]
+name = "jupiter"
+title = "JUPITER Booster"
+host = "login.jupiter.fz-juelich.de"

@@ -61,18 +61,18 @@ def tab_views(app, cluster):
   """The subtabs of a tab to keep: {"views": [spec], "shown": "jobs", "overview" or the index of a view, "jobs_open"};
   those not opened again yet (placeholders: not connected since the start) as they were"""
   specs, shown = [], "overview"
-  for view in cluster.views:
+  for view in cluster.view.views:
     spec = view_spec(app, view)
     if spec is not None:
-      if cluster.current_view == view.mode:
+      if cluster.view.current_view == view.mode:
         shown = len(specs)
       specs.append(spec)
-  if cluster.current_view == "_default":
+  if cluster.view.current_view == "_default":
     shown = "jobs"
-  saved = cluster.pending_views
-  if saved and cluster.current_view == "overview" and isinstance(saved.get("shown"), int):
+  saved = cluster.view.pending_views
+  if saved and cluster.view.current_view == "overview" and isinstance(saved.get("shown"), int):
     shown = saved["shown"] # (not opened again yet: the one shown before stays the one to show)
-  return {"views": specs, "shown": shown, "jobs_open": bool(cluster.jobs_open or (saved or {}).get("jobs_open"))}
+  return {"views": specs, "shown": shown, "jobs_open": bool(cluster.view.jobs_open or (saved or {}).get("jobs_open"))}
 
 
 def spec_key(spec):
@@ -103,7 +103,7 @@ def spec_title(spec):
     return os.path.basename(path.rstrip("/")) or path, "file"
   if kind == "categories":
     key = spec.get("key") or "categories"
-    return key, "categories"
+    return ("Categories" if key == "categories" else key), "categories" # (the key stays as it was saved)
   if kind == "rules":
     return "Rule catalogue", "rules"
   if kind == "guides":
@@ -156,17 +156,17 @@ def placeholders(app, cluster, saved):
       views.append(View(type(app).next_view_id, str(title), "window", spec_key(spec), icon=str(icon), kept=spec, pending=True))
   except Exception as e: # (what was kept cannot be read: a fresh start for this tab, without subtabs)
     log.warning(f"{cluster.name}: the subtabs of the last run cannot be read ({e}): starting without them")
-    cluster.pending_views = None
+    cluster.view.pending_views = None
     return False
-  cluster.views.extend(views)
+  cluster.view.views.extend(views)
   return True
 
 
 def give_up(app, cluster, why):
   """Opening the kept subtabs again went wrong: they go (the tab as at a fresh start), said once"""
-  for view in [v for v in cluster.views if v.pending]:
-    cluster.views.remove(view)
-  cluster.pending_views, cluster.restoring = None, False
+  for view in [v for v in cluster.view.views if v.pending]:
+    cluster.view.views.remove(view)
+  cluster.view.pending_views, cluster.view.restoring = None, False
   log.warning(f"{cluster.name}: opening the subtabs of the last run failed: {why}")
   app.notify("the subtabs of the last run could not be opened again: starting without them", title=cluster.name,
              severity="warning", timeout=8)
@@ -188,8 +188,8 @@ def ready(app, cluster):
 def placeholder_clicked(app, view):
   """A placeholder clicked: not connected yet: say so, the overview (Connect is there); else it opens (soon)"""
   cluster = app.cluster
-  if ready(app, cluster) or cluster.restoring:
-    cluster.restore_target = view.kept
+  if ready(app, cluster) or cluster.view.restoring:
+    cluster.view.restore_target = view.kept
     restore(app, cluster)
     app.notify(f"opening {view.title} …", timeout=3)
     return
@@ -200,24 +200,24 @@ def placeholder_clicked(app, view):
 def restore(app, cluster):
   """Open the placeholders of a tab (once it is ready; in their order, each in its place; nothing switches), then
   show the one shown before (if the overview or the job list is still shown) or the one clicked meanwhile"""
-  if getattr(cluster, "restoring", False) or not any(v.pending for v in cluster.views):
+  if cluster.view.restoring or not any(v.pending for v in cluster.view.views):
     return
   if not ready(app, cluster):
     if cluster is app.cluster and connected(cluster):
       app.set_timer(1, lambda: restore(app, cluster)) # (a dialog open: when it closed)
     return
-  cluster.restoring = True
-  saved = cluster.pending_views or {}
+  cluster.view.restoring = True
+  saved = cluster.view.pending_views or {}
   shown = saved.get("shown")
-  specs_order = [v.kept for v in cluster.views if v.pending]
+  specs_order = [v.kept for v in cluster.view.views if v.pending]
   opened = {} # id(spec) -> the view it opened
   def finish():
-    cluster.restoring = False
-    cluster.pending_views = None
+    cluster.view.restoring = False
+    cluster.view.pending_views = None
     if saved.get("jobs_open"):
-      cluster.jobs_open = True
-    target = getattr(cluster, "restore_target", None)
-    cluster.restore_target = None
+      cluster.view.jobs_open = True
+    target = cluster.view.restore_target
+    cluster.view.restore_target = None
     if cluster is app.cluster:
       if target is not None and id(target) in opened:
         app.show_view(opened[id(target)])
@@ -227,31 +227,31 @@ def restore(app, cluster):
       app.refresh_status()
     app.save_tabs()
   def step():
-    holder = next((v for v in cluster.views if v.pending), None)
+    holder = next((v for v in cluster.view.views if v.pending), None)
     if holder is None or cluster is not app.cluster:
       finish()
       return
     spec = holder.kept
     holder.key = "" # (the real subtab opens with its key)
-    before = list(cluster.views)
+    before = list(cluster.view.views)
     waited, done = [0.0], [False]
     def placed():
-      new = [v for v in cluster.views if v not in before]
-      if holder in cluster.views:
-        index = cluster.views.index(holder)
-        cluster.views.remove(holder)
+      new = [v for v in cluster.view.views if v not in before]
+      if holder in cluster.view.views:
+        index = cluster.view.views.index(holder)
+        cluster.view.views.remove(holder)
         if new:
           view = new[-1]
-          cluster.views.remove(view)
-          cluster.views.insert(index, view)
+          cluster.view.views.remove(view)
+          cluster.view.views.insert(index, view)
           view.kept = spec
           opened[id(spec)] = view
-        if cluster.current_view == holder.mode:
-          cluster.current_view = "overview"
+        if cluster.view.current_view == holder.mode:
+          cluster.view.current_view = "overview"
       app.refresh_status()
       app.call_later(step)
     def wait():
-      if [v for v in cluster.views if v not in before] or waited[0] >= RESTORE_WAIT or done[0]:
+      if [v for v in cluster.view.views if v not in before] or waited[0] >= RESTORE_WAIT or done[0]:
         placed()
       else:
         waited[0] += 0.1

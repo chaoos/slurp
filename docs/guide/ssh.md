@@ -72,21 +72,57 @@ Each tab keeps its own job list, shell, and session. Switching tabs shows the
 list as it was loaded; `r` (or **Reload**) loads it again. While a list
 loads, the old one stays visible, the footer shows the progress, and `a` (or
 the **Abort** button, which replaces **Reload** meanwhile) stops it.
-**Shell on the cluster** (in the menu, or `t`) opens a login shell on the cluster of the tab in a subtab. The **+** tab button adds another local or remote connection: best an **SSH destination**, a Host of your
+**Shell on the cluster** (in the menu, or `t`) opens a login shell on the cluster of the tab in a subtab. The **+** tab button adds another local or remote connection, in a form like the endpoints': its **Name** first (the
+tab's name; empty: the destination), then best an **SSH destination**, a Host of your
 `~/.ssh/config` (suggested as you type), or `user@host`; as a fallback the **Full SSH settings** (host, user,
-port, jump hosts, identity files, more `ssh` options, the tab's name), kept with the tab. **Check…** tries the
+port, jump hosts, identity files, more `ssh` options), kept with the tab. A jump host is offered the tab's identity
+files too (`ssh -J` alone would give them only to the cluster). An identity file must be a private key on this
+machine: one that is not there, a directory or a `.pub` file gets a red mark at once, with what is wrong below it,
+and **Add** and **Test** say so first: they become **Add anyway** and **Test anyway** (red), and pressed again they
+go on (the command before the login may make the key, for example). **Browse…** next to it chooses a key on this machine (it starts in
+`~/.ssh`; slurp does not read or show its content). Its buttons are **Test**, **Cancel** and
+**Add**, as the endpoints' forms.
+
+**From a site**, at the top of a new connection: **Choose…** opens a window with the clusters slurp knows how to log
+in to, to search (every word you type must match the cluster, its site, its host or the pack: `juwels booster`,
+`cscs`, `lumi`; `↑` `↓` while typing, `Enter` takes it; below the list, how the highlighted one logs in), and
+**Clear** takes the choice back. They come from its site packs, some 50 sites: CSCS Alps, JSC (JURECA, JUWELS, JUSUF, JEDI,
+JUPITER), LRZ, HLRS, the German NHR centres (Göttingen, ZIB, KIT, Paderborn, Dresden, Erlangen, Aachen), MPCDF, DKRZ,
+the EuroHPC systems (LUMI, Leonardo, MareNostrum 5, Karolina, MeluXina, Vega, Discoverer, Deucalion), Jean Zay,
+Adastra, CSC, Dardel, Sigma2, Snellius, Isambard, Cirrus, CSD3, NERSC Perlmutter, OLCF Frontier, ALCF Aurora and
+Polaris, TACC, NCSA Delta, SDSC Expanse, PSC Bridges-2, Purdue Anvil, NCAR Derecho, RIKEN Fugaku, ABCI, TSUBAME,
+Pawsey Setonix and NCI Gadi (`slurp --version` lists them all). A cluster without Slurm (PBS: Aurora, Derecho, Gadi,
+HLRS; Fugaku's own; Grid Engine: TSUBAME) says so: slurp logs in there and has files, shells and transfers, but no job
+list. One
+fills in the form: its name, the full settings (the host; at CSCS the jump host `ela.cscs.ch` and the key
+`~/.ssh/cscs-key`), and the command before the login (at CSCS `cscs-key sign --headless`, only when a login without
+it fails: a signed key is valid for a day). You fill in your user (at CSCS the jump host takes it too), and at a site
+that logs in with a key only, the key (if the site names none, e.g. Karolina): the
+fields the site needs from you have a yellow border until they are filled in, and **Add** or **Test** without them
+turns them red, with what to fill in below each (a pack names them in `required`); then **Add anyway** and **Test
+anyway** go on without them. Below the
+choice the form says how the site logs in, whether what it needs is installed on this machine (`cscs-key`; if not,
+where to get it), and what to do once before the first login (make a key; at JSC, upload it in JuDoor with a
+`from=` clause). Nothing of it is used until **Add**, and all of it can be changed first. slurp never writes your
+`~/.ssh/config`. A site pack of your own can offer clusters too (`[login]` and `[[clusters]]`, see
+`src/slurp/sites/__init__.py`). **Test** tries the
 connection in a window with a terminal, as the tab's login goes: what needs no login (what ssh makes of it, the
 keys, the name, the port, the server), the command before the login if there is one, and the login itself, where
 you answer what it asks (a host key, a passphrase, a password, a one-time code). Then it says whether it works,
 or precisely what does not (the host key, the keys and what the server accepts, …), with the end of `ssh -v`'s
-log; the connection window has the same **Check…**. A tab can be added
-checked or not.
+log; the connection window has the same check (**Check…**). A tab can be added
+tested or not.
 
 **Run before login** (in the same dialog, for a `~/.ssh/config` destination too) is a command run on this machine
 before every login of the tab, e.g. one that signs a key first (`cscs-keygen`, `step ssh login`, `tsh login`). It
 runs in the login pane, where you answer it (a password, a one-time code; `Ctrl-C` ends only the command); when it
-returns, slurp shows how it ended and the SSH login follows as usual. The connection window shows it, and
-**Check…** runs it too, before its login.
+returns, slurp shows how it ended and the SSH login follows as usual. What the command exports is there for the
+login: `eval "$(ssh-agent -s)"; ssh-add …` in it starts an agent the login then uses (slurp says which variables it
+set). With **only when the login fails without it**, slurp first logs in without the command, asking nothing (`ssh -o
+BatchMode=yes`): a key or certificate that is still valid is not made anew. Only if that fails does the command run,
+and the login follows at once, in the pane; after a login that worked the next one tries without it first again.
+The connection window shows it, and **Check…** goes the same way (without it first, if the box is ticked; then the
+command, before its login).
 **Open a directory…** (in the menu, or `d`) asks which directory: your home (the default), scratch, project, … (`$SCRATCH`, `$PROJECT`, `$STORE` and `$WORK`, those set on the cluster) or a path, and opens it in a new subtab, each time another one. Its path at the top is an input (edit it, Enter goes there) with buttons for home, scratch, project, … next to it. The directory view shows the permissions of each entry as `ls -l` does (a `+` when it has extended ACL entries, which are listed in the **ACL** column), its owner and group, and in **You** what you cannot do with it: **no read** (red) or **no write** (yellow), as the cluster answers for your user (groups and ACLs count). `/` searches the names (a part of them, or `*.out`), here as you type, or with **Subdirectories** (`Ctrl+R`) in all directories below, in the background: the results come in as they are found while the window stays usable, and `Esc` stops the search. Each tab has a `✕`
 that closes it (after asking). Notifications name the tab they belong to.
 

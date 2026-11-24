@@ -1,0 +1,29 @@
+# Institute of Science Tokyo TSUBAME4.0 (Japan): 240 HPE Cray XD665 nodes, each 2 AMD EPYC 9654 (96 cores) and
+# 4 NVIDIA H100 SXM5 94 GB; batch system Altair Grid Engine (qsub, qrsh). Logins: login.t4.gsic.titech.ac.jp
+# (round robin over login1/login2.t4.gsic.titech.ac.jp); files are transferred through the same login nodes (SFTP).
+schema = 1
+version = "2026.11.23"
+name = "TSUBAME4.0"
+scheduler = "sge"
+match = ["tsubame*", "*.t4.gsic.titech.ac.jp"]
+docs = "https://www.t4.cii.isct.ac.jp/docs/handbook.en/"
+status = "https://www.t4.cii.isct.ac.jp/en"
+parallel_fs = ["/home", "/work", "/gs/fs", "/gs/bs"]
+login_node_limits = "4 GB of memory per process on the login nodes; no programs over 10 minutes (except file transfers), no parallel or multiple simultaneous processes, no server programs such as VSCode Server or Jupyter; overloading programs are terminated without notice."
+
+# How to log in (https://www.t4.cii.isct.ac.jp/docs/handbook.en/start/): SSH key authentication only; the public key
+# is registered in the TSUBAME portal.
+[login]
+required = ["user", "identities"]
+user_label = "your TSUBAME login name (begins with u, e.g. ux00000)"
+setup = """Once, before the first login:
+1. Create an SSH key pair with a passphrase on your own machine; ECDSA or Ed25519 is recommended (short RSA keys with SHA-1 are refused by the login nodes).
+2. Log in to the TSUBAME portal (https://portal.t4.gsic.titech.ac.jp), choose "Manage SSH public key" and upload or paste the PUBLIC key in OpenSSH format (the .pub file), never the private key. Registering through Open OnDemand also works.
+3. Put the private key path in the identities field.
+4. At the first connection, compare the host key with the documented fingerprints of login.t4.gsic.titech.ac.jp: ED25519 SHA256:l++Qi9lvnHIRQbQ+638MgWsZdSyZvdAWicwDsYq5KBI, ECDSA SHA256:CyUFJvJ9ExAE4QEM3BTcKHZ2g7Mw57NnCzbvqIM0ewo.
+Each login: enter your key passphrase (or use an agent). "Permission denied (publickey,hostbased)" usually means no public key in OpenSSH format is registered in the portal."""
+
+[[clusters]]
+name = "tsubame4"
+title = "TSUBAME4.0 (Grid Engine)"
+host = "login.t4.gsic.titech.ac.jp"

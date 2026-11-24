@@ -1,0 +1,37 @@
+# EPCC Cirrus (Edinburgh, UK; UKRI National Compute Resource): HPE EX4000, 640 CPU nodes with 2x 144-core AMD EPYC 9825
+# (576 standard 768 GB, 64 high-memory 1,536 GB), no GPU nodes. Slurm with --partition (standard, highmem), --qos and
+# --account. Login: login.cirrus.ac.uk with an SSH key registered in SAFE plus a TOTP code.
+schema = 1
+version = "2026.11.23"
+name = "EPCC Cirrus"
+scheduler = "slurm"
+match = ["cirrus*", "*.cirrus.ac.uk"]
+docs = "https://docs.cirrus.ac.uk/"
+status = "https://www.cirrus.ac.uk/support-access/status/"
+parallel_fs = ["/epccfs", "/work"]
+numa_domains = 8
+globus = "https://docs.cirrus.ac.uk/software-tools/globus/"
+
+# How to log in (https://docs.cirrus.ac.uk/user-guide/connecting/): MFA with an SSH key (passphrase) uploaded in SAFE
+# and a time-based one-time passcode.
+[login]
+required = ["user", "identities"]
+user_label = "your Cirrus username (as in SAFE)"
+host = "login.cirrus.ac.uk"
+setup = """Once, before the first login:
+1. On your own machine create an SSH key pair protected by a passphrase, e.g. ssh-keygen -t ed25519 (or -t rsa),
+   and fill in the path of its private key here.
+2. Log in to SAFE (https://safe.epcc.ed.ac.uk/), Login accounts > your Cirrus account > Add Credential >
+   SSH public key, and upload the PUBLIC key (.pub).
+3. Set up a TOTP (MFA) generator for your machine account in SAFE (see the SAFE guide for users).
+4. At the first connection check the host key fingerprint (SHA256) for login.cirrus.ac.uk: ED25519
+   WX5NbmOOYZdcm0HN3KgSkkI67+cSudpll0E1R6n9nto, ECDSA shYcH1BDaOTSVO9lFIt2YdQQ/k0qxrF8MltLDObcLrE,
+   RSA WZ7VBV9PYblA0DRIJvry9C9oaznaFAb6sfjKUw8Oih8 (fingerprints of the host keys published on the connecting page).
+   If you used Cirrus before the change to the EX4000, remove the old login.cirrus.ac.uk entry from known_hosts.
+Each login: your key passphrase, then the TOTP code, in the terminal pane. Data transfers go through the login
+nodes (or Globus: collections "CephFS" for /home, "NAIDIN" for /epccfs)."""
+
+[[clusters]]
+name = "cirrus"
+title = "Cirrus"
+host = "login.cirrus.ac.uk"

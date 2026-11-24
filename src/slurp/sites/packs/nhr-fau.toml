@@ -1,0 +1,49 @@
+# NHR@FAU (Erlangen): Fritz (CPU; 992 nodes 2x Xeon Platinum 8360Y Ice Lake, 72 cores; Sapphire Rapids spr1tb/spr2tb
+# nodes), Alex (GPU; 8 NVIDIA A40, A100 40/80 GB or RTX Pro 6000 per node), Helma (GPU; 4 H100 or H200 per node, and
+# AMD Turin CPU nodes; experienced users only). Logins fritz.nhr.fau.de, alex.nhr.fau.de, helma.nhr.fau.de (each
+# redirects to a frontend); the frontends have private IPv4 addresses: reach them through the dialog server
+# csnhr.nhr.fau.de (or directly over IPv6, or from the FAU network/VPN for FAU users).
+schema = 1
+version = "2026.11.23"
+name = "NHR@FAU Fritz, Alex and Helma"
+scheduler = "slurm"
+match = ["*.nhr.fau.de", "csnhr*"]
+docs = "https://doc.nhr.fau.de/"
+# $FASTTMP Lustre (Fritz, Alex; high-watermark deletion of the oldest and largest files above e.g. 80% filling);
+# /anvme (Alex) and /hnvme (Helma) NVMe Lustre workspaces
+parallel_fs = ["/lustre", "/anvme", "/hnvme"]
+login_node_limits = "Do not run applications on the frontend nodes; use them only for compiling."
+
+# How to log in (https://doc.nhr.fau.de/access/ssh-command-line/, https://doc.nhr.fau.de/access/overview/): SSH
+# key only, with a strong passphrase, uploaded to the HPC portal; ProxyJump through csnhr.nhr.fau.de.
+[login]
+required = ["user", "identities"]
+user_label = "your HPC account (from the HPC portal, not your SSO identity)"
+jump = "{user}@csnhr.nhr.fau.de"
+identities = ["~/.ssh/id_ed25519_nhr_fau"]
+setup = """Once, before the first login:
+1. On each machine you connect from, create a key with a strong passphrase (required):
+   ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_nhr_fau
+   (RSA of at least 4096 bits and ECDSA nistp521 are accepted too).
+2. Upload only the PUBLIC key (~/.ssh/id_ed25519_nhr_fau.pub) in the HPC portal, https://portal.hpc.fau.de, User tab.
+   FAU Tier3 accounts need the access form for Fritz and Alex; Helma needs its own application.
+3. Check the dialog server's host key at the first login: csnhr.nhr.fau.de ED25519
+   SHA256:ZbsDL9koTZ48+trswAeqvjVGZyv/kBUtOjodEN4XMCo (the frontends' fingerprints: Host key fingerprints page
+   in the NHR@FAU documentation).
+Then each login: your key's passphrase; there is no password login. FAU users inside the FAU network or VPN, and
+anyone with IPv6, can also connect without the jump host."""
+
+[[clusters]]
+name = "fritz"
+title = "Fritz (CPU)"
+host = "fritz.nhr.fau.de"
+
+[[clusters]]
+name = "alex"
+title = "Alex (GPU)"
+host = "alex.nhr.fau.de"
+
+[[clusters]]
+name = "helma"
+title = "Helma (GPU, H100/H200)"
+host = "helma.nhr.fau.de"

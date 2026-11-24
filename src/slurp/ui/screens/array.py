@@ -9,7 +9,7 @@ from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, DataTable, Static, TabbedContent, TabPane
-from .. import icons
+from ...resources import icons
 
 import shlex
 from rich.progress_bar import ProgressBar as RichProgressBar

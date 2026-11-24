@@ -1,0 +1,40 @@
+# NHR@ZIB Lise (Berlin): CPU CLX (838 nodes, Intel Cascade Lake 9242), CPU Genoa (250 nodes, 2x AMD EPYC 9654;
+# partitions cpu-genoa, cpu-genoa:test), GPU A100 (42 nodes, 4 A100 80 GB), GPU H200 (14 nodes, 4 H200), GPU PVC
+# (8 nodes, 4 Intel Data Center GPU Max 1550; gpu-pvc). Each partition group has its own login nodes and software:
+# blogin.nhr.zib.de (CLX), bgnlogin.nhr.zib.de (A100), bgilogin.nhr.zib.de (PVC). HOME and WORK (/scratch) are on
+# IBM Storage Scale.
+schema = 1
+version = "2026.11.23"
+name = "NHR@ZIB Lise"
+scheduler = "slurm"
+match = ["*.nhr.zib.de", "blogin.nhr*", "bgnlogin*", "bgilogin*", "lise"]
+docs = "https://user.nhr.zib.de/"
+parallel_fs = ["/scratch"] # WORK: /scratch/usr/$USER, /scratch/projects/<projectID> (Storage Scale, no backup)
+
+# How to log in (https://user.nhr.zib.de/wiki/spaces/PUB/pages/428112/Usage+Guide and the partition pages): SSH
+# key only, the key protected by a passphrase, its public key managed in the NHR@ZIB portal.
+[login]
+required = ["user", "identities"]
+user_label = "your NHR@ZIB username"
+setup = """Once, before the first login:
+1. On your own machine create an SSH key protected by a passphrase (NHR@ZIB accepts only passphrase-protected
+   keys) with ssh-keygen, and put the private key's path in the identity files field.
+2. Upload only the PUBLIC key (.pub) in the NHR@ZIB portal, https://portal.nhr.zib.de. Keys are not synchronised
+   with NHR@Göttingen any more: a key uploaded to Academic Cloud does not work at ZIB.
+3. Log in to the login node of the partition you will compute on (its Slurm partitions and software differ).
+Then each login: your key's passphrase (ssh-add once per session saves retyping it); passwords are not accepted."""
+
+[[clusters]]
+name = "lise-clx"
+title = "Lise CPU CLX"
+host = "blogin.nhr.zib.de"
+
+[[clusters]]
+name = "lise-a100"
+title = "Lise GPU A100"
+host = "bgnlogin.nhr.zib.de"
+
+[[clusters]]
+name = "lise-pvc"
+title = "Lise GPU PVC (Intel Max 1550)"
+host = "bgilogin.nhr.zib.de"

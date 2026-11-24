@@ -28,8 +28,8 @@ def test_overview_at_the_start(check, quiet, start_on_overview):
           break
       await pilot.pause(0.3)
       ov = app.screen
-      check("at the start no subtab is open: the overview", isinstance(ov, OverviewScreen) and not app.cluster.jobs_open
-            and not app.cluster.views, type(ov).__name__)
+      check("at the start no subtab is open: the overview", isinstance(ov, OverviewScreen) and not app.cluster.view.jobs_open
+            and not app.cluster.view.views, type(ov).__name__)
       check("…the job list's subtab is not there", not ov.query_one("#view-jobs").display and not ov.query_one("#view-close-jobs").display)
       bar = ov.query_one("#view-tabs")
       check("the overview: the only subtab, shown, without ✕", ov.query_one("#view-overview").display
@@ -46,34 +46,34 @@ def test_overview_at_the_start(check, quiet, start_on_overview):
       check("Quota and Health", ov.query_one("#ov-quota").display and ov.query_one("#ov-info").display)
       check("not many lines: a card, not a report", card.region.height <= 14, card.region)
       app.show_view(None); await pilot.pause(0.4)
-      check("opening the job list: a subtab with ✕", app.screen is app.main and app.cluster.jobs_open
+      check("opening the job list: a subtab with ✕", app.screen is app.main and app.cluster.view.jobs_open
             and app.main.query_one("#view-jobs").display and app.main.query_one("#view-close-jobs").display)
       tabs = [b for b in app.main.query_one("#view-tabs").children if b.display]
       check("the overview stays, the leftmost subtab", tabs and tabs[0].id == "view-overview" and tabs[1].id == "view-jobs"
             and app.main.query_one("#view-overview").variant == "default", [b.id for b in tabs])
       await pilot.click("#view-overview"); await pilot.pause(0.3)
-      check("a click on it: the overview, the job list stays open", isinstance(app.screen, OverviewScreen) and app.cluster.jobs_open)
+      check("a click on it: the overview, the job list stays open", isinstance(app.screen, OverviewScreen) and app.cluster.view.jobs_open)
       app.show_view(None); await pilot.pause(0.3)
       await pilot.click("#view-close-jobs"); await pilot.pause(0.4)
-      check("its ✕ closes it: the overview again", isinstance(app.screen, OverviewScreen) and not app.cluster.jobs_open)
+      check("its ✕ closes it: the overview again", isinstance(app.screen, OverviewScreen) and not app.cluster.view.jobs_open)
       await pilot.click("#ov-quota"); await pilot.pause(0.5)
-      check("Quota: a window over the overview, no subtab", type(app.screen).__name__ == "QuotaScreen" and not app.cluster.views
+      check("Quota: a window over the overview, no subtab", type(app.screen).__name__ == "QuotaScreen" and not app.cluster.view.views
             and isinstance(app.screen_stack[-2], OverviewScreen), type(app.screen).__name__)
       await pilot.press("escape"); await pilot.pause(0.3)
       check("Esc closes it: the overview again", isinstance(app.screen, OverviewScreen))
       await pilot.click("#ov-info"); await pilot.pause(0.5)
-      check("Health: a window too", type(app.screen).__name__ == "ClusterInfoScreen" and not app.cluster.views, type(app.screen).__name__)
+      check("Health: a window too", type(app.screen).__name__ == "ClusterInfoScreen" and not app.cluster.view.views, type(app.screen).__name__)
       await pilot.click("#ci-close"); await pilot.pause(0.3)
       check("Close closes it", isinstance(app.screen, OverviewScreen))
       app.show_view(None); await pilot.pause(0.3)
       await pilot.press("ctrl+w"); await pilot.pause(0.4)
-      check("Ctrl-W closes the job list too: the overview", isinstance(app.screen, OverviewScreen) and not app.cluster.jobs_open,
+      check("Ctrl-W closes the job list too: the overview", isinstance(app.screen, OverviewScreen) and not app.cluster.view.jobs_open,
             type(app.screen).__name__)
       await pilot.press("f10"); await pilot.pause(0.3)
       check("the menu is there too (F10)", type(app.screen).__name__ == "MenuScreen")
       items = app.screen.query_one("#menu-list")
       items.highlighted = items.get_option_index("job_list"); await pilot.press("enter"); await pilot.pause(0.5)
-      check("Job list in the menu opens the job list", app.screen is app.main and app.cluster.jobs_open, type(app.screen).__name__)
+      check("Job list in the menu opens the job list", app.screen is app.main and app.cluster.view.jobs_open, type(app.screen).__name__)
       await pilot.press("q")
   asyncio.run(main())
 

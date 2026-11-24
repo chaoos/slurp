@@ -153,7 +153,7 @@ async def helper_links(check, mgr, S):
   r = subprocess.run([helper, "uninstall"], capture_output=True, text=True, env=env)
   check("uninstall removes it", r.returncode == 0 and not os.path.exists(helper)
         and not os.path.exists(os.path.join(env["XDG_DATA_HOME"], "applications/slurp-helper.desktop")))
-  mgr.shutdown() # (here, while the loop runs: the relays' processes end on it)
+  await mgr.stopped() # (here, while the loop runs: the relays' processes end on it)
   await until(lambda: all(lk.tunnel is None or lk.tunnel.returncode is not None for lk in mgr.links), 10)
 
 def mounted(path):

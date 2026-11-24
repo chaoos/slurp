@@ -15,7 +15,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
-  Button, Checkbox, Collapsible, Input, Label, RadioButton,
+  Button, Checkbox, Collapsible, DataTable, Input, Label, RadioButton,
   RadioSet, Select, Static, TextArea
 )
 from textual.suggester import SuggestFromList
@@ -556,13 +556,14 @@ class SshCheckScreen(ModalScreen):
   """
   BINDINGS = [Binding("escape", "close", "Close"), Binding("ctrl+right_square_bracket", "close", "Close", priority=True)]
 
-  def __init__(self, destination, settings=None, pre_login=""):
+  def __init__(self, destination, settings=None, pre_login="", pre_login_fallback=False):
     super().__init__()
     import json
     from ...cluster import sshsetup
     self.what = sshsetup.label(settings) if settings else destination
     self.args = [sys.executable, "-m", "slurp.cluster.sshcheck",
-                 json.dumps({"destination": destination, "ssh": settings or None, "pre_login": pre_login or ""})]
+                 json.dumps({"destination": destination, "ssh": settings or None, "pre_login": pre_login or "",
+                             "pre_login_fallback": bool(pre_login_fallback)})]
     self.session = None
 
   def compose(self) -> ComposeResult:
@@ -620,11 +621,185 @@ class SshCheckScreen(ModalScreen):
     self.dismiss()
 
 
+def sites_requirable():
+  from ...sites import REQUIRABLE
+  return REQUIRABLE
+
+def sshsetup_label(settings):
+  from ...cluster import sshsetup
+  return sshsetup.label(settings)
+
+def site_login_text(entry):
+  """What a site's cluster's login is, what it needs here (found or not), what to do once; where it comes from"""
+  out = Text()
+  out.append(f"{entry['site']}", style="bold")
+  out.append(f" (site pack {entry['version'] or 'without version'}, {'built in' if entry['builtin'] else 'yours'}): ", style="dim")
+  how = [f"through the jump host {entry['jump'].replace('{user}@', '')}" if entry.get("jump") else "directly",
+         f"with {', '.join(entry.get('identities', []))}" if entry.get("identities") else ""]
+  out.append("logs in " + " ".join(h for h in how if h))
+  if entry.get("pre_login"):
+    out.append(f"; first {entry['pre_login']} here, in the login pane"
+               + (" (when a login without it fails)" if entry.get("pre_login_fallback") else " (before every login)"))
+  out.append(". Fill in " + (entry.get("user_label") or "your user there") + " (User).\n")
+  if entry.get("scheduler", "slurm") != "slurm":
+    from ... import sites
+    out.append(f"Its batch system is {sites.SCHEDULERS.get(entry['scheduler'], entry['scheduler'])}, not Slurm: slurp logs in and has "
+               "its files, shells and transfers, but no job list and no checks of job scripts there.\n", style="yellow")
+  for need in entry.get("needs", []):
+    found = shutil.which(need["command"])
+    out.append(f"✔ {need['command']}: {found}\n" if found else f"✖ {need['command']} is not installed here: ", style="green" if found else "red")
+    if not found:
+      out.append(need.get("install", "") + "\n")
+  if entry.get("setup"):
+    out.append(entry["setup"].strip() + "\n")
+  if not entry["builtin"]:
+    out.append("From your own pack: check what it fills in (the command runs on this machine).\n", style="yellow")
+  return out
+
+def site_login_way(entry):
+  """How a site's cluster logs in, in a few words (a column of the search window)"""
+  parts = [f"via {entry['jump'].replace('{user}@', '')}" if entry.get("jump") else "direct"]
+  if entry.get("pre_login"):
+    parts.append(entry["pre_login"].split()[0])
+  elif entry.get("identities"):
+    parts.append("key")
+  if entry.get("scheduler", "slurm") != "slurm": # (no job list there: said in the list already)
+    from ... import sites
+    parts.append(f"no Slurm: {sites.SCHEDULERS.get(entry['scheduler'], entry['scheduler'])}")
+  return ", ".join(parts)
+
+def site_cluster_words(entry):
+  """What a search of the sites' clusters looks in: the cluster, its site, its host and jump host, the pack (its file)"""
+  words = [entry.get("title", ""), entry.get("name", ""), entry.get("site", ""), entry.get("host", ""), entry.get("id", ""),
+           entry.get("jump", "").replace("{user}@", ""), entry.get("scheduler", "slurm")]
+  return " ".join(words).lower()
+
+class SiteClusterScreen(ModalScreen[str | None]):
+  """The clusters of the site packs, to choose one for a new SSH connection: a search (each word must match the
+  cluster, its site, host or pack), the list (↑ ↓ while typing; Enter or a click chooses), and how the highlighted one
+  logs in. Dismissed with its id, or None"""
+  DEFAULT_CSS = """
+  SiteClusterScreen { align: center middle; }
+  #sc-dialog { width: 120; max-width: 96%; height: 90%; border: thick $accent; background: $surface; padding: 1 2; }
+  #sc-title { text-style: bold; height: auto; }
+  #sc-search { margin-top: 1; }
+  #sc-list { height: 1fr; margin-top: 1; }
+  #sc-count { height: auto; color: $text-muted; }
+  #sc-info-scroll { height: 12; border: round $panel; padding: 0 1; }
+  #sc-info { height: auto; }
+  #sc-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+  #sc-buttons Button { margin-left: 1; }
+  """
+  BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+  def __init__(self, clusters, chosen=None):
+    super().__init__()
+    self.clusters, self.chosen = clusters, chosen
+    self.shown = []
+
+  def compose(self) -> ComposeResult:
+    from ..widgets import ClickTable
+    with Vertical(id="sc-dialog"):
+      yield Static("Choose a cluster to log in to", id="sc-title")
+      yield Input(placeholder="search: a cluster, a site, a host (e.g. daint, jülich, lumi, cineca); ↑ ↓ choose, Enter takes it",
+                  id="sc-search")
+      yield ClickTable(id="sc-list", cursor_type="row", zebra_stripes=True)
+      yield Static(id="sc-count")
+      with VerticalScroll(id="sc-info-scroll"):
+        yield Static(id="sc-info")
+      with Horizontal(id="sc-buttons"):
+        yield Button("Cancel", id="sc-cancel", compact=True)
+        yield Button("Choose", id="sc-ok", variant="primary", compact=True)
+
+  def on_mount(self):
+    from ..widgets import ClickTable
+    table = self.query_one("#sc-list", ClickTable)
+    for key, label in (("cluster", "Cluster"), ("site", "Site"), ("host", "Host"), ("login", "Login"), ("pack", "Pack")):
+      table.add_column(label, key=key)
+    self.populate()
+    if self.chosen in [c["id"] for c in self.shown]:
+      table.move_cursor(row=[c["id"] for c in self.shown].index(self.chosen))
+    self.query_one("#sc-search", Input).focus()
+
+  def populate(self):
+    from ..widgets import ClickTable
+    table = self.query_one("#sc-list", ClickTable)
+    terms = self.query_one("#sc-search", Input).value.lower().split()
+    terms = [t.replace("ü", "u").replace("ue", "u") for t in terms] # (jülich, juelich, julich)
+    def matches(entry):
+      words = site_cluster_words(entry).replace("ü", "u").replace("ue", "u")
+      return all(t in words for t in terms)
+    self.shown = [c for c in self.clusters if matches(c)]
+    self.shown.sort(key=lambda c: (c["site"].lower(), c["title"].lower()))
+    table.clear()
+    for c in self.shown:
+      pack = f"{c['version'] or '-'}" + ("" if c["builtin"] else " (yours)")
+      table.add_row(Text(c["title"], style="bold"), c["site"], c.get("host", ""), site_login_way(c), pack, key=c["id"])
+    if self.shown:
+      table.move_cursor(row=0) # (a new search: its first match)
+    self.query_one("#sc-count", Static).update(
+      f"{len(self.shown)} of {len(self.clusters)} clusters" + (f" match {' '.join(terms)}" if terms else "")
+      + " · from the site packs (built in, and yours in ~/.config/slurp/rules)")
+    self.query_one("#sc-ok", Button).disabled = not self.shown
+    self.show_info()
+
+  def current(self):
+    from ..widgets import ClickTable
+    table = self.query_one("#sc-list", ClickTable)
+    if not self.shown or not table.row_count:
+      return None
+    return self.shown[min(table.cursor_row, len(self.shown) - 1)]
+
+  def show_info(self):
+    entry = self.current()
+    self.query_one("#sc-info", Static).update(site_login_text(entry) if entry else Text("no cluster matches", style="dim"))
+
+  @on(Input.Changed, "#sc-search")
+  def search_changed(self, event):
+    self.populate()
+
+  def on_key(self, event):
+    """↑ ↓ (and page up, page down) move in the list while the search has the focus"""
+    from ..widgets import ClickTable
+    if self.focused is not self.query_one("#sc-search", Input):
+      return
+    table = self.query_one("#sc-list", ClickTable)
+    moves = {"down": table.action_cursor_down, "up": table.action_cursor_up, "pagedown": table.action_page_down,
+             "pageup": table.action_page_up}
+    if event.key in moves:
+      event.stop()
+      event.prevent_default()
+      moves[event.key]()
+
+  @on(DataTable.RowHighlighted, "#sc-list")
+  def highlighted(self, event):
+    self.show_info()
+
+  @on(DataTable.RowSelected, "#sc-list")
+  def selected(self, event):
+    event.stop()
+    self.dismiss(event.row_key.value)
+
+  @on(Input.Submitted, "#sc-search")
+  @on(Button.Pressed, "#sc-ok")
+  def ok(self, event):
+    event.stop()
+    entry = self.current()
+    if entry is not None:
+      self.dismiss(entry["id"])
+
+  @on(Button.Pressed, "#sc-cancel")
+  def action_cancel(self, event=None):
+    if event is not None:
+      event.stop()
+    self.dismiss(None)
+
 class AddClusterScreen(ModalScreen):
-  """A new tab. The main way: an SSH destination, a Host of ~/.ssh/config (its user, jump hosts and keys are there;
-  suggested as you type) or user@host; empty: this machine. The fallback: the full SSH settings (user, host, port,
-  jump hosts, identity files, more options). Check tries the connection without asking anything and says what is
-  wrong; Add adds the tab, checked or not. Dismissed with the destination (str), {"ssh": settings}, or None.
+  """A new tab, as the forms of the endpoints: its name (the tab's), then the main way: an SSH destination, a Host of
+  ~/.ssh/config (its user, jump hosts and keys are there; suggested as you type) or user@host; empty: this machine.
+  The fallback: the full SSH settings (user, host, port, jump hosts, identity files, more options). Test tries the
+  connection in a terminal and says what is wrong; Add adds the tab, tested or not. Dismissed with the destination
+  (str), {"destination" or "ssh": settings, "name", "pre_login", …}, or None.
   With a cluster: its SSH settings, to see and change (Save): filled in, with the blocks of ~/.ssh/config that apply
   and what ssh makes of it all (ssh -G)."""
   DEFAULT_CSS = """
@@ -632,12 +807,29 @@ class AddClusterScreen(ModalScreen):
   #cluster-dialog { width: 100; max-width: 98%; height: auto; max-height: 96%; border: thick $accent; background: $surface; padding: 1 2; }
   #cluster-body { height: auto; max-height: 80vh; } /* (the buttons below stay in view, whatever is above) */
   #cluster-title { text-style: bold; margin-bottom: 1; }
-  #cluster-destination { width: 1fr; }
-  #cluster-hint { height: auto; color: $text-muted; margin-bottom: 1; }
+  .cluster-note { height: auto; color: $text-muted; }
+  .cluster-row { height: auto; margin-top: 1; }
+  .cluster-row Label { width: 18; }
+  .cluster-row Input { width: 1fr; }
+  #cluster-hint { height: auto; color: $text-muted; margin: 0 0 1 18; }
+  #cluster-site { width: 1fr; height: 1; }
+  #cluster-site-choose, #cluster-site-clear { margin-left: 1; }
+  #cluster-site-info { height: auto; margin: 1 0 0 18; padding: 0 1; border-left: wide $accent; }
   #cluster-full { height: auto; margin-bottom: 1; }
   .ssh-row { height: 1; margin-bottom: 1; }
+  /* a field to fill in: yellow, red after Add or Test without it; the terminal's yellow and red, in every theme ($warning
+     is a red in some) and when focused too (the cursor is often there). The one-line fields: a bar at each end, no
+     lines above and below (they stay one line high); the others have a border anyway: its colour */
+  #cluster-dialog Input.-required, #cluster-dialog Input.-required:focus { border: round ansi_yellow; }
+  #cluster-dialog Input.-missing, #cluster-dialog Input.-missing:focus { border: round ansi_red; }
+  #cluster-dialog .ssh-row Input.-required, #cluster-dialog .ssh-row Input.-required:focus {
+    height: 1; padding: 0; border: none; border-left: outer ansi_yellow; border-right: outer ansi_yellow; }
+  #cluster-dialog .ssh-row Input.-missing, #cluster-dialog .ssh-row Input.-missing:focus {
+    border-left: outer ansi_red; border-right: outer ansi_red; }
+  .required-hint { height: auto; color: ansi_red; margin: 0 0 1 16; }
   .ssh-row Label { width: 16; padding: 0 1 0 0; }
   .ssh-row Input { width: 1fr; }
+  #ssh-identities-browse { margin-left: 1; }
   #ssh-port { width: 12; }
   #ssh-options { height: 5; }
   #cluster-config { height: auto; margin-bottom: 1; }
@@ -655,11 +847,26 @@ class AddClusterScreen(ModalScreen):
     hosts = sshsetup.config_hosts()
     with Vertical(id="cluster-dialog"):
       with VerticalScroll(id="cluster-body"):
-        yield Static(f"SSH settings of the tab {self.cluster.name}" if self.cluster else "Add a tab: a cluster (or this machine)",
-                     id="cluster-title", markup=False)
-        yield Label("SSH destination")
-        yield Input(placeholder="a Host of your ~/.ssh/config (best), or user@host; empty: this machine", id="cluster-destination",
-                    suggester=SuggestFromList(hosts, case_sensitive=False) if hosts else None)
+        yield Static(f"The SSH connection {self.cluster.name}" if self.cluster else "A new SSH connection", id="cluster-title", markup=False)
+        yield Static("A cluster (or this machine) as a tab: its jobs, files, shells; and an endpoint of transfers.",
+                     classes="cluster-note", markup=False)
+        sites = self.site_choices()
+        if sites:
+          with Horizontal(classes="cluster-row"):
+            yield Label("From a site")
+            yield Static(Text("(none: fill in yourself)", style="dim"), id="cluster-site")
+            yield Button("Choose…", id="cluster-site-choose", compact=True,
+                         tooltip=f"a cluster slurp knows how to log in to ({len(sites)}, searchable): fills in the fields "
+                         "below (see and change them before Add)")
+            yield Button("Clear", id="cluster-site-clear", compact=True, tooltip="no site: the form as you fill it in")
+          yield Static(id="cluster-site-info")
+        with Horizontal(classes="cluster-row"):
+          yield Label("Name")
+          yield Input(placeholder="the tab's name, shown everywhere (default: the destination)", id="cluster-name")
+        with Horizontal(classes="cluster-row"):
+          yield Label("SSH destination")
+          yield Input(placeholder="a Host of your ~/.ssh/config (best), or user@host; empty: this machine", id="cluster-destination",
+                      suggester=SuggestFromList(hosts, case_sensitive=False) if hosts else None)
         yield Static("The best way: an entry of ~/.ssh/config with the user, jump hosts and keys of the cluster; ssh, "
                      "scp and your other tools use it too." + (f" Yours: {', '.join(hosts[:12])}" + (" …" if len(hosts) > 12 else "")
                      if hosts else " You have none yet."), id="cluster-hint", markup=False)
@@ -668,46 +875,267 @@ class AddClusterScreen(ModalScreen):
                                           ("User", "user", "your user there (default: as here, or ~/.ssh/config)"),
                                           ("Port", "port", "22"),
                                           ("Jump hosts", "jump", "ProxyJump: user@gateway[:port], more separated by commas"),
-                                          ("Identity files", "identities", "private keys, e.g. ~/.ssh/cscs-key (more: commas)"),
-                                          ("Tab name", "name", "the tab's name (default: user@host)")):
-            with Horizontal(classes="ssh-row"):
+                                          ("Identity files", "identities", "private keys, e.g. ~/.ssh/cscs-key (more: commas)")):
+            with Horizontal(classes="ssh-row", id=f"ssh-{key}-row"):
               yield Label(label)
               yield Input(placeholder=placeholder, id=f"ssh-{key}", compact=True)
+              if key == "identities":
+                yield Button("Browse…", id="ssh-identities-browse", compact=True,
+                             tooltip="choose a private key on this machine (its content is not read or shown)")
+            yield Static(id=f"ssh-{key}-hint", classes="required-hint", markup=False)
           yield Label("More ssh options, one per line: Key=Value (e.g. ForwardAgent=yes, ServerAliveInterval=30, "
                       "UserKnownHostsFile=…, PreferredAuthentications=…, ProxyCommand=…)")
           yield TextArea(id="ssh-options", soft_wrap=False)
-        yield Label("Run before login (optional)")
-        yield Input(placeholder="a command on this machine before every login, e.g. one that signs your key (cscs-keygen, step ssh login …)",
-                    id="ssh-pre-login", tooltip="it runs in the login pane: answer it there (a password, a code); then the login follows")
+        with Horizontal(classes="cluster-row"):
+          yield Label("Run before login")
+          yield Input(placeholder="(optional) a command here before every login, e.g. one that signs your key (cscs-keygen, step ssh login …)",
+                      id="ssh-pre-login", tooltip="it runs in the login pane: answer it there (a password, a code); then the login follows. "
+                      "What it exports (eval $(ssh-agent): SSH_AUTH_SOCK, …) is there for the login")
+        yield Static(id="ssh-pre-login-hint", classes="required-hint", markup=False)
+        yield Checkbox("only when the login fails without it (first a login without it: a key or certificate that is still "
+                       "valid is not made anew)", id="ssh-pre-login-fallback", compact=True)
         if self.cluster is not None:
           yield Static(id="cluster-config")
-      with Horizontal(id="cluster-actions"):
-        yield Button("Cancel", id="cluster-cancel", compact=True)
-        yield Button("Check…", id="cluster-check-button", compact=True,
+      with Horizontal(id="cluster-actions"): # (as the endpoints' forms: Test, Cancel, Add)
+        yield Button("Test", id="cluster-check-button", compact=True,
                      tooltip="try the connection in a terminal, as the login goes (answer what it asks), and say what is wrong")
+        yield Button("Cancel", id="cluster-cancel", compact=True)
         yield Button("Save" if self.cluster else "Add", id="cluster-confirm", variant="primary", compact=True,
                      tooltip="the tab takes these settings (the next login uses them)" if self.cluster else
                      "add the tab (checked or not); it logs in")
 
+  site = None # (the site's cluster chosen in From a site: its entry of sites.site_clusters())
+
+  def site_choices(self):
+    """The clusters of the site packs (a new tab only: editing one keeps its own settings)"""
+    if self.cluster is not None:
+      return []
+    from ... import sites
+    try:
+      return sites.site_clusters()
+    except Exception: # (a pack that cannot be read must not keep the form from opening)
+      return []
+
   def on_mount(self):
-    self.query_one("#cluster-destination", Input).focus()
+    self.query_one("#cluster-name", Input).focus()
+    if self.query("#cluster-site-info"):
+      self.query_one("#cluster-site-info").display = False
+      self.query_one("#cluster-site-clear").display = False
+    for hint in self.query(".required-hint"):
+      hint.display = False
     cluster = self.cluster
     if cluster is None:
       return
     settings = cluster.ssh or {}
+    default = sshsetup_label(settings) if settings else cluster.destination
+    if cluster.name != default: # (its own name: shown; the default stays empty, it follows the destination)
+      self.query_one("#cluster-name", Input).value = cluster.name
     self.query_one("#ssh-pre-login", Input).value = cluster.pre_login or ""
+    self.query_one("#ssh-pre-login-fallback", Checkbox).value = bool(cluster.pre_login_fallback)
     if settings:
       self.query_one("#cluster-full", Collapsible).collapsed = False
-      for key in ("host", "user", "port", "jump", "name"):
+      for key in ("host", "user", "port", "jump"):
         self.query_one(f"#ssh-{key}", Input).value = str(settings.get(key) or "")
+      if settings.get("name"):
+        self.query_one("#cluster-name", Input).value = settings["name"]
       self.query_one("#ssh-identities", Input).value = ", ".join(settings.get("identities") or [])
+      self.call_after_refresh(self.mark_required)
       self.query_one("#ssh-options", TextArea).load_text("\n".join(settings.get("options") or []))
       self.query_one("#ssh-host", Input).focus()
     else:
       self.query_one("#cluster-destination", Input).value = cluster.destination or ""
     self.show_config()
 
+  @on(Button.Pressed, "#cluster-site-choose")
+  def choose_site(self, event=None):
+    """The search window of the sites' clusters; the one chosen fills in the form"""
+    if event is not None:
+      event.stop()
+    def chosen(cluster_id):
+      if cluster_id is not None:
+        self.site_chosen(cluster_id)
+    self.app.push_screen(SiteClusterScreen(self.site_choices(), (self.site or {}).get("id")), chosen)
+
+  @on(Button.Pressed, "#cluster-site-clear")
+  def clear_site(self, event=None):
+    if event is not None:
+      event.stop()
+    self.site_chosen(None)
+
+  def site_chosen(self, cluster_id):
+    """A site's cluster (its id): its login fills in the form (the full settings, the command before the login), and
+    what it needs and what to do once is said; None: no site, the form as it was filled in"""
+    from ... import sites
+    entry = next((c for c in self.site_choices() if c["id"] == cluster_id), None)
+    self.site = entry
+    info = self.query_one("#cluster-site-info", Static)
+    info.display = entry is not None
+    self.query_one("#cluster-site", Static).update(Text.assemble((entry["title"], "bold"), f" · {entry['site']}") if entry
+                                                    else Text("(none: fill in yourself)", style="dim"))
+    self.query_one("#cluster-site-clear").display = entry is not None
+    self.mark_required()
+    if entry is None:
+      return
+    user = self.query_one("#ssh-user", Input).value.strip()
+    fill = sites.login_settings(entry, user)
+    self.query_one("#cluster-name", Input).value = fill["name"]
+    self.query_one("#cluster-destination", Input).value = ""
+    self.query_one("#cluster-full", Collapsible).collapsed = False
+    for key in ("host", "port", "jump"):
+      self.query_one(f"#ssh-{key}", Input).value = fill[key]
+    self.query_one("#ssh-identities", Input).value = ", ".join(fill["identities"])
+    self.query_one("#ssh-options", TextArea).load_text("\n".join(fill["options"]))
+    self.query_one("#ssh-pre-login", Input).value = fill["pre_login"]
+    self.query_one("#ssh-pre-login-fallback", Checkbox).value = fill["pre_login_fallback"]
+    field = self.query_one("#ssh-user", Input)
+    field.placeholder = entry.get("user_label") or "your user there"
+    info.update(self.site_text(entry))
+    self.mark_required()
+    first = next((key for key in entry.get("required", []) if not self.field_value(key)), None)
+    if first:
+      self.query_one(f"#ssh-{first.replace('_', '-')}", Input).focus()
+
+  def site_text(self, entry):
+    return site_login_text(entry)
+
+  REQUIRED_LABELS = {"user": "the user", "host": "the host", "port": "the port", "jump": "the jump host",
+                     "identities": "the identity files", "pre_login": "the command before the login"}
+
+  def field_value(self, key):
+    return self.query_one(f"#ssh-{key.replace('_', '-')}", Input).value.strip()
+
+  def required_fields(self):
+    """The fields the chosen site's cluster needs filled in (its pack's required)"""
+    return list((self.site or {}).get("required", []))
+
+  def field_problem(self, key):
+    """What is wrong with a filled-in field, "" if nothing: the identity files must be on this machine, files (not
+    directories), and private keys (not the .pub half). Only whether they are there: none is read"""
+    if key != "identities":
+      return ""
+    problems = []
+    for path in (p.strip() for p in self.field_value("identities").split(",")):
+      full = os.path.expanduser(path)
+      if not path:
+        continue
+      if not os.path.exists(full):
+        problems.append(f"{path} does not exist (here, on this machine)")
+      elif os.path.isdir(full):
+        problems.append(f"{path} is a directory, not a key")
+      elif path.endswith(".pub"):
+        problems.append(f"{path} is the public half: choose the private key ({path[:-4]})")
+    return "; ".join(problems)
+
+  def mark_required(self, pressed=False):
+    """The fields to fill in: a yellow bar (border) while empty; pressed (Add, Test): the empty ones red, each with
+    what to fill in below it. A field that is wrong (an identity file that is not there): red at once, what is wrong
+    below it. The others (or no site chosen): as usual. [the empty required ones and the wrong ones]"""
+    required, missing = self.required_fields(), []
+    for key in sites_requirable():
+      field, hint = self.query_one(f"#ssh-{key.replace('_', '-')}", Input), self.query_one(f"#ssh-{key.replace('_', '-')}-hint", Static)
+      empty = key in required and not field.value.strip()
+      problem = self.field_problem(key)
+      marked = empty or bool(problem)
+      if marked:
+        missing.append(key)
+      if not hasattr(field, "_was_compact"):
+        field._was_compact = field.compact
+      field.compact = field._was_compact and not marked # (a compact input has no border, whatever the CSS says)
+      field.set_class(marked, "-required")
+      field.set_class(bool(problem) or empty and (pressed or field.has_class("-missing")), "-missing")
+      row = self.query(f"#ssh-{key}-row")
+      if row:
+        row.first().set_class(marked, "-required")
+      if problem:
+        hint.update(f"↑ {problem}")
+        hint.display = True
+      elif empty and field.has_class("-missing"):
+        site = (self.site or {}).get("site", "the site")
+        if key == "identities": # (a site that takes keys only: which one, and where to find it)
+          hint.update(f"↑ fill in the private key whose public half you registered at {site} (Browse… finds it): "
+                      "it logs in with a key only")
+        else:
+          what = (self.site or {}).get("user_label") if key == "user" else ""
+          hint.update(f"↑ fill in {what or self.REQUIRED_LABELS[key]}: {site} needs it")
+        hint.display = True
+      else:
+        hint.display = False
+    if not missing and self.anyway:
+      self.set_anyway(False)
+    return missing
+
+  anyway = False # (Add and Test were pressed with marked fields: they say "… anyway", the next press goes on)
+
+  def set_anyway(self, on):
+    """Add and Test as "Add anyway", "Test anyway" (red): the marks are only advice (the command before the login may
+    make the key, the user may come from ~/.ssh/config, …), the next press goes on; off: as they were"""
+    self.anyway = on
+    for button, label, variant in (("#cluster-check-button", "Test", "default"), ("#cluster-confirm", "Save" if self.cluster else "Add", "primary")):
+      b = self.query_one(button, Button)
+      b.label, b.variant = (f"{label} anyway", "error") if on else (label, variant)
+
+  def missing_refused(self, action):
+    """Add or Test with fields marked (empty required ones, identity files that are not there): they turn red, said,
+    and the buttons say "… anyway": True (nothing happens yet). Pressed again: False (it goes on)"""
+    missing = self.mark_required(pressed=True)
+    if not missing:
+      self.set_anyway(False)
+      return False
+    if self.anyway:
+      return False
+    if missing[0] != "pre_login":
+      self.query_one("#cluster-full", Collapsible).collapsed = False
+    self.query_one(f"#ssh-{missing[0].replace('_', '-')}", Input).focus()
+    said = [self.field_problem(k) or f"fill in {self.REQUIRED_LABELS[k]}" for k in missing]
+    self.set_anyway(True)
+    self.notify(f"{action}: " + "; ".join(said) + f" (marked red). {action} anyway: press it again", severity="error")
+    return True
+
   config_timer = None
+
+  @on(Input.Changed, "#ssh-user, #ssh-host, #ssh-port, #ssh-jump, #ssh-identities, #ssh-pre-login")
+  def required_changed(self, event):
+    """(a required field filled in: its mark goes; emptied again: yellow, red only after the next Add or Test; an
+    identity file: red at once while it is not there, with or without a site)"""
+    if self.site is not None or event.input.id == "ssh-identities":
+      if not event.value.strip():
+        event.input.remove_class("-missing")
+      self.mark_required()
+
+  @on(Button.Pressed, "#ssh-identities-browse")
+  def browse_identity(self, event):
+    """A private key on this machine to choose (nothing of it read or shown): it replaces the field's last file if
+    that is not there, else it is added (more keys: commas)"""
+    event.stop()
+    from .files import FilePickScreen
+    field = self.query_one("#ssh-identities", Input)
+    paths = [p.strip() for p in field.value.split(",") if p.strip()]
+    current = os.path.expanduser(paths[-1]) if paths else ""
+    ssh_dir = os.path.expanduser("~/.ssh")
+    start = os.path.dirname(current) if current and os.path.isdir(os.path.dirname(current)) else ssh_dir if os.path.isdir(ssh_dir) else os.path.expanduser("~")
+    def chosen(path):
+      if not path:
+        return
+      home = os.path.expanduser("~")
+      short = "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
+      field.value = ", ".join(paths[:-1] + [short]) if paths and not os.path.exists(current) else ", ".join(paths + [short]) if paths else short
+      field.focus()
+    self.app.push_screen(FilePickScreen("An identity file (a private key) on this machine", start, chosen=current, local=True, preview=False), chosen)
+
+  @on(Input.Changed, "#ssh-user")
+  def site_user_changed(self, event):
+    """(a site's jump host or command before the login that wants the user too: it follows the user filled in, unless
+    you changed it yourself)"""
+    if self.site is None:
+      return
+    from ... import sites
+    for key, field_id, wants in (("jump", "#ssh-jump", "{user}@"), ("pre_login", "#ssh-pre-login", "{user}")):
+      if wants not in (self.site.get(key) or ""):
+        continue
+      field = self.query_one(field_id, Input)
+      if field.value in (sites.login_settings(self.site, u)[key] for u in ("", getattr(self, "site_user", ""))):
+        field.value = sites.login_settings(self.site, event.value.strip())[key]
+    self.site_user = event.value.strip()
 
   @on(Input.Changed)
   def destination_changed(self, event):
@@ -760,7 +1188,8 @@ class AddClusterScreen(ModalScreen):
     """The full settings filled in ({} if no host)"""
     from ...cluster import sshsetup
     value = lambda key: self.query_one(f"#ssh-{key}", Input).value.strip()
-    raw = {key: value(key) for key in ("host", "user", "port", "jump", "name")}
+    raw = {key: value(key) for key in ("host", "user", "port", "jump")}
+    raw["name"] = self.query_one("#cluster-name", Input).value.strip()
     raw["identities"] = [v for v in value("identities").split(",") if v.strip()]
     raw["options"] = [line for line in self.query_one("#ssh-options", TextArea).text.splitlines() if line.strip()]
     return sshsetup.clean(raw) or {}
@@ -769,9 +1198,11 @@ class AddClusterScreen(ModalScreen):
     settings = self.settings()
     pre_login = self.query_one("#ssh-pre-login", Input).value.strip()
     destination = self.query_one("#cluster-destination", Input).value.strip()
+    name = self.query_one("#cluster-name", Input).value.strip()
+    before = {"pre_login": pre_login, **({"pre_login_fallback": True} if self.query_one("#ssh-pre-login-fallback", Checkbox).value else {})} if pre_login else {}
     if settings:
-      return {"ssh": settings, **({"pre_login": pre_login} if pre_login else {})}
-    return {"destination": destination, "pre_login": pre_login} if pre_login else destination
+      return {"ssh": settings, **before}
+    return {"destination": destination, **before, **({"name": name} if name else {})} if pre_login or name else destination
 
   @on(Button.Pressed, "#cluster-check-button")
   def check_pressed(self, event):
@@ -783,10 +1214,13 @@ class AddClusterScreen(ModalScreen):
     if errors:
       self.notify("; ".join(errors), severity="error")
       return
+    if self.missing_refused("Test"):
+      return
     if not destination and not settings:
       self.notify("this machine: nothing to check (no SSH)", timeout=4)
       return
-    self.app.push_screen(SshCheckScreen(destination, settings, self.query_one("#ssh-pre-login", Input).value.strip()))
+    self.app.push_screen(SshCheckScreen(destination, settings, self.query_one("#ssh-pre-login", Input).value.strip(),
+                                        self.query_one("#ssh-pre-login-fallback", Checkbox).value))
 
   @on(Button.Pressed, "#cluster-cancel")
   def cancel_pressed(self):
@@ -794,12 +1228,18 @@ class AddClusterScreen(ModalScreen):
 
   @on(Button.Pressed, "#cluster-confirm")
   @on(Input.Submitted, "#cluster-destination")
+  @on(Input.Submitted, "#cluster-name")
   def add_pressed(self):
     from ...cluster import sshsetup
     settings = self.settings()
     errors = sshsetup.option_errors(settings) if settings else []
+    name = self.query_one("#cluster-name", Input).value.strip()
+    if name and any(c.name == name for c in self.app.clusters if c is not self.cluster):
+      errors.append(f"a tab is called {name} already")
     if errors:
       self.notify("; ".join(errors), severity="error")
+      return
+    if self.missing_refused("Add"):
       return
     self.dismiss(self.result())
 
@@ -870,7 +1310,7 @@ class UpdateScreen(ModalScreen):
 
 
 def icons_label(icon, text):
-  from .. import icons
+  from ...resources import icons
   return icons.label(icon, text)
 
 

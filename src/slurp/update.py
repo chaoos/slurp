@@ -43,18 +43,19 @@ def enabled():
   return load_config().get("update_check", True) is not False
 
 
-def latest_version(timeout=5, now=None):
-  """The newest version of slurp on PyPI (not a pre-release), or None (unknown: offline, …); asked at most once a day
-  (worker)"""
+def latest_version(timeout=5, now=None, force=False):
+  """The newest version of slurp on PyPI (not a pre-release), or None (unknown: offline, …); asked at most once a day,
+  force: now (Check for updates in the menu) (worker)"""
   now = now or time.time()
   path = cache_file()
-  try:
-    with open(path) as f:
-      kept = json.load(f)
-    if now - float(kept.get("checked", 0)) < CHECK_EVERY and kept.get("version"):
-      return kept["version"]
-  except (OSError, ValueError, TypeError):
-    pass
+  if not force:
+    try:
+      with open(path) as f:
+        kept = json.load(f)
+      if now - float(kept.get("checked", 0)) < CHECK_EVERY and kept.get("version"):
+        return kept["version"]
+    except (OSError, ValueError, TypeError):
+      pass
   try:
     request = urllib.request.Request(URL, headers={"Accept": "application/json", "User-Agent": f"slurp/{current()}"})
     with urllib.request.urlopen(request, timeout=timeout) as response:

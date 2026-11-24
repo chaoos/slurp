@@ -1,0 +1,32 @@
+# CINES Adastra (Montpellier, France; GENCI): MI250X partition (1 AMD Trento CPU, 4 AMD MI250X = 8 GCDs per node),
+# MI300A partition (4 AMD MI300A APUs per node), GENOA partition (CPU only) and HPDA pre/post-processing nodes.
+# Slurm, node type chosen with --constraint=MI250|GENOA|HPDA. Logins: adastra.cines.fr (adastraN.cines.fr for a given
+# login node); password only, SSH keys are not accepted; access filtered by registered IP address.
+schema = 1
+version = "2026.11.23"
+name = "CINES Adastra"
+scheduler = "slurm"
+match = ["adastra*", "*.cines.fr"]
+docs = "https://dci.dci-gitlab.cines.fr/webextranet/index.html"
+status = "https://dci.dci-gitlab.cines.fr/webextranet/other/machine_status.html"
+scratch_purge_days = 30 # (scratch: files not accessed or modified for 30 days are purged)
+parallel_fs = ["/lus"]
+
+# How to log in (https://dci.dci-gitlab.cines.fr/webextranet/user_support/index.html#connecting and the FAQ): ssh with
+# your CINES password; SSH keys are not permitted.
+[login]
+required = ["user"]
+user_label = "your CINES login"
+host = "adastra.cines.fr"
+setup = """Once, before the first login:
+1. The IP address you connect from must be declared in your access request on eDARI (validated by your research
+   lead and your structure's network/security officer). GENCI requires IPs located in France (in Europe for European
+   projects, at CINES' discretion), managed by and dedicated to your organisation.
+2. You get a password from CINES; change it on Adastra with passwd (at least 12 characters with upper and lower case,
+   a digit and a special character; it expires after 1 year).
+SSH keys are not accepted on Adastra. Each login: enter your CINES password in the terminal pane."""
+
+[[clusters]]
+name = "adastra"
+title = "Adastra"
+host = "adastra.cines.fr"

@@ -15,6 +15,7 @@ from datetime import datetime
 
 
 from ..state import collector, log
+from .workers import Scheduler
 
 ssh_connection = None # RemoteSSH of the active tab, None: the local machine
 
@@ -46,17 +47,32 @@ def check_cancelled():
 
 CURRENT = object() # start_worker(connection=CURRENT): the connection of the active tab
 
-def start_worker(node, fn, group, exclusive=True, connection=CURRENT, name=""):
-  """Run fn() in a thread worker of node. The worker keeps the connection of the tab that was active when it was
-  started (or the given one), so switching tabs does not redirect its commands; worker.abort stops the command it
-  is waiting for; an error is logged and shown instead of ending the app."""
+# The receiver of a worker is a Scheduler (cluster/workers.py), or a frontend's object that an adapter makes one of:
+# register_scheduler(type, make) (ui/workers.py: a Textual widget or app). This module knows no frontend.
+_adapters = []
+
+def register_scheduler(kind, make):
+  """Receivers of this type (isinstance) get the scheduler make(receiver)"""
+  _adapters.append((kind, make))
+
+def scheduler_of(target):
+  if isinstance(target, Scheduler):
+    return target
+  for kind, make in _adapters:
+    if isinstance(target, kind):
+      return make(target)
+  raise TypeError(f"no scheduler for {type(target).__name__} (register_scheduler)")
+
+def start_worker(target, fn, group, exclusive=True, connection=CURRENT, name=""):
+  """Run fn() in a thread worker of target (a Scheduler, or a receiver with an adapter, e.g. a Textual widget). The
+  worker keeps the connection of the tab that was active when it was started (or the given one), so switching tabs
+  does not redirect its commands; worker.abort stops the command it is waiting for; an error is logged and shown
+  instead of ending the app."""
+  sched = scheduler_of(target)
   bound = ssh_connection if connection is CURRENT else connection
   abort = threading.Event()
-  app = node.app
   if exclusive:
-    for w in list(app.workers):
-      if w.node is node and w.group == group and hasattr(w, "abort"):
-        w.abort.set()
+    sched.cancel_group(group)
   def body():
     _thread.conn, _thread.cancel = bound, abort
     try:
@@ -66,36 +82,36 @@ def start_worker(node, fn, group, exclusive=True, connection=CURRENT, name=""):
     except Exception as e:
       log.exception(f"{name or group} failed")
       if not abort.is_set():
-        app.call_from_thread(app.notify, f"{name or group} failed: {e}", title=tab_name(), severity="error", timeout=10)
+        tab, message = tab_name(), f"{name or group} failed: {e}"
+        sched.call_soon(lambda: sched.notify_error(tab, message))
       return None
     finally:
       del _thread.conn, _thread.cancel
-  worker = node.run_worker(body, thread=True, group=group, exclusive=exclusive, exit_on_error=False, name=name or group)
+  worker = sched.submit(body, group, exclusive, name or group)
   worker.abort = abort
   return worker
 
-def in_background(node, work, done, group="io", name="", connection=CURRENT):
+def in_background(target, work, done, group="io", name="", connection=CURRENT):
   """Run work() in a worker (remote file access and commands never run on the UI thread), then done(result) on the
-  UI thread, if node is still there; result is None if work() failed (the error is shown)"""
-  app = node.app
+  UI thread, if target is still there; result is None if work() failed (the error is shown)"""
+  sched = scheduler_of(target)
   def body():
     try:
       result = work()
     except Exception as e:
       log.exception(f"{name or group} failed")
-      app.call_from_thread(app.notify, f"{name or group} failed: {e}", title=tab_name(), severity="error", timeout=10)
+      tab, message = tab_name(), f"{name or group} failed: {e}"
+      sched.call_soon(lambda: sched.notify_error(tab, message))
       result = None
     tab = tab_name()
     def show():
-      if not (node is app or node.is_attached):
-        return
       try:
         done(result)
       except Exception as e: # showing a result must not end the app
         log.exception(f"showing the result of {name or group} failed")
-        app.notify(f"showing {name or group} failed: {e}", title=tab, severity="error", timeout=10)
-    app.call_from_thread(show)
-  return start_worker(node, body, group, exclusive=False, connection=connection, name=name)
+        sched.notify_error(tab, f"showing {name or group} failed: {e}")
+    sched.deliver(show)
+  return start_worker(sched, body, group, exclusive=False, connection=connection, name=name)
 
 def cluster_work(group, exclusive=True):
   """Decorator for methods that run as start_worker() workers, like @work(thread=True)"""
@@ -182,20 +198,39 @@ ui_thread_remote_calls = [] # remote commands run on the UI thread (they block i
 CTTY_STDERR = "import fcntl, os, sys, termios; fcntl.ioctl(2, termios.TIOCSCTTY, 0); os.execvp(sys.argv[1], sys.argv[1:])"
 # A command before the login (e.g. one that signs a key): it runs in the login's terminal, with it as its input and
 # output (the user can answer it: a password, a one-time code), Ctrl-C is its own; when it ends, the login as above
+# (the command before the login, in the login's terminal; what it exports (eval $(ssh-agent): SSH_AUTH_SOCK, …) is in
+# the environment of the login: its shell writes its environment to a private file when it ends, not to a pipe, which
+# an agent it starts would keep open)
 PRE_LOGIN = (
-  "import fcntl, os, signal, subprocess, sys, termios\n"
+  "import fcntl, os, signal, subprocess, sys, tempfile, termios\n"
   "fcntl.ioctl(2, termios.TIOCSCTTY, 0)\n"
   "say = lambda text: os.write(2, text.replace('\\n', '\\r\\n').encode())\n"
   "say('\\n$ ' + sys.argv[1] + '    (run before the login)\\n')\n"
   "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+  "fd, path = tempfile.mkstemp(prefix='slurp-env-')\n"
+  "os.close(fd)\n"
+  "script = 'trap \\'env -0 > \"$SLURP_PRE_LOGIN_ENV\"\\' EXIT\\n' + sys.argv[1]\n"
   "try:\n"
-  "  code = subprocess.run(['/bin/sh', '-c', sys.argv[1]], stdin=2, stdout=2, stderr=2,\n"
+  "  code = subprocess.run(['/bin/sh', '-c', script], stdin=2, stdout=2, stderr=2, env=dict(os.environ, SLURP_PRE_LOGIN_ENV=path),\n"
   "                        preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL)).returncode\n"
   "except OSError as e:\n"
   "  code = str(e)\n"
-  "say(f'\\n[the command before the login ended' + ('' if code == 0 else f' with {code}') + '; the SSH login follows]\\n\\n')\n"
+  "try:\n"
+  "  with open(path, 'rb') as f:\n"
+  "    data = f.read()\n"
+  "finally:\n"
+  "  os.unlink(path)\n"
+  "env = dict(os.environ)\n"
+  "for item in data.split(b'\\0'):\n"
+  "  key, eq, value = item.partition(b'=')\n"
+  "  key = key.decode(errors='replace')\n"
+  "  if eq and key not in ('_', 'SHLVL', 'PWD', 'OLDPWD', 'SLURP_PRE_LOGIN_ENV'):\n"
+  "    env[key] = os.fsdecode(value)\n"
+  "changed = sorted(k for k in env if os.environ.get(k) != env[k])\n"
+  "said = ('; it set ' + ', '.join(changed) + ' for the login') if changed else ''\n"
+  "say(f'\\n[the command before the login ended' + ('' if code == 0 else f' with {code}') + said + '; the SSH login follows]\\n\\n')\n"
   "signal.signal(signal.SIGINT, signal.SIG_DFL)\n"
-  "os.execvp(sys.argv[2], sys.argv[2:])\n")
+  "os.execvpe(sys.argv[2], sys.argv[2:], env)\n")
 PING_INTERVAL = 15 # seconds without an answer from the cluster before a heartbeat is sent
 PING_SLOW = 5      # seconds without an answer to the heartbeat: shown as not responding
 PING_DEAD = 60     # seconds without an answer to the heartbeat: the session is given up and reconnected
@@ -207,10 +242,14 @@ class RemoteSSH:
   trip in the open session; no ssh process is started for it. The process is also the OpenSSH control master, so
   interactive shells (Shell, node shells, GDB) open as channels of the same connection, without a new login.
   A heartbeat notices a session that stops answering; the app then reconnects it."""
-  def __init__(self, destination, ssh_options=(), pre_login=""):
+  def __init__(self, destination, ssh_options=(), pre_login="", pre_login_fallback=False):
     self.destination = destination
     self.ssh_options = list(ssh_options) # (a tab's full SSH settings: -l, -p, -J, -i, -o … before the destination)
     self.pre_login = pre_login           # a command run before every login, in the login's terminal (e.g. signing a key)
+    self.pre_login_fallback = pre_login_fallback # (only when a login without it fails: a key still valid is not signed anew)
+    self.pre_login_due = False           # (fallback: the login without it failed: the next one runs it)
+    self.retry_now = False               # (that failed: the app logs in again at once, with the command)
+    self.plain_attempt = False           # (the current login is the one without the command)
     self.socket_dir = tempfile.mkdtemp(prefix=f"slurp-{os.getuid()}-")
     os.chmod(self.socket_dir, 0o700)
     self.control_path = os.path.join(self.socket_dir, "control")
@@ -287,10 +326,17 @@ class RemoteSSH:
     if self.heartbeat_thread is None or not self.heartbeat_thread.is_alive():
       self.heartbeat_thread = threading.Thread(target=self.heartbeat, daemon=True, name=f"heartbeat {self.destination}")
       self.heartbeat_thread.start()
+    # (the command before the login: before every login, or only after a login without it failed; that one asks
+    # nothing (BatchMode): it fails at once where it would need the command)
+    run_before = bool(self.pre_login) and (not self.pre_login_fallback or self.pre_login_due)
+    self.plain_attempt = bool(self.pre_login) and not run_before
+    self.retry_now = False
+    batch = ["-o", "BatchMode=yes"] if self.plain_attempt else []
     argv = self.argv = ["ssh", "-M", "-S", self.control_path, "-o", "ControlMaster=yes", "-o", "ControlPersist=no",
-                        "-T", "-x", "-a", *self.ssh_options, self.destination, "exec /bin/sh"]
-    self.event(f"session {generation}: connecting" + (f" (first: {self.pre_login})" if self.pre_login else ""))
-    launcher = [sys.executable, "-c", PRE_LOGIN, self.pre_login] if self.pre_login else [sys.executable, "-c", CTTY_STDERR]
+                        "-T", "-x", "-a", *batch, *self.ssh_options, self.destination, "exec /bin/sh"]
+    self.event(f"session {generation}: connecting" + (f" (first: {self.pre_login})" if run_before else
+                                                      " (without the command before the login first)" if self.plain_attempt else ""))
+    launcher = [sys.executable, "-c", PRE_LOGIN, self.pre_login] if run_before else [sys.executable, "-c", CTTY_STDERR]
     proc = subprocess.Popen([*launcher, *argv], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=tty, start_new_session=True, env=os.environ | {"TERM": "xterm-256color"})
     self.proc = proc
@@ -344,6 +390,7 @@ class RemoteSSH:
           return
         self.user, self.groups, self.home, self.hostname = user, groups.split(), home, hostname
         self.state, self.last_answer, self.ready_at = "ready", time.monotonic(), datetime.now()
+        self.pre_login_due = False # (logged in: the next login tries without the command first again)
       self.event(f"session {generation}: connected as {user} on {hostname} "
                  f"after {time.monotonic() - self.connecting_since:.1f} s")
       tok = token.encode()
@@ -369,6 +416,8 @@ class RemoteSSH:
             self.state = "broken"
           self.error = (self.error or error or "the session ended") if self.state == "broken" else ""
           failed, self.pending = self.pending, {}
+          if self.state == "broken" and self.ready_at is None and self.plain_attempt: # (it needs the command)
+            self.pre_login_due = self.retry_now = True
         else:
           failed = {}
       for entry in failed.values():

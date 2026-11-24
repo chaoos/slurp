@@ -151,7 +151,7 @@ async def share_links(check, mgr, events, S, KNOWN):
     await blocking(subprocess.run, ["fusermount", "-u", mnt], capture_output=True)
   else:
     check("read only mount", False, r.stderr[-300:])
-  mgr.shutdown()
+  await mgr.stopped()
   log = open(os.path.join(sh.state_dir(), "links.log")).read()
   check("the log of links has links and sessions, no password", "created" in log and "session" in log and "locked" in log
         and all(l.password not in log for l in mgr.links), log.count("\n"))

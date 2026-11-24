@@ -1,0 +1,47 @@
+# Sigma2/NRIS (Norway): Betzy (1344 AMD Epyc 7742 nodes, 128 cores; 4 A100 nodes), Saga (Intel
+# nodes, P100 and A100 GPU nodes; BeeGFS), Olivia (252 AMD CPU nodes and 112 nodes with 4 NVIDIA
+# GH200). Logins: betzy.sigma2.no, saga.sigma2.no, olivia.sigma2.no; password plus mandatory one-time code (2FA).
+schema = 1
+version = "2026.11.23"
+name = "Sigma2 NRIS"
+scheduler = "slurm"
+match = ["betzy*", "saga", "olivia", "*.sigma2.no"]
+docs = "https://documentation.sigma2.no/"
+status = "https://opslog.sigma2.no/"
+parallel_fs = ["/cluster"]
+login_node_limits = "The login nodes are only for preparing jobs: production or heavy interactive runs there are stopped"
+
+# How to log in (https://documentation.sigma2.no/getting_started/ssh.html and
+# https://documentation.sigma2.no/getting_help/two_factor_authentication.html): ssh with your password and a TOTP code;
+# SSH keys do not work for logins from outside.
+[login]
+required = ["user"]
+user_label = "your NRIS (Metacenter) username"
+setup = """Once, before the first login:
+1. Set up two-factor authentication: log in at https://www.metacenter.no ("User Login (Passwords)"), choose
+   "Manage OTP secret / 2FA", scan the QR code with an authenticator app, verify with a code, and save the
+   recovery codes. Wait for the systems to sync.
+2. At the first connection check the host key fingerprint (SHA256):
+   saga.sigma2.no: ED25519 YOkZ1uudXrFmaigdnpZ64z497ZccNhdZe/abFkDXOH8, ECDSA
+   qirKlTjO9QSXuCAiuDQeDPqq+jorMFarCW+0qhpaAEA, RSA mY+Po9LKAlZGzMRHUmq1abrSOohifdN7+5VUmRTW4tE;
+   betzy.sigma2.no: ED25519 7M0HDP163k9fOUeZq3KtzLdjISE9Kq/gVygCpyrZPDQ, ECDSA
+   l0adSAGOHM4CNOqxvBNh5Laf+PlDSXQiargVoG/cue4, RSA wSirru+JTpcAZKQe/u6jLRj3kVCccNNUWU2PxzgbebM;
+   olivia.sigma2.no: ED25519 eYV+k2UiexuyCPeReFTqC8+ez9prO9z3wds/B74riGw, ECDSA
+   SlKWaL+cDjtBmimUOxb2+10pcn0l0IxWBZP7HmUZ0/M, RSA mSdqJrmd3MMPOL3L9GDxAs8w3avQREhS3r7Hf9+Df/I.
+Each login: your password and the one-time code from the app, typed in the terminal pane. SSH keys are only used
+between NRIS systems (and for SFTP on port 12 from the Norwegian research network, without 2FA)."""
+
+[[clusters]]
+name = "betzy"
+title = "Betzy"
+host = "betzy.sigma2.no"
+
+[[clusters]]
+name = "saga"
+title = "Saga"
+host = "saga.sigma2.no"
+
+[[clusters]]
+name = "olivia"
+title = "Olivia"
+host = "olivia.sigma2.no"

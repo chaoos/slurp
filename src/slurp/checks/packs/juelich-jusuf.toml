@@ -1,5 +1,0 @@
-# Jülich Supercomputing Centre (JSC): JUSUF. Logins: jusuf.fz-juelich.de and its numbered login nodes.
-name = "JSC JUSUF"
-match = ["jusuf*"]
-docs = "https://apps.fz-juelich.de/jsc/hps/jusuf/index.html"
-status = "https://status.jsc.fz-juelich.de/"

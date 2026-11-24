@@ -1,0 +1,35 @@
+# TGCC Joliot-Curie / Irene (Bruyeres-le-Chatel, France; GENCI/CEA): AMD Rome partition (2x64 cores, 2286 nodes),
+# V100 GPU partitions (4x V100 per node; V100l and V100xl with 1x V100), xlarge fat nodes (3 TB, 1 P100). Slurm,
+# driven through the TGCC wrappers ccc_msub / ccc_mprun with #MSUB directives. The login host names are not given in
+# the public documentation (only in TGCC's private documentation): fill in the host your TGCC account mail gives.
+schema = 1
+version = "2026.11.23"
+name = "TGCC Irene"
+scheduler = "slurm"
+match = ["irene*", "*.ccc.cea.fr"]
+docs = "https://www-hpc.cea.fr/tgcc-public/en/html/tgcc-public.html"
+scratch_purge_days = 60 # (SCRATCH: files not accessed for 60 days are purged automatically; see ccc_will_purge)
+parallel_fs = ["/ccc/scratch", "/ccc/work", "/ccc/store"]
+login_node_limits = "Processes using more CPU or memory than a basic personal computer are automatically throttled or killed on the login nodes"
+
+# How to log in (https://www-hpc.cea.fr/tgcc-public/en/html/toc/Getting_Started.html: "ssh <login>@<host>"; the
+# system access details are only in TGCC's internal documentation). Access is filtered by registered IP address
+# (GENCI guide, https://hopper.cines.fr/documentation/index.php?title=Documentation_compl%C3%A8te).
+[login]
+required = ["user", "host"]
+user_label = "your TGCC login"
+setup = """Once, before the first login:
+1. The IP address you connect from must be declared in your access request on eDARI (validated by your research
+   lead and your structure's network/security officer). GENCI requires IPs located in France (in Europe for European
+   projects, at the centre's discretion), managed by and dedicated to your organisation.
+2. Fill in the login host TGCC gives you (French/GENCI and European projects use different login nodes; the names
+   are only in TGCC's private documentation).
+Each login: authenticate as TGCC told you (the password must be changed once a year). SFTP is disabled on the
+European and FR login nodes: use scp or rsync for transfers."""
+
+# (no [[clusters]]: TGCC's public docs do not give the login host names, they are in its private documentation;
+# the pack applies to a tab of your own named irene… or on *.ccc.cea.fr)
+[[advice]]
+pattern = "#SBATCH"
+text = "On Irene, TGCC documents job scripts with #MSUB directives submitted with ccc_msub (a wrapper around Slurm). SCRATCH, WORK and STORE are unavailable in a job unless requested, e.g. #MSUB -m scratch,work,store."
+severity = "info"

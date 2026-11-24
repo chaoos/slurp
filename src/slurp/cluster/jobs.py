@@ -533,6 +533,28 @@ def expand_array_spec(spec, limit=1_000_000):
       raise ValueError(f"array has more than {limit} task IDs")
   return sorted(ids)
 
+COLLAPSE_MIN = 2 # tasks of an array in the list from which it is one row
+
+def collapse_arrays(ordered, expanded=(), minimum=COLLAPSE_MIN):
+  """The rows of a job list: jobs, and for each array with at least minimum tasks a row (array id, tasks) where its
+  first task is (followed by its tasks if its id is in expanded, the rows shown open)"""
+  groups = {}
+  for job in ordered:
+    if array_task_id(job) is not None:
+      groups.setdefault(job.jid.partition("_")[0], []).append(job)
+  big = {key: jobs for key, jobs in groups.items() if len(jobs) >= minimum}
+  member = {job.jid: key for key, jobs in big.items() for job in jobs}
+  done = set()
+  for job in ordered:
+    key = member.get(job.jid)
+    if key is None:
+      yield job
+    elif key not in done:
+      done.add(key)
+      yield (key, big[key])
+      if key in expanded:
+        yield from big[key]
+
 def compress_array_ids(ids):
   """Compress sorted task IDs into the range-list syntax accepted by sbatch"""
   ids = sorted(set(ids))
@@ -765,7 +787,9 @@ def progress_lines(found, shape="", total=None):
       if not any(same(i, k) for k in kinds):
         kinds.append((shapes[i], found[i][2]))
     count = {k: len(lines_of(k)) for k in kinds}
-    if count[latest] >= 2 or (kept is None and max(count.values()) < 2):
+    # (the latest line's kind is not always one of kinds: a line before it alike in structure, not the same, stands
+    # for it there; counted by itself)
+    if len(lines_of(latest)) >= 2 or (kept is None and max(count.values()) < 2):
       kind = latest
     else:
       best = max(kinds, key=lambda k: (count[k], lines_of(k)[-1]))

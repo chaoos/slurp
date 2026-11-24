@@ -9,7 +9,9 @@ browser, the guides, the rule catalogue, options, about). Under the header
 are the tabs, then the subtabs. The toolbar of the job list has **Reload**,
 the time window of finished jobs, whose jobs are listed and **group arrays**.
 
-Every tab is a cluster (or this machine). Under the tabs, each tab has its
+Every tab is a cluster (or this machine). While there are transfers, the tab **Transfers** is at their left: its
+subtabs are the list of transfers and a subtab for each transfer opened from it; it has no connection of its own (see
+[Transfers](transfers.md)). Under the tabs, each tab has its
 subtabs, each with a `✕`: **Jobs** (the job list), and one for each job
 window, each file or directory, each shell (on the cluster, on the node of a
 job, GDB). Quota and Health are windows over it.
@@ -22,7 +24,8 @@ subtab, or the overview). A file or
 directory always opens in a subtab of its own, wherever you open it (the
 files of a job, a path in a file, a file in a directory), and where you
 opened it stays as it was. A folder you enter in a directory view opens in
-that subtab (`←` or `Esc` goes back). Other windows you open inside a subtab
+that subtab (`←` or `Esc` goes back); **Shell here** (`s`) opens a shell in a
+subtab that starts in the directory shown. Other windows you open inside a subtab
 open in it, and back from its first window shows the job list (or the
 overview). Opening a job, file or directory again shows its subtab. Switching tabs keeps the subtabs. They are also kept
 for the next start: starting slurp again, a tab's job windows, array windows, files and directories, the

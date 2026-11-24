@@ -60,12 +60,40 @@ with open(os.path.join(S, "slurm_calls"), "a") as f:
   f.write(prog + " " + " ".join(args) + "\n")
 def opt(name):
   return args[args.index(name) + 1] if name in args else None
-if prog == "squeue":
+XFER = os.path.join(S, "xfer_jobs") # transfer jobs (slurp-xfer-*): they really run, "<id> <pid>" per line
+def xfer_jobs():
+  try:
+    return dict(line.split()[:2] for line in open(XFER) if line.strip())
+  except OSError:
+    return {}
+def alive(pid):
+  try:
+    os.kill(int(pid), 0)
+    stat = open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()
+    return stat[0] != "Z"
+  except (OSError, ValueError, IndexError):
+    return False
+def xfer_rows():
+  """The transfer jobs as jobs (listed only when asked for by their id: the job lists of the scenarios stay as they are)"""
+  rows = []
+  for xid, pid in xfer_jobs().items():
+    running = alive(pid)
+    rows.append(dict(JobID=xid, JobIDRaw=xid, JobName=f"slurp-xfer-{xid}", User=user, Account="acct1", Partition="normal",
+                     State="RUNNING" if running else "COMPLETED", ExitCode="0:0", NNodes="1", NTasks="1", NodeList="nid000099",
+                     Submit=(now - timedelta(minutes=2)).isoformat(), Start=(now - timedelta(minutes=1)).isoformat(),
+                     End="Unknown" if running else now.isoformat(), Elapsed="00:01:00", Timelimit="01:00:00", WorkDir=S,
+                     StdOut="/dev/null", StdErr="/dev/null", MaxRSS="", AveRSS="", TRESUsageInMax="", AllocCPUS="1",
+                     AllocTRES="billing=1,cpu=1,node=1", SubmitLine="sbatch job.sh", Reason="None"))
+  return rows
+if prog == "squeue" and opt("-o") and opt("-j") in xfer_jobs(): # (how slurp follows a transfer job)
+  if alive(xfer_jobs()[opt("-j")]):
+    print((opt("-o") or "%T").replace("%T", "RUNNING").replace("%r", "None"))
+elif prog == "squeue":
   fmt = next(a for a in args if a.startswith("--format=")).split("=", 1)[1]
   codes = {"%i": "JobID", "%j": "JobName", "%u": "User", "%a": "Account", "%P": "Partition", "%T": "State", "%r": "Reason",
            "%D": "NNodes", "%M": "Elapsed", "%l": "Timelimit", "%S": "Start", "%V": "Submit", "%Z": "WorkDir", "%N": "NodeList"}
   ids = opt("-j").split(",") if opt("-j") else None
-  for j in jobs:
+  for j in jobs + (xfer_rows() if ids else []):
     if j["State"] in ("RUNNING", "PENDING") and (ids is None or j["JobID"] in ids or j["JobID"].split("_")[0] in ids):
       print("|".join(j[codes[c]] for c in fmt.split("|")))
       found = True
@@ -83,7 +111,7 @@ elif prog == "sacct" and "--batch-script" in args:
 elif prog == "sacct":
   fields = next(a for a in args if a.startswith("--format=")).split("=", 1)[1].split(",")
   ids = opt("-j").split(",") if opt("-j") else None
-  for j in jobs:
+  for j in jobs + (xfer_rows() if ids else []):
     if ids is not None and j["JobID"] not in ids and j["JobID"].split("_")[0] not in ids: # an array id: all its tasks
       continue
     print("|".join(j.get(f, "") for f in fields))
@@ -115,6 +143,11 @@ elif prog == "sacctmgr":
 elif prog == "scancel":
   with open(os.path.join(S, "scancel_calls"), "a") as f:
     f.write(" ".join(args) + "\n")
+  for jid in args:
+    pid = xfer_jobs().get(jid)
+    if pid and alive(pid): # (as Slurm: TERM to the job's processes)
+      import signal
+      os.killpg(int(pid), signal.SIGTERM)
 elif prog == "sinfo" and "--version" in args:
   print("slurm 23.11.4")
 elif prog == "sinfo":
@@ -136,7 +169,10 @@ elif prog == "sinfo":
     print("normal*|up|13/5/2/20|1-00:00:00|20")
     print("debug|up|1/2/0/3|30:00|3")
 elif prog == "scontrol" and args[:2] == ["show", "reservation"]:
-  print("ReservationName=maint1 StartTime=2026-11-20T08:00:00 EndTime=2026-11-20T18:00:00 Duration=10:00:00 Nodes=nid[0000-0019] NodeCnt=20 CoreCnt=2560 Features=(null) PartitionName=(null) Flags=MAINT,SPEC_NODES State=INACTIVE")
+  # (in 30 days, from whenever the tests run: a fixed date made it "soon" (within a day) on the day before it, then
+  # active; the health and the overview card said so then, a line longer)
+  day = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+  print(f"ReservationName=maint1 StartTime={day}T08:00:00 EndTime={day}T18:00:00 Duration=10:00:00 Nodes=nid[0000-0019] NodeCnt=20 CoreCnt=2560 Features=(null) PartitionName=(null) Flags=MAINT,SPEC_NODES State=INACTIVE")
 elif prog == "sbatch" and "--help" in args:
   print("Usage: sbatch [OPTIONS(0)...] [ : [OPTIONS(N)...]] script(0) [args(0)...]\n  -A, --account=name  charge job to specified account\n"
         "  -N, --nodes=N  number of nodes\n  -t, --time=minutes  time limit\n      --mem=MB  minimum amount of real memory\n"
@@ -145,6 +181,20 @@ elif prog == "sbatch" and "--version" in args:
   print("slurm 23.02.7")
 elif prog == "sbatch" and "--test-only" in args:
   print("sbatch: Job 9101 to start at 2026-11-14T18:00:00 using 256 processors on nodes nid[0001-0002] in partition normal", file=sys.stderr)
+elif prog == "sbatch" and any("slurp-xfer-" in open(a).read() for a in args if a.endswith(".sh") and os.path.exists(a)):
+  import subprocess
+  script = next(a for a in args if a.endswith(".sh"))
+  jid = str(9200 + len(xfer_jobs()))
+  out = next((l.split("=", 1)[1] for l in open(script) if l.startswith("#SBATCH --output=")), "/dev/null").strip().replace("%j", jid)
+  with open(os.path.join(S, "sbatch_calls"), "a") as f:
+    f.write(repr(args) + f" XFER={jid}\n")
+  wait = open(os.path.join(S, "xfer_queue")).read().strip() if os.path.exists(os.path.join(S, "xfer_queue")) else "0"
+  # (xfer_queue: seconds a transfer job waits in the queue before it runs)
+  proc = subprocess.Popen(["sh", "-c", 'sleep "$1"; exec sh "$2"', "sh", wait, script], env=dict(os.environ, SLURM_JOB_ID=jid), stdin=subprocess.DEVNULL,
+                          stdout=open(out, "a"), stderr=subprocess.STDOUT, start_new_session=True)
+  with open(XFER, "a") as f:
+    f.write(f"{jid} {proc.pid}\n")
+  print(jid if "--parsable" in args else f"Submitted batch job {jid}")
 elif prog == "sbatch":
   with open(os.path.join(S, "sbatch_calls"), "a") as f:
     script = next((a for a in args if a.endswith(".sh")), None)

@@ -1,0 +1,33 @@
+# Purdue Anvil (West Lafayette, ACCESS): sub-cluster A (1,000 nodes, 128 AMD EPYC Milan cores, 256 GB), B (32 nodes,
+# 1 TB, highmem partition), G (16 nodes, 4 NVIDIA A100 40 GB, gpu partition), H (21 nodes, 96 Xeon 8468 cores, 4 NVIDIA
+# H100 80 GB, ai partition). Logins: anvil.rcac.purdue.edu (8 login nodes).
+schema = 1
+version = "2026.11.23"
+name = "Purdue Anvil"
+scheduler = "slurm"
+match = ["anvil", "*.anvil.rcac.purdue.edu", "anvil.rcac.purdue.edu"]
+docs = "https://docs.rcac.purdue.edu/userguides/anvil/"
+status = "https://www.rcac.purdue.edu/news"
+scratch_purge_days = 30 # (/anvil/scratch: files older than 30 days by access time are purged)
+parallel_fs = ["/anvil"]
+login_node_limits = "No numeric limit is documented: do not run jobs on the login nodes and do not stress the filesystem"
+
+# How to log in (https://docs.rcac.purdue.edu/userguides/anvil/getting-started/): SSH keys only, with your Anvil
+# username (your ACCESS username with an "x-" prefix); there is no Anvil password.
+[login]
+required = ["user", "identities"] # (it logs in with a key only)
+user_label = "your Anvil username (your ACCESS username with an x- prefix, e.g. x-doug)"
+setup = """Once, before the first login:
+1. Make sure your ACCESS allocation has credits exchanged to Anvil (otherwise you have no Anvil username).
+2. Create a key pair on your own machine, protected with a passphrase (ssh-keygen; e.g. ssh-keygen -t ed25519).
+3. Log in to Open OnDemand, https://ondemand.anvil.rcac.purdue.edu, with your ACCESS username and password, open
+   Clusters > Anvil Shell Access, and append your PUBLIC key (the .pub file, one line) to ~/.ssh/authorized_keys
+   (mkdir -p ~/.ssh first). Never copy the private key there.
+4. Fill in the private key's path here (Browse... finds it).
+Then each login: ssh with the key (you are asked for its passphrase, if any). Password logins, with an Anvil or an
+ACCESS password, are not accepted."""
+
+[[clusters]]
+name = "anvil"
+title = "Anvil"
+host = "anvil.rcac.purdue.edu"

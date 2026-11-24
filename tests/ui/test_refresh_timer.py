@@ -1,5 +1,5 @@
-"""The job list refreshes by itself every refresh_seconds; the title bar counts down; a click switches it off (kept),
-and on again; views that do not refresh have no countdown"""
+"""The job list refreshes by itself every refresh_seconds; the title bar counts down; due but unable to start (a load
+runs): it says why, not 0:00; a click switches it off (kept), and on again; views that do not refresh have no countdown"""
 import asyncio
 import shutil
 import time
@@ -37,6 +37,13 @@ def test_the_job_list_refreshes_and_counts_down(check, monkeypatch):
       ok = await until(pilot, lambda: reloads, 6)
       ok = ok and await until(pilot, lambda: str(timer.label) in ("⟳ 0:03", "⟳ 0:02", "⟳ 0:01"), 3)
       check("at 0: it reloads (and counts from that load again)", ok, (reloads, str(timer.label)))
+      busy = object()
+      app.cluster.loader = busy # (a load runs when the refresh is due: it waits, and says so)
+      ok = await until(pilot, lambda: str(timer.label) == "⟳ loading", 6)
+      check("due while a load runs: ⟳ loading, not 0:00", ok, str(timer.label))
+      app.cluster.loader = None
+      ok = await until(pilot, lambda: str(timer.label) not in ("⟳ loading", "⟳ 0:00"), 3)
+      check("…the load done: it counts down again", ok, str(timer.label))
       await pilot.click("#refresh-timer"); await pilot.pause(0.3)
       n = len(reloads)
       ok = await until(pilot, lambda: str(timer.label) == "⟳ off", 3)
@@ -45,6 +52,6 @@ def test_the_job_list_refreshes_and_counts_down(check, monkeypatch):
       await pilot.click("#refresh-timer"); await pilot.pause(0.3)
       ok = await until(pilot, lambda: len(reloads) > n, 6)
       check("a click again: on, it reloads again", ok and load_config().get("auto_refresh") is True)
-      app.cluster.jobs_open = False; app.show_home(); await pilot.pause(0.6)
+      app.cluster.view.jobs_open = False; app.show_home(); await pilot.pause(0.6)
       check("the overview (no automatic refresh): no countdown", not any(t.display for t in app.screen.query("#refresh-timer")))
   asyncio.run(main())

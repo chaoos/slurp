@@ -1,0 +1,33 @@
+# LuxProvide MeluXina (Bissen, EuroHPC): Cluster (573 nodes, 2x AMD EPYC 7H12, 128 cores), Accelerator GPU (200 nodes,
+# 4 NVIDIA A100-40 each, 64 cores), Accelerator FPGA (20 nodes, 2 Intel Stratix 10MX), Large Memory (20 nodes, 4 TB).
+# Login: login.lxp.lu port 8822 (one of 4 login nodes); Ed25519 key only, registered in the LuxProvide service desk.
+schema = 1
+version = "2026.11.23"
+name = "LuxProvide MeluXina"
+scheduler = "slurm"
+match = ["meluxina*", "*.lxp.lu"]
+docs = "https://docs.lxp.lu/"
+status = "https://status.lxp.lu"
+parallel_fs = ["/home/users", "/project/home", "/project/scratch", "/mnt/tier1", "/mnt/tier2"]
+cuda_arch = "sm_80"
+login_node_limits = "Applications or long running tasks must not be run on the login nodes (no numeric limit documented)"
+
+# How to log in (https://docs.lxp.lu/first-steps/connecting/): ssh -p 8822 with a dedicated Ed25519 key.
+[login]
+required = ["user", "identities"] # (it logs in with a key only)
+user_label = "your MeluXina user ID (from the welcome email)"
+port = 8822
+identities = ["~/.ssh/id_ed25519_mlux"]
+setup = """Once, before the first login:
+1. Set your service desk password at https://servicedesk.lxp.lu/ with the token from your welcome email (this password is for the portal only, not for MeluXina).
+2. Create an Ed25519 key with a passphrase of at least 12 characters (upper and lower case, digits, special characters):
+   ssh-keygen -o -a 100 -t ed25519 -f ~/.ssh/id_ed25519_mlux -C "Key4meluXina"
+   RSA and other key types are not accepted.
+3. In the service desk choose "Add a new SSH key to an Account" and paste the PUBLIC key (~/.ssh/id_ed25519_mlux.pub, starting with ssh-ed25519) into the Description field.
+4. At the first login, check the host key: SHA256:CiIRq/peOWCDY7r5iReXS1KLaO/BBwN7wcpcT4sqsiI (ED25519).
+Then each login: ssh to login.lxp.lu on port 8822 with that key (ssh-add ~/.ssh/id_ed25519_mlux to keep it in the agent); you land on one of the 4 login nodes."""
+
+[[clusters]]
+name = "meluxina"
+title = "MeluXina"
+host = "login.lxp.lu"

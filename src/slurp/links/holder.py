@@ -35,54 +35,59 @@ import termios
 import time
 
 from .. import __version__
+from ..cluster.ctty import CTTY
 from ..launch import slurp_command
+from ..resources import icons, logo
 
 log = logging.getLogger("slurp.holder")
 
-CTTY = "import fcntl, os, sys, termios; fcntl.ioctl(0, termios.TIOCSCTTY, 0); os.execvp(sys.argv[1], sys.argv[1:])"
 RESET_TERMINAL = ("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?1004l\x1b[?2004l\x1b[<u\x1b[0m"
                   "\x1b[?25h\x1b[?1049l")
 ALT_MODES = (47, 1047, 1049)
 
 def _logo_lines():
-  """The logo in 5 rows of terminal output (see ui/logo.py; the holder does not import the app, logo.py is small)"""
-  try:
-    from ..ui import logo
-  except ImportError:
-    import logo
+  """The logo in 5 rows of terminal output (see resources/logo.py; the holder does not import the app)"""
   return logo.ansi_lines()
 
 def _page_brand():
   """The tab of the web view: slurp's logo and name"""
-  try:
-    from ..ui import logo
-  except ImportError:
-    import logo
   return f'<title>slurp</title><link rel="icon" href="{logo.svg_data_url()}">'
 
 def _intro_brand():
   """The start screen of the web view (until the first output): the logo, the name, what it is"""
-  try:
-    from ..ui import logo
-  except ImportError:
-    import logo
   return (f'{logo.svg(size=72, boxed=True)}<div><div style="font-size:28px;font-weight:700;color:#e8eef4">slurp</div>'
           f'<div style="font-size:13px;opacity:.7;margin-top:6px">{logo.TAGLINE}</div></div>')
 
 def icon_font_path():
-  """slurp's icon font (ui/fonts/slurp-icons.ttf)"""
-  try:
-    from ..ui import icons
-    return icons.FONT
-  except ImportError:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "slurp-icons.ttf")
+  """slurp's icon font (resources/fonts/slurp-icons.ttf)"""
+  return icons.FONT
 
 # The terminal of the web page draws in Roboto Mono; slurp's icons (codepoints of Nerd Fonts' Material Design icons)
 # come from slurp's icon font, one cell wide, under the same name: the browser takes it for those codepoints only.
+# The terminal of the page (xterm.js) draws on a canvas and keeps each glyph as it first drew it. A browser loads a
+# face with a unicode-range only when it is needed, and a canvas does not wait for it: the icons drawn before the icon
+# font came stayed boxes (until a hover drew them anew). So the page's start (textual.js sets window.onload: it makes
+# the terminal and connects) waits until the browser has both faces of the icon font, at most 3 s.
+FONT_WAIT = """<script>
+(function () {
+  var glyph = String.fromCodePoint(0xF0322), fonts = document.fonts;
+  var ready = fonts && fonts.load ? Promise.race([
+    Promise.all(['16px "Roboto Mono"', 'bold 16px "Roboto Mono"'].map(function (f) { return fonts.load(f, glyph); })),
+    new Promise(function (done) { setTimeout(done, 3000); })
+  ]).catch(function () {}) : Promise.resolve();
+  var start = null;
+  Object.defineProperty(window, "onload", { configurable: true, get: function () { return start; },
+                                            set: function (f) { start = f; } });
+  window.addEventListener("load", function (e) {
+    ready.then(function () { if (typeof start === "function") start.call(window, e); });
+  });
+})();
+</script>"""
+
 ICON_FONT_HEAD = ('<link rel="preload" href="/slurp-icons.ttf" as="font" type="font/ttf" crossorigin>'
                   '<style>' + "".join('@font-face { font-family: "Roboto Mono"; src: url("/slurp-icons.ttf") format("truetype"); '
                                       f'font-weight: {weight}; unicode-range: U+F0000-F1FFF; }}' for weight in (400, 700))
-                  + '</style>') # (the weights of the text's faces, exactly: a face of another weight is passed over; bold labels too)
+                  + '</style>' + FONT_WAIT) # (the weights of the text's faces, exactly: a face of another weight is passed over; bold labels too)
 
 # The web page opens slurp:// links (for the slurp helper on the user's computer) like any URL from the app
 # (window.open). A browser may refuse that without a click right before, and nothing shows when the helper is not set

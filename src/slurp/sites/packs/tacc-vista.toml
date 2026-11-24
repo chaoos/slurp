@@ -1,0 +1,35 @@
+# TACC Vista (Austin): Grace-Grace CPU nodes (144 NVIDIA Grace cores, gg queue), Grace-Hopper GPU nodes (one 72-core
+# Grace CPU and one H200 GPU with 96 GB HBM3 per node, gh and gh-dev queues). Logins: vista.tacc.utexas.edu (login1, ...).
+schema = 1
+version = "2026.11.23"
+name = "TACC Vista"
+scheduler = "slurm"
+match = ["vista*", "*.vista.tacc.utexas.edu", "vista.tacc.utexas.edu"]
+docs = "https://docs.tacc.utexas.edu/hpc/vista/"
+status = "https://tacc.utexas.edu/news/user-updates/"
+scratch_purge_days = 10 # ($SCRATCH: files not accessed for ten days are subject to purge)
+parallel_fs = ["/work"]
+gpus_implicit = true
+login_node_limits = "No numeric limit is documented: the login nodes are a shared resource for editing, compiling and file management, not for computation (see TACC's Good Conduct Guide)"
+
+# How to log in (https://docs.tacc.utexas.edu/hpc/vista/): ssh, your TACC password, then the "TACC Token Code" from
+# your paired MFA device. Only possible with an allocation on Vista.
+[login]
+required = ["user"]
+user_label = "your TACC username"
+setup = """Once, before the first login:
+1. Pair an MFA device: log in to the TACC Accounts Portal, https://accounts.tacc.utexas.edu, select "Multi-Factor Auth",
+   then an authenticator app or SMS.
+2. Make sure you have an allocation on Vista, otherwise your password is rejected.
+Then each login: enter your TACC password at "Password:", then the current code at "TACC Token Code:".
+Do not run ssh-keygen on Vista (it interferes with the batch system's own key pair)."""
+
+[[clusters]]
+name = "vista"
+title = "Vista"
+host = "vista.tacc.utexas.edu"
+
+[[advice]]
+pattern = "#SBATCH\\s+(--gres|--gpus-per-task|--mem)\\b"
+text = "Vista does not support --gres or --gpus-per-task (Slurm rejects any script with them), and --mem is not available. GPU nodes are requested by queue (-p gh or -p gh-dev)."
+severity = "warning"

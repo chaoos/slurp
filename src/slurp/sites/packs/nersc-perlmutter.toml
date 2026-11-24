@@ -1,0 +1,43 @@
+# NERSC Perlmutter (Berkeley Lab): GPU nodes (1 AMD EPYC 7763 + 4 NVIDIA A100 40 GB or 80 GB), CPU nodes
+# (2 AMD EPYC 7763, 128 cores). Logins: perlmutter.nersc.gov (alias saul.nersc.gov); data transfer nodes dtn01-04.nersc.gov.
+schema = 1
+version = "2026.11.23"
+name = "NERSC Perlmutter"
+scheduler = "slurm"
+match = ["perlmutter*", "perlmutter*.nersc.gov", "saul.nersc.gov", "saul*.nersc.gov"]
+docs = "https://docs.nersc.gov/systems/perlmutter/"
+status = "https://www.nersc.gov/live-status/motd/"
+scratch_purge_days = 56 # ($SCRATCH /pscratch: files not read or changed for 8 weeks may be purged; runs when scratch is full)
+parallel_fs = ["/pscratch", "/global/pscratch"]
+cuda_arch = "sm_80"
+transfer_hosts = ["dtn01.nersc.gov", "dtn02.nersc.gov", "dtn03.nersc.gov", "dtn04.nersc.gov"]
+globus = "https://app.globus.org/file-manager/collections/9d6d994a-6d04-11e5-ba46-22000b92c6ec/overview"
+login_node_limits = "Per user, all processes together: 30 GB of memory and 12.5% of the CPU (cgroups); over that, processes are throttled or killed"
+
+# How to log in (https://docs.nersc.gov/connect/mfa/): password + TOTP once a day through sshproxy, which writes a
+# 24-hour key to ~/.ssh/nersc; without a valid key, ssh asks for "Password + OTP" (password then the 6 digits, no space).
+[login]
+required = ["user"]
+user_label = "your NERSC username"
+identities = ["~/.ssh/nersc"]
+pre_login = "sshproxy -u {user}"
+pre_login_fallback = true
+needs = [{ command = "sshproxy", install = "https://portal.nersc.gov/cfs/mfa/" }]
+setup = """Once, before the first login:
+1. Install a TOTP app (e.g. Google Authenticator) and log in to Iris, https://iris.nersc.gov.
+2. In Iris, MFA tab: enter a description, click "+ Add Token", scan the QR code (or enter the secret, time based), then Test it.
+3. Install sshproxy from https://portal.nersc.gov/cfs/mfa/ (Linux tar.gz, macOS pkg; the old sshproxy.sh is in "legacy").
+4. On the first connection, check the host key: perlmutter.nersc.gov RSA SHA256:Db9s2Fa4J3qx7An5oIMgUqUAdK7UWJGTPGoIKD44+Gs
+   (current values: https://docs.nersc.gov/connect/).
+Then each login: if the key in ~/.ssh/nersc has expired (24 hours), sshproxy asks for "Password+OTP" (your NERSC
+password followed by the 6-digit code) and writes a new key; ssh then logs in with it."""
+
+[[clusters]]
+name = "perlmutter"
+title = "Perlmutter"
+host = "perlmutter.nersc.gov"
+
+[[advice]]
+pattern = "conda\\s+create"
+text = "On Perlmutter, NERSC recommends installing conda environments in your project's /global/common/software directory (faster than $HOME, e.g. conda create --prefix /global/common/software/<project>/<env>), especially for parallel jobs; at 10+ nodes it suggests Shifter."
+severity = "info"

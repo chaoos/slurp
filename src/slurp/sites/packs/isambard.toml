@@ -1,0 +1,60 @@
+# Bristol Centre for Supercomputing (BriCS, UK): Isambard-AI Phase 1 and Phase 2 (nodes with 4 NVIDIA GH200, aarch64;
+# Phase 2 has 1,320 nodes), Isambard 3 Grace (384 NVIDIA Grace CPU Superchip nodes, aarch64) and Isambard 3 MACS
+# (x86-64 comparison partitions, some with A100/H100/MI100). Login with a 12-hour SSH certificate from BriCS's
+# clifton tool; the account name is <shortname>.<project>.
+schema = 1
+version = "2026.11.23"
+name = "Isambard (BriCS)"
+scheduler = "slurm"
+match = ["isambard*", "*.isambard", "*.isambard.ac.uk"]
+docs = "https://docs.isambard.ac.uk/"
+status = "https://docs.isambard.ac.uk/service-status/"
+scratch_purge_days = 60 # ($SCRATCHDIR: files not accessed for 60 days are deleted)
+parallel_fs = ["/scratch", "/projects"]
+login_node_limits = "On Isambard-AI each login session is limited to one CPU core, 4 GiB of memory and 500 tasks (cgroups); the login nodes have no GPUs"
+
+# How to log in (https://docs.isambard.ac.uk/user-documentation/guides/login/): an SSH key on your machine, signed for
+# 12 hours by "clifton auth" (browser login to the BriCS portal); then ssh as <shortname>.<project>.
+[login]
+required = ["user"]
+user_label = "<your UNIX short name>.<project> (e.g. alice.myproject)"
+pre_login = "clifton auth --write-config false"
+pre_login_fallback = true
+needs = [{ command = "clifton", install = "https://github.com/isambard-sc/clifton/releases/latest" }]
+setup = """Once, before the first login:
+1. In the BriCS portal (https://portal.isambard.ac.uk) set your UNIX short name and join a project.
+2. On your own machine create an SSH key pair with a passphrase if you have none (Ed25519, or RSA of 3072 bits or
+   more), e.g. ssh-keygen -t ed25519 (~/.ssh/id_ed25519). Clifton uses ~/.ssh/id_ed25519, id_ecdsa or id_rsa;
+   another key is given with clifton auth --identity <path>.
+3. Install clifton from its GitHub releases (Linux, macOS, Windows/WinGet) somewhere in your PATH.
+4. Run clifton auth once, then clifton ssh-config (without "write": it only prints) to see, for each of your
+   projects, the User, HostName and any ProxyJump; if a ProxyJump is shown, enter it as the jump host here.
+   Do not run "clifton ssh-config write": it edits ~/.ssh/config.
+5. At the first connection check the host key fingerprint (SHA256) against
+   https://docs.isambard.ac.uk/user-documentation/guides/login/#host-fingerprints, e.g. Isambard-AI Phase 2
+   ED25519 jLwRcG3g1kDJwTHBqc3JdgZA99UQ5baO6ALIaNMZTyA, Isambard 3 ED25519
+   xoWObzEBWd71ZhUFmDxzsVHB1vHX4OexFfkY0m0rnkE, remote login server ED25519
+   WT11ouKX6R4Xw81pzLuvfxR0OU5xmf2jBkKESBA8Sfw.
+Each day (certificates last 12 hours): clifton auth opens your browser (or shows a QR code) to log in to the BriCS
+portal and writes ~/.ssh/id_ed25519-cert.pub; then ssh works with your key passphrase. Persistent tmux/screen
+sessions on login nodes are not allowed."""
+
+[[clusters]]
+name = "isambard-ai"
+title = "Isambard-AI Phase 2"
+host = "ai-p2.access.isambard.ac.uk"
+
+[[clusters]]
+name = "isambard-ai-p1"
+title = "Isambard-AI Phase 1"
+host = "ai-p1.access.isambard.ac.uk"
+
+[[clusters]]
+name = "isambard3"
+title = "Isambard 3"
+host = "i3.access.isambard.ac.uk"
+
+[[clusters]]
+name = "isambard3-macs"
+title = "Isambard 3 MACS"
+host = "i3macs.access.isambard.ac.uk"

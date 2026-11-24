@@ -55,6 +55,7 @@ nav:
       - Files and node tools: guide/files.md
       - Tabs and subtabs: guide/tabs.md
       - Clusters over SSH: guide/ssh.md
+      - Transfers: guide/transfers.md
       - Checks and the rule catalogue: guide/checks.md
       - Quota and scratch: guide/storage.md
       - Copying: guide/copying.md

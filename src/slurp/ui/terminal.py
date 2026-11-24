@@ -24,13 +24,13 @@ from textual.widgets import Button, Static
 
 
 from ..state import log
-from . import icons
+from ..cluster.ctty import CTTY
+from ..resources import icons
 
 # ---------------------------------------------------------------------------
 # terminal window: a command (srun --pty bash) in a pseudo terminal, emulated with pyte
 
 # make the pseudo terminal the controlling terminal of the command (for Ctrl-C, job control), then run it
-CTTY = "import fcntl, os, sys, termios; fcntl.ioctl(0, termios.TIOCSCTTY, 0); os.execvp(sys.argv[1], sys.argv[1:])"
 ALT_SCREEN_MODES = (47, 1047, 1049)
 DECCKM = 1 << 5 # private mode 1 (application cursor keys), pyte stores private modes shifted by 5 bits
 

@@ -142,7 +142,7 @@ def with_icon_font(path):
   """slurp's icon font in the picture (a data URL: a picture shown as an image loads no other), for the codepoints
   of the icons: the text's font stays"""
   import base64
-  from slurp.ui.icons import FONT
+  from slurp.resources.icons import FONT
   with open(FONT, "rb") as f:
     data = base64.b64encode(f.read()).decode()
   face = "".join('    @font-face {\n        font-family: "Fira Code";\n'

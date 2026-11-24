@@ -5,11 +5,11 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static
-from .. import icons
+from ...resources import icons
 
 EVERYWHERE = """
-Tabs at the top are clusters (`+` adds one, `✕` closes one); under them the subtabs of the tab: **Jobs** and every
-window opened from it (`Ctrl-W` closes the one shown). `Ctrl-]` switches between the window and the shell pane on the
+Tabs at the top are clusters (`+` adds one, `✕` closes one), and, while there are transfers, **Transfers** at their
+left; under them the subtabs of the tab: **Jobs** and every window opened from it (`Ctrl-W` closes the one shown). `Ctrl-]` switches between the window and the shell pane on the
 right. The footer shows the keys of the window and, on the right, the state of the tab's connection (click it for the
 connection window). **? slurp** at the top right is about slurp in general: how it works, its version, the machine
 it runs on.
@@ -107,6 +107,7 @@ A directory of the cluster.
 
 - The path at the top is an input: edit it and Enter goes there (`~` is your home; `Esc` puts it back). The buttons next
   to it go to your home, scratch, project, … (`$SCRATCH`, `$PROJECT`, `$STORE`, `$WORK`, those set on the cluster).
+  **Shell here** (`s`) opens a shell in a subtab that starts in this directory (your login shell, on the cluster).
 - Enter opens an entry: folders here (← goes back), files in a subtab of their own (the directory stays), in the
   matching view (text, Markdown, HDF5, core dumps, batch scripts in the script view with their checks). A file
   open already: its subtab.
@@ -193,18 +194,193 @@ given days: red, close to it: yellow. An exclude regex leaves paths out.
   "MenuScreen": ("Menu", """
 What slurp does for the tab, each with the key that does the same from the job list or the overview: the job list (`j`),
 the health of the cluster (`C`), your quotas (`Q`), your oldest files in scratch (`X`), a shell on the cluster (`t`), a directory
-(`d`: home, scratch, project, … or a path; each time in a new subtab) and Map a directory (`F`: the login directory as a drive), an interactive job (`i`), a new job script (`n`), the
+(`d`: home, scratch, project, … or a path; each time in a new subtab) and Map a directory (`F`: the login directory as a drive), a transfer of data between two tabs (`T`), an interactive job (`i`), a new job script (`n`), the
 categories (`K`), this slurp in your browser (`W`), the guides (`F1`), the rule catalogue (`F2`), the options (`F3`),
 about slurp, and quit (`q`). Enter or a click does the item; `Esc` or a click elsewhere closes the menu.
+"""),
+  "TransfersScreen": ("Transfers", """
+The transfers of data between the tabs (clusters, or this machine): the first subtab of the **Transfers** tab, which is
+there while transfers exist (also finished ones). Each row: its name, from where and to where (each tab with a dot for
+its connection, and its path, a long one shortened in the middle: /very/long/…/in/its/path; several sources: the first
+and +n), what moves the data (rsync, rclone, Globus), its route and where it runs, its state, how far it is, its rate and the time left, and when it runs next
+(or when it ran last). The lines below say more of the highlighted one (why it waits, how it failed,
+its full paths). **Endpoints** (Menu → Endpoints…) lists where data can come from and go to.
+Enter or a click opens its subtab with everything about it. A click on a column's header sorts the list by it (▲),
+another click the other way (▼); by State the running ones come first; the order is kept for the next start.
+**Reload** (`r`) asks again now (also automatically, counted down in the title bar as in the other views; a click
+there turns it off and on): the runs on the clusters and at Globus, and the S3, SMB, WebDAV and Globus endpoints.
+
+**New transfer** (`n`, or Menu → Transfer data…, `T`) sets one up in a wizard. `p` pauses (a transfer job is
+cancelled for it: slurp asks first), `c` continues (rsync goes on where it stopped: what is there is not copied again),
+`s` runs it now, `e` changes its settings (in the wizard), `Del` deletes it (its settings and
+history; the files stay). Keys that act on a cluster do nothing here: its tab first.
+"""),
+  "TransferScreen": ("A transfer", """
+One transfer: its state at the top, in big (RUNNING with how far and how long, PAUSED,
+WAITING and for what, QUEUED, DONE, FAILED and why, …), the source and the destination as cards (the endpoint, its
+state, e.g. ● connected or ○ needs login, its paths, and a button for what it needs: Connect, Open its tab), whether both sides are in sync (● in sync, ● not in sync with what is left, ○ not known:
+from the newer of the last check and the last run that ended well, and when), how the data flows (a picture: the tabs as boxes with their connections, slurp between them
+for the relay; on the arrow push, pull, relay or the same filesystem; under each box what runs there; while it runs a
+dot moves along the arrows), the paths on the cards (links: a click opens one in the tab of its cluster, a
+folder as a directory view, a file in its view, a file that cannot be shown or a pattern such as `*.log` as its folder
+searched for it, a destination not there yet as the nearest folder that is), how far it is (bytes, rate, time left, files; for the relay also the rate through slurp), the file it
+copies now, its rate over time, what happens if slurp closes (in slurp: it stops as paused and Continue goes on;
+detached on the cluster or as a transfer job: it goes on without slurp), the errors rsync reported for
+single files, **Runs** (how many times it ran, how they ended, the last one; a click: the list of its runs), what the
+check found (**Check again** checks it anew as it is set up: what remains, both sides, the routes; not while a run
+goes on), and its log.
+
+**Pause** (`p`) stops the run; rsync keeps the half-copied file in `.slurp-partial` and the next run goes on from it.
+**Continue** is there only for a transfer paused mid-run: it goes on where it stopped. A transfer runs when you click
+**Run now**, which waits until every endpoint it needs is connected (its tooltip names what is missing).
+A transfer job is cancelled for it (it loses its place in the queue): slurp asks first, and **Continue** (`c`) submits a
+new one. **Run now** (`s`), **Edit…** (`e`), **Its job** (the job window of its transfer job), **Copy as a command**
+(the rsync line of a run, or its `sbatch --wrap`, to put into scrontab or cron yourself: slurp has no schedules),
+**Delete**. A transfer is idempotent: running it again copies only what is missing or changed, and
+nothing is ever deleted on the destination. With an S3 endpoint (rclone): **Verify** (`rclone check`: is everything of
+the sources on the destination, the same?), and a file half copied when it was paused starts over at Continue.
+"""),
+  "TransferRunsScreen": ("Runs of a transfer", """
+Every run of the transfer, the last first (the history keeps the last 50): its number, when it started and ended, how
+long it took, how it ended (done, done with errors, paused, failed, interrupted), how much it copied, how many files,
+its rate, the route and where it ran (its job, the host), and why it ended so. Enter or a click opens a run's
+details; `Esc` (or ←) goes back to the transfer.
+"""),
+  "TransferRunScreen": ("A run of a transfer", """
+One run: when it started and ended and how long it took, how it ended and why, what it copied (of how much), its
+average rate, the route and where it ran (its transfer job, the login node, its folder on the cluster), the sources and
+the destination, its options, rsync's statistics (files, how many it copied, sizes, bytes sent and received), the
+errors rsync reported for single files, and the events of the run. **Its job**: the job window of its transfer job.
+`Esc` (or ←) goes back to the list of runs.
+"""),
+  "TransferWizard": ("Transfer data", """
+Sets up a transfer in five steps; **Next** waits until a step is complete (its tooltip says what is missing). The
+steps at the top can be clicked: any step whose steps before it are complete. Editing a transfer (**Edit…**), every
+step is a click away and the buttons are **Cancel** and **Save**: Save keeps the changes (nothing
+starts now) once every step is complete; its tooltip says what is missing. An endpoint that is not connected does not
+hold it up: its paths stay as they are (they can be changed once it is connected), the options, the route and where it
+runs can be changed, and the check is not run again (what the last one found stays; Run now checks first).
+
+1. **Source**: an endpoint (this machine, or a tab, with its state; **Connect** or **Log in in its tab** when it
+   needs it) and one or more files or folders there (Browse…: Space marks several; or type a path), or
+   patterns such as `/path/to/dir/*.h5` (typed, or in Browse… the pattern field, which shows its matches, and **Choose
+   the pattern**): each match is copied. Braces as bash's: `run_{1..1000..20}`, `{in,out}/*.h5`, `step_{001..100}`
+   (one line, all its paths; at most 10,000; no `$(…)`, no variables). Each is copied into the destination folder under its own name. Each shows what it holds, counted on its tab in the
+   background (its size, files, folders, links), and in all.
+2. **Destination**: an endpoint and a folder there (created if it is not there), with its home, scratch, project, …
+3. **Options**: how rsync copies, the same at every run: checksums (they read every file on both sides at every run,
+   also when nothing changed: the estimate counts it), compression (used only on the relay), a speed limit in MB/s.
+4. **Route**: slurp checks both sides and changes nothing: rsync on both, the paths, what remains to copy (an rsync
+   dry run), the room there (free space, quota, a scratch that is purged). Each route is a choice that shows what its
+   check found, as it comes: ✓ passed (its speed, an estimate; the recommended one is chosen), ! only with the
+   temporary key, ✗ failed (why; it cannot be chosen): the same filesystem (a marker file, removed at once), direct
+   (one cluster logs in to the other by itself), the relay through slurp (always possible). Any route will do (also
+   one that failed, or is not checked yet: **Run now** checks first and runs only if it passes). For large transfers it suggests Globus or a similar service, where both sites offer it. A
+   picture shows how the data flows (push, pull, relay through slurp, the same filesystem, where rsync runs), the
+   bandwidth measured under its arrows and the estimate below it (with checksums: their time too). A direct route
+   as a transfer job is checked from a node of its partition too (srun): refused there, Next refuses. As a transfer
+   job: its account (a list of yours there to choose from; a field where none can be found), and its batch script tested with `sbatch --test-only` as soon as
+   it is chosen and when its partition, time limit or account change: when and where it would start, or Slurm's
+   error (then Next refuses). Below: where it runs (in slurp; detached on the cluster's login node; as a transfer job
+   where the site has a transfer partition, e.g. xfer). A direct route asks, under the routes, **how it logs in**: by
+   itself; with a **temporary key** (made on the cluster that runs rsync, only its public half on the other: rsync
+   only, expiring; with rrsync there only in the transfer's folder, one way); or **with your login now** (a password,
+   a one-time code: **Log in now…** opens a terminal on that cluster, the connection stays open there until 2 hours
+   unused; not as a transfer job). Each with what it means; the picture shows it. slurp never copies your own keys
+   or passwords to a cluster.
+5. **Summary**: a name, everything chosen, the estimate, what happens if slurp closes; **Add**: the transfer is
+   added and runs each time you click **Run now**.
+"""),
+  "TransferLoginScreen": ("Your login to the other cluster", """
+A terminal on the cluster that runs rsync of a direct route, on the login node slurp is connected to (rsync runs
+there too): it logs in to the other cluster. Answer what that one asks (a password, a one-time code, a host key);
+slurp keeps nothing of it. Once logged in, the connection stays open on that login node until it has been unused for
+2 hours (or **Disconnect** in the transfer's subtab), and the window closes by itself (✓ connected).
+
+- **Again**: log in once more (after a typo, a code that expired).
+- **Close** (`Esc`; `Ctrl-]` while it runs): stop.
+
+While it is open, root on that cluster, and your own programs on that node, could use the connection too.
+"""),
+  "EndpointsScreen": ("Endpoints", """
+Where transfers take data from and put it: this machine, every tab (a cluster tab is an endpoint by itself, as long
+as it is open), S3 buckets, SMB shares, WebDAV folders and Globus collections. Each row: its name, its kind, where it is (a tab linked to a Globus collection:
+which), its state (● connected, ○ needs login, connecting, needs you, tab not open; Globus: not set up until you log
+in, expired or needs consent: log in again) and how many transfers use it. **Connect** logs in (a tab: in its tab;
+Globus: the Globus login if there is none, then a test), **Disconnect**, **Test**, **Edit…** (a cluster tab: its SSH
+settings; a Globus endpoint: its collection; S3, SMB, WebDAV: its settings and secrets), **Globus link…** (`g`, a
+cluster tab: the Globus collection of its site), **Delete** (refused while transfers
+use it; its keys leave the keyring too; a tab goes away when it is closed). An S3 endpoint is "not set up" while the
+keyring lacks one of its keys. S3, SMB and WebDAV: rclone moves the data; secrets are kept only in the system keyring.
+**Enter** or a click opens its window: a tab's connection window, or the window of an S3, SMB, WebDAV or Globus endpoint.
+"""),
+  "EndpointScreen": ("An endpoint", """
+The window of an S3, SMB, WebDAV or Globus endpoint, as a tab's connection window: its border says its state (green:
+connected, yellow: not tested or connecting, red: failed or not set up). **Settings**: its address and what its form
+holds; its secrets only as there (✓) or missing (✗) in the keyring, never their values. **Server**: what its server
+says of itself without a change: WebDAV its software (the Server header, Nextcloud's or ownCloud's product and version)
+and WebDAV classes; S3 its software and the bucket's region; SMB the protocol it speaks (SMB 2.1, 3.0, …), signing,
+encryption and its other offers, the logins it takes, Samba; its space where the server tells (total, used, free);
+Globus what Globus knows of the collection (owner, organization, GCS version, storage). Asked when the window opens and
+after each test. **Connection**: its state, its
+last test (when, how long it took), what reaches it (rclone on this machine, as a remote of its environment; or Globus,
+and whether you are logged in and gave consent). **Used by**: the transfers that use it. **Course of its tests**: each
+test, with its result. **Test** (`t`), **Edit…** (`e`), **Disconnect**, **Copy address** (s3://…, //server/share, the
+URL, the collection).
+"""),
+  "RcloneEndpointScreen": ("An S3, SMB or WebDAV endpoint", """
+An endpoint rclone moves data to and from. **S3** (AWS or S3-compatible: Ceph, MinIO, a site's object store): the
+provider, the endpoint URL (empty: AWS), the region, the bucket, and its keys (access key, secret key; a session token
+for temporary keys). **SMB** (a Windows or Samba share): the server, the share, your user, the domain, the port, and
+the password. **WebDAV** (Nextcloud, ownCloud, SharePoint, …): the URL, the vendor, your user, and a password or a
+token. Each has a name and its folder (where Browse… starts). The secrets go to the keyring of this machine only:
+editing, an empty field keeps the one there. **Test** lists the folder; with **as a destination** it also writes a marker object
+(`.slurp-test-…`) and deletes it, and says when it cannot (no right to write). rclone moves the data (it must be
+installed on this machine, and for a tab's files on that cluster).
+"""),
+  "NewEndpointScreen": ("New endpoint", """
+Choose the kind of the new endpoint, then **Next** for its settings (`Esc` or **Cancel** closes it). A cluster is
+added as a tab (`+`): every open tab is an endpoint by itself. A kind that cannot be made here says why (Globus needs
+the Python package globus-sdk and a keyring); the kinds this version cannot make yet are not offered.
+"""),
+  "GlobusLoginScreen": ("Log in to Globus", """
+One Globus login for all collections. The first time, step 1: the Globus app slurp logs in as (Globus lets programs
+log in only as a registered app): **Open the Globus developers page**, register "a thick client or script that will be
+installed and run by users on their devices" (redirect https://auth.globus.org/v2/web/auth-code), and paste its Client
+UUID (**Use it**; kept in slurp's settings; **Another app…** changes it). Then the login: **Open the login page** (or
+**Copy its link** into a browser, e.g. when slurp runs over SSH), log in there with your institution, allow slurp, and
+paste the code Globus shows into the field, then **Log in**. slurp keeps the login (a refresh token) only in the keyring
+of this machine. Collections that
+need a consent to their data (mapped collections of Globus Connect Server 5) are asked for in the same login.
+"""),
+  "GlobusEndpointScreen": ("A Globus collection", """
+A Globus endpoint: its name, its collection (**Search** by name at Globus, or paste its id; a click on a result chooses
+it), and its folder (where Browse… starts; empty: your home there). Linking a tab: the collection of its site (the
+site's suggestion, where its rule pack names one), and which folder of the tab is which folder in the collection (the
+paths of transfers under the folder of the tab map to it); **Remove the link** unlinks it. **Test** asks Globus for the
+collection and lists the folder. **Log in to Globus** when there is no login yet (search and Test need it). Globus
+moves the data between collections itself: not through this machine, and on without slurp.
+"""),
+  "PickPathsScreen": ("Choose paths", """
+A folder of a tab: Enter or a click goes into a folder (`Backspace` or **Up**: the one above), the path at the top can
+be typed (Enter goes there), the buttons go to home, scratch, project, … To copy: `Space` marks files and folders,
+**Choose the marked** takes them; **Choose this folder** takes the folder shown; a pattern in the field below
+(`*.h5`, `run_??.out`) shows its matches in the list, and **Choose the pattern** (or Enter) takes it: each match is
+copied. Choosing the destination: **New folder…** makes a folder in the one shown (its name, then **Create** or Enter)
+and goes into it, for **Choose this folder** (on a tab, Globus, S3, SMB or WebDAV; on S3 a folder is there once files
+are in it).
 """),
   "OverviewScreen": ("Overview", """
 The first subtab of every tab, always there (it cannot be closed): what a tab shows at the start, and when its other
 subtabs are closed; **Overview** at the left of the subtabs shows it any time. In its middle:
 the cluster (its site, the Slurm version, its nodes and partitions), its health (healthy, degraded or unhealthy, and
 why), the SSH session, and the ways on: **Jobs** (`j`, with how many run and wait; *No Slurm available* where there
-is none), **Quota** (`Q`) and **Health** (`C`, everything about the nodes and partitions). Below them the site's
+is none), **Quota** (`Q`) and **Health** (`C`, everything about the nodes and partitions); a line about the
+transfers from or to the tab while they run or wait (a click: the Transfers tab). Below them the site's
 status page and documentation (a click opens them). Not connected: **Connect**, and what happened to the connection (slurp does not log in at the start; a tab added
-with `+` logs in right away); connected: **Disconnect**. **SSH settings…**: how the tab logs in, its destination or
+with `+` logs in right away); connected: **Disconnect**. While it connects or reconnects (its session does not answer
+yet) it is not shown as connected: no Jobs and no health, what ssh printed last (a host key that changed: said
+plainly), and **Abort** gives up the login. **SSH settings…**: how the tab logs in, its destination or
 full SSH settings, what `~/.ssh/config` and `ssh -G` make of it, **Check**; saved, the next login uses them.
 `r` asks the cluster again (it does by itself after 5 minutes). *At the start a tab shows* in **Options** (`F3`) can
 open the job list instead.
@@ -269,8 +445,9 @@ has, the ones in the categories in it counted too), and for the one selected its
   and GPU hours (from Slurm's accounting: nodes, CPUs, GPUs times run time); from the first submit to the last end;
   partitions, accounts. Slurm is asked for the jobs themselves (`sacct -j`), so old jobs count too, as long as its
   accounting keeps them.
-- **Jobs:** a click (Enter) opens a job (an array: its window), in a subtab of its own. **Categorize…** (`c`) puts it in a category,
-  **Take job out** (`x`) takes it out of its category.
+- **Jobs:** a click (Enter) opens a job (an array: its window), in a subtab of its own. `m` marks a job (and moves
+  on; again: unmarks it), `M` marks all of them or none, as in the job list. **Categorize…** (`c`) puts the marked
+  jobs (else the one selected) in a category, **Take job out** (`x`) takes them out of theirs.
 - **not categorized** (at the end of the tree): the jobs of the job list (queued, and those finished since …) that
   are in no category, with their numbers; `c` sorts them in.
 - **New** (`n`, in the category selected), **Rename** (`e`: another path moves it, with all it has), **Delete**
@@ -278,8 +455,44 @@ has, the ones in the categories in it counted too), and for the one selected its
   (`cat:` in the filter). **Reload** (`r`) reads the categories and asks Slurm again.
 - **Notes…** (`o`): notes of the category, in Markdown (what it is for, how the runs differ, links); shown under its
   numbers. A rename takes them along, a delete removes them.
+- **Hide jobs in this category in the job list** (`h`): the job list leaves out its jobs (and those of the
+  categories in it) and counts them in its status line (*3 hidden jobs*); the tree marks it *hidden*. **Show jobs in
+  this category in the job list** shows them again. `cat:` in the job list's filter shows them all the same.
+- **Rules…** (`u`): rules that put jobs in a category by their name (`ci-[0-9]+` into `CI`), when the job list
+  loads; the category selected lists its own, with how many jobs of the job list each matches.
 - They are kept on the cluster (`~/.config/slurp/categories.json` in your home there), per Slurm cluster: slurp on
   your own machine and slurp on the login node see the same.
+"""),
+  "RulesScreen": ("Rules of the categories", """
+Each rule puts jobs in a category by their name, when the job list loads (`r`, or by itself). The list shows for each
+whether it is on, its pattern, its category, which jobs it takes, and how many jobs of the job list it **matches
+now** (with how many of them are not in its category yet); under it, for the rule selected: in its category already,
+in no category, in another one.
+
+- **New…** (`n`), **Edit…** (`e`, Enter), **Delete** (`Del`: the jobs it put in stay), `Space`: on or off.
+- **Apply now…** (`a`): the rule on all the jobs of the job list now, whatever it has looked at: the ones in no
+  category, or also those in another category (moved).
+- Each job is looked at once by a rule: one you take out of its category by hand is not put back. Of several rules,
+  the first that matches a job has it. A rename of a category takes its rules along, a delete removes them.
+"""),
+  "ApplyRuleScreen": ("Apply a rule now", """
+The rule on all the jobs of the job list now (queued, and those finished since …), whatever it has looked at before.
+It says how many jobs it matches: in its category already, in no category, in another one.
+
+- **Put the … in no category in …:** only those in no category.
+- **Also move the … in another:** those in another category too (shown only if there are any).
+- `Esc` (**Cancel**): nothing changes.
+"""),
+  "RuleFormScreen": ("A rule of the categories", """
+- **Job names that match:** a regular expression for the **whole** name: `ci-[0-9]+` takes `ci-1234` (not
+  `ci-1234-b`), `ci-.*` all that start with `ci-`, `(train|eval)_.*` either.
+- **Category:** where they go (`a/b`: b in a; made if it is new).
+- **Which jobs:** **new jobs only** (submitted from now on: the jobs of the job list now are left), **jobs in no
+  category** (those of the job list now, and the new ones), or **all jobs** (also moved out of another category).
+- **On:** off keeps the rule but it does nothing.
+
+Under the form: how many jobs of the job list it matches now, a few of their names, and what it takes of them. A
+changed pattern, category or scope looks at the jobs again. `Ctrl+S` saves.
 """),
   "CategorizeScreen": ("Categorize", """
 Put the jobs in a category: pick one in the tree, or type a new one (`a/b` makes b in a, and a if it is new).
@@ -297,15 +510,18 @@ The reason is kept with the job, on the cluster (next to the categories): the jo
 show it, with the other job as a link, and the categories window has a column for it.
 """),
   "FilePickScreen": ("Choose a file", """
-A directory of the cluster, to choose a file from (the progress file of a job, …). Enter or a click goes into a
+A directory of the cluster, to choose a file from (the progress file of a job, …), or of this machine (an identity
+file of an SSH connection: nothing of it is shown). Enter or a click goes into a
 directory, or chooses the file; `..` or `Backspace` (**↑ Up**) goes up; the path at the top can be typed (Enter goes
-there; `~` is your home); the filter keeps the files whose names contain what you type, or match a pattern
+there; `~` is your home); **Reload** (`r`) lists the directory again (new files, ones gone; the cursor stays on its
+file); the filter keeps the files whose names contain what you type, or match a pattern
 (`run_123*.log`, `step_??.out`, `*.[oe]*`); directories stay listed, and the filter stays when you change directory. Under the list: the end of the
 file under the cursor, and (the progress file) whether slurp finds progress in it (`n/N` or `M%`). `Esc` cancels.
 """),
   "ExtendScreen": ("Extend the lifetime of a link", """
 How much longer the link takes logins: 1 hour, 2, 4, 8 or 12 hours, a day, two days or a week, added to its end (to
-now, if it has ended). It says until when. Sessions that are open go on either way; this is about new logins.
+now, if it has ended). It says until when. A shell's or a drive's sessions that are open go on either way (this is
+about new logins); a web link ends with its browsers.
 """),
   "NotesScreen": ("Notes", """
 Notes of a category or a job, in Markdown: `# headings`, `**bold**`, `- lists`, `` `code` ``, `[links](https://…)`.
@@ -320,8 +536,8 @@ The name of a category: `a/b` is b in the category a (made too, if it is new). R
 with all it has; into a category that exists, the two are merged.
 """),
   "AboutScreen": ("About slurp", """
-slurp in general (how it works, where to find what), its version (and the commit it runs from), and the machine it
-runs on: host, system, CPUs, memory, load, user; how this slurp runs (in the background, its views), the active tab,
+slurp in general (how it works, where to find what), its version (and the commit it runs from), the site packs it reads
+(with their versions; the active tab's pack), and the machine it runs on: host, system, CPUs, memory, load, user; how this slurp runs (in the background, its views), the active tab,
 where its settings and logs are. **Copy details** copies the version and the machine as text, for a bug report.
 """),
   "HelperSetupScreen": ("The slurp helper", """
@@ -357,7 +573,8 @@ The check of an SSH connection, in a terminal, as the tab's login goes:
 
 1. what needs no login: what ssh makes of the destination and settings (`ssh -G`), the keys (there, permissions, a
    passphrase), the host's name, the port, and the server's greeting; when one of these fails, it stops there;
-2. the command before the login (Run before login), if there is one: answer it here;
+2. the command before the login (Run before login), if there is one: answer it here (with "only when the login fails
+   without it": first a login without it that asks nothing; the command only if that fails);
 3. the login itself (`ssh -v`, its verbose log to a file): answer what it asks, a new host key (yes: it is kept, as
    at any login), a passphrase, a password, a one-time code.
 
@@ -375,8 +592,8 @@ no reminder until a newer one. No check at all: `"update_check": false` in the c
   "WebEndingScreen": ("A web link ends soon", """
 A web link (slurp in your browser) ends in a few minutes; the title bar counts down to it (⏱, left of ?).
 
-- **It takes no more logins then** (its time limit): a browser that is open goes on, but reloading the page or a new
-  browser needs a login. **Extend lifetime…** keeps it usable (how much longer: 1 hour to a week).
+- **It ends then** (its time limit): a browser that is open loses slurp at once, a reload or a new browser gets
+  nothing. **Extend lifetime…** keeps it usable (how much longer: 1 hour to a week).
 - **Its relay ends the tunnel** (the free pinggy relay keeps one for an hour): slurp opens a new one, with a new
   address, so a browser on the old one loses slurp. That cannot be extended; a relay without a time limit (Cloudflare,
   your own) avoids it.
@@ -415,26 +632,50 @@ Which directory of the tab's cluster to open, in a new subtab (each time another
 Enter), your scratch, project, … (`$SCRATCH`, `$PROJECT`, `$STORE`, `$WORK`, those set on the cluster), or a path
 typed in the field below (`~/…` and relative paths are in your home). `Esc` cancels.
 """),
-  "AddClusterScreen": ("Add a cluster", """
-A new tab. The best way: an **SSH destination**, a Host of your `~/.ssh/config` with the cluster's user, jump hosts
-and keys (suggested as you type; ssh, scp and your other tools use it too), or `user@host`; blank: this machine.
+  "SiteClusterScreen": ("Choose a cluster to log in to", """
+The clusters of the site packs (built in, and yours in `~/.config/slurp/rules/`): the cluster, its site, its host,
+how it logs in (directly or through a jump host; the command before the login, or a key) and the pack's version.
+Type to search: every word must match the cluster, its site, its host or the pack (`juwels booster`, `cscs`, `lumi`;
+`jülich`, `juelich` and `julich` are the same). `↑` `↓` move in the list while you type; below it, how the highlighted
+one logs in, what it needs on this machine and what to do once. `Enter`, a click or **Choose** takes it: it fills in
+the form, to see and change before **Add**. `Esc` cancels.
+"""),
+  "AddClusterScreen": ("A new SSH connection", """
+A new tab, as the forms of the endpoints. **Name**: the tab's name, shown everywhere (empty: the destination; no two
+tabs with one name). The best way to reach it: an **SSH destination**, a Host of your `~/.ssh/config` with the
+cluster's user, jump hosts and keys (suggested as you type; ssh, scp and your other tools use it too), or
+`user@host`; blank: this machine.
+
+**From a site** (a new tab): **Choose…** opens a window with the clusters slurp knows how to log in to (from its site
+packs: CSCS Alps, JSC, LUMI, CINECA, BSC, LRZ, NERSC, OLCF, … and yours), to search; **Clear** takes the choice back. It fills in the form: the name, the full settings (host, jump host, key), the command
+before the login; fill in your user. Below it: how the site logs in, what it needs on this machine (✔ found, ✖ not,
+and where to get it), what to do once. Everything stays to see and change before **Add**. The fields the site needs
+from you (your user) have a yellow border until filled in; **Add** or **Test** without them turns them red, with what
+to fill in below each.
+**Add** and **Test** with fields marked: they turn red, the buttons become **Add anyway** and **Test anyway**
+(red), and pressed again they go on: the marks are advice (the command before the login may make the key).
 
 The fallback, **Full SSH settings**: host, user, port, jump hosts (ProxyJump), identity files (only these are tried),
-the tab's name, and more ssh options, one `Key=Value` per line. They are kept with the tab.
+and more ssh options, one `Key=Value` per line. They are kept with the tab. An identity file must be a private key on
+this machine: one that is not there, a directory or a `.pub` file is marked red at once, said below it (Add and Test:
+**… anyway**, as above). **Browse…** chooses one on this machine (from `~/.ssh`; its content is not read or shown).
 
 **Run before login** (both ways): a command on this machine before every login of the tab, e.g. one that signs your
 key for the day (`cscs-keygen`, `step ssh login`, `tsh login`). It runs in the login pane: answer it there (a
-password, a one-time code; `Ctrl-C` ends only it); when it ends, the SSH login follows as usual.
+password, a one-time code; `Ctrl-C` ends only it); when it ends, the SSH login follows as usual, with what it exported
+(`eval "$(ssh-agent -s)"` in it: the login uses that agent). **only when the login fails without it**: first a login
+without the command that asks nothing; only if it fails, the command and the login again (a certificate still valid
+is not made anew).
 
-**Check…** tries the connection in a window with a terminal, as the tab's login goes: what needs no login (what ssh
+**Test** tries the connection in a window with a terminal, as the tab's login goes: what needs no login (what ssh
 makes of the settings, the keys, the host name, the port and the server), the command before the login if there is
 one, and the login itself, where you answer what it asks (a host key, a passphrase, a password, a code). Then whether
-it works, or what is wrong, precisely, with the end of ssh's verbose log. **Add** adds the tab, checked or not; the
-login runs in the pane on the right.
+it works, or what is wrong, precisely, with the end of ssh's verbose log. **Cancel** closes it; **Add** adds the tab,
+tested or not; the login runs in the pane on the right.
 
 From a tab's overview (**SSH settings…**) the same dialog shows the tab's settings, filled in, with the blocks of your
 `~/.ssh/config` that apply (with their file and line) and what ssh makes of it all (`ssh -G`); **Save** changes the tab
-(the next login uses it: **Reconnect**).
+(a new name renames it at once; the rest: the next login uses it, **Reconnect**).
 """),
   "InteractiveJobScreen": ("Interactive job", """
 An `sbatch` command for a job that only holds nodes (`sleep infinity`), for shells on them from its job window. The
@@ -599,7 +840,7 @@ class ViewHelpScreen(ModalScreen):
   def compose(self):
     from .checks import DocViewer
     from rich.text import Text
-    from .. import logo
+    from ...resources import logo
     with Vertical(id="vh-dialog"):
       with Horizontal(id="vh-brand"):
         yield Static(Text("\n").join(logo.half_blocks()), id="vh-logo")
@@ -709,6 +950,8 @@ def about_facts(app):
   f["libraries"] = ", ".join(libs)
   path = cloudflare.binary()
   f["cloudflared"] = f"{cloudflare.version(path) or '?'} ({path})" if path else "not here (downloaded when a web link through Cloudflare is made)"
+  from ...sites import packs_line, pack_text, site_pack
+  f["packs"] = packs_line()
   # the machine
   f["host"] = socket.getfqdn()
   f["hostname"] = platform.node()
@@ -765,13 +1008,15 @@ def about_facts(app):
     c = cluster.connection
     f["tab"] = (f"{cluster.name}: " + (f"SSH {cluster.destination}" + (f", login node {c.hostname} as {c.user}" if c is not None and c.hostname else "")
                                         if cluster.destination else "this machine"))
+    f["tab_pack"] = pack_text(site_pack(cluster.name, cluster.destination or "")) or "none (only what slurp finds itself)"
   return f
 
 FACTS = [("Version", [("slurp", "version"), ("from", "commit"), ("installed in", "package"), ("Python", "python"),
-                      ("libraries", "libraries"), ("cloudflared", "cloudflared")]),
+                      ("libraries", "libraries"), ("cloudflared", "cloudflared"),
+                      ("site packs", "packs")]),
          ("This machine (slurp runs here)", [("host", "host"), ("hostname", "hostname"), ("system", "os"), ("CPUs", "cpus"),
                                              ("memory", "memory"), ("load", "load"), ("up for", "uptime"), ("user", "user")]),
-         ("This slurp", [("process", "process"), ("runs", "session"), ("view", "view"), ("active tab", "tab"),
+         ("This slurp", [("process", "process"), ("runs", "session"), ("view", "view"), ("active tab", "tab"), ("its site pack", "tab_pack"),
                          ("config", "config"), ("logs", "state")])]
 
 def about_text(facts):

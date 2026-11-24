@@ -57,7 +57,8 @@ screen, **Detach** (`d`) closes the view (slurp goes on). When the active view
 goes away (a browser tab closed, a terminal gone), another one becomes active
 by itself. Quitting asks when other views are attached, and closes them all.
 When a web link ends, the title bar counts down to it (⏱, left of **?**; a click
-opens the link): when it takes no more logins (its time limit), or when its relay
+opens the link): when its time limit ends (then it ends with its browsers: one that is
+open loses slurp at once, a reload gets nothing), or when its relay
 ends the tunnel (the free pinggy relay keeps one for an hour, then a new address).
 Five minutes before, slurp warns: a time limit can be extended right there
 (**Extend lifetime…**: 1 hour up to a week); the relay's hour cannot (a relay without one, Cloudflare or your own,

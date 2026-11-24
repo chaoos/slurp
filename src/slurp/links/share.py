@@ -53,7 +53,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from ..state import log
-from ..ui.terminal import CTTY
+from ..cluster.ctty import CTTY
 
 try:
   import asyncssh
@@ -200,6 +200,21 @@ def die_with_parent():
     ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGTERM) # PR_SET_PDEATHSIG
   except Exception:
     pass
+
+async def ended(procs, timeout=5):
+  """Wait until the asyncio processes are gone (killed after timeout): a process still running when its event loop
+  closes is cleaned up later without the loop ("Event loop is closed" when it is garbage collected)"""
+  for proc in procs:
+    if not isinstance(proc, asyncio.subprocess.Process) or proc.returncode is not None:
+      continue
+    try:
+      await asyncio.wait_for(proc.wait(), timeout)
+    except asyncio.TimeoutError:
+      try:
+        proc.kill()
+      except ProcessLookupError:
+        pass
+      await proc.wait()
 
 def make_password():
   """20 characters without ones that are easy to confuse"""
@@ -737,10 +752,16 @@ class ShareManager:
     self.heartbeat()
     for link in self.links:
       if link.server is not None and not link.open():
-        link.server.close() # no new logins; the sessions go on
+        link.server.close() # no new logins; the sessions of a shell or a drive go on
         link.server = None
         audit(f"link {link.id} takes no more logins: {link.why_closed()}")
         self.events("closed", link, None, link.why_closed())
+      if link.kind == "web" and link.expired() and link.live_sessions:
+        # (a web link's session is the browser's way into all of slurp: its lifetime ends it, as Revoke does; the
+        # tunnel closes with it, and the web view once no web link is left)
+        audit(f"link {link.id} expired: its {len(link.live_sessions)} web session(s) ended")
+        for s in link.live_sessions:
+          s.close()
       if link.finished and link.tunnel is not None and link.tunnel.returncode is None:
         try:
           link.tunnel.terminate()
@@ -809,6 +830,12 @@ class ShareManager:
           link.tunnel.terminate()
         except ProcessLookupError:
           pass
+
+  async def stopped(self, timeout=5):
+    """shutdown(), then wait until the processes it ended are gone (the relays' tunnels, the drives' servers)"""
+    procs = [p for link in self.links for p in (link.tunnel, *(s.proc for s in link.sessions)) if p is not None]
+    self.shutdown()
+    await ended(procs, timeout)
 
   # ---- sessions
   def _started(self, session):

@@ -1,0 +1,34 @@
+# PSC Bridges-2 (Pittsburgh): RM nodes (128 cores, 256 or 512 GB), EM nodes (96 cores, 4 TB), GPU nodes with 8 GPUs
+# (v100-16, v100-32, l40s-48, h100-80). Logins: bridges2.psc.edu; data transfer nodes: data.bridges2.psc.edu.
+# Bridges-2 is down from November 9, 2026 for a datacenter move, expected back in December 2026
+# (https://www.psc.edu/b2-migration-2026/).
+schema = 1
+version = "2026.11.23"
+name = "PSC Bridges-2"
+scheduler = "slurm"
+match = ["bridges2*", "bridges-2*", "*.bridges2.psc.edu", "bridges2.psc.edu"]
+docs = "https://www.psc.edu/resources/bridges-2/user-guide/"
+status = "https://www.psc.edu/b2-migration-2026/"
+parallel_fs = ["/ocean"]
+transfer_hosts = ["data.bridges2.psc.edu"]
+login_node_limits = "No numeric limit is documented: login nodes are not for production computing, which must run on compute nodes; transfers can no longer be started from them (use data.bridges2.psc.edu)"
+
+# How to log in (https://www.psc.edu/resources/bridges-2/user-guide/): ssh to bridges2.psc.edu on port 22 with your
+# PSC password, or with an SSH key registered with PSC.
+[login]
+required = ["user"]
+user_label = "your PSC username"
+setup = """Once, before the first login:
+1. Set your PSC password (a Kerberos password, the same on all PSC systems) at https://apr.psc.edu/ (later change it
+   with kpasswd on Bridges-2, not passwd).
+2. Optional, to log in with a key instead: create a key pair on your own machine with a passphrase
+   (ssh-keygen -t ed25519) and register its PUBLIC key (the .pub file) with PSC through the form at
+   https://grants.psc.edu/cgi-bin/ssh/listKeys.pl. Never send the private key.
+Then each login: enter your PSC password at the prompt (or your key's passphrase).
+Copy files through data.bridges2.psc.edu, not the login nodes; in Globus the endpoint is
+"PSC Bridges-2 /ocean and /jet filesystems"."""
+
+[[clusters]]
+name = "bridges2"
+title = "Bridges-2"
+host = "bridges2.psc.edu"

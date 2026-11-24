@@ -1,0 +1,33 @@
+# SURF Snellius (Amsterdam, Dutch national supercomputer): CPU partitions rome, genoa (and fat_*), GPU partitions
+# gpu_a100, gpu_h100 (4 NVIDIA A100 or H100 per node). Logins: snellius.surf.nl (login nodes int*).
+schema = 1
+version = "2026.11.23"
+name = "SURF Snellius"
+scheduler = "slurm"
+match = ["snellius*", "*.snellius.surf.nl"]
+docs = "https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/30660265/Snellius+FAQ"
+status = "https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/9798134/Service+status"
+# /scratch-shared: files whose contents did not change for 14 days are removed (/scratch-local: 6 days)
+scratch_purge_days = 14
+# scratch-local and scratch-shared are on the same GPFS file system
+parallel_fs = ["/scratch-shared", "/scratch-local"]
+login_node_limits = "processes on the login nodes that use too much CPU time or memory are killed automatically (VS Code Server too)"
+
+# How to log in (servicedesk.surf.nl/wiki, Connecting to Snellius, Snellius FAQ, Service status): directly from a
+# whitelisted IP range (Dutch academic networks), with a key uploaded to the CUA portal (keys in authorized_keys are
+# no longer used since the maintenance of October 2026).
+[login]
+required = ["user", "identities"] # (it logs in with a key only)
+user_label = "your SURF (CUA) login"
+setup = """Once, before the first login:
+1. Accept the Usage Agreement and change your initial password at portal.cua.surf.nl.
+2. A key with a passphrase: ssh-keygen -t ed25519
+3. Upload its public half (~/.ssh/id_ed25519.pub) at portal.cua.surf.nl: Public ssh keys, add key, paste it into the SSH key field and give your CUA password. It can take a few minutes to work on Snellius; only keys uploaded there are accepted.
+4. Snellius accepts logins only from whitelisted IP ranges (the Dutch academic institutions, eduroam, most university VPNs). From elsewhere: your institution's VPN, or ask the SURF servicedesk to whitelist your public IP (curl https://echoip.cua.surf.nl shows it). The doornode doornode.hpcv.surf.nl (a menu, not a jump host) and Open OnDemand (ondemand.snellius.surf.nl) work from anywhere.
+5. At the first login: compare the host key with the Snellius hostkey fingerprints on the SURF wiki.
+If your PI had 2FA enabled for your login, a TOTP code is asked after the key. Five failed logins ban you from a login node for 24 hours."""
+
+[[clusters]]
+name = "snellius"
+title = "Snellius"
+host = "snellius.surf.nl"

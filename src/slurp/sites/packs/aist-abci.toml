@@ -1,0 +1,29 @@
+# AIST ABCI 3.0 (Japan): 766 compute nodes (H), each 2 Intel Xeon Platinum 8558 (48 cores) and 8 NVIDIA H200 SXM
+# 141 GB; batch system Altair PBS Professional. Access server as.v3.abci.ai (from outside); interactive nodes "login"
+# (5 nodes, reached only through the access server).
+schema = 1
+version = "2026.11.23"
+name = "AIST ABCI 3.0"
+scheduler = "pbs"
+match = ["abci*", "*.abci.ai"]
+docs = "https://docs.abci.ai/v3/en/"
+status = "https://abci.ai/en/about_abci/info.html"
+parallel_fs = ["/home", "/groups", "/groups_s3"]
+login_node_limits = "No GPUs on the interactive nodes; high-load tasks there are forcibly terminated by the system."
+
+# How to log in (https://docs.abci.ai/v3/en/getting-started/): two-step SSH public key authentication, through the
+# access server as.v3.abci.ai to the interactive node login (the documented ProxyJump method).
+[login]
+required = ["user", "identities"]
+user_label = "your ABCI account name"
+jump = "{user}@as.v3.abci.ai"
+setup = """Once, before the first login:
+1. Create an SSH key pair with a passphrase on your own machine. Accepted: RSA (at least 2048 bits), ECDSA (256, 384 or 521 bits), Ed25519; SSH protocol version 2 only.
+2. Register the PUBLIC key (the .pub file) in the ABCI 3.0 User Portal, https://portal.v3.abci.ai/ (guide: https://docs.abci.ai/v3/portal/en/).
+3. Put the private key path in the identities field; the same key is used for the access server and the interactive node.
+Each login: ssh goes through as.v3.abci.ai to the interactive node login; enter your key passphrase (or use an agent). File transfers (scp, sftp) take the same route."""
+
+[[clusters]]
+name = "abci"
+title = "ABCI 3.0 (PBS)"
+host = "login"
