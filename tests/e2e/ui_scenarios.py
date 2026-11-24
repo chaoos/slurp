@@ -2994,10 +2994,11 @@ async def t_array_window(app, pilot):
   lines = rendered(js.query_one("#info").content).split("\n")
   y = next(i for i, line in enumerate(lines) if "9500  (task 1)" in line)
   x = lines[y].index("9500  (task 1)") + 2
-  js.query_one("#info").scroll_visible(); await pilot.pause(0.2)
-
-  await pilot.click("#info", offset=(x, y)); await pilot.pause(0.5)
-
+  for _ in range(3): # (the job window may scroll in between as its checks come in: the click missed the link, again)
+    js.query_one("#info").scroll_visible(animate=False); await pilot.pause(0.2)
+    await pilot.click("#info", offset=(x, y))
+    if await until(pilot, lambda: app.screen is not js, 3): # (opened: no click again)
+      break
   ok = await until(pilot, lambda: isinstance(app.screen, ArrayScreen) and app.screen.groups, 20)
   check("a click on it: the array window in a new subtab", ok and app.screen.array_id == "9500" and len(app.cluster.view.views) == views + 1
         and app.cluster.view.views[-1].key == "array 9500", [v.key for v in app.cluster.view.views])
