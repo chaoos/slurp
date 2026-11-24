@@ -222,3 +222,6 @@ __marimo__/
 # Sublime Text: project and workspace files are personal
 *.sublime-project
 *.sublime-workspace
+
+# Task notes: local only, never committed
+/tasks/
