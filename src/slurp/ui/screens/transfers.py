@@ -432,6 +432,8 @@ class PickPathsScreen(ModalScreen):
     self.query_one("#pp-status", Static).update(Text(f"listing {path} …", style="dim"))
     self.asked = asked = object() # (only the latest listing is shown: an earlier one that comes later, e.g. the start
     # folder after a path typed, is dropped)
+    field = self.query_one("#pp-path", Input)
+    before = field.value # (what the path field had: typed into since, it is not overwritten by the listing)
     def work():
       try:
         if self.lister is not None:
@@ -461,7 +463,8 @@ class PickPathsScreen(ModalScreen):
           entries = [*entries, {"name": name, "dir": True, "size": 0, "mtime": time.time()}]
           names.add(name)
       self.path, self.entries, self.marked = where, entries, (self.marked & names if keep else set())
-      self.query_one("#pp-path", Input).value = where
+      if field.value == before:
+        field.value = where
       self.populate()
       if keep and table.row_count:
         table.move_cursor(row=min(cursor, table.row_count - 1))
