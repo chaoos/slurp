@@ -33,7 +33,7 @@ async def until(pilot, cond, t=10):
 
 
 def titles(app):
-  return [v.title for v in app.cluster.views]
+  return [v.title for v in app.cluster.view.views]
 
 
 def test_subtabs_open_again_at_the_next_start(check, home):
@@ -48,7 +48,7 @@ def test_subtabs_open_again_at_the_next_start(check, home):
       open_path(app, ["Local"], str(home / "runs" / "out.log"))
       await until(pilot, lambda: isinstance(app.screen, FileScreen) and app.screen.file_size is not None)
       app.show_view(None); await pilot.pause(0.2) # (the job list open)
-      app.show_view(app.cluster.views[2]); await pilot.pause(0.3) # (the file shown)
+      app.show_view(app.cluster.view.views[2]); await pilot.pause(0.3) # (the file shown)
       return titles(app)
   before = asyncio.run(first())
   kept = (load_config().get("tabs") or [{}])[0].get("views") or {}
@@ -65,19 +65,19 @@ def test_subtabs_open_again_at_the_next_start(check, home):
       async with app.run_test(size=(140, 40)) as pilot:
         await until(pilot, lambda: app.main is not None)
         await pilot.pause(0.2)
-        check("at once at the start: the subtabs as placeholders, in their order (titled as they were)", [v.title for v in app.cluster.views] == before[:3]
-              and all(v.pending for v in app.cluster.views), [(v.title, v.pending) for v in app.cluster.views])
+        check("at once at the start: the subtabs as placeholders, in their order (titled as they were)", [v.title for v in app.cluster.view.views] == before[:3]
+              and all(v.pending for v in app.cluster.view.views), [(v.title, v.pending) for v in app.cluster.view.views])
         buttons = [b for b in app.screen.query("#view-tabs Button.view-tab") if b.display and b.id != "view-overview"]
         check("…in the bar, muted", [str(b.label).split()[-1] for b in buttons][-3:] == [before[0].split()[-1][:40], "catalogue", "out.log"]
               and all(b.has_class("-pending") for b in buttons[-3:]), [str(b.label) for b in buttons])
         app.show_view(None); await pilot.pause(0.2)
-        app.show_view(app.cluster.views[2]); await pilot.pause(0.3)
+        app.show_view(app.cluster.view.views[2]); await pilot.pause(0.3)
         notes = [str(n.message) for n in app._notifications]
         check("a click before it is connected: connect first, the overview", isinstance(app.screen, OverviewScreen)
               and any("connect first" in n for n in notes), (type(app.screen).__name__, notes[-2:]))
         restore.ready = real_ready # (connected now)
         app.restore_views()
-        ok = await until(pilot, lambda: not any(v.pending for v in app.cluster.views) and not app.cluster.restoring, 15)
+        ok = await until(pilot, lambda: not any(v.pending for v in app.cluster.view.views) and not app.cluster.view.restoring, 15)
         await pilot.pause(0.3)
         check("connected: each opened in its place, in their order", ok and titles(app) == before[:3], (titles(app), before))
         buttons = [str(b.label).split()[-1] for b in app.screen.query("#view-tabs Button.view-tab") if b.display and b.id != "view-overview"]
@@ -85,8 +85,8 @@ def test_subtabs_open_again_at_the_next_start(check, home):
               and not app.screen.query("#view-tabs Button.-pending"), buttons)
         check("the one shown before is shown (the overview was)", isinstance(app.screen, FileScreen) and app.screen.path.endswith("out.log"),
               type(app.screen).__name__)
-        check("the job list open again too", app.cluster.jobs_open)
-        app.close_view(app.cluster.views[0]); await pilot.pause(0.3)
+        check("the job list open again too", app.cluster.view.jobs_open)
+        app.close_view(app.cluster.view.views[0]); await pilot.pause(0.3)
         return titles(app)
     finally:
       restore.ready = real_ready
@@ -122,18 +122,18 @@ def test_the_start_with_placeholders_on_the_overview(check, home, start_on_overv
       async with app.run_test(size=(140, 40)) as pilot:
         await until(pilot, lambda: app.main is not None); await pilot.pause(0.5)
         check("it starts: the overview, the placeholders in the bar", isinstance(app.screen, OverviewScreen)
-              and [v.title for v in app.cluster.views] == ["Rule catalogue", "runs/"] and all(v.pending for v in app.cluster.views),
+              and [v.title for v in app.cluster.view.views] == ["Rule catalogue", "runs/"] and all(v.pending for v in app.cluster.view.views),
               type(app.screen).__name__)
         app.show_view(None); await pilot.pause(0.2)
         await pilot.press("ctrl+w"); await pilot.pause(0.3)
         check("closing the job list: the overview again, not a placeholder", isinstance(app.screen, OverviewScreen), type(app.screen).__name__)
         # (connected, with the job list of the last run kept, not loaded again, not open: that is enough)
-        app.cluster.loaded, app.cluster.from_cache, app.cluster.jobs_open = True, True, False
+        app.cluster.loaded, app.cluster.from_cache, app.cluster.view.jobs_open = True, True, False
         restore.ready = real_ready
         app.restore_views()
-        ok = await until(pilot, lambda: not any(v.pending for v in app.cluster.views) and not app.cluster.restoring, 10)
+        ok = await until(pilot, lambda: not any(v.pending for v in app.cluster.view.views) and not app.cluster.view.restoring, 10)
         await pilot.pause(0.5) # (the one shown before is being shown)
-        check("then opened, and the one shown before shown", ok and [v.title for v in app.cluster.views][0] == "Rule catalogue"
+        check("then opened, and the one shown before shown", ok and [v.title for v in app.cluster.view.views][0] == "Rule catalogue"
               and isinstance(app.screen, DirScreen), type(app.screen).__name__)
     finally:
       restore.ready = real_ready
@@ -167,8 +167,8 @@ def test_a_fresh_start_after_a_crash(check, home):
     async with app.run_test(size=(140, 40)) as pilot:
       await until(pilot, lambda: app.main is not None); await pilot.pause(0.5)
       notes = [str(n.message) for n in app._notifications]
-      check("no subtabs (the tab itself stays), and why", not app.cluster.views and app.cluster.pending_views is None
-            and any("did not end cleanly" in n for n in notes), ([v.title for v in app.cluster.views], notes))
+      check("no subtabs (the tab itself stays), and why", not app.cluster.view.views and app.cluster.view.pending_views is None
+            and any("did not end cleanly" in n for n in notes), ([v.title for v in app.cluster.view.views], notes))
       check("this run counts as started", load_config()["session"]["clean"] is False)
   asyncio.run(main())
   check("ended cleanly: recorded; nothing kept to open (it was not)", load_config()["session"]["clean"] is True
@@ -188,8 +188,8 @@ def test_what_cannot_be_read_or_opened(check, home):
     try:
       async with app.run_test(size=(140, 40)) as pilot:
         await until(pilot, lambda: app.main is not None); await pilot.pause(0.3)
-        check("unreadable: that tab without subtabs; the other one keeps its own", not app.clusters[0].views
-              and [v.title for v in app.clusters[1].views] == ["Rule catalogue"], [[v.title for v in c.views] for c in app.clusters])
+        check("unreadable: that tab without subtabs; the other one keeps its own", not app.clusters[0].view.views
+              and [v.title for v in app.clusters[1].view.views] == ["Rule catalogue"], [[v.title for v in c.view.views] for c in app.clusters])
         app.activate_cluster(1, connect=False); await pilot.pause(0.2)
         restore.ready = real_ready
         def broken(app, cluster):
@@ -197,7 +197,7 @@ def test_what_cannot_be_read_or_opened(check, home):
         restore.restore = broken
         app.restore_views(); await pilot.pause(0.3)
         notes = [str(n.message) for n in app._notifications]
-        check("opening them fails: they go, the tab as at a fresh start, said so", not app.cluster.views
+        check("opening them fails: they go, the tab as at a fresh start, said so", not app.cluster.view.views
               and any("could not be opened again" in n for n in notes) and app.current_mode in ("_default", "overview"), (notes[-2:], app.current_mode))
     finally:
       restore.ready, restore.restore = real_ready, real_restore

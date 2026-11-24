@@ -81,7 +81,7 @@ def test_search_in_the_directory_view(check, home, monkeypatch):
       table.focus(); table.move_cursor(row=rows().index("run03/out/result3.txt")); await pilot.press("enter")
       ok = await until(pilot, lambda: isinstance(app.screen, FileScreen))
       check("a result opens (a file in its subtab)", ok and app.screen.path == os.path.join(str(home), "run03/out/result3.txt"))
-      app.show_view(app.cluster.views[0]); await pilot.pause(0.3)
+      app.show_view(app.cluster.view.views[0]); await pilot.pause(0.3)
       await pilot.press("escape")
       ok = await until(pilot, lambda: d.results is None and ".." in rows() and len(rows()) == 15)
       check("Esc again: no search, the listing as it was", ok and not d.query_one("#dsearch").has_class("visible"), rows()[:4])

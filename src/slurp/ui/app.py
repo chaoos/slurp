@@ -31,7 +31,7 @@ from ..cluster.remote import (
   command_exists, connection_health, CURRENT, fs_isdir, fs_isfile, HEALTH_STYLES, in_background, RemoteSSH, run, run_cmd, SLURM_ENV, start_worker
 )
 from ..cluster.jobs import (
-  annotate, array_task_id, compress_array_ids, duration_text, fmt_time, is_time, load_jobs, pace_eta, progress_for_job, slurm_accounts
+  annotate, array_task_id, collapse_arrays, COLLAPSE_MIN, compress_array_ids, duration_text, fmt_time, is_time, load_jobs, pace_eta, progress_for_job, slurm_accounts
 )
 from ..cluster.details import current_memory_usage, MEMORY, record_memory
 from ..cluster.paths import job_vars
@@ -303,10 +303,10 @@ class Slurp(TransfersTab, App):
       cluster.pre_login_fallback = bool(tab.get("pre_login_fallback")) and bool(cluster.pre_login)
       cluster.since_value = tab.get("since") or "1d"
       cluster.scope = tab.get("scope") or "me"
-      cluster.collapse_arrays = tab.get("collapse_arrays", True)
+      cluster.view.collapse_arrays = tab.get("collapse_arrays", True)
       views = tab.get("views")
       if isinstance(views, dict) and (views.get("views") or views.get("jobs_open")) and not self.fresh_start:
-        cluster.pending_views = views
+        cluster.view.pending_views = views
         placeholders(self, cluster, views) # (there at once; opened when it is connected)
       self.clusters.append(cluster)
     self.cluster_index = min(max(int(saved.get("active", 0) or 0), 0), max(len(self.clusters) - 1, 0))
@@ -445,7 +445,7 @@ class Slurp(TransfersTab, App):
     except Exception as e:
       log.debug(f"keeping the tabs at the end: {e!r}")
     for cluster in self.clusters:
-      for view in cluster.views:
+      for view in cluster.view.views:
         if view.session is not None:
           view.session.terminate()
       for terminal in (cluster.terminal, cluster.login_terminal):
@@ -485,7 +485,7 @@ class Slurp(TransfersTab, App):
       cluster.login_terminal.terminate()
     cluster.login_terminal = TerminalSession(self, [], f"SSH login: {cluster.destination}", login=c)
     cluster.login_terminal.ensure(100, 30) # starts it now, also while it is not shown
-    cluster.show_login = show
+    cluster.view.show_login = show
     cluster.attempts += 1
     cluster.ready_generation = None
 
@@ -504,7 +504,7 @@ class Slurp(TransfersTab, App):
                 f"only the configured key. To keep it so, add \"IdentitiesOnly yes\" to Host {cluster.destination} in "
                 "~/.ssh/config", title=cluster.name, severity="warning", timeout=15)
     cluster.broken_at = None
-    self.login(cluster, show=cluster.show_login)
+    self.login(cluster, show=cluster.view.show_login)
     return True
 
   def needs_login(self, cluster):
@@ -533,24 +533,24 @@ class Slurp(TransfersTab, App):
       self.tab_history.remove(cluster)
     self.tab_history.append(cluster) # (closing the tab shown goes back to the one shown before)
     remote.ssh_connection = cluster.connection
-    if not cluster.opened:
-      cluster.opened = True
-      cluster.jobs_open = self.start_page() == "_default"
-      cluster.current_view = self.home_mode(cluster)
-    mode = cluster.current_view
-    if not (mode == "_default" and cluster.jobs_open or mode == "overview" or any(v.mode == mode and not v.pending for v in cluster.views)):
-      mode = cluster.current_view = self.home_mode(cluster)
+    if not cluster.view.opened:
+      cluster.view.opened = True
+      cluster.view.jobs_open = self.start_page() == "_default"
+      cluster.view.current_view = self.home_mode(cluster)
+    mode = cluster.view.current_view
+    if not (mode == "_default" and cluster.view.jobs_open or mode == "overview" or any(v.mode == mode and not v.pending for v in cluster.view.views)):
+      mode = cluster.view.current_view = self.home_mode(cluster)
     if self.current_mode != mode:
       self.switch_mode(mode)
     self.show_tab_shell()
     self.update_scope_select()
     self.update_since_widgets()
-    self.query_one("#collapse-arrays", Checkbox).value = cluster.collapse_arrays # (no reload: only the rows change)
+    self.query_one("#collapse-arrays", Checkbox).value = cluster.view.collapse_arrays # (no reload: only the rows change)
     self.populate()
     self.refresh_status()
     if not cluster.loaded and cluster.loader is None and (not cluster.destination or cluster.connection.ready):
       self.action_reload()
-    elif any(v.pending for v in cluster.views):
+    elif any(v.pending for v in cluster.view.views):
       self.call_after_refresh(lambda: self.restore_views(cluster))
 
   def connect_tab(self):
@@ -575,7 +575,7 @@ class Slurp(TransfersTab, App):
     if not cluster.destination or c is None or c.ready:
       return None
     if c.state == "connecting":
-      return "connecting" if cluster.show_login else None
+      return "connecting" if cluster.view.show_login else None
     return "idle" if self.needs_login(cluster) and (c.state in ("new", "closed") or not c.wanted) else None
 
   def login_visible(self, cluster):
@@ -586,11 +586,11 @@ class Slurp(TransfersTab, App):
     if t is None or c is None or c.ready:
       return False
     if t.done:
-      return cluster.show_login
+      return cluster.view.show_login
     if c.state != "connecting":
       return False
     printed = t.vt is not None and any(line.strip() for line in t.vt.display)
-    return cluster.show_login or printed and time.monotonic() - c.connecting_since > 1
+    return cluster.view.show_login or printed and time.monotonic() - c.connecting_since > 1
 
   def show_tab_shell(self):
     """The pane shows the login of the active tab while it needs the user, else the shell of the tab"""
@@ -602,7 +602,7 @@ class Slurp(TransfersTab, App):
     self.shell = want
     self.shell_changed()
     if login is not None:
-      cluster.show_login = True # stays until the login is done
+      cluster.view.show_login = True # stays until the login is done
       self.call_after_refresh(self.focus_terminal)
     elif isinstance(self.focused, TerminalView) or self.focused is None:
       self.call_after_refresh(self.focus_left)
@@ -624,7 +624,7 @@ class Slurp(TransfersTab, App):
   next_view_id = 0
 
   def find_view(self, key):
-    return next((v for v in self.cluster.views if key and v.key == key), None)
+    return next((v for v in self.cluster.view.views if key and v.key == key), None)
 
   def open_view(self, title, make_screen, kind="window", key="", session=None, icon=""):
     """A new subtab of the active tab (or the one that shows key already); icon: the concept of its icon"""
@@ -635,11 +635,11 @@ class Slurp(TransfersTab, App):
       type(self).next_view_id += 1
       view = View(type(self).next_view_id, title, kind, key, session, icon)
       self.add_mode(view.mode, make_screen)
-      self.cluster.views.append(view)
-    if self.cluster.restoring and not view.pending: # (a kept subtab opened again: in its place, nothing switches)
+      self.cluster.view.views.append(view)
+    if self.cluster.view.restoring and not view.pending: # (a kept subtab opened again: in its place, nothing switches)
       return
     self.show_view(view)
-    if not self.cluster.restoring:
+    if not self.cluster.view.restoring:
       self.call_after_refresh(self.save_tabs) # (the subtabs are kept for the next start)
 
   new_subtab = None # (while in_new_subtab runs: the key of the subtab a window opens in)
@@ -660,7 +660,7 @@ class Slurp(TransfersTab, App):
   def open_window(self, screen, title=""):
     """A window: from the job list it opens as a subtab, within a subtab it opens on top of it (← goes back); in a
     subtab of its own in in_new_subtab"""
-    new = self.new_subtab is not None or (bool(self.clusters) and self.cluster.restoring)
+    new = self.new_subtab is not None or (bool(self.clusters) and self.cluster.view.restoring)
     if (new or self.current_mode in ("_default", "overview")) and not isinstance(self.screen, ModalScreen) and self.clusters:
       crumbs = getattr(screen, "crumbs", None)
       self.open_view(title or (crumbs[-1] if crumbs else "") or type(screen).__name__, lambda: screen,
@@ -677,19 +677,19 @@ class Slurp(TransfersTab, App):
     """What a tab shows when the subtab shown goes away: the one shown before it that is still open (views; the
     overview is always there), else its job list if open, else its last subtab (views), else the overview"""
     if views:
-      for mode in reversed(cluster.view_history):
-        if (mode == "_default" and cluster.jobs_open) or any(v.mode == mode and not v.pending for v in cluster.views) or mode == "overview":
+      for mode in reversed(cluster.view.view_history):
+        if (mode == "_default" and cluster.view.jobs_open) or any(v.mode == mode and not v.pending for v in cluster.view.views) or mode == "overview":
           return mode
-    if cluster.jobs_open:
+    if cluster.view.jobs_open:
       return "_default"
-    opened = [v for v in cluster.views if not v.pending] # (a placeholder has no window yet)
+    opened = [v for v in cluster.view.views if not v.pending] # (a placeholder has no window yet)
     return opened[-1].mode if views and opened else "overview"
 
   def show_home(self, views=True):
     """The job list (if open), the last subtab (views: when one closed; not for Back), or the overview of the tab"""
     if not self.clusters:
       return
-    mode = self.cluster.current_view = self.home_mode(self.cluster, views)
+    mode = self.cluster.view.current_view = self.home_mode(self.cluster, views)
     if self.current_mode != mode:
       self.switch_mode(mode)
       if mode == "_default":
@@ -699,8 +699,8 @@ class Slurp(TransfersTab, App):
   def close_jobs(self):
     """Close the job list's subtab (its list stays loaded): the last subtab, or the overview"""
     cluster = self.cluster
-    cluster.jobs_open = False
-    if self.current_mode == "_default" or cluster.current_view == "_default":
+    cluster.view.jobs_open = False
+    if self.current_mode == "_default" or cluster.view.current_view == "_default":
       self.show_home()
     self.refresh_status()
 
@@ -710,9 +710,9 @@ class Slurp(TransfersTab, App):
       log.warning(f"no subtab {mode} to show: the overview instead")
       mode = "overview"
       if self.clusters:
-        self.cluster.current_view = mode
+        self.cluster.view.current_view = mode
     if self.clusters and not self.is_transfers_mode(mode):
-      history = self.cluster.view_history
+      history = self.cluster.view.view_history
       if mode in history:
         history.remove(mode)
       history.append(mode)
@@ -723,7 +723,7 @@ class Slurp(TransfersTab, App):
     """The overview of the active tab: its first subtab, always there (it cannot be closed)"""
     if not self.clusters:
       return
-    self.cluster.current_view = "overview"
+    self.cluster.view.current_view = "overview"
     if self.current_mode != "overview":
       self.switch_mode("overview")
     self.call_after_refresh(self.refresh_status)
@@ -736,8 +736,8 @@ class Slurp(TransfersTab, App):
       return
     mode = view.mode if view is not None else "_default"
     if view is None:
-      self.cluster.jobs_open = True
-    self.cluster.current_view = mode
+      self.cluster.view.jobs_open = True
+    self.cluster.view.current_view = mode
     if self.current_mode != mode:
       self.switch_mode(mode)
       if view is None:
@@ -749,16 +749,16 @@ class Slurp(TransfersTab, App):
   def close_view(self, view, cluster=None):
     """Close a subtab: its windows go away, its shell ends"""
     cluster = cluster or self.cluster
-    if view not in cluster.views:
+    if view not in cluster.view.views:
       return
     if view.session is not None:
       view.session.terminate()
-    cluster.views.remove(view)
-    if cluster.current_view == view.mode:
-      cluster.current_view = self.home_mode(cluster)
+    cluster.view.views.remove(view)
+    if cluster.view.current_view == view.mode:
+      cluster.view.current_view = self.home_mode(cluster)
     if self.current_mode == view.mode:
       self.show_home()
-    if not cluster.restoring:
+    if not cluster.view.restoring:
       self.call_after_refresh(self.save_tabs)
     def remove():
       try:
@@ -775,7 +775,7 @@ class Slurp(TransfersTab, App):
     if self.current_mode == "_default":
       self.close_jobs()
       return
-    view = next((v for v in self.cluster.views if v.mode == self.current_mode), None)
+    view = next((v for v in self.cluster.view.views if v.mode == self.current_mode), None)
     if view is not None:
       self.request_close_view(view)
 
@@ -807,9 +807,9 @@ class Slurp(TransfersTab, App):
     for b in bar.query("#view-overview"):
       b.variant = "primary" if self.current_mode == "overview" else "default"
     for b in (*jobs, *bar.query("#view-close-jobs")):
-      if b.display != self.cluster.jobs_open:
-        b.display = self.cluster.jobs_open
-    wanted = {str(v.id) for v in self.cluster.views}
+      if b.display != self.cluster.view.jobs_open:
+        b.display = self.cluster.view.jobs_open
+    wanted = {str(v.id) for v in self.cluster.view.views}
     have = set()
     for b in bar.query("Button.view-tab, Button.view-close"): # remove only the buttons of closed subtabs (ids stay unique)
       if b.id in ("view-jobs", "view-close-jobs", "view-overview"):
@@ -821,7 +821,7 @@ class Slurp(TransfersTab, App):
           b.remove()
       else:
         have.add(vid)
-    views = self.cluster.views
+    views = self.cluster.view.views
     for i, v in enumerate(views):
       if str(v.id) not in have:
         tip = f"{v.title}: opens when the tab is connected" if v.pending else v.title
@@ -832,7 +832,7 @@ class Slurp(TransfersTab, App):
                   Button("✕", id=f"view-close-{v.id}", classes="view-close", compact=True, tooltip="close the subtab"),
                   **({"before": after} if after is not None else {}))
         have.add(str(v.id))
-    for v in self.cluster.views:
+    for v in self.cluster.view.views:
       for b in bar.query(f"#view-tab-{v.id}"):
         b.variant = "primary" if self.current_mode == v.mode else "default"
         label = icons.label(v.icon, v.title[:40] + (" (ended)" if v.session is not None and v.session.done else ""))
@@ -846,11 +846,11 @@ class Slurp(TransfersTab, App):
     what = ["its job list"]
     if cluster.destination:
       what.insert(0, "its SSH session")
-    shells = sum(v.session is not None and not v.session.done for v in cluster.views)
+    shells = sum(v.session is not None and not v.session.done for v in cluster.view.views)
     if shells:
       what.append(f"its {shells} shell{'s' if shells > 1 else ''}")
-    if len(cluster.views) > shells:
-      what.append(f"its other subtabs ({len(cluster.views) - shells})")
+    if len(cluster.view.views) > shells:
+      what.append(f"its other subtabs ({len(cluster.view.views) - shells})")
     moving = self.transfers_for_tab(cluster)
     if moving:
       what.append(f"the connection of {len(moving)} transfer{'s' if len(moving) > 1 else ''} under way (they wait for the tab)")
@@ -881,7 +881,7 @@ class Slurp(TransfersTab, App):
       self.shell_changed()
     if current and self.current_mode != "_default":
       self.switch_mode("_default")
-    for view in list(cluster.views):
+    for view in list(cluster.view.views):
       self.close_view(view, cluster)
     self.clusters.pop(index)
     if cluster in self.tab_history:
@@ -912,7 +912,7 @@ class Slurp(TransfersTab, App):
         log.debug(f"keeping the subtabs of {c.name}: {e!r}")
         return None
     update_config(tabs=[{"destination": c.destination, "since": c.since_value, "scope": c.scope,
-                         "collapse_arrays": c.collapse_arrays, **({"ssh": c.ssh} if c.ssh else {}),
+                         "collapse_arrays": c.view.collapse_arrays, **({"ssh": c.ssh} if c.ssh else {}),
                          **({"name": c.name} if c.ssh or c.name != (c.destination or "Local") else {}),
                          **({"pre_login": c.pre_login} if c.pre_login else {}),
                          **({"pre_login_fallback": True} if c.pre_login and c.pre_login_fallback else {}), "views": views(c)}
@@ -923,7 +923,7 @@ class Slurp(TransfersTab, App):
     """The subtabs of the last run of a tab, opened again when it is ready (connected, its job list loaded)"""
     from .restore import give_up, restore
     cluster = cluster or (self.cluster if self.clusters else None)
-    if cluster is not None and any(v.pending for v in cluster.views):
+    if cluster is not None and any(v.pending for v in cluster.view.views):
       try:
         restore(self, cluster)
       except Exception as e:
@@ -1021,7 +1021,7 @@ class Slurp(TransfersTab, App):
     c.close()
     if cluster.login_terminal is not None:
       cluster.login_terminal.terminate()
-    cluster.show_login = False
+    cluster.view.show_login = False
     if self.shell is cluster.login_terminal:
       self.shell = cluster.terminal
       self.shell_changed()
@@ -1081,12 +1081,12 @@ class Slurp(TransfersTab, App):
           self.login(cluster, show=True)
           continue
       if c.ready and cluster.ready_generation != c.generation: # (re)connected
-        cluster.ready_generation, cluster.attempts, cluster.show_login = c.generation, 0, False
+        cluster.ready_generation, cluster.attempts, cluster.view.show_login = c.generation, 0, False
         cluster.broken_at = None
         self.notify(f"connected to {c.identity}", timeout=3)
         if not cluster.loaded and cluster.loader is None:
           self.reload_cluster(cluster)
-        if any(v.pending for v in cluster.views): # (its kept subtabs: open now)
+        if any(v.pending for v in cluster.view.views): # (its kept subtabs: open now)
           self.call_after_refresh(lambda cluster=cluster: self.restore_views(cluster))
       elif c.state == "broken" and c.wanted and (cluster.login_terminal is None or cluster.login_terminal.done):
         if cluster.broken_at is None:
@@ -1329,7 +1329,7 @@ class Slurp(TransfersTab, App):
     if via is not None and not via.ready:
       self.notify("log in first", severity="warning")
       return
-    same = sum(v.kind == "shell" and v.title.split(" (")[0] == title for v in self.cluster.views)
+    same = sum(v.kind == "shell" and v.title.split(" (")[0] == title for v in self.cluster.view.views)
     title = f"{title} ({same + 1})" if same else title
     session = TerminalSession(self, args, title, via=via)
     self.open_view(title, lambda: TerminalScreen(session), kind="shell", session=session, icon="shell")
@@ -2086,7 +2086,7 @@ class Slurp(TransfersTab, App):
       threading.Thread(target=jobcache.save, args=(cluster, jobs), daemon=True, name="keeping the job list").start()
     self.show_warnings()
     self.refresh_status()
-    if any(v.pending for v in cluster.views) and (jobs is not None or cluster.no_slurm):
+    if any(v.pending for v in cluster.view.views) and (jobs is not None or cluster.no_slurm):
       self.call_after_refresh(lambda: self.restore_views(cluster))
 
   def check_login_nodes(self):
@@ -2250,27 +2250,12 @@ class Slurp(TransfersTab, App):
       self.notify("loading aborted: the list is the one loaded before", timeout=4)
     self.refresh_status()
 
-  COLLAPSE_MIN = 2 # tasks of one array in the list from which they are shown as one row (one alone: its own row)
+  COLLAPSE_MIN = COLLAPSE_MIN # tasks of one array in the list from which they are shown as one row (one alone: its own row)
 
   def collapse(self, ordered, cluster):
     """The rows of the job list: jobs, and for each array with many tasks a row (array id, tasks) where its first
     task is (followed by the tasks if the row was opened)"""
-    groups = {}
-    for job in ordered:
-      if array_task_id(job) is not None:
-        groups.setdefault(job.jid.partition("_")[0], []).append(job)
-    big = {key: jobs for key, jobs in groups.items() if len(jobs) >= self.COLLAPSE_MIN}
-    member = {job.jid: key for key, jobs in big.items() for job in jobs}
-    done = set()
-    for job in ordered:
-      key = member.get(job.jid)
-      if key is None:
-        yield job
-      elif key not in done:
-        done.add(key)
-        yield (key, big[key])
-        if key in cluster.expanded:
-          yield from big[key]
+    return collapse_arrays(ordered, cluster.view.expanded, self.COLLAPSE_MIN)
 
   STATE_CODES = {"RUNNING": "R", "PENDING": "PD", "COMPLETED": "CD", "COMPLETING": "CG", "CONFIGURING": "CF",
                  "FAILED": "F", "CANCELLED": "CA", "TIMEOUT": "TO", "OUT_OF_MEMORY": "OOM", "NODE_FAIL": "NF",
@@ -2308,10 +2293,10 @@ class Slurp(TransfersTab, App):
     ids = compress_array_ids(indices)
     if len(ids) > 15: # interleaved states give long lists (1,3,5,...): they would make the column very wide
       ids = f"{indices[0]}…{indices[-1]}"
-    opened = key in cluster.expanded
+    opened = key in cluster.view.expanded
     first = tasks[0].rec
     values = [Text(icons.label("array", f"{array_id}_[{ids}] {'▾' if opened else '▸'} {len(tasks)} tasks"), style="bold"), first["JobName"]]
-    if "group|" + key in cluster.marked:
+    if "group|" + key in cluster.view.marked:
       values[0] = Text.assemble(("● ", "bold magenta"), values[0])
     if "category" in self.job_column_keys:
       cats = {j.category for j in tasks}
@@ -2413,12 +2398,12 @@ class Slurp(TransfersTab, App):
       job.rec.get("Partition"), job.rec.get("NodeList"), job.rec.get("WorkDir"), job.command,
       job.rec.get("SubmitLine"), job.rec.get("ExitCode"), job.category,
     )).casefold())]
-    cluster.marked &= {job.jid for job in all_jobs} | {"group|" + job.jid.partition("_")[0] for job in all_jobs} # (gone ones)
+    cluster.view.marked &= {job.jid for job in all_jobs} | {"group|" + job.jid.partition("_")[0] for job in all_jobs} # (gone ones)
     table.clear()
     self.mark_sort_column(table)
     ordered = sorted(visible_jobs, key=SORT_KEYS[self.sort_column], reverse=self.sort_reverse)
     try:
-      items = list(self.collapse(ordered, cluster)) if cluster.collapse_arrays else ordered
+      items = list(self.collapse(ordered, cluster)) if cluster.view.collapse_arrays else ordered
       rows = {item[0]: self.group_row(*item, cluster) for item in items if isinstance(item, tuple)}
     except Exception: # the list must show in any case: then without collapsed arrays
       log.exception("collapsing arrays in the job list failed")
@@ -2434,7 +2419,7 @@ class Slurp(TransfersTab, App):
       start = fmt_time(rec["Start"])
       in_open_array = rows and job.jid.partition("_")[0] in rows and array_task_id(job) is not None # under its row
       values = [self.job_id_cell(job, in_open_array), rec["JobName"]]
-      if job.jid in cluster.marked:
+      if job.jid in cluster.view.marked:
         values[0] = Text.assemble(("● ", "bold magenta"), (values[0], "bold"))
       if "category" in self.job_column_keys:
         values.append(category_cell(job.category))
@@ -2490,8 +2475,8 @@ class Slurp(TransfersTab, App):
       status += f" · only the {len(visible_jobs)} jobs with problems (!: all)"
     if errors:
       status += f" · {errors} with output in their error file"
-    if cluster.marked:
-      status += f" · {len(cluster.marked)} marked (c: categorize, M: none)"
+    if cluster.view.marked:
+      status += f" · {len(cluster.view.marked)} marked (c: categorize, M: none)"
     cluster.summary = status + f" · updated {cluster.updated:%H:%M:%S}"
     self.refresh_status()
 
@@ -2679,8 +2664,8 @@ class Slurp(TransfersTab, App):
 
   @on(Checkbox.Changed, "#collapse-arrays")
   def collapse_changed(self, event):
-    if event.value != self.cluster.collapse_arrays:
-      self.cluster.collapse_arrays = event.value
+    if event.value != self.cluster.view.collapse_arrays:
+      self.cluster.view.collapse_arrays = event.value
       self.populate()
       self.save_tabs()
 
@@ -2696,7 +2681,7 @@ class Slurp(TransfersTab, App):
     key = self.cursor_key()
     if key is None:
       return
-    self.cluster.marked.symmetric_difference_update({key})
+    self.cluster.view.marked.symmetric_difference_update({key})
     table = self.query_one("#jobs", ClickTable)
     row = table.cursor_row
     self.populate()
@@ -2705,15 +2690,15 @@ class Slurp(TransfersTab, App):
   def action_mark_all(self):
     """M: mark every row shown; if some are marked: none"""
     table = self.query_one("#jobs", ClickTable)
-    if self.cluster.marked:
-      self.cluster.marked.clear()
+    if self.cluster.view.marked:
+      self.cluster.view.marked.clear()
     else:
-      self.cluster.marked.update(str(k.value) for k in table.rows)
+      self.cluster.view.marked.update(str(k.value) for k in table.rows)
     self.populate()
 
   def category_targets(self):
     """The jobs c works on: the marked rows (an array's row: the array), else the row under the cursor; as job ids"""
-    keys = sorted(self.cluster.marked) or ([k] if (k := self.cursor_key()) else [])
+    keys = sorted(self.cluster.view.marked) or ([k] if (k := self.cursor_key()) else [])
     jids = [k.partition("|")[2] if k.startswith("group|") else k for k in keys]
     return list(dict.fromkeys(jids))
 
@@ -2723,7 +2708,7 @@ class Slurp(TransfersTab, App):
     if not jids:
       self.notify("no job here to categorize", severity="warning")
       return
-    self.categorize_jobs(jids, {k.partition("|")[2] for k in self.cluster.marked if k.startswith("group|")})
+    self.categorize_jobs(jids, {k.partition("|")[2] for k in self.cluster.view.marked if k.startswith("group|")})
 
   def categorize_jobs(self, jids, arrays=(), after=None):
     """Ask for the category of the jobs (ids; arrays: those that are whole arrays), then put them in it"""
@@ -2744,7 +2729,7 @@ class Slurp(TransfersTab, App):
         return
       what, path = result
       def done(store, _):
-        cluster.marked.clear()
+        cluster.view.marked.clear()
         self.populate()
         if after is not None:
           after()
@@ -2770,10 +2755,10 @@ class Slurp(TransfersTab, App):
 
 
   def action_toggle_collapse(self):
-    self.query_one("#collapse-arrays", Checkbox).value = not self.cluster.collapse_arrays
+    self.query_one("#collapse-arrays", Checkbox).value = not self.cluster.view.collapse_arrays
 
   def toggle_group(self, key):
-    self.cluster.expanded.symmetric_difference_update({key})
+    self.cluster.view.expanded.symmetric_difference_update({key})
     self.populate()
 
   def action_toggle_group(self):
@@ -2786,7 +2771,7 @@ class Slurp(TransfersTab, App):
       self.toggle_group(key.partition("|")[2])
     elif (job := self.jobs.get(key)) and array_task_id(job) is not None:
       group = job.jid.partition("_")[0]
-      if group in self.cluster.expanded:
+      if group in self.cluster.view.expanded:
         self.toggle_group(group)
 
   def open_array(self, array_id, job=None):

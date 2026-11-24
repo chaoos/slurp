@@ -215,7 +215,7 @@ class TerminalScreen(SplitScreen):
   def restart(self):
     old = self.session
     self.session = TerminalSession(self.app, old.args, old.title, via=old.via)
-    for view in self.app.cluster.views:
+    for view in self.app.cluster.view.views:
       if view.session is old:
         view.session = self.session
     view = self.query_one(TerminalView)

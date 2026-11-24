@@ -52,15 +52,16 @@ class Collector(logging.Handler):
 collector = Collector()
 
 @dataclass
-class ClusterSession:
-  """A tab: the local machine or an SSH destination, with its own connection, shell and job list"""
+class ClusterState:
+  """A tab, as any frontend needs it: the local machine or an SSH destination, with its own connection, shell and job
+  list. No view state: that is the frontend's (ViewState for the Textual app)."""
   name: str
   destination: str | None = None
   ssh: dict | None = None              # full SSH settings (sshsetup: user, host, port, jump, identities, options, name)
   pre_login: str = ""                  # a command run before every login, in the login's terminal (e.g. signing a key)
   pre_login_fallback: bool = False     # …only when a login without it fails (a key still valid is not signed anew)
   connection: object | None = None
-  terminal: object | None = None       # shell in the pane on the right while this tab is active
+  terminal: object | None = None       # the shell session of this tab (shown in the pane on the right while it is active)
   login_terminal: object | None = None # the ssh login (control master) of the connection
   jobs: dict = field(default_factory=dict)
   since: object | None = None          # finished-since time of the loaded list
@@ -72,9 +73,25 @@ class ClusterSession:
   loader: object | None = None         # worker loading the job list
   accounts: list | None = None         # Slurm accounts of the user (sacctmgr), None: not asked yet
   since_value: str = "1d"              # finished jobs listed: within this time (e.g. 1d, 3d12h, 2w, 1mo), "off": none
-  collapse_arrays: bool = True        # big arrays as one row in the job list (else every task)
-  expanded: set = field(default_factory=set) # collapsed array rows that are open ("array id|state")
   scope: str = "me"                    # whose jobs are listed: "me", "all" (all accounts) or an account
+  overview: dict = field(default_factory=dict) # what the overview loaded of its cluster (screens/overview.py)
+  load_started: float = 0.0
+  updated: object | None = None        # when the list was loaded
+  attempts: int = 0                    # logins since the session was last ready
+  ready_generation: int | None = None  # session generation the app has seen ready
+  broken_at: float | None = None       # when the session broke (or the last reconnect started)
+  categories: object | None = None     # categories.Store of its Slurm cluster (None: not read yet)
+  slurm_cluster: str | None = None     # Slurm's name of the cluster (ClusterName; the categories are kept by it)
+  from_cache: bool = False             # the job list is the one kept from an earlier load (jobcache.py), not loaded now
+  slurm_found: bool = False            # squeue was found on the machine of the tab (it is not looked for again)
+  no_slurm: bool = False               # the last load found no Slurm there: the job list says so
+  pending_categories: list = field(default_factory=list) # changes to the categories made while the cluster could not
+                                                         # be reached: [op, args...], written to it with the next load
+
+@dataclass
+class ViewState:
+  """How the Textual app shows a tab: its subtabs, the job list's rows (marked, arrays collapsed or open), the login in
+  the pane. Another frontend keeps its own; headless code never reads it."""
   views: list = field(default_factory=list) # the subtabs besides the job list
   current_view: str = "_default"       # mode shown ("_default": the job list, "overview": no subtab open, a view's mode)
   view_history: list = field(default_factory=list) # the modes shown, the last one most recently (closing goes back)
@@ -83,21 +100,15 @@ class ClusterSession:
   pending_views: dict | None = None    # the subtabs of the last run, to open again when connected (ui/restore.py)
   restoring: bool = False              # (they are being opened)
   restore_target: dict | None = None   # (a placeholder clicked meanwhile: shown when it is open)
-  overview: dict = field(default_factory=dict) # what the overview loaded of its cluster (screens/overview.py)
-  load_started: float = 0.0
-  updated: object | None = None        # when the list was loaded
-  show_login: bool = False             # the login is shown in the pane (until it is done)
-  attempts: int = 0                    # logins since the session was last ready
-  ready_generation: int | None = None  # session generation the app has seen ready
-  broken_at: float | None = None       # when the session broke (or the last reconnect started)
-  categories: object | None = None     # categories.Store of its Slurm cluster (None: not read yet)
-  slurm_cluster: str | None = None     # Slurm's name of the cluster (ClusterName; the categories are kept by it)
   marked: set = field(default_factory=set) # rows of the job list marked (m): job ids, "group|<array>" for an array
-  from_cache: bool = False             # the job list is the one kept from an earlier load (jobcache.py), not loaded now
-  slurm_found: bool = False            # squeue was found on the machine of the tab (it is not looked for again)
-  no_slurm: bool = False               # the last load found no Slurm there: the job list says so
-  pending_categories: list = field(default_factory=list) # changes to the categories made while the cluster could not
-                                                         # be reached: [op, args...], written to it with the next load
+  expanded: set = field(default_factory=set) # collapsed array rows that are open ("array id|state")
+  collapse_arrays: bool = True         # big arrays as one row in the job list (else every task)
+  show_login: bool = False             # the login is shown in the pane (until it is done)
+
+@dataclass
+class ClusterSession(ClusterState):
+  """A tab of the Textual app: its ClusterState and its ViewState (.view)"""
+  view: ViewState = field(default_factory=ViewState)
 
 @dataclass
 class View:

@@ -157,8 +157,8 @@ class Endpoint:
 
 def this_machine(clusters):
   """This machine: the local tab when one is open, else a stand-in for it (always there)"""
-  from ..state import ClusterSession
-  return next((c for c in clusters if not c.destination), None) or ClusterSession("Local", None)
+  from ..state import ClusterState
+  return next((c for c in clusters if not c.destination), None) or ClusterState("Local", None)
 
 def tab_state(cluster, app=None):
   """(state, words) of a tab, as its overview and its dot say"""

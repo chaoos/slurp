@@ -447,7 +447,7 @@ async def t_cluster_info(app, pilot):
   await pilot.press("escape"); await pilot.pause(0.4)
   check("Esc closes it: the job list", app.screen is app.main)
   app.close_jobs(); await pilot.pause(0.5)
-  check("closing the job list too: nothing open, the overview", isinstance(app.screen, OverviewScreen) and not app.cluster.jobs_open)
+  check("closing the job list too: nothing open, the overview", isinstance(app.screen, OverviewScreen) and not app.cluster.view.jobs_open)
   ok = await until(pilot, lambda: "degraded" in card_text(app) and "Slurm 23.11.4" in card_text(app), 20)
   t = card_text(app)
   check("the overview: what it is (Slurm, nodes, partitions), its health, the SSH session", ok and "lab" in t and "20 nodes in 2 partitions" in t
@@ -458,7 +458,7 @@ async def t_cluster_info(app, pilot):
   check("…a few lines, not a report", app.screen.query_one("#ov-card").region.height <= 15) # (with SSH settings…: 15)
   app.save_screenshot(filename="overview.svg", path=OUT)
   await pilot.click("#ov-jobs"); await pilot.pause(0.4)
-  check("Jobs: the job list, as a subtab again", app.screen is app.main and app.cluster.jobs_open and vtabs(app) == ["Jobs"], vtabs(app))
+  check("Jobs: the job list, as a subtab again", app.screen is app.main and app.cluster.view.jobs_open and vtabs(app) == ["Jobs"], vtabs(app))
 
 def slurm_calls():
   f = os.path.join(LAB, "slurm_calls")
@@ -617,7 +617,7 @@ async def t_checks_ui(app, pilot):
         (cat.rule_id, viewer.scroll_y, viewer.document.scroll_y, cat.tries))
   app.save_screenshot(filename="checks_catalogue.svg", path=OUT)
   check("the catalogue is a subtab of its own", "Rule catalogue" in vtabs(app) and app.current_mode != "_default", vtabs(app))
-  app.show_view(next(v for v in app.cluster.views if v.title == "job 9005")); await pilot.pause(0.3)
+  app.show_view(next(v for v in app.cluster.view.views if v.title == "job 9005")); await pilot.pause(0.3)
   app.action_rule_catalogue("B05"); await pilot.pause(1.0)
   check("another rule link: the same subtab, at the other rule", isinstance(app.screen, RuleCatalogueScreen) and app.screen is cat
         and cat.rule_id == "B05" and vtabs(app).count("Rule catalogue") == 1, vtabs(app))
@@ -1226,15 +1226,15 @@ async def t_categories(app, pilot):
   table.focus(); table.move_cursor(row=table.get_row_index("9001")); await pilot.pause(0.1)
   await pilot.press("m", "m"); await pilot.pause(0.3)
   first = str(table.get_row("9001")[0])
-  check("m marks the row and moves on (down: the list is newest first): two marked, shown with ●, said in the status line", cluster.marked == {"9001", "9000"} and first.startswith("● ")
-        and "2 marked" in cluster.summary, (cluster.marked, first, cluster.summary[-80:]))
+  check("m marks the row and moves on (down: the list is newest first): two marked, shown with ●, said in the status line", cluster.view.marked == {"9001", "9000"} and first.startswith("● ")
+        and "2 marked" in cluster.summary, (cluster.view.marked, first, cluster.summary[-80:]))
   await pilot.press("c"); await pilot.pause(0.5)
   cz = app.screen
   check("c: the dialog, for the 2 marked jobs", isinstance(cz, CategorizeScreen) and "2 jobs: 9000, 9001" in str(cz.query_one("#cz-title").render()))
   cz.query_one("#cz-path").value = " proj X / production "
   await pilot.press("enter")
   ok = await until(pilot, lambda: cluster.categories.category_of("9001") == "proj X/production", 10)
-  check("Enter: they are in the new category; the marks are gone", ok and cluster.categories.category_of("9000") == "proj X/production" and not cluster.marked)
+  check("Enter: they are in the new category; the marks are gone", ok and cluster.categories.category_of("9000") == "proj X/production" and not cluster.view.marked)
   data = json.load(open(CATEGORIES_FILE)) if os.path.exists(CATEGORIES_FILE) else {}
   check("kept on the cluster, under its Slurm name, with the job's name", data.get("clusters", {}).get("lab", {}).get("jobs", {}).get("9001", {}).get("name") == "run01"
         and "proj X" in data["clusters"]["lab"]["categories"], data)
@@ -1281,23 +1281,23 @@ async def t_categories(app, pilot):
   ok = await until(pilot, lambda: f"](<{wd}/slurm-9001.out:3>)" in getattr(md, "notes_markdown", ""), 15)
   check("an existing path in the notes: a link; one that does not exist: not; a web address: a link", ok
         and "/no/such/file](" not in md.notes_markdown and "](<https://slurm.schedmd.com>)" in md.notes_markdown, getattr(md, "notes_markdown", ""))
-  views = len(cluster.views)
+  views = len(cluster.view.views)
   md.post_message(Markdown.LinkClicked(md, f"{wd}/slurm-9001.out:3"))
   ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and (app.screen.path or "").endswith("slurm-9001.out"), 10)
-  check("a click on it: the file opens, in a subtab", ok and len(cluster.views) == views + 1, type(app.screen).__name__)
-  for v in list(cluster.views)[views:]: app.close_view(v)
+  check("a click on it: the file opens, in a subtab", ok and len(cluster.view.views) == views + 1, type(app.screen).__name__)
+  for v in list(cluster.view.views)[views:]: app.close_view(v)
   await pilot.pause(0.3)
   # a click on it: the categories window there, in a subtab of its own
   grid = app.screen.query_one("#info").content if ok else None
   cell = next((c for c in getattr(grid, "columns", [None, None])[1]._cells if "proj X/production" in str(c)), None) if grid else None
   clicks = [s.style.meta.get("@click") for s in (cell.spans if cell is not None else []) if s.style and not isinstance(s.style, str)]
   check("the category is a link", "screen.open_category" in clicks, clicks)
-  views = len(cluster.views)
+  views = len(cluster.view.views)
   await app.screen.run_action("open_category"); await pilot.pause(0.6)
   check("a click on it: the categories window at it, in a new subtab", isinstance(app.screen, CategoriesScreen)
-        and app.screen.path == "proj X/production" and len(cluster.views) == views + 1
-        and cluster.views[-1].key == "category proj X/production", (type(app.screen).__name__, getattr(app.screen, "path", None)))
-  app.close_view(cluster.views[-1])
+        and app.screen.path == "proj X/production" and len(cluster.view.views) == views + 1
+        and cluster.view.views[-1].key == "category proj X/production", (type(app.screen).__name__, getattr(app.screen, "path", None)))
+  app.close_view(cluster.view.views[-1])
   app.show_view(None)
   await pilot.pause(0.4)
   # the window
@@ -1317,12 +1317,12 @@ async def t_categories(app, pilot):
   check("a category selected: its jobs only", [str(k.value) for k in jt.rows] == ["9003"] and "proj X/tests" in rendered(cs.query_one("#cat-info").render()))
   app.save_screenshot(filename="categories.svg", path=OUT)
   # a job of it: its window in a subtab of its own; the categories stay in theirs
-  views = len(cluster.views)
+  views = len(cluster.view.views)
   jt.focus(); jt.move_cursor(row=0); await pilot.press("enter")
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.job.jid == "9003", 10)
-  check("a job in the categories window: its window in a new subtab", ok and len(cluster.views) == views + 1
-        and cluster.views[-1].key == "job 9003", [v.key for v in cluster.views])
-  app.close_view(cluster.views[-1]); app.show_view(app.find_view("categories")); await pilot.pause(0.4)
+  check("a job in the categories window: its window in a new subtab", ok and len(cluster.view.views) == views + 1
+        and cluster.view.views[-1].key == "job 9003", [v.key for v in cluster.view.views])
+  app.close_view(cluster.view.views[-1]); app.show_view(app.find_view("categories")); await pilot.pause(0.4)
   check("closed: back to the categories", app.screen is cs, type(app.screen).__name__)
   check("and still at the category chosen", cs.path == "proj X/tests" and tree.cursor_node.data == "proj X/tests", cs.path)
   tree.focus()
@@ -1414,7 +1414,7 @@ async def t_categories(app, pilot):
   check("and it is not overwritten", open(CATEGORIES_FILE).read() == "{ broken" and any("not valid JSON" in m for _, m in notes(app)), notes(app)[-2:])
   os.unlink(CATEGORIES_FILE)
   await pilot.press("r"); await until(pilot, lambda: cluster.loader is None, 30)
-  cluster.marked.clear()
+  cluster.view.marked.clear()
 
 async def t_category_rules(app, pilot):
   """Rules of the categories: u in the categories window; a rule by job name (its matches as it is typed), new jobs
@@ -1755,11 +1755,11 @@ async def t_script_edit(app, pilot):
   ok = await until(pilot, lambda: open(path).read().startswith("# x"), 8)
   check("Overwrite writes the edited version", ok and "changed elsewhere" not in open(path).read())
   await pilot.press(*"y"); await pilot.pause(0.3)
-  view = next(v for v in app.cluster.views if v.mode == app.current_mode)
+  view = next(v for v in app.cluster.view.views if v.mode == app.current_mode)
   app.action_close_view(); ok = await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 5)
   check("closing the subtab with unsaved changes asks", ok and "unsaved" in str(app.screen.query_one("#confirm-message").render()))
   await pilot.click("#confirm-no"); await pilot.pause(0.3)
-  check("No: the subtab stays", view in app.cluster.views and isinstance(app.screen, ScriptScreen))
+  check("No: the subtab stays", view in app.cluster.view.views and isinstance(app.screen, ScriptScreen))
   check("Reload is there while editing too", sc.query_one("#sc-reload").display)
   await pilot.press("ctrl+r"); ok = await until(pilot, lambda: isinstance(app.screen, ConfirmScreen), 5)
   check("Reload (Ctrl+R) with unsaved changes asks", ok and "Reload" in str(app.screen.query_one("#confirm-yes").label))
@@ -2099,32 +2099,32 @@ async def t_subtabs(app, pilot):
         ok and busy and "Reloading" not in str(button.label) and js.job.jid == "9001", (busy, str(button.label)))
   out = next(e for e in js.details["files"] if e.kind == "stdout"); js.open_entry(out)
   ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and len(vtabs(app)) == 3, 10)
-  file_view = app.cluster.views[-1]
+  file_view = app.cluster.view.views[-1]
   check("a file of the job: a subtab of its own, shown; the job's stays", ok and vtabs(app)[:2] == ["Jobs", "job 9001"]
         and "slurm-9001.out" in vtabs(app)[2] and app.current_mode == file_view.mode, vtabs(app))
-  app.show_view(app.cluster.views[0]); await pilot.pause(0.3)
+  app.show_view(app.cluster.view.views[0]); await pilot.pause(0.3)
   check("the job's subtab: still the job window", app.screen is js)
   js.open_entry(out); await pilot.pause(0.5)
-  check("the file again: its subtab, not another", app.current_mode == file_view.mode and len(app.cluster.views) == 2, vtabs(app))
+  check("the file again: its subtab, not another", app.current_mode == file_view.mode and len(app.cluster.view.views) == 2, vtabs(app))
   app.close_view(file_view); await pilot.pause(0.3)
-  app.show_view(app.cluster.views[0]); await pilot.pause(0.3)
+  app.show_view(app.cluster.view.views[0]); await pilot.pause(0.3)
   check("its subtab closed: the job's stays", app.screen is js and vtabs(app) == ["Jobs", "job 9001"], vtabs(app))
   await pilot.press("escape"); await pilot.pause(0.3)
   check("Esc at the job window: the job list, the subtab stays", app.screen is app.main and vtabs(app) == ["Jobs", "job 9001"])
   t.focus(); t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter"); await pilot.pause(0.5)
-  check("the same job again: the same subtab", app.screen is js and len(app.cluster.views) == 1)
+  check("the same job again: the same subtab", app.screen is js and len(app.cluster.view.views) == 1)
   await pilot.click("#view-jobs"); await pilot.pause(0.3)
   t.focus(); t.move_cursor(row=t.get_row_index("9002"))
   await pilot.press("o", "e"); await pilot.pause(0.5)
   check("o and e are no shortcuts any more", "o" not in app.active_bindings and "e" not in app.active_bindings and app.screen is app.main
-        and len(app.cluster.views) == 1)
+        and len(app.cluster.view.views) == 1)
   app.open_file(app.jobs["9002"], app.jobs["9002"].stdout_path())
   ok = await until(pilot, lambda: isinstance(app.screen, FileScreen) and len(vtabs(app)) == 3, 10)
-  check("output file from the job list: a file subtab", ok and len(app.cluster.views) == 2 and "slurm-9002.out" in vtabs(app)[-1], vtabs(app))
+  check("output file from the job list: a file subtab", ok and len(app.cluster.view.views) == 2 and "slurm-9002.out" in vtabs(app)[-1], vtabs(app))
   await pilot.press("t"); await pilot.pause(0.3); await pilot.press("enter"); ok = await until(pilot, lambda: "(cluster)" in sterm(app), 15)
   await pilot.click("#view-jobs"); await pilot.pause(0.3)
   await pilot.press("t"); await pilot.pause(0.3); await pilot.press("enter"); ok = ok and await until(pilot, lambda: "(cluster)" in sterm(app), 15)
-  shells = [v for v in app.cluster.views if v.kind == "shell"]
+  shells = [v for v in app.cluster.view.views if v.kind == "shell"]
   check("two shells, each a subtab", ok and len(shells) == 2 and shells[0].session is not shells[1].session, vtabs(app))
   await pilot.press(*"echo second-$((1+1))", "enter"); await until(pilot, lambda: "second-2" in sterm(app), 5)
   await pilot.click(f"#view-tab-{shells[0].id}"); await pilot.pause(0.5)
@@ -2139,13 +2139,13 @@ async def t_subtabs(app, pilot):
   proc = shells[0].session.proc
   await pilot.click(f"#view-close-{shells[0].id}"); await pilot.pause(0.8)
   check("✕ closes a shell subtab and ends the shell; the subtab shown before it comes back (the other shell)",
-        shells[0] not in app.cluster.views and proc.poll() is not None and isinstance(app.screen, TerminalScreen)
+        shells[0] not in app.cluster.view.views and proc.poll() is not None and isinstance(app.screen, TerminalScreen)
         and app.screen.session is shells[1].session, vtabs(app))
   await pilot.click(f"#view-tab-{shells[1].id}"); await pilot.pause(0.3)
   await pilot.press("ctrl+w"); await pilot.pause(0.5)
-  check("Ctrl-W in a shell goes to the shell (no close)", shells[1] in app.cluster.views)
+  check("Ctrl-W in a shell goes to the shell (no close)", shells[1] in app.cluster.view.views)
   await pilot.click("#view-jobs"); await pilot.pause(0.3)
-  for v in list(app.cluster.views):
+  for v in list(app.cluster.view.views):
     app.close_view(v)
   await pilot.pause(0.5)
   check("all subtabs closed", vtabs(app) == ["Jobs"] and app.screen is app.main)
@@ -2159,7 +2159,7 @@ async def t_array_sort(app, pilot):
   for jid in ("500_3", "500_1", "400_2", "600"):
     j = copy.deepcopy(base); j.rec["JobID"] = jid; app.cluster.jobs[jid] = j
   app.sort_column, app.sort_reverse = "jobid", True
-  grouped, app.cluster.collapse_arrays = app.cluster.collapse_arrays, False # (the order of the tasks themselves)
+  grouped, app.cluster.view.collapse_arrays = app.cluster.view.collapse_arrays, False # (the order of the tasks themselves)
   app.populate()
   order = lambda: [str(t.get_row_at(i)[0]) for i in range(t.row_count)]
   header = lambda: "".join(sg.text for sg in t.render_line(0))
@@ -2173,7 +2173,7 @@ async def t_array_sort(app, pilot):
     ["500_3", "400_2", "500_1", "600"], ["600", "500_3", "500_1", "400_2"]], seen)
   check("marks: ▼ ▲ for the job id, △ ▽ for the array index", [h for _, h in seen] == ["Job ID ▼", "Job ID ▲", "Job ID △ array",
         "Job ID ▽ array", "Job ID ▼"], [h for _, h in seen])
-  app.cluster.collapse_arrays = grouped
+  app.cluster.view.collapse_arrays = grouped
   app.cluster.jobs.clear(); app.cluster.jobs.update(saved); app.populate()
 
 async def t_conn_health(app, pilot):
@@ -2225,7 +2225,7 @@ async def t_restart_env(app, pilot):
   check("submitted with the original environment (env -i) and the original script", "UENV=/capstor/uenv/prgenv-gnu.squashfs" in call
         and "MY=42" in call and "SLURM_JOB_ID=None" in call and "FUNC=True" in call and "SCRIPT='#!/bin/bash" in call and "changed on disk" not in call
         and ".slurp-restart-9010.sh" in call, call)
-  for v in list(app.cluster.views):
+  for v in list(app.cluster.view.views):
     app.close_view(v)
   await pilot.pause(0.5)
 
@@ -2237,7 +2237,7 @@ async def t_quota(app, pilot):
   app.show_view(None); await pilot.pause(0.3)
   lab_quota_delay = os.path.join(LAB, "delay"); open(lab_quota_delay, "w").write("0")
   await pilot.press("Q"); await pilot.pause(0.3)
-  check("quota opens as a window, no subtab", isinstance(app.screen, QuotaScreen) and "quota" not in [v.title for v in app.cluster.views])
+  check("quota opens as a window, no subtab", isinstance(app.screen, QuotaScreen) and "quota" not in [v.title for v in app.cluster.view.views])
   check("…not covered while it loads", not app.screen.query("LoadingIndicator"))
   ok = await until(pilot, lambda: hasattr(app.screen, "shown"), 20)
   t = rendered(app.screen.shown) if ok else ""
@@ -2317,7 +2317,7 @@ async def open_job(app, pilot, jid):
   app.show_view(None); await pilot.pause(0.3)
   t = app.main.query_one("#jobs")
   if jid not in t.rows and "_" in jid: # (a task of an array in one row: the row opened first, as ▸ does)
-    app.cluster.expanded.add(jid.partition("_")[0]); app.populate(); await pilot.pause(0.3)
+    app.cluster.view.expanded.add(jid.partition("_")[0]); app.populate(); await pilot.pause(0.3)
   t.focus(); t.move_cursor(row=t.get_row_index(jid)); await pilot.press("enter")
   await until(pilot, lambda: isinstance(app.screen, JobScreen) and app.screen.details["files"], 10)
   return app.screen
@@ -2336,7 +2336,7 @@ async def t_log_positions(app, pilot):
     fs = app.screen
     check(f"job window, output of a {'running' if running else 'ended'} job: at its end, {'followed' if running else 'not followed'}",
           ok and at_end(fs) and fs.following == running, (fs.area.cursor_location, fs.following))
-    for v in list(app.cluster.views): app.close_view(v)
+    for v in list(app.cluster.view.views): app.close_view(v)
     await pilot.pause(0.3)
   wd = app.jobs["9001"].rec["WorkDir"]
   open_path(app, ["Local"], wd)
@@ -2346,7 +2346,7 @@ async def t_log_positions(app, pilot):
   fs = app.screen
   check("the same log of the running job from the directory browser: at its top, not followed",
         ok and fs.area.cursor_location == (0, 0) and not fs.following, (fs.area.cursor_location, fs.following))
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   await pilot.pause(0.3)
   app.show_view(None); await pilot.pause(0.3)
   job = next(j for j in app.jobs.values() if not j.running and j.stderr_path() and j.err[0] == "file" and j.err[1] > 0)
@@ -2355,7 +2355,7 @@ async def t_log_positions(app, pilot):
   fs = app.screen
   check("the error file from the job list (Err): at its end; the job ended: not followed", ok and at_end(fs) and not fs.following,
         (fs.area.cursor_location, fs.following))
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   await pilot.pause(0.3)
 
 async def t_large_log(app, pilot):
@@ -2391,7 +2391,7 @@ async def t_large_log(app, pilot):
     check("/ a match beyond the part shown: grep on the cluster, shown, selected, numbered", ok, (numbers(), a.selected_text))
   finally:
     os.unlink(path)
-    for v in list(app.cluster.views): app.close_view(v)
+    for v in list(app.cluster.view.views): app.close_view(v)
     await pilot.pause(0.3)
 
 async def t_cancel_reason(app, pilot):
@@ -2448,9 +2448,9 @@ async def t_cancel_reason(app, pilot):
     info = rendered(js.query_one("#info").content)
     check("the job window: why, the details, the other job", "Cancelled because" in info and "Submitted twice by mistake: pressed submit twice" in info
           and "the same as job 9002" in info, info[:600])
-    views = len(cluster.views)
+    views = len(cluster.view.views)
     await app.run_action("open_job('9002')"); await pilot.pause(0.5)
-    check("the other job, a link: its window in a subtab", isinstance(app.screen, JobScreen) and app.screen.job.jid == "9002" and len(cluster.views) == views + 1)
+    check("the other job, a link: its window in a subtab", isinstance(app.screen, JobScreen) and app.screen.job.jid == "9002" and len(cluster.view.views) == views + 1)
     # in the categories window
     from slurp.ui.screens.categories import change_categories
     done = []
@@ -2469,36 +2469,36 @@ async def t_cancel_reason(app, pilot):
       undone = []
       change_categories(app, cluster, op, lambda st, r: undone.append(1))
       await until(pilot, lambda: undone, 10)
-    for v in list(app.cluster.views): app.close_view(v)
+    for v in list(app.cluster.view.views): app.close_view(v)
     await pilot.pause(0.3)
 
 async def t_restore_subtabs(app, pilot):
   """The subtabs kept from the last run of the lab's tab, opened again once it is connected and loaded: a job, an
   array, a file at its end, the categories, the rule catalogue (in their order), then the one shown before"""
   cluster = app.cluster
-  for v in list(cluster.views): app.close_view(v)
+  for v in list(cluster.view.views): app.close_view(v)
   await pilot.pause(0.3)
   wd = cluster.jobs["9001"].rec["WorkDir"]
-  cluster.pending_views = {"views": [{"type": "job", "jid": "9001"}, {"type": "path", "path": f"{wd}/slurm-9001.out", "crumbs": ["Jobs", "9001"],
+  cluster.view.pending_views = {"views": [{"type": "job", "jid": "9001"}, {"type": "path", "path": f"{wd}/slurm-9001.out", "crumbs": ["Jobs", "9001"],
                                       "follow": False, "at_end": True},
                                      {"type": "categories", "key": "categories", "path": ""}, {"type": "rules", "rule": "B05"},
                                      {"type": "path", "path": "/no/such/file", "crumbs": ["Jobs"]}],
                            "shown": 1, "jobs_open": True}
   from slurp.ui.restore import placeholders
-  placeholders(app, cluster, cluster.pending_views) # (as at the start: there at once)
+  placeholders(app, cluster, cluster.view.pending_views) # (as at the start: there at once)
   app.show_overview(); await pilot.pause(0.3)
-  check("at once: placeholders, in their order", [v.title for v in cluster.views] == ["job 9001", "slurm-9001.out", "Categories", "Rule catalogue", "file"]
-        and all(v.pending for v in cluster.views), [v.title for v in cluster.views])
+  check("at once: placeholders, in their order", [v.title for v in cluster.view.views] == ["job 9001", "slurm-9001.out", "Categories", "Rule catalogue", "file"]
+        and all(v.pending for v in cluster.view.views), [v.title for v in cluster.view.views])
   app.restore_views(cluster)
-  ok = await until(pilot, lambda: cluster.pending_views is None and not cluster.restoring, 30); await pilot.pause(0.5)
+  ok = await until(pilot, lambda: cluster.view.pending_views is None and not cluster.view.restoring, 30); await pilot.pause(0.5)
   check("the kept subtabs open again, in their order (one that is gone: left out)", ok
-        and [v.title for v in cluster.views] == ["job 9001", "slurm-9001.out", "Categories", "Rule catalogue"], [v.title for v in cluster.views])
+        and [v.title for v in cluster.view.views] == ["job 9001", "slurm-9001.out", "Categories", "Rule catalogue"], [v.title for v in cluster.view.views])
   check("the one shown before is shown: the log, at its end", isinstance(app.screen, FileScreen) and app.screen.path.endswith("slurm-9001.out")
         and app.screen.area.cursor_location[0] >= app.screen.area.document.line_count - 2, type(app.screen).__name__)
   from slurp.ui.restore import tab_views
   kept = tab_views(app, cluster)
   check("and they are kept again as they are", [s["type"] for s in kept["views"]] == ["job", "path", "categories", "rules"] and kept["shown"] == 1, kept)
-  for v in list(cluster.views): app.close_view(v)
+  for v in list(cluster.view.views): app.close_view(v)
   await pilot.pause(0.3)
   app.show_view(None); await pilot.pause(0.3)
 
@@ -2515,7 +2515,7 @@ async def t_auto_refresh(app, pilot):
     before = js.details
     ok = await until(pilot, lambda: js.details is not before, 15)
     check("…it reloads by itself (the job and its files again)", ok)
-    for v in list(app.cluster.views): app.close_view(v)
+    for v in list(app.cluster.view.views): app.close_view(v)
     await pilot.pause(0.3)
     app.show_view(None); await pilot.pause(0.3)
     app.open_array("9700") # (an array of the lab)
@@ -2527,7 +2527,7 @@ async def t_auto_refresh(app, pilot):
     check("the array window: the countdown, and it reloads by itself", ok, (str(timer.label), first, arr.last_refresh))
   finally:
     app.refresh_seconds = real
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   await pilot.pause(0.3)
 
 async def t_shell_button(app, pilot):
@@ -2561,11 +2561,11 @@ async def t_shell_button(app, pilot):
   ok = await until(pilot, lambda: isinstance(app.screen, CategorizeScreen), 5)
   check("c still categorizes the job", ok, type(app.screen).__name__)
   await pilot.press("escape"); await pilot.pause(0.3)
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   await pilot.pause(0.3)
   ended = await open_job(app, pilot, "9008")
   check("a job that ended: no Shell…", not ended.query_one("#shell").display)
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   await pilot.pause(0.3)
 
 async def t_ended_progress(app, pilot):
@@ -2595,7 +2595,7 @@ async def t_ended_progress(app, pilot):
   ok = await until(pilot, lambda: "62.5%" in line(), 10)
   check("a file chosen for an ended job: its progress (M% too)", ok and "(chosen for this job)" in line() and js.query_one("#progress-stdout").display, line())
   set_progress_file("9009", None); js.load(); await pilot.pause(0.5)
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   await pilot.pause(0.3)
 
 async def t_memory(app, pilot):
@@ -2614,11 +2614,11 @@ async def t_memory(app, pilot):
   await pilot.click("#nc-ok")
   ok = await until(pilot, lambda: isinstance(app.screen, DiagnosticsScreen) and "Memory" in str(app.screen.query_one("#diag-text").render()), 30)
   ds = app.screen
-  job_view = next(v for v in app.cluster.views if v.key == "job 9001")
-  diag_view = next((v for v in app.cluster.views if v.key == "diagnostics 9001 *"), None)
+  job_view = next(v for v in app.cluster.view.views if v.key == "job 9001")
+  diag_view = next((v for v in app.cluster.view.views if v.key == "diagnostics 9001 *"), None)
   check("in a subtab of its own (the job's stays), named after the job", ok and diag_view is not None
-        and app.current_mode == diag_view.mode and diag_view.title == "diagnostics 9001" and job_view in app.cluster.views,
-        [(v.key, v.title) for v in app.cluster.views])
+        and app.current_mode == diag_view.mode and diag_view.title == "diagnostics 9001" and job_view in app.cluster.view.views,
+        [(v.key, v.title) for v in app.cluster.view.views])
   text = str(ds.query_one("#diag-text").render()) if ok else ""
   call = open(calls).read() if os.path.exists(calls) else ""
   check("the probe runs through srun as a step of the job, the script on stdin, measuring (full), on all nodes",
@@ -2637,7 +2637,7 @@ async def t_memory(app, pilot):
   await pilot.click("#nc-ok")
   ok = await until(pilot, lambda: app.screen is ds and "Memory" in str(ds.query_one("#diag-text").render()), 30)
   check("the same diagnostics again: its subtab, measured again (not another)", ok
-        and sum(v.key.startswith("diagnostics 9001") for v in app.cluster.views) == 1)
+        and sum(v.key.startswith("diagnostics 9001") for v in app.cluster.view.views) == 1)
   app.show_view(job_view); await pilot.pause(0.3)
   cpu = str(js.query_one("#memory-cpu").render())
   check("the memory row shows its memory (all nodes: the job's PSS here)", app.screen is js and "(the job's processes, PSS" in cpu
@@ -2650,8 +2650,8 @@ async def t_memory(app, pilot):
   call = open(calls).read().splitlines()[-1] if os.path.exists(calls) else ""
   check("one node: srun -w that node, in a subtab of its own too", ok and f"-w {node}" in call
         and node in str(app.screen.query_one("#diag-status").render())
-        and any(v.key == f"diagnostics 9001 {node}" for v in app.cluster.views), call)
-  for v in list(app.cluster.views): app.close_view(v)
+        and any(v.key == f"diagnostics 9001 {node}" for v in app.cluster.view.views), call)
+  for v in list(app.cluster.view.views): app.close_view(v)
   await pilot.pause(0.3)
 
 async def t_memory_watch(app, pilot):
@@ -2674,7 +2674,7 @@ async def t_memory_watch(app, pilot):
   w["due"] = 0 # due now: measured while the job window is not shown
   ok = await until(pilot, lambda: len(w["samples"]) == 2, 30)
   check("measured also while another subtab is shown", ok)
-  app.show_view(next(v for v in app.cluster.views if v.key == "job 9003")); await pilot.pause(1.5)
+  app.show_view(next(v for v in app.cluster.view.views if v.key == "job 9003")); await pilot.pause(1.5)
   plot = js.query_one("#spark-cpu")
   check("the plot has the measurements (CPU and GPU over time)", [v for _, v in plot.data] == [s[1] for s in w["samples"]]
         and "now" in str(js.query_one("#spark-cpu-text").render()), plot.data)
@@ -2695,7 +2695,7 @@ async def t_memory_watch(app, pilot):
   check("diagnostics of all nodes are kept as a measurement too", ok and len(open(path).read().splitlines()) == 4)
   await until(pilot, lambda: isinstance(app.screen, DiagnosticsScreen), 5)
   js.query_one("#memory-every").value = 0
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   await pilot.pause(0.3)
 
 async def t_scratch_exclude(app, pilot):
@@ -2763,13 +2763,13 @@ async def t_array_progress(app, pilot):
   open(os.path.join(wd, "train_task4_2026-11-13T11-00-00.log"), "w").write("epoch 7/10\n")
   await reload(app, pilot)
   check("a file that appears later is found at the next reload", app.jobs["9500_4"].progress and app.jobs["9500_4"].progress.current == 7)
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   arrays(False)
   await reload(app, pilot)
 
 async def t_collapse(app, pilot):
   arrays(True)
-  app.cluster.expanded.clear() # (all arrays closed: open_job opens one it opens a task of)
+  app.cluster.view.expanded.clear() # (all arrays closed: open_job opens one it opens a task of)
   await reload(app, pilot)
   t = app.main.query_one("#jobs")
   keys = lambda: [str(t.coordinate_to_cell_key(Coordinate(i, 0)).row_key.value) for i in range(t.row_count)]
@@ -2801,7 +2801,7 @@ async def t_collapse(app, pilot):
   t.move_cursor(row=t.get_row_index("9001")); await pilot.press("enter")
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10)
   check("other rows open their job as before", ok and app.screen.job.jid == "9001")
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   arrays(False)
   await reload(app, pilot)
 
@@ -2817,7 +2817,7 @@ async def t_array_window(app, pilot):
   groups = {g: len(ids) for g, ids in scr.groups.items()} if ok else {}
   check("Enter on a collapsed array: its window (a subtab) with every task by state and exit code", ok and groups == {
         "RUNNING": 30, "COMPLETED (exit 0:0)": 100, "FAILED (exit 1:0)": 5, "FAILED (exit 2:0)": 5, "PENDING (Priority)": 10}
-        and "array 9600" in [v.title for v in app.cluster.views], groups)
+        and "array 9600" in [v.title for v in app.cluster.view.views], groups)
   texts = [str(w.render()) for w in scr.query(".arr-ids")]
   check("the ids comma separated, and as ranges", any(x.startswith("1, 2, 3") and "= 1-30" in x for x in texts), texts[:1])
   info = rendered(scr.info_table)
@@ -2903,19 +2903,19 @@ async def t_array_window(app, pilot):
   check("clicking State groups the tasks by state", states == sorted(states), states[:3])
   await pilot.click(tt, offset=(2, 0)); await pilot.pause(0.3)
   async def back_to_array():
-    for v in [v for v in app.cluster.views if v.key.startswith("job ")]: app.close_view(v)
+    for v in [v for v in app.cluster.view.views if v.key.startswith("job ")]: app.close_view(v)
     app.show_view(app.find_view("array 9600")); await pilot.pause(0.3)
-  views = len(app.cluster.views)
+  views = len(app.cluster.view.views)
   tt.focus(); tt.move_cursor(row=tt.get_row_index("17")); await pilot.press("enter")
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10)
-  check("a task opens its job window, in a subtab of its own", ok and app.screen.job.jid == "9600_17" and len(app.cluster.views) == views + 1
-        and app.cluster.views[-1].key == "job 9600_17", [v.key for v in app.cluster.views])
+  check("a task opens its job window, in a subtab of its own", ok and app.screen.job.jid == "9600_17" and len(app.cluster.view.views) == views + 1
+        and app.cluster.view.views[-1].key == "job 9600_17", [v.key for v in app.cluster.view.views])
   await back_to_array()
   check("back to the array window (its subtab)", app.screen is scr)
   gone = app.cluster.jobs.pop("9600_120") # a task that is not in the job list: loaded from Slurm
   tt.focus(); tt.move_cursor(row=tt.get_row_index("120")); await pilot.press("enter")
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 15)
-  check("a task that is not in the job list is loaded first, in a subtab too", ok and app.screen.job.jid == "9600_120" and len(app.cluster.views) == views + 1)
+  check("a task that is not in the job list is loaded first, in a subtab too", ok and app.screen.job.jid == "9600_120" and len(app.cluster.view.views) == views + 1)
   app.cluster.jobs["9600_120"] = gone
   await back_to_array()
   scr.query_one("#arr-tabs").active = "arr-tab-states"; await pilot.pause(0.3)
@@ -2927,7 +2927,7 @@ async def t_array_window(app, pilot):
   await pilot.click(ids, offset=(text.index("134") + 1, 0))
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10)
   check("By state: clicking an id opens the job window of that task, in a subtab", ok and app.screen.job.jid == "9600_134"
-        and app.cluster.views[-1].key == "job 9600_134", text)
+        and app.cluster.view.views[-1].key == "job 9600_134", text)
   await back_to_array()
   check("back to the array window", app.screen is scr)
   await pilot.click("#arr-cancel-pending"); await pilot.pause(0.3)
@@ -2958,13 +2958,13 @@ async def t_array_window(app, pilot):
   check("the job window of an array task has an Array button", b.display)
   jinfo = rendered(js.query_one("#info").content)
   check("the job window: total node hours, so far for a running job", re.search(r"Node hours \(total\) +[0-9.]+ +\d+ nodes? × [0-9.]+ h +so far", jinfo), jinfo)
-  views = len(app.cluster.views)
+  views = len(app.cluster.view.views)
   b.scroll_visible(); await pilot.pause(0.2); await pilot.click("#array-window")
   ok = await until(pilot, lambda: isinstance(app.screen, ArrayScreen) and app.screen.groups, 20)
-  check("it opens the window of its array, in a subtab of its own", ok and app.screen.array_id == "9500" and len(app.cluster.views) == views + 1
+  check("it opens the window of its array, in a subtab of its own", ok and app.screen.array_id == "9500" and len(app.cluster.view.views) == views + 1
         and {g: len(i) for g, i in app.screen.groups.items()} == {"RUNNING": 4, "COMPLETED (exit 0:0)": 1, "PENDING (Priority)": 1},
         app.screen.groups if ok else None)
-  for v in list(app.cluster.views)[views:]: app.close_view(v)
+  for v in list(app.cluster.view.views)[views:]: app.close_view(v)
   await pilot.pause(0.3)
   check("closed: back to the job", app.screen is js, type(app.screen).__name__)
   # the Array line of its info: a link to the array, in a subtab of its own
@@ -2972,7 +2972,7 @@ async def t_array_window(app, pilot):
   cell = next((c for c in grid.columns[1]._cells if "(task 1)" in str(c)), None)
   clicks = [s.style.meta.get("@click") for s in (cell.spans if cell is not None else []) if s.style and not isinstance(s.style, str)]
   check("the job window of an array task: an Array line, a link", str(cell).startswith("9500  (task 1)") and "screen.open_array_window" in clicks, (str(cell), clicks))
-  views = len(app.cluster.views)
+  views = len(app.cluster.view.views)
   lines = rendered(js.query_one("#info").content).split("\n")
   y = next(i for i, line in enumerate(lines) if "9500  (task 1)" in line)
   x = lines[y].index("9500  (task 1)") + 2
@@ -2981,16 +2981,16 @@ async def t_array_window(app, pilot):
   await pilot.click("#info", offset=(x, y)); await pilot.pause(0.5)
 
   ok = await until(pilot, lambda: isinstance(app.screen, ArrayScreen) and app.screen.groups, 20)
-  check("a click on it: the array window in a new subtab", ok and app.screen.array_id == "9500" and len(app.cluster.views) == views + 1
-        and app.cluster.views[-1].key == "array 9500", [v.key for v in app.cluster.views])
+  check("a click on it: the array window in a new subtab", ok and app.screen.array_id == "9500" and len(app.cluster.view.views) == views + 1
+        and app.cluster.view.views[-1].key == "array 9500", [v.key for v in app.cluster.view.views])
   await js.run_action("open_array_window"); await pilot.pause(0.3)
-  check("again: that subtab, not another", len(app.cluster.views) == views + 1)
+  check("again: that subtab, not another", len(app.cluster.view.views) == views + 1)
   # from the array window: the job window of a task (its own subtab), its Array line: the array's subtab again
   arr = app.screen
   ids = arr.query(".arr-ids").first()
   await pilot.click(ids, offset=(0, 0))
   ok = await until(pilot, lambda: isinstance(app.screen, JobScreen), 10)
-  js3 = app.screen; views = len(app.cluster.views)
+  js3 = app.screen; views = len(app.cluster.view.views)
   await until(pilot, lambda: "(task " in rendered(js3.query_one("#info").content) and js3.query_one("#info").region.height > 3, 10)
   js3.query_one("#info").scroll_visible(); await pilot.pause(0.3)
   lines = rendered(js3.query_one("#info").content).split("\n")
@@ -2998,11 +2998,11 @@ async def t_array_window(app, pilot):
   await pilot.click("#info", offset=(lines[y].index("9500") + 1, y))
   ok = ok and await until(pilot, lambda: app.screen is arr, 20)
   check("a task opened from the array window, a click on its Array line: the array's subtab (the job window stays in its own)",
-        ok and len(app.cluster.views) == views and js3.is_attached, ([v.key for v in app.cluster.views], type(app.screen).__name__))
+        ok and len(app.cluster.view.views) == views and js3.is_attached, ([v.key for v in app.cluster.view.views], type(app.screen).__name__))
   js2 = await open_job(app, pilot, "9001")
   check("no Array line for other jobs", "(task " not in rendered(js2.query_one("#info").content))
   check("no Array button for other jobs", not js2.query_one("#array-window").display)
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   arrays(False)
   await reload(app, pilot)
 
@@ -3027,7 +3027,7 @@ async def t_array_done(app, pilot):
   scr.show_info(); await pilot.pause(0.3)
   check("a mistake in the information is shown there, the app keeps running", app.is_running and "ZeroDivisionError" in rendered(scr.info_table))
   scr.fill_info = real
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   arrays(False)
   await reload(app, pilot)
 
@@ -3069,10 +3069,10 @@ async def t_array_reload(app, pilot):
   # switched away while it loads: the result must still arrive
   await pilot.click("#arr-reload"); await pilot.pause(0.02)
   app.show_view(None); await pilot.pause(1.5)
-  app.show_view(next(v for v in app.cluster.views if v.key == "array 9600")); await pilot.pause(0.3)
+  app.show_view(next(v for v in app.cluster.view.views if v.key == "array 9600")); await pilot.pause(0.3)
   ok = await until(pilot, lambda: not scr.fetching and scr.groups, 10)
   check("a load finishes also when another subtab was shown meanwhile", ok, scr.fetching)
-  for v in list(app.cluster.views): app.close_view(v)
+  for v in list(app.cluster.view.views): app.close_view(v)
   arrays(False)
   await reload(app, pilot)
 
@@ -3598,8 +3598,8 @@ async def t_ssh_edit(app, pilot):
   port = _re.search(r"Port (\d+)", open(os.path.join(LAB, "ssh_config")).read())[1]
   relay = os.path.join(HERE, "share", "relaykey")
   app.show_home(); await pilot.pause(0.3)
-  for v in list(cluster.views): app.close_view(v)
-  cluster.jobs_open = False; app.show_home(); await pilot.pause(0.5)
+  for v in list(cluster.view.views): app.close_view(v)
+  cluster.view.jobs_open = False; app.show_home(); await pilot.pause(0.5)
   ok = await until(pilot, lambda: isinstance(app.screen, OverviewScreen) and app.screen.query_one("#ov-config-row").display, 10)
   check("the overview of an SSH tab: SSH settings…", ok)
   app.screen.query_one("#ov-config").press()

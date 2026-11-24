@@ -52,6 +52,6 @@ def test_the_job_list_refreshes_and_counts_down(check, monkeypatch):
       await pilot.click("#refresh-timer"); await pilot.pause(0.3)
       ok = await until(pilot, lambda: len(reloads) > n, 6)
       check("a click again: on, it reloads again", ok and load_config().get("auto_refresh") is True)
-      app.cluster.jobs_open = False; app.show_home(); await pilot.pause(0.6)
+      app.cluster.view.jobs_open = False; app.show_home(); await pilot.pause(0.6)
       check("the overview (no automatic refresh): no countdown", not any(t.display for t in app.screen.query("#refresh-timer")))
   asyncio.run(main())

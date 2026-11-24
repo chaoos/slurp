@@ -118,7 +118,7 @@ class SplitScreen(Screen):
     if event.button.id and event.button.id.startswith(("view-tab-", "view-close-")):
       event.stop()
       vid = int(event.button.id.rsplit("-", 1)[1])
-      view = next((v for v in self.app.cluster.views if v.id == vid), None)
+      view = next((v for v in self.app.cluster.view.views if v.id == vid), None)
       if view is not None:
         (self.app.show_view if event.button.id.startswith("view-tab-") else self.app.request_close_view)(view)
       return

@@ -9,7 +9,7 @@ from slurp.ui.app import Slurp
 def test_too_many_keys(check):
   events, notes, logins = [], [], []
   c = types.SimpleNamespace(ssh_options=["-p", "22"], event=events.append)
-  cluster = types.SimpleNamespace(name="daint", destination="daint-alps", connection=c, show_login=False, broken_at=1.0)
+  cluster = types.SimpleNamespace(name="daint", destination="daint-alps", connection=c, view=types.SimpleNamespace(show_login=False), broken_at=1.0)
   app = types.SimpleNamespace(clusters=[cluster], notify=lambda message, **kw: notes.append(message),
                               login=lambda cl, show=True: logins.append(cl))
   said = ["Received disconnect from UNKNOWN port 65535:2: Too many authentication failures", "Disconnected from UNKNOWN port 65535"]
