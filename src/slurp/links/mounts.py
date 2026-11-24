@@ -240,6 +240,13 @@ class LocalDrive:
       except ProcessLookupError:
         pass
 
+  async def stopped(self, timeout=5):
+    """stop(), then wait until sshfs is gone (see share.ended)"""
+    proc = self.proc
+    self.stop()
+    from .share import ended
+    await ended([proc], timeout)
+
   def update_link(self):
     """sshfs reaches the cluster through a symlink to the control socket of the tab's session: a reconnect may give
     the socket a new path, the symlink follows it, so sshfs's own reconnect works"""

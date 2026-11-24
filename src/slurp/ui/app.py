@@ -429,8 +429,9 @@ class Slurp(TransfersTab, App):
       return
     update_config(**{self.theme_key(): theme})
 
-  def on_unmount(self):
+  async def on_unmount(self):
     self.shutdown()
+    await self.end_links_and_drives() # (also when slurp ends without Quit, e.g. its terminal closed)
 
   def shutdown(self):
     """End the shells, logins and remote shells of all tabs (their subtabs are kept for the next start first)"""
@@ -1864,11 +1865,15 @@ class Slurp(TransfersTab, App):
         parts.append(f"{len(views)} views show this slurp ({', '.join(v['label'] for v in views)}): they all close.")
       self.push_screen(ConfirmScreen("Quit slurp", " ".join(parts), "Quit"), done)
       return
-    self.link_manager.shutdown()
+    await self.end_links_and_drives()
+    await self.real_quit()
+
+  async def end_links_and_drives(self):
+    """The links' sessions and relays, the drives: ended, and waited for while the event loop still runs"""
+    await self.link_manager.stopped()
     for c in self.clusters:
       if c.drive is not None:
-        c.drive.stop()
-    await self.real_quit()
+        await c.drive.stopped()
 
   async def real_quit(self):
     # Stop mouse and focus reports right away, and clear the screen while still on the alternate screen:

@@ -201,6 +201,21 @@ def die_with_parent():
   except Exception:
     pass
 
+async def ended(procs, timeout=5):
+  """Wait until the asyncio processes are gone (killed after timeout): a process still running when its event loop
+  closes is cleaned up later without the loop ("Event loop is closed" when it is garbage collected)"""
+  for proc in procs:
+    if not isinstance(proc, asyncio.subprocess.Process) or proc.returncode is not None:
+      continue
+    try:
+      await asyncio.wait_for(proc.wait(), timeout)
+    except asyncio.TimeoutError:
+      try:
+        proc.kill()
+      except ProcessLookupError:
+        pass
+      await proc.wait()
+
 def make_password():
   """20 characters without ones that are easy to confuse"""
   alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -815,6 +830,12 @@ class ShareManager:
           link.tunnel.terminate()
         except ProcessLookupError:
           pass
+
+  async def stopped(self, timeout=5):
+    """shutdown(), then wait until the processes it ended are gone (the relays' tunnels, the drives' servers)"""
+    procs = [p for link in self.links for p in (link.tunnel, *(s.proc for s in link.sessions)) if p is not None]
+    self.shutdown()
+    await ended(procs, timeout)
 
   # ---- sessions
   def _started(self, session):

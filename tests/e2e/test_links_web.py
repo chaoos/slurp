@@ -90,7 +90,7 @@ async def web_link(check, mgr, events, KNOWN):
       os.kill(term.pid, 15)
     except OSError:
       pass
-  mgr.shutdown(); await runner.cleanup(); await orun.cleanup()
+  await mgr.stopped(); await runner.cleanup(); await orun.cleanup()
 
 
 def test_web_link(check, links, link_manager):
@@ -140,7 +140,7 @@ async def web_link_expires(check, mgr, events, KNOWN):
     os.kill(t.pid, 15)
   except OSError:
     pass
-  mgr.shutdown(); await runner.cleanup()
+  await mgr.stopped(); await runner.cleanup()
 
 
 def test_web_link_expires(check, links, link_manager):
