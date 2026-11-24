@@ -1049,14 +1049,13 @@ class DriveScreen(ModalScreen):
       with_places(self, self.cluster, self.show_places)
 
   places = ()
-  setting = False # (the list is set by the program: no event of the user)
 
   def show_places(self, places):
     """The places of the tab (home, $SCRATCH, $PROJECT, …) in the list; the path shown picks its entry"""
     self.places = [(label, path) for label, path in places if path] or [("Home", self.home)]
-    self.setting = True
-    self.query_one("#drive-place", Select).set_options([*self.places, (OTHER_PLACE, OTHER_PLACE)])
-    self.call_after_refresh(self.match_place)
+    with self.prevent(Select.Changed): # (set by the program: no choice of the user, the path stays)
+      self.query_one("#drive-place", Select).set_options([*self.places, (OTHER_PLACE, OTHER_PLACE)])
+    self.match_place()
 
   def match_place(self):
     """The list shows the place of the path typed in, or Other"""
@@ -1065,14 +1064,11 @@ class DriveScreen(ModalScreen):
     select = self.query_one("#drive-place", Select)
     value = remote if remote in paths else OTHER_PLACE
     if select.value != value:
-      self.setting = True
-      select.value = value
-    self.call_after_refresh(lambda: setattr(self, "setting", False))
+      with self.prevent(Select.Changed): # (only what the user chooses changes the path; a flag cleared after the
+        select.value = value             # next refreshes dropped a choice made before them)
 
   @on(Select.Changed, "#drive-place")
   def place_chosen(self, event):
-    if self.setting:
-      return
     if event.value == OTHER_PLACE:
       self.query_one("#drive-remote", Input).focus()
     elif event.value != Select.BLANK:
