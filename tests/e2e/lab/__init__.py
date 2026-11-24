@@ -14,6 +14,7 @@ key has none. Nothing here touches the user's own ~/.ssh or config.
 
 import getpass
 import os
+import re
 import shutil
 import signal
 import socket
@@ -32,6 +33,16 @@ SESSION_DELAY = "0.3" # seconds every session waits (slow login scripts)
 
 def find_sshd():
   return shutil.which("sshd") or next((p for p in ("/usr/sbin/sshd", "/usr/local/sbin/sshd") if os.path.exists(p)), None)
+
+
+def sshd_version():
+  """(major, minor) of this machine's sshd (sshd -V; (0, 0) when it does not say)"""
+  try:
+    out = subprocess.run([find_sshd(), "-V"], capture_output=True, text=True, timeout=10)
+    m = re.search(r"OpenSSH_(\d+)\.(\d+)", out.stderr + out.stdout)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+  except (OSError, subprocess.SubprocessError, TypeError):
+    return (0, 0)
 
 
 def missing_tools():
@@ -120,7 +131,8 @@ AcceptEnv FAKE_*
 SetEnv PATH={d}/fakebin:/usr/local/bin:/usr/bin:/bin SCRATCH={d}/scratch XDG_CACHE_HOME={d}/cache
 Subsystem sftp internal-sftp
 ForceCommand {d}/force.sh
-""")
+""" + ("PerSourcePenalties no\n" if sshd_version() >= (9, 8) else "")) # (OpenSSH 9.8 on: the logins refused on purpose
+    # (a user, a key it does not take) put 127.0.0.1 in the penalty box, "Not allowed at this time" for the next ones)
     common = f"""  HostName 127.0.0.1
   Port {self.port}
   User {user}
