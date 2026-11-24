@@ -214,12 +214,13 @@ class JobScreen(SplitScreen):
     for key, label in [("step", "Step"), ("name", "Name"), ("state", "State"), ("exit", "Exit"), ("elapsed", "Elapsed"),
                        ("tasks", "Tasks"), ("nodes", "Nodes"), ("maxrss", "MaxRSS"), ("total", "~Total RSS"), ("cmd", "Command")]:
       table.add_column(label, key=key)
+    self.memory = memory_watch(self.job.jid, self.job)
     self.show_job()
     self.query_one("#files").focus()
     self.load()
     self.run_checks()
     self.set_interval(self.PROGRESS_EVERY, self.refresh_progress)
-    self.memory = memory_watch(self.job.jid, self.job)
+    self.show_last_memory()
     self.query_one("#memory-every", Select).value = self.memory["every"]
     self.set_interval(1, self.show_memory_watch)
     self.show_memory_watch()
@@ -274,9 +275,12 @@ class JobScreen(SplitScreen):
       grid.add_row(key, val)
     self.query_one("#info", Static).update(grid)
     self.show_notes()
-    self.query_one("#memory-controls", Horizontal).display = job.running
+    # (a job that ended: the last query of its memory, when one was made)
+    self.query_one("#memory-controls", Horizontal).display = job.running or bool(self.memory.get("last"))
     self.show_diagnostics_title()
-    self.query_one("#diagnostics", Button).disabled = not job.running
+    self.query_one("#diagnostics", Button).display = job.running
+    if not job.running:
+      self.show_last_memory()
     self.show_progress()
     self.query_one("#nodes").display = job.running
     self.query_one("#checks-placement", Button).display = job.running
@@ -613,6 +617,15 @@ class JobScreen(SplitScreen):
       self.query_one("#memory-cpu", Static).update(f"{node}: " + cpu_memory_text(result["memory"]))
       self.query_one("#memory-gpu", Static).update(f"{node}: " + gpu_memory_text(result["memory"]))
 
+  def show_last_memory(self):
+    """The last query of the job's memory in the memory row, with its time (kept: also once the job has ended)"""
+    last = self.memory.get("last")
+    if not last:
+      return
+    when = f"last measured {datetime.fromtimestamp(last['time']):%Y-%m-%d %H:%M}: "
+    self.query_one("#memory-cpu", Static).update(when + cpu_memory_text(last))
+    self.query_one("#memory-gpu", Static).update(when + gpu_memory_text(last))
+
   shown_samples = -1
 
   @on(Select.Changed, "#memory-every")
@@ -650,7 +663,7 @@ class JobScreen(SplitScreen):
       values = [s[index] for s in samples if s[index] is not None]
       self.query_one(f"#spark-{key}", TimePlot).set_data([(s[0], s[index]) for s in samples])
       self.query_one(f"#spark-{key}-text", Static).update(
-        f"{memory_text(values[-1])} now\nmin {memory_text(min(values))}\nmax {memory_text(max(values))}"
+        f"{memory_text(values[-1])} {'now' if self.job.running else 'last'}\nmin {memory_text(min(values))}\nmax {memory_text(max(values))}"
         if values else "-")
 
   def memory_loaded(self, result):

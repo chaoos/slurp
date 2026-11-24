@@ -1,5 +1,6 @@
 """What the job window shows besides the accounting: files, core dumps, commands on the nodes, memory"""
 
+import json
 import os
 from importlib import resources
 import re
@@ -424,15 +425,44 @@ def memory_dir():
   return os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "slurp", "memory")
 
 def memory_watch(jid, job=None):
-  """The memory watch of a job of the current tab (created on first use)"""
+  """The memory watch of a job of the current tab (created on first use, with the measurements kept in its file and
+  the last query: still shown once the job has ended, also after slurp was restarted)"""
   key = (tab_name(), jid)
   if key not in MEMORY:
     name = re.sub(r"[^\w.@-]+", "_", f"{key[0]}-{jid}")
-    MEMORY[key] = {"samples": [], "every": 0, "due": 0.0, "busy": False, "job": job, "error": "", "misses": 0,
-                   "file": os.path.join(memory_dir(), f"{name}.csv")}
+    path = os.path.join(memory_dir(), f"{name}.csv")
+    MEMORY[key] = {"samples": read_samples(path), "every": 0, "due": 0.0, "busy": False, "job": job, "error": "",
+                   "misses": 0, "file": path, "last": read_last(path)}
   if job is not None:
     MEMORY[key]["job"] = job
   return MEMORY[key]
+
+def read_samples(path):
+  """The measurements of a watch's file: [(time, cpu, gpu, gpu used, gpu total)] (none: no file, or unreadable)"""
+  samples = []
+  try:
+    with open(path) as f:
+      for line in f.read().splitlines()[1:]:
+        fields = line.split(",")
+        try:
+          samples.append((datetime.fromisoformat(fields[0]).timestamp(), *(int(v) if v else None for v in fields[1:5])))
+        except (ValueError, IndexError):
+          continue # (a line cut short)
+  except OSError:
+    pass
+  return samples
+
+def last_path(path):
+  return path[:-len(".csv")] + ".last.json"
+
+def read_last(path):
+  """The last query of a watch kept next to its file (what the memory row showed): the result, or None"""
+  try:
+    with open(last_path(path)) as f:
+      last = json.load(f)
+    return last if isinstance(last, dict) and "time" in last else None
+  except (OSError, ValueError):
+    return None
 
 def record_memory(watch, result):
   """Keep a query of current_memory_usage() and append it to the file of the watch. False: nothing was measured."""
@@ -445,8 +475,11 @@ def record_memory(watch, result):
             sum(g[3] for g in gpus) if gpus else None, sum(g[4] for g in gpus) if gpus else None)
   watch["samples"].append(sample)
   watch["error"], watch["misses"] = "", 0
+  watch["last"] = {**{k: v for k, v in result.items() if k != "sstat"}, "time": sample[0]}
   try:
     os.makedirs(os.path.dirname(watch["file"]), exist_ok=True)
+    with open(last_path(watch["file"]), "w") as f:
+      json.dump(watch["last"], f)
     new = not os.path.exists(watch["file"])
     with open(watch["file"], "a") as f:
       if new:

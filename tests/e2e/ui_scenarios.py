@@ -2697,6 +2697,24 @@ async def t_memory_watch(app, pilot):
   js.query_one("#memory-every").value = 0
   for v in list(app.cluster.view.views): app.close_view(v)
   await pilot.pause(0.3)
+  # kept: after a restart (the watches gone) the measurements and the last query are read back
+  _d.MEMORY.clear()
+  js = await open_job(app, pilot, "9003")
+  check("kept: the measurements and the last query read back from the files", len(js.memory["samples"]) == 3
+        and (js.memory["last"] or {}).get("cpu_bytes") == w["last"]["cpu_bytes"], (js.memory["samples"], js.memory["last"]))
+  for v in list(app.cluster.views): app.close_view(v)
+  await pilot.pause(0.3)
+  # a job that has ended: its measurements and the last query still shown (no queries any more)
+  _sh.copy(path, path.replace("9003", "9008")); _sh.copy(_d.last_path(path), _d.last_path(path).replace("9003", "9008"))
+  ended = await open_job(app, pilot, "9008")
+  cpu = str(ended.query_one("#memory-cpu").render())
+  check("ended: the last query shown with its time, no diagnostics to query",
+        ended.query_one("#memory-controls").display and cpu.startswith("last measured ") and "(the job's" in cpu
+        and not ended.query_one("#diagnostics").display, cpu)
+  check("ended: the plots of the measurements, the last value", ended.query_one("#memory-watch").display
+        and len(ended.query_one("#spark-cpu").data) == 3 and "last" in str(ended.query_one("#spark-cpu-text").render()))
+  for v in list(app.cluster.views): app.close_view(v)
+  await pilot.pause(0.3)
 
 async def t_scratch_exclude(app, pilot):
   import time as _t
