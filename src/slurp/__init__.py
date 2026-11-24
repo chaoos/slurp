@@ -6,6 +6,6 @@ Run it with the `slurp` command (see pyproject.toml) or `python -m slurp`.
 """
 
 # the version of slurp and of its Windows helper (one number for both; CHANGELOG.md says what changed)
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 RELEASE = "beta"
 VERSION_TEXT = f"{__version__} ({RELEASE})" if RELEASE else __version__

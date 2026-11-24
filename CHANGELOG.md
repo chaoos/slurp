@@ -6,6 +6,8 @@ version may need the helper of the same version).
 
 ## Unreleased
 
+## 0.9.0 (beta), 2026-11-24
+
 - Transfers, Browse…: a path typed while the start folder was still being
   listed is no longer replaced by that folder when its listing comes later.
 - Progress of a job: no more "progress failed" now and then, when the latest
